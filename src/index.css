@@ -2,12 +2,45 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
+  /* ===== 深色主题颜色（默认） ===== */
   --color-vnote-bg: #0d0d0d;
   --color-vnote-card: #161616;
   --color-vnote-border: #262626;
   --color-vnote-hover: #1f1f1f;
+
+  /* 扩展颜色 */
+  --color-vnote-surface: #1a1a1a;
+  --color-vnote-elevated: #202020;
+  --color-vnote-muted: #404040;
+
+  /* 强调色 */
+  --color-vnote-accent: #3b82f6;
+  --color-vnote-accent-hover: #2563eb;
+  --color-vnote-success: #22c55e;
+  --color-vnote-warning: #f59e0b;
+
+  /* 玻璃态 */
+  --color-vnote-glass: rgba(255, 255, 255, 0.05);
+  --color-vnote-glass-border: rgba(255, 255, 255, 0.1);
+
+  /* 侧边栏尺寸 */
+  --sidebar-width-collapsed: 64px;
+  --sidebar-width-expanded: 240px;
+  --titlebar-height: 36px;
+
+  /* ===== 亮色主题颜色 ===== */
+  --color-vnote-bg-light: #f8fafc;
+  --color-vnote-card-light: #ffffff;
+  --color-vnote-border-light: #e2e8f0;
+  --color-vnote-hover-light: #f1f5f9;
+  --color-vnote-surface-light: #f1f5f9;
+  --color-vnote-elevated-light: #ffffff;
+  --color-vnote-muted-light: #94a3b8;
+  --color-vnote-glass-light: rgba(255, 255, 255, 0.8);
+  --color-vnote-glass-border-light: rgba(0, 0, 0, 0.1);
 }
 
+/* 滚动条样式 */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -32,4 +65,101 @@
 
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #64748b;
+}
+
+/* 玻璃态效果 */
+.glass {
+  background: var(--color-vnote-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-vnote-glass-border);
+}
+
+/* 上传区域样式 */
+.upload-zone {
+  border: 2px dashed #e2e8f0;
+  border-radius: 16px;
+  transition: all 0.2s ease;
+}
+
+.dark .upload-zone {
+  border-color: var(--color-vnote-border);
+}
+
+.upload-zone:hover,
+.upload-zone.drag-over {
+  border-color: var(--color-vnote-accent);
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* 侧边栏过渡 */
+.sidebar {
+  transition: width 0.2s ease-in-out;
+}
+
+/* 笔记卡片悬停效果 */
+.note-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.note-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+}
+
+.dark .note-card:hover {
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
+}
+
+/* 渐变文字效果 */
+.gradient-text {
+  background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 50%, #ec4899 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* 按钮发光效果 */
+.btn-glow {
+  box-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+.btn-glow:hover {
+  box-shadow: 0 0 30px rgba(59, 130, 246, 0.5);
+}
+
+/* 淡入动画 */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* 脉冲动画（用于加载状态） */
+@keyframes pulse-soft {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.animate-pulse-soft {
+  animation: pulse-soft 2s ease-in-out infinite;
+}
+
+/* 竖排文字 */
+.writing-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
 }
