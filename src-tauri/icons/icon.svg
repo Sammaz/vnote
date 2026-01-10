@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6366f1"/>
+      <stop offset="100%" style="stop-color:#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f472b6"/>
+      <stop offset="100%" style="stop-color:#c084fc"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded square -->
+  <rect x="32" y="32" width="448" height="448" rx="80" ry="80" fill="url(#bg)"/>
+
+  <!-- Video play button (left side) -->
+  <circle cx="180" cy="220" r="70" fill="rgba(255,255,255,0.2)" stroke="white" stroke-width="6"/>
+  <polygon points="160,185 160,255 215,220" fill="white"/>
+
+  <!-- Note/Document icon (right side) -->
+  <rect x="280" y="150" width="120" height="160" rx="12" fill="white"/>
+  <rect x="300" y="180" width="80" height="8" rx="4" fill="url(#accent)"/>
+  <rect x="300" y="200" width="60" height="8" rx="4" fill="#c4b5fd"/>
+  <rect x="300" y="220" width="70" height="8" rx="4" fill="#c4b5fd"/>
+  <rect x="300" y="240" width="50" height="8" rx="4" fill="#c4b5fd"/>
+  <rect x="300" y="260" width="65" height="8" rx="4" fill="#c4b5fd"/>
+
+  <!-- AI sparkle/magic wand effect -->
+  <g fill="url(#accent)">
+    <!-- Star/sparkle 1 -->
+    <path d="M240 320 L248 340 L268 348 L248 356 L240 376 L232 356 L212 348 L232 340 Z"/>
+    <!-- Star/sparkle 2 -->
+    <path d="M140 330 L145 342 L157 347 L145 352 L140 364 L135 352 L123 347 L135 342 Z"/>
+    <!-- Star/sparkle 3 -->
+    <path d="M320 380 L326 394 L340 400 L326 406 L320 420 L314 406 L300 400 L314 394 Z"/>
+  </g>
+
+  <!-- Connecting arrow/flow -->
+  <path d="M250 220 Q265 220 265 200 Q265 180 280 180" stroke="white" stroke-width="5" fill="none" stroke-linecap="round"/>
+  <polygon points="278,170 292,180 278,190" fill="white"/>
+</svg>
