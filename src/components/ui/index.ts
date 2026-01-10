@@ -1,1 +1,1 @@
-export { SearchBar } from "./SearchBar";
+// UI components

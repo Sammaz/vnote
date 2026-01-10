@@ -1,4 +1,3 @@
-import { SearchBar } from "./ui";
 import { UploadZone, ModelSelector, GenerateButton } from "./Upload";
 import { RecentNotes } from "./Notes";
 import { StatsSection } from "./Stats";
@@ -17,9 +16,6 @@ export function HomePage() {
             上传视频和字幕，AI 自动生成结构化笔记
           </p>
         </div>
-
-        {/* 搜索栏 */}
-        <SearchBar />
 
         {/* 上传区域 */}
         <div className="space-y-4">
