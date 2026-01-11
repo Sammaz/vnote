@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { X } from "lucide-react";
 
 interface PlaybackResumeProps {
@@ -13,6 +14,15 @@ function formatTime(seconds: number): string {
 }
 
 export function PlaybackResume({ position, onResume, onDismiss }: PlaybackResumeProps) {
+  // 5 秒后自动消失
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onDismiss();
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
   return (
     <div className="absolute bottom-12 left-4 z-20 flex items-center gap-2 bg-black/80 text-white text-sm rounded px-3 py-2 animate-slide-in-bottom">
       <button
