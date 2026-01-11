@@ -1,5 +1,6 @@
-import { useState, useRef, useEffect } from "react";
-import { Send, Paperclip, Video } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
+import { Paperclip, Video, Send, Maximize2, Minimize2, Eraser, X } from "lucide-react";
 import { cn } from "../../utils/cn";
 
 interface Message {
@@ -7,6 +8,12 @@ interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+}
+
+interface UploadedImage {
+  id: string;
+  file: File;
+  previewUrl: string;
 }
 
 interface ChatWindowProps {
@@ -19,6 +26,17 @@ const DEFAULT_QUESTIONS = [
   "有哪些关键知识点?",
   "如何在实际项目中应用?",
 ];
+
+// 最小和最大尺寸限制
+const MIN_WIDTH = 320;
+const MIN_HEIGHT = 400;
+const MAX_WIDTH = 800;
+const MAX_HEIGHT = 900;
+
+// 支持的图片类型
+const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp,image/svg+xml,image/bmp,image/tiff,image/heic,image/heif,image/avif";
+
+type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw" | null;
 
 export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: ChatWindowProps) {
   // 使用数据库中的问题，如果没有则使用默认问题
@@ -33,7 +51,21 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
     },
   ]);
   const [input, setInput] = useState("");
+  const [basedOnVideo, setBasedOnVideo] = useState(true);
+  const [isPopout, setIsPopout] = useState(false);
+  const [position, setPosition] = useState({ x: 0, y: 0 });
+  const [size, setSize] = useState({ width: 420, height: 550 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const [resizeDirection, setResizeDirection] = useState<ResizeDirection>(null);
+  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const popoutRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -43,8 +75,168 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
     scrollToBottom();
   }, [messages]);
 
+  // 清理预览URL
+  useEffect(() => {
+    return () => {
+      uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    };
+  }, []);
+
+  // 初始化弹窗位置
+  useEffect(() => {
+    if (isPopout && position.x === 0 && position.y === 0) {
+      // 设置初始位置为屏幕右下角
+      const windowWidth = window.innerWidth;
+      const windowHeight = window.innerHeight;
+      setPosition({
+        x: windowWidth - size.width - 30,
+        y: windowHeight - size.height - 50,
+      });
+    }
+  }, [isPopout, position.x, position.y, size.width, size.height]);
+
+  // 拖动处理
+  const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    if (!popoutRef.current) return;
+
+    const rect = popoutRef.current.getBoundingClientRect();
+    setDragOffset({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+    });
+    setIsDragging(true);
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (isDragging) {
+      const newX = e.clientX - dragOffset.x;
+      const newY = e.clientY - dragOffset.y;
+
+      // 限制在屏幕范围内
+      const maxX = window.innerWidth - size.width;
+      const maxY = window.innerHeight - 100;
+
+      setPosition({
+        x: Math.max(0, Math.min(newX, maxX)),
+        y: Math.max(0, Math.min(newY, maxY)),
+      });
+    }
+
+    if (isResizing && resizeDirection) {
+      const deltaX = e.clientX - resizeStart.x;
+      const deltaY = e.clientY - resizeStart.y;
+
+      let newWidth = resizeStart.width;
+      let newHeight = resizeStart.height;
+      let newX = resizeStart.posX;
+      let newY = resizeStart.posY;
+
+      // 根据方向计算新尺寸
+      if (resizeDirection.includes("e")) {
+        newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, resizeStart.width + deltaX));
+      }
+      if (resizeDirection.includes("w")) {
+        const potentialWidth = resizeStart.width - deltaX;
+        if (potentialWidth >= MIN_WIDTH && potentialWidth <= MAX_WIDTH) {
+          newWidth = potentialWidth;
+          newX = resizeStart.posX + deltaX;
+        }
+      }
+      if (resizeDirection.includes("s")) {
+        newHeight = Math.min(MAX_HEIGHT, Math.max(MIN_HEIGHT, resizeStart.height + deltaY));
+      }
+      if (resizeDirection.includes("n")) {
+        const potentialHeight = resizeStart.height - deltaY;
+        if (potentialHeight >= MIN_HEIGHT && potentialHeight <= MAX_HEIGHT) {
+          newHeight = potentialHeight;
+          newY = resizeStart.posY + deltaY;
+        }
+      }
+
+      setSize({ width: newWidth, height: newHeight });
+      setPosition({ x: newX, y: newY });
+    }
+  }, [isDragging, isResizing, dragOffset, resizeDirection, resizeStart, size.width]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsDragging(false);
+    setIsResizing(false);
+    setResizeDirection(null);
+  }, []);
+
+  // 开始调整大小
+  const handleResizeStart = useCallback((e: React.MouseEvent, direction: ResizeDirection) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setIsResizing(true);
+    setResizeDirection(direction);
+    setResizeStart({
+      x: e.clientX,
+      y: e.clientY,
+      width: size.width,
+      height: size.height,
+      posX: position.x,
+      posY: position.y,
+    });
+  }, [size, position]);
+
+  // 添加全局鼠标事件监听
+  useEffect(() => {
+    if (isDragging || isResizing) {
+      document.addEventListener("mousemove", handleMouseMove);
+      document.addEventListener("mouseup", handleMouseUp);
+      return () => {
+        document.removeEventListener("mousemove", handleMouseMove);
+        document.removeEventListener("mouseup", handleMouseUp);
+      };
+    }
+  }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
+
+  // 处理文件选择
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newImages: UploadedImage[] = [];
+
+    Array.from(files).forEach((file) => {
+      // 检查是否为图片类型
+      if (file.type.startsWith("image/")) {
+        const previewUrl = URL.createObjectURL(file);
+        newImages.push({
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          file,
+          previewUrl,
+        });
+      }
+    });
+
+    setUploadedImages((prev) => [...prev, ...newImages]);
+
+    // 重置input以允许选择相同文件
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // 删除上传的图片
+  const handleRemoveImage = (imageId: string) => {
+    setUploadedImages((prev) => {
+      const imageToRemove = prev.find((img) => img.id === imageId);
+      if (imageToRemove) {
+        URL.revokeObjectURL(imageToRemove.previewUrl);
+      }
+      return prev.filter((img) => img.id !== imageId);
+    });
+  };
+
+  // 触发文件选择
+  const handleAttachClick = () => {
+    fileInputRef.current?.click();
+  };
+
   const handleSend = () => {
-    if (!input.trim()) return;
+    if (!input.trim() && uploadedImages.length === 0) return;
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -55,6 +247,10 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
+
+    // 清除上传的图片
+    uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    setUploadedImages([]);
 
     // 模拟 AI 回复
     setTimeout(() => {
@@ -79,13 +275,115 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
     }
   };
 
-  return (
-    <div className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden">
+  const handlePopout = () => {
+    setIsPopout(true);
+  };
+
+  const handleMinimize = () => {
+    setIsPopout(false);
+    // 重置位置，下次弹出时重新计算
+    setPosition({ x: 0, y: 0 });
+  };
+
+  const handleClearMessages = () => {
+    setMessages([
+      {
+        id: "1",
+        role: "assistant",
+        content: "嗨！请问你想知道点儿什么？",
+        timestamp: new Date(),
+      },
+    ]);
+    // 同时清除上传的图片
+    uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    setUploadedImages([]);
+  };
+
+  // 调整大小的手柄
+  const resizeHandles = (
+    <>
+      {/* 四边 */}
+      <div
+        className="absolute top-0 left-2 right-2 h-1 cursor-n-resize hover:bg-blue-500/30"
+        onMouseDown={(e) => handleResizeStart(e, "n")}
+      />
+      <div
+        className="absolute bottom-0 left-2 right-2 h-1 cursor-s-resize hover:bg-blue-500/30"
+        onMouseDown={(e) => handleResizeStart(e, "s")}
+      />
+      <div
+        className="absolute left-0 top-2 bottom-2 w-1 cursor-w-resize hover:bg-blue-500/30"
+        onMouseDown={(e) => handleResizeStart(e, "w")}
+      />
+      <div
+        className="absolute right-0 top-2 bottom-2 w-1 cursor-e-resize hover:bg-blue-500/30"
+        onMouseDown={(e) => handleResizeStart(e, "e")}
+      />
+      {/* 四角 */}
+      <div
+        className="absolute top-0 left-0 w-3 h-3 cursor-nw-resize hover:bg-blue-500/30"
+        onMouseDown={(e) => handleResizeStart(e, "nw")}
+      />
+      <div
+        className="absolute top-0 right-0 w-3 h-3 cursor-ne-resize hover:bg-blue-500/30"
+        onMouseDown={(e) => handleResizeStart(e, "ne")}
+      />
+      <div
+        className="absolute bottom-0 left-0 w-3 h-3 cursor-sw-resize hover:bg-blue-500/30"
+        onMouseDown={(e) => handleResizeStart(e, "sw")}
+      />
+      <div
+        className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize hover:bg-blue-500/30"
+        onMouseDown={(e) => handleResizeStart(e, "se")}
+      />
+    </>
+  );
+
+  // 聊天窗口内容
+  const chatContent = (
+    <>
       {/* 头部 */}
-      <div className="flex items-center px-4 py-2 border-b border-slate-200 dark:border-vnote-border">
+      <div
+        className={cn(
+          "flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border",
+          isPopout && "cursor-move select-none"
+        )}
+        onMouseDown={isPopout ? handleMouseDown : undefined}
+      >
         <span className="text-sm font-medium text-slate-700 dark:text-slate-200">
           聊天窗口
         </span>
+        <div className="flex items-center gap-1">
+          {/* 清空对话按钮 */}
+          <button
+            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleClearMessages();
+            }}
+            title="清空对话"
+          >
+            <Eraser className="w-4 h-4" />
+          </button>
+          {isPopout ? (
+            <button
+              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMinimize();
+              }}
+            >
+              <Minimize2 className="w-4 h-4" />
+            </button>
+          ) : (
+            <button
+              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors"
+              onClick={handlePopout}
+            >
+              <Maximize2 className="w-4 h-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 消息列表 */}
@@ -147,33 +445,81 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
 
       {/* 输入区域 */}
       <div className="p-4 border-t border-slate-200 dark:border-vnote-border">
-        <div className="flex items-center gap-2">
-          <button className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors">
-            <Paperclip className="w-5 h-5" />
-          </button>
-          <button className="flex items-center gap-1 px-3 py-1.5 text-xs text-blue-500 bg-blue-50 dark:bg-blue-500/10 rounded-full hover:bg-blue-100 dark:hover:bg-blue-500/20 transition-colors">
-            <Video className="w-3.5 h-3.5" />
-            基于视频
-          </button>
+        {/* 隐藏的文件输入 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED_IMAGE_TYPES}
+          multiple
+          onChange={handleFileSelect}
+          className="hidden"
+        />
+
+        {/* 图片预览区域 */}
+        {uploadedImages.length > 0 && (
+          <div className="mb-3 flex flex-wrap gap-2">
+            {uploadedImages.map((image) => (
+              <div
+                key={image.id}
+                className="relative group"
+              >
+                <img
+                  src={image.previewUrl}
+                  alt="预览"
+                  className="w-24 h-24 object-cover rounded-lg border border-slate-200 dark:border-vnote-border"
+                />
+                <button
+                  onClick={() => handleRemoveImage(image.id)}
+                  className="absolute -top-2 -right-2 w-5 h-5 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 文本输入框 */}
+        <div className="relative">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="你的问题..."
+            className="w-full px-4 py-3 bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border rounded-xl text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            rows={2}
+          />
         </div>
-        <div className="mt-2 flex items-end gap-2">
-          <div className="flex-1 relative">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="你的问题..."
-              className="w-full px-4 py-3 bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border rounded-xl text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-              rows={1}
-            />
+        {/* 底部操作栏 */}
+        <div className="mt-3 flex items-center justify-between">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleAttachClick}
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors"
+              title="上传图片"
+            >
+              <Paperclip className="w-5 h-5" />
+            </button>
+            <button
+              onClick={() => setBasedOnVideo(!basedOnVideo)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors",
+                basedOnVideo
+                  ? "text-cyan-400 border border-cyan-400/50 bg-cyan-400/10"
+                  : "text-slate-400 hover:text-slate-300"
+              )}
+            >
+              <Video className="w-4 h-4" />
+              {basedOnVideo ? "基于视频" : "不基于视频"}
+            </button>
           </div>
           <button
             onClick={handleSend}
-            disabled={!input.trim()}
+            disabled={!input.trim() && uploadedImages.length === 0}
             className={cn(
-              "p-3 rounded-xl transition-colors",
-              input.trim()
-                ? "bg-blue-500 text-white hover:bg-blue-600"
+              "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
+              input.trim() || uploadedImages.length > 0
+                ? "bg-slate-700 dark:bg-slate-600 text-white hover:bg-slate-600 dark:hover:bg-slate-500"
                 : "bg-slate-200 dark:bg-vnote-surface text-slate-400 cursor-not-allowed"
             )}
           >
@@ -181,6 +527,64 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
           </button>
         </div>
       </div>
+    </>
+  );
+
+  // 弹出窗口
+  if (isPopout) {
+    return (
+      <>
+        {/* 原位置占位符 */}
+        <div
+          ref={containerRef}
+          className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden items-center justify-center"
+        >
+          <div className="text-slate-400 dark:text-slate-500 text-sm">
+            聊天窗口已弹出
+          </div>
+          <button
+            onClick={handleMinimize}
+            className="mt-2 px-3 py-1.5 text-xs text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors"
+          >
+            点击收回
+          </button>
+        </div>
+
+        {/* 弹出窗口 - 使用 Portal 渲染到 body */}
+        {createPortal(
+          <div
+            ref={popoutRef}
+            style={{
+              position: "fixed",
+              left: position.x,
+              top: position.y,
+              width: size.width,
+              height: size.height,
+              zIndex: 9999,
+            }}
+            className={cn(
+              "flex flex-col bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border shadow-2xl overflow-hidden",
+              isDragging && "cursor-grabbing",
+              isResizing && "select-none"
+            )}
+          >
+            {chatContent}
+            {/* 调整大小的手柄 */}
+            {resizeHandles}
+          </div>,
+          document.body
+        )}
+      </>
+    );
+  }
+
+  // 正常嵌入模式
+  return (
+    <div
+      ref={containerRef}
+      className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden"
+    >
+      {chatContent}
     </div>
   );
 }
