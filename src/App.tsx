@@ -12,6 +12,7 @@ import "./index.css";
 function AppContent() {
   const { currentView, setCurrentView } = useApp();
   const [theme, setTheme] = useState<"light" | "dark">("dark");
+  const [previousView, setPreviousView] = useState<"home" | "note">("home");
 
   useEffect(() => {
     // Load saved theme and show window
@@ -98,6 +99,21 @@ function AppContent() {
 
   const isSettingsView = currentView === "settings";
 
+  const handleSettingsClick = () => {
+    if (isSettingsView) {
+      // 在设置页面时，点击返回之前的视图
+      setCurrentView(previousView);
+    } else {
+      // 不在设置页面时，保存当前视图并进入设置
+      setPreviousView(currentView as "home" | "note");
+      setCurrentView("settings");
+    }
+  };
+
+  const handleSettingsClose = () => {
+    setCurrentView(previousView);
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen bg-white dark:bg-vnote-bg text-slate-900 dark:text-slate-100 font-sans overflow-hidden transition-colors duration-200">
       {/* Title Bar */}
@@ -121,8 +137,13 @@ function AppContent() {
             <Moon size={18} className="block dark:hidden" />
           </button>
           <button
-            onClick={() => setCurrentView("settings")}
-            className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-full transition-colors"
+            onClick={handleSettingsClick}
+            className={[
+              "p-2 rounded-full transition-colors",
+              isSettingsView
+                ? "text-blue-500 bg-blue-500/10 dark:text-blue-400 dark:bg-blue-400/10"
+                : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+            ].join(" ")}
             title="设置"
           >
             <Settings size={18} />
@@ -162,7 +183,7 @@ function AppContent() {
             <SettingsPage
               currentTheme={theme}
               onThemeChange={handleThemeChange}
-              onClose={() => setCurrentView("home")}
+              onClose={handleSettingsClose}
             />
           ) : currentView === "note" ? (
             <NotePage />
