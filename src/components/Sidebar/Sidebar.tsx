@@ -192,7 +192,7 @@ function NoteItem({ note }: NoteItemProps) {
       {showMenu && (
         <div
           ref={menuRef}
-          className="absolute left-full top-0 ml-1 w-36 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-50"
+          className="absolute right-0 top-full mt-1 w-36 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-50"
         >
           <div className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-neutral-400 border-b border-slate-100 dark:border-neutral-700">
             操作
