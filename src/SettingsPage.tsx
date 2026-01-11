@@ -32,9 +32,34 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const [apiKeyVisible, setApiKeyVisible] = useState(false);
     const [testingAi, setTestingAi] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+    const [loading, setLoading] = useState(true);
 
-    const handleThemeChange = (theme: "light" | "dark") => {
+    // Load settings from database on mount
+    useEffect(() => {
+        const loadSettings = async () => {
+            try {
+                const [tray, configs] = await Promise.all([
+                    invoke<boolean>("get_tray_enabled"),
+                    invoke<AiConfig[]>("get_ai_configs"),
+                ]);
+                setTrayEnabled(tray);
+                setAiConfigs(configs);
+            } catch (error) {
+                console.error("Failed to load settings:", error);
+            } finally {
+                setLoading(false);
+            }
+        };
+        loadSettings();
+    }, []);
+
+    const handleThemeChange = async (theme: "light" | "dark") => {
         onThemeChange(theme);
+        try {
+            await invoke("set_theme", { theme });
+        } catch (error) {
+            console.error("Failed to save theme:", error);
+        }
     };
 
     const handleTrayToggle = async () => {
@@ -47,10 +72,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
-    useEffect(() => {
-        invoke<boolean>("get_tray_enabled").then(setTrayEnabled).catch(console.error);
-    }, []);
-
     const createEmptyAiConfig = (): AiConfig => ({
         id: 0,
         title: "",
@@ -60,28 +81,40 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         sort_order: aiConfigs.length
     });
 
-    const saveAiConfig = () => {
+    const saveAiConfig = async () => {
         if (!editingAiConfig) return;
-        if (editingAiConfig.id === 0) {
-            const newId = Date.now();
-            setAiConfigs([...aiConfigs, { ...editingAiConfig, id: newId }]);
-        } else {
-            setAiConfigs(aiConfigs.map(c => c.id === editingAiConfig.id ? editingAiConfig : c));
+        try {
+            if (editingAiConfig.id === 0) {
+                // Create new config
+                const newId = await invoke<number>("create_ai_config", { config: editingAiConfig });
+                setAiConfigs([...aiConfigs, { ...editingAiConfig, id: newId }]);
+            } else {
+                // Update existing config
+                await invoke("update_ai_config", { config: editingAiConfig });
+                setAiConfigs(aiConfigs.map(c => c.id === editingAiConfig.id ? editingAiConfig : c));
+            }
+            setEditingAiConfig(null);
+            setApiKeyVisible(false);
+        } catch (error) {
+            console.error("Failed to save AI config:", error);
         }
-        setEditingAiConfig(null);
-        setApiKeyVisible(false);
     };
 
-    const deleteAiConfig = (id: number) => {
-        setAiConfigs(aiConfigs.filter(c => c.id !== id));
-        setDeletingAiConfigId(null);
+    const deleteAiConfig = async (id: number) => {
+        try {
+            await invoke("delete_ai_config", { id });
+            setAiConfigs(aiConfigs.filter(c => c.id !== id));
+            setDeletingAiConfigId(null);
+        } catch (error) {
+            console.error("Failed to delete AI config:", error);
+        }
     };
 
     const testAiConfig = async () => {
         if (!editingAiConfig) return;
         setTestingAi(true);
         setTestResult(null);
-        // Simulate test
+        // Simulate test - TODO: implement actual API test
         await new Promise(resolve => setTimeout(resolve, 1000));
         setTestResult({ success: true, message: "连接成功" });
         setTestingAi(false);
@@ -94,6 +127,14 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 ? "bg-blue-600 text-white border-blue-600 shadow-sm"
                 : "bg-white/50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600",
         ].join(" ");
+
+    if (loading) {
+        return (
+            <div className="flex h-full w-full items-center justify-center">
+                <Loader2 size={24} className="animate-spin text-slate-400" />
+            </div>
+        );
+    }
 
     return (
         <div className="flex h-full w-full">

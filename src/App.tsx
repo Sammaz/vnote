@@ -13,20 +13,31 @@ function AppContent() {
   const [theme, setTheme] = useState<"light" | "dark">("dark");
 
   useEffect(() => {
-    // Show window after React has mounted
-    invoke("show_window").catch(console.error);
+    // Load saved theme and show window
+    const init = async () => {
+      try {
+        const settings = await invoke<{ theme: string; tray_enabled: boolean }>("get_app_settings");
+        const savedTheme = settings.theme === "light" ? "light" : "dark";
+        if (savedTheme === "dark") {
+          document.documentElement.classList.add("dark");
+        } else {
+          document.documentElement.classList.remove("dark");
+        }
+        setTheme(savedTheme);
+      } catch {
+        // Default to dark theme
+        document.documentElement.classList.add("dark");
+        setTheme("dark");
+      }
+      invoke("show_window").catch(console.error);
+    };
+    init();
   }, []);
 
   useEffect(() => {
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
     document.addEventListener("contextmenu", handleContextMenu);
     return () => document.removeEventListener("contextmenu", handleContextMenu);
-  }, []);
-
-  // 默认深色主题
-  useEffect(() => {
-    document.documentElement.classList.add("dark");
-    setTheme("dark");
   }, []);
 
   const isTauri =
