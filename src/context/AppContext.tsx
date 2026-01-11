@@ -1,5 +1,6 @@
-import { createContext, useContext, useState, useCallback, type ReactNode } from "react";
-import type { Folder, Note, AppStats, AiConfig, SidebarState } from "../types";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile } from "../types";
 
 // Mock 数据
 const mockFolders: Folder[] = [
@@ -66,25 +67,6 @@ const mockStats: AppStats = {
   lastActivityDate: new Date(),
 };
 
-const mockAiConfigs: AiConfig[] = [
-  {
-    id: 1,
-    title: "DeepSeek V3",
-    base_url: "https://api.deepseek.com",
-    api_key: "sk-***",
-    model: "deepseek-chat",
-    sort_order: 1,
-  },
-  {
-    id: 2,
-    title: "OpenAI GPT-4",
-    base_url: "https://api.openai.com/v1",
-    api_key: "sk-***",
-    model: "gpt-4-turbo",
-    sort_order: 2,
-  },
-];
-
 // Context 状态类型
 interface AppContextType {
   // 侧边栏状态
@@ -98,12 +80,14 @@ interface AppContextType {
   notes: Note[];
   stats: AppStats;
   aiConfigs: AiConfig[];
+  refreshAiConfigs: () => Promise<void>;
+  addNote: (note: Omit<Note, "id" | "createdAt" | "updatedAt">) => Note;
 
   // 上传状态
-  uploadedVideo: File | null;
-  uploadedSubtitle: File | null;
-  setUploadedVideo: (file: File | null) => void;
-  setUploadedSubtitle: (file: File | null) => void;
+  uploadedVideo: UploadedFile | null;
+  uploadedSubtitle: UploadedFile | null;
+  setUploadedVideo: (file: UploadedFile | null) => void;
+  setUploadedSubtitle: (file: UploadedFile | null) => void;
 
   // AI 模型选择
   selectedModelId: number | null;
@@ -136,18 +120,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // 数据（暂用 mock）
   const [folders] = useState<Folder[]>(mockFolders);
-  const [notes] = useState<Note[]>(mockNotes);
-  const [stats] = useState<AppStats>(mockStats);
-  const [aiConfigs] = useState<AiConfig[]>(mockAiConfigs);
+  const [notes, setNotes] = useState<Note[]>(mockNotes);
+  const [stats, setStats] = useState<AppStats>(mockStats);
+  const [aiConfigs, setAiConfigs] = useState<AiConfig[]>([]);
 
   // 上传状态
-  const [uploadedVideo, setUploadedVideo] = useState<File | null>(null);
-  const [uploadedSubtitle, setUploadedSubtitle] = useState<File | null>(null);
+  const [uploadedVideo, setUploadedVideo] = useState<UploadedFile | null>(null);
+  const [uploadedSubtitle, setUploadedSubtitle] = useState<UploadedFile | null>(null);
 
   // AI 模型
-  const [selectedModelId, setSelectedModelId] = useState<number | null>(
-    mockAiConfigs[0]?.id ?? null
-  );
+  const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
 
   // 生成状态
   const [isGenerating, setIsGenerating] = useState(false);
@@ -158,6 +140,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 视图
   const [currentView, setCurrentView] = useState<"home" | "settings" | "note">("home");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+
+  // 加载 AI 配置
+  const refreshAiConfigs = useCallback(async () => {
+    try {
+      const configs = await invoke<AiConfig[]>("get_ai_configs");
+      setAiConfigs(configs);
+
+      // 如果当前没有选中模型，选择默认模型或第一个
+      if (configs.length > 0) {
+        const defaultConfig = configs.find(c => c.is_default);
+        if (defaultConfig) {
+          setSelectedModelId(defaultConfig.id);
+        } else if (!selectedModelId || !configs.find(c => c.id === selectedModelId)) {
+          setSelectedModelId(configs[0].id);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to load AI configs:", error);
+    }
+  }, [selectedModelId]);
+
+  // 初始加载 AI 配置
+  useEffect(() => {
+    refreshAiConfigs();
+  }, []);
 
   // 侧边栏操作
   const toggleSidebar = useCallback(() => {
@@ -180,6 +187,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  // 添加笔记
+  const addNote = useCallback((noteData: Omit<Note, "id" | "createdAt" | "updatedAt">): Note => {
+    const now = new Date();
+    const newNote: Note = {
+      ...noteData,
+      id: `n${Date.now()}`,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    setNotes((prev) => [newNote, ...prev]);
+
+    // 更新统计
+    setStats((prev) => ({
+      ...prev,
+      totalNotes: prev.totalNotes + 1,
+      notesThisWeek: prev.notesThisWeek + 1,
+      lastActivityDate: now,
+    }));
+
+    return newNote;
+  }, []);
+
   const value: AppContextType = {
     sidebar,
     toggleSidebar,
@@ -189,6 +219,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     notes,
     stats,
     aiConfigs,
+    refreshAiConfigs,
+    addNote,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,

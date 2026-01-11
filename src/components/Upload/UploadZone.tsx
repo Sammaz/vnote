@@ -1,11 +1,208 @@
 import { useCallback, useState } from "react";
 import { Upload, Video, FileText, X } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { readDir, stat } from "@tauri-apps/plugin-fs";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import type { UploadedFile } from "../../types";
+
+// 字幕格式优先级（越靠前优先级越高）
+const SUBTITLE_PRIORITY = ["ass", "srt", "vtt", "ssa"];
+const VIDEO_EXTENSIONS = ["mp4", "mkv", "avi", "mov", "webm", "flv"];
+const SUBTITLE_EXTENSIONS = ["ass", "srt", "vtt", "ssa"];
+
+// 获取文件扩展名
+function getExtension(filename: string): string {
+  return filename.split(".").pop()?.toLowerCase() || "";
+}
+
+// 获取文件名（不含扩展名）
+function getBaseName(filename: string): string {
+  const lastDotIndex = filename.lastIndexOf(".");
+  return lastDotIndex > 0 ? filename.substring(0, lastDotIndex) : filename;
+}
+
+// 获取目录路径
+function getDirectoryPath(filePath: string): string {
+  // 处理 Windows 和 Unix 路径
+  const lastSep = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  return lastSep > 0 ? filePath.substring(0, lastSep) : filePath;
+}
+
+// 获取文件名
+function getFileName(filePath: string): string {
+  const lastSep = Math.max(filePath.lastIndexOf("/"), filePath.lastIndexOf("\\"));
+  return lastSep >= 0 ? filePath.substring(lastSep + 1) : filePath;
+}
 
 export function UploadZone() {
   const { uploadedVideo, uploadedSubtitle, setUploadedVideo, setUploadedSubtitle } = useApp();
   const [isDragOver, setIsDragOver] = useState(false);
+
+  // 自动查找同名字幕文件
+  const findMatchingSubtitle = useCallback(async (videoPath: string): Promise<UploadedFile | null> => {
+    try {
+      const dirPath = getDirectoryPath(videoPath);
+      const videoFileName = getFileName(videoPath);
+      const videoBaseName = getBaseName(videoFileName);
+
+      // 读取目录
+      const entries = await readDir(dirPath);
+
+      // 查找同名字幕文件
+      const subtitleCandidates: { path: string; name: string; priority: number }[] = [];
+
+      for (const entry of entries) {
+        if (entry.isFile && entry.name) {
+          const ext = getExtension(entry.name);
+          const baseName = getBaseName(entry.name);
+
+          // 检查是否是字幕文件且文件名匹配
+          if (SUBTITLE_EXTENSIONS.includes(ext) && baseName === videoBaseName) {
+            const priority = SUBTITLE_PRIORITY.indexOf(ext);
+            subtitleCandidates.push({
+              path: `${dirPath}/${entry.name}`,
+              name: entry.name,
+              priority: priority >= 0 ? priority : SUBTITLE_PRIORITY.length,
+            });
+          }
+        }
+      }
+
+      // 按优先级排序，选择最高优先级的字幕
+      if (subtitleCandidates.length > 0) {
+        subtitleCandidates.sort((a, b) => a.priority - b.priority);
+        const bestMatch = subtitleCandidates[0];
+
+        // 获取文件大小
+        const fileInfo = await stat(bestMatch.path);
+
+        return {
+          name: bestMatch.name,
+          path: bestMatch.path,
+          size: fileInfo.size,
+          type: "subtitle",
+        };
+      }
+
+      return null;
+    } catch (error) {
+      console.error("查找字幕文件失败:", error);
+      return null;
+    }
+  }, []);
+
+  // 处理选择视频文件
+  const handleSelectVideo = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{
+          name: "视频文件",
+          extensions: VIDEO_EXTENSIONS,
+        }],
+      });
+
+      if (selected) {
+        const filePath = selected as string;
+        const fileName = getFileName(filePath);
+        const fileInfo = await stat(filePath);
+
+        const videoFile: UploadedFile = {
+          name: fileName,
+          path: filePath,
+          size: fileInfo.size,
+          type: "video",
+        };
+
+        setUploadedVideo(videoFile);
+
+        // 自动查找字幕文件
+        const matchingSubtitle = await findMatchingSubtitle(filePath);
+        if (matchingSubtitle) {
+          setUploadedSubtitle(matchingSubtitle);
+        }
+      }
+    } catch (error) {
+      console.error("选择视频文件失败:", error);
+    }
+  }, [setUploadedVideo, setUploadedSubtitle, findMatchingSubtitle]);
+
+  // 处理选择字幕文件
+  const handleSelectSubtitle = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{
+          name: "字幕文件",
+          extensions: SUBTITLE_EXTENSIONS,
+        }],
+      });
+
+      if (selected) {
+        const filePath = selected as string;
+        const fileName = getFileName(filePath);
+        const fileInfo = await stat(filePath);
+
+        setUploadedSubtitle({
+          name: fileName,
+          path: filePath,
+          size: fileInfo.size,
+          type: "subtitle",
+        });
+      }
+    } catch (error) {
+      console.error("选择字幕文件失败:", error);
+    }
+  }, [setUploadedSubtitle]);
+
+  // 处理选择文件（视频或字幕）
+  const handleSelectFiles = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: true,
+        filters: [{
+          name: "视频和字幕文件",
+          extensions: [...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS],
+        }],
+      });
+
+      if (selected) {
+        const paths = Array.isArray(selected) ? selected : [selected];
+
+        for (const filePath of paths) {
+          const fileName = getFileName(filePath);
+          const ext = getExtension(fileName);
+          const fileInfo = await stat(filePath);
+
+          if (VIDEO_EXTENSIONS.includes(ext)) {
+            const videoFile: UploadedFile = {
+              name: fileName,
+              path: filePath,
+              size: fileInfo.size,
+              type: "video",
+            };
+            setUploadedVideo(videoFile);
+
+            // 自动查找字幕文件
+            const matchingSubtitle = await findMatchingSubtitle(filePath);
+            if (matchingSubtitle) {
+              setUploadedSubtitle(matchingSubtitle);
+            }
+          } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
+            setUploadedSubtitle({
+              name: fileName,
+              path: filePath,
+              size: fileInfo.size,
+              type: "subtitle",
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error("选择文件失败:", error);
+    }
+  }, [setUploadedVideo, setUploadedSubtitle, findMatchingSubtitle]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -18,42 +215,52 @@ export function UploadZone() {
   }, []);
 
   const handleDrop = useCallback(
-    (e: React.DragEvent) => {
+    async (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragOver(false);
 
       const files = Array.from(e.dataTransfer.files);
-      processFiles(files);
+
+      for (const file of files) {
+        const ext = getExtension(file.name);
+
+        // 视频文件
+        if (VIDEO_EXTENSIONS.includes(ext)) {
+          // 注意：拖放的文件没有完整路径，只能使用 File 对象的基本信息
+          // 在 Tauri 中拖放文件会有特殊处理
+          const filePath = (file as File & { path?: string }).path || file.name;
+
+          const videoFile: UploadedFile = {
+            name: file.name,
+            path: filePath,
+            size: file.size,
+            type: "video",
+          };
+          setUploadedVideo(videoFile);
+
+          // 如果有完整路径，尝试自动查找字幕
+          if (filePath !== file.name) {
+            const matchingSubtitle = await findMatchingSubtitle(filePath);
+            if (matchingSubtitle) {
+              setUploadedSubtitle(matchingSubtitle);
+            }
+          }
+        }
+        // 字幕文件
+        else if (SUBTITLE_EXTENSIONS.includes(ext)) {
+          const filePath = (file as File & { path?: string }).path || file.name;
+
+          setUploadedSubtitle({
+            name: file.name,
+            path: filePath,
+            size: file.size,
+            type: "subtitle",
+          });
+        }
+      }
     },
-    [setUploadedVideo, setUploadedSubtitle]
+    [setUploadedVideo, setUploadedSubtitle, findMatchingSubtitle]
   );
-
-  const processFiles = (files: File[]) => {
-    files.forEach((file) => {
-      const ext = file.name.split(".").pop()?.toLowerCase();
-
-      // 视频文件
-      if (["mp4", "mkv", "avi", "mov", "webm", "flv"].includes(ext || "")) {
-        setUploadedVideo(file);
-      }
-      // 字幕文件
-      else if (["srt", "vtt", "ass", "ssa"].includes(ext || "")) {
-        setUploadedSubtitle(file);
-      }
-    });
-  };
-
-  const handleFileSelect = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.multiple = true;
-    input.accept = ".mp4,.mkv,.avi,.mov,.webm,.flv,.srt,.vtt,.ass,.ssa";
-    input.onchange = (e) => {
-      const files = Array.from((e.target as HTMLInputElement).files || []);
-      processFiles(files);
-    };
-    input.click();
-  };
 
   const hasFiles = uploadedVideo || uploadedSubtitle;
 
@@ -62,7 +269,7 @@ export function UploadZone() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={!hasFiles ? handleFileSelect : undefined}
+      onClick={!hasFiles ? handleSelectFiles : undefined}
       className={cn(
         "upload-zone relative p-8 text-center",
         isDragOver && "drag-over",
@@ -85,7 +292,7 @@ export function UploadZone() {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleFileSelect();
+              handleSelectFiles();
             }}
             className={cn(
               "inline-flex items-center gap-2 px-4 py-2 rounded-lg",
@@ -154,7 +361,7 @@ export function UploadZone() {
 
           {/* 添加更多文件 */}
           <button
-            onClick={handleFileSelect}
+            onClick={!uploadedVideo ? handleSelectVideo : handleSelectSubtitle}
             className={cn(
               "w-full flex items-center justify-center gap-2 p-3 rounded-lg",
               "border border-dashed border-slate-300 dark:border-vnote-border",
@@ -163,7 +370,7 @@ export function UploadZone() {
             )}
           >
             <Upload className="w-4 h-4" />
-            {!uploadedVideo ? "添加视频" : !uploadedSubtitle ? "添加字幕（可选）" : "替换文件"}
+            {!uploadedVideo ? "添加视频" : !uploadedSubtitle ? "添加字幕（可选）" : "替换字幕"}
           </button>
         </div>
       )}

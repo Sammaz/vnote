@@ -80,6 +80,7 @@
   border: 2px dashed #e2e8f0;
   border-radius: 16px;
   transition: all 0.2s ease;
+  min-height: 220px;
 }
 
 .dark .upload-zone {
@@ -162,4 +163,66 @@
 .writing-vertical {
   writing-mode: vertical-rl;
   text-orientation: mixed;
+}
+
+/* Plyr 视频播放器样式 */
+.plyr-container {
+  --plyr-color-main: #3b82f6;
+}
+
+.plyr-container .plyr {
+  width: 100%;
+  height: 100%;
+}
+
+.plyr-container .plyr__video-wrapper {
+  background: #000;
+}
+
+/* 确保 Plyr 控件可见 */
+.plyr-container .plyr__controls {
+  opacity: 1;
+}
+
+.plyr-container .plyr--video .plyr__controls {
+  background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+}
+
+/* 暗色模式下的 Plyr 样式 */
+.dark .plyr-container {
+  --plyr-color-main: #60a5fa;
+}
+
+/* ASS 字幕容器样式 */
+.plyr-container .ASS-box {
+  pointer-events: none;
+}
+
+/* 聊天窗口样式 */
+.chat-container {
+  scrollbar-width: thin;
+}
+
+.chat-message {
+  animation: messageSlideIn 0.3s ease-out;
+}
+
+@keyframes messageSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 建议问题标签样式 */
+.suggestion-tag {
+  transition: all 0.2s ease;
+}
+
+.suggestion-tag:hover {
+  transform: translateY(-1px);
 }

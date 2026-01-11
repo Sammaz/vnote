@@ -1,5 +1,5 @@
-import { ChevronDown, Bot } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { ChevronDown, Bot, Star } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 
@@ -7,6 +7,14 @@ export function ModelSelector() {
   const { aiConfigs, selectedModelId, setSelectedModelId } = useApp();
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Sort configs: default first, then by sort_order
+  const sortedConfigs = useMemo(() =>
+    [...aiConfigs].sort((a, b) => {
+      if (a.is_default && !b.is_default) return -1;
+      if (!a.is_default && b.is_default) return 1;
+      return a.sort_order - b.sort_order;
+    }), [aiConfigs]);
 
   const selectedModel = aiConfigs.find((c) => c.id === selectedModelId);
 
@@ -55,7 +63,7 @@ export function ModelSelector() {
             "py-1 animate-fade-in"
           )}
         >
-          {aiConfigs.map((config) => (
+          {sortedConfigs.map((config) => (
             <button
               key={config.id}
               onClick={() => {
@@ -72,7 +80,12 @@ export function ModelSelector() {
             >
               <Bot className="w-4 h-4" />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{config.title}</p>
+                <p className="text-sm font-medium truncate flex items-center gap-1.5">
+                  {config.title}
+                  {config.is_default && (
+                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                  )}
+                </p>
                 <p className="text-xs text-slate-500 truncate">{config.model}</p>
               </div>
             </button>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  Home,
+  Sparkles,
   FolderClosed,
   FolderOpen,
   Search,
@@ -8,6 +8,8 @@ import {
   PanelLeft,
   FileText,
   ChevronDown,
+  Video,
+  MoreHorizontal,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
@@ -137,6 +139,37 @@ function FolderItem({
   );
 }
 
+// 笔记记录列表项
+interface NoteItemProps {
+  note: Note;
+}
+
+function NoteItem({ note }: NoteItemProps) {
+  const { setSelectedNoteId, setCurrentView } = useApp();
+  const [isHovered, setIsHovered] = useState(false);
+
+  return (
+    <button
+      onClick={() => {
+        setSelectedNoteId(note.id);
+        setCurrentView("note");
+      }}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={cn(
+        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all duration-150 group",
+        "hover:bg-slate-100 dark:hover:bg-vnote-hover text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+      )}
+    >
+      <Video className="w-4 h-4 text-blue-400 flex-shrink-0" />
+      <span className="flex-1 truncate text-left">{note.title}</span>
+      {isHovered && (
+        <MoreHorizontal className="w-4 h-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0" />
+      )}
+    </button>
+  );
+}
+
 export function Sidebar() {
   const { sidebar, toggleSidebar, folders, notes, currentView, setCurrentView } = useApp();
   const { collapsed } = sidebar;
@@ -213,15 +246,15 @@ export function Sidebar() {
       {/* 导航区域 */}
       <nav className="p-2 space-y-1">
         <NavItem
-          icon={<Home className="w-5 h-5" />}
-          label="首页"
+          icon={<Sparkles className="w-5 h-5" />}
+          label="新笔记"
           active={currentView === "home"}
           collapsed={collapsed}
           onClick={() => setCurrentView("home")}
         />
         <NavItem
           icon={<Search className="w-5 h-5" />}
-          label="搜索"
+          label="全局搜索"
           collapsed={collapsed}
           onClick={() => {
             setCurrentView("home");
@@ -236,9 +269,10 @@ export function Sidebar() {
       {/* 文件夹树 - 仅在展开时显示 */}
       {!collapsed && (
         <div className="flex-1 overflow-y-auto px-2 pb-4 animate-fade-in">
+          {/* 资源库 */}
           <div className="flex items-center justify-between px-2 mb-2">
             <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              文件夹
+              资源库
             </span>
           </div>
 
@@ -253,6 +287,22 @@ export function Sidebar() {
                 allFolders={folders}
                 allNotes={notes}
               />
+            ))}
+          </div>
+
+          {/* 分隔线 */}
+          <div className="mx-1 my-3 border-t border-slate-200 dark:border-vnote-border" />
+
+          {/* 笔记记录 */}
+          <div className="flex items-center justify-between px-2 mb-2">
+            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+              笔记记录
+            </span>
+          </div>
+
+          <div className="space-y-0.5">
+            {notes.slice(0, 10).map((note) => (
+              <NoteItem key={note.id} note={note} />
             ))}
           </div>
         </div>

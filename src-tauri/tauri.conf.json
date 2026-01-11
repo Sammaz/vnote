@@ -13,9 +13,8 @@
     "windows": [
       {
         "title": "VNote",
-        "width": 1440,
-        "height": 1000,
-        "center": true,
+        "minWidth": 1024,
+        "minHeight": 700,
         "visible": false,
         "label": "main"
       }

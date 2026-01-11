@@ -11,6 +11,7 @@ pub struct AiConfig {
     pub api_key: String,
     pub model: String,
     pub sort_order: i32,
+    pub is_default: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -52,10 +53,25 @@ impl Database {
                 base_url TEXT NOT NULL,
                 api_key TEXT NOT NULL,
                 model TEXT NOT NULL,
-                sort_order INTEGER NOT NULL DEFAULT 0
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_default INTEGER NOT NULL DEFAULT 0
             )",
             [],
         )?;
+
+        // Migration: Add is_default column if not exists
+        let has_is_default: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('ai_configs') WHERE name='is_default'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_is_default {
+            conn.execute(
+                "ALTER TABLE ai_configs ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS app_settings (
@@ -82,7 +98,7 @@ impl Database {
     pub fn get_all_ai_configs(&self) -> SqliteResult<Vec<AiConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, base_url, api_key, model, sort_order FROM ai_configs ORDER BY sort_order"
+            "SELECT id, title, base_url, api_key, model, sort_order, is_default FROM ai_configs ORDER BY is_default DESC, sort_order"
         )?;
 
         let configs = stmt.query_map([], |row| {
@@ -93,6 +109,7 @@ impl Database {
                 api_key: row.get(3)?,
                 model: row.get(4)?,
                 sort_order: row.get(5)?,
+                is_default: row.get::<_, i64>(6)? != 0,
             })
         })?;
 
@@ -102,8 +119,8 @@ impl Database {
     pub fn create_ai_config(&self, config: &AiConfig) -> SqliteResult<i64> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO ai_configs (title, base_url, api_key, model, sort_order) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order),
+            "INSERT INTO ai_configs (title, base_url, api_key, model, sort_order, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32),
         )?;
         Ok(conn.last_insert_rowid())
     }
@@ -111,9 +128,24 @@ impl Database {
     pub fn update_ai_config(&self, config: &AiConfig) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE ai_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5 WHERE id = ?6",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.id),
+            "UPDATE ai_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5, is_default = ?6 WHERE id = ?7",
+            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.id),
         )?;
+        Ok(())
+    }
+
+    pub fn set_default_ai_config(&self, id: i64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        // First, unset all defaults
+        conn.execute("UPDATE ai_configs SET is_default = 0", [])?;
+        // Then set the specified config as default
+        conn.execute("UPDATE ai_configs SET is_default = 1 WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn unset_default_ai_config(&self, id: i64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("UPDATE ai_configs SET is_default = 0 WHERE id = ?1", [id])?;
         Ok(())
     }
 

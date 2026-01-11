@@ -2,21 +2,52 @@ import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 
+// 获取文件名（不含扩展名）
+function getBaseName(filename: string): string {
+  const lastDotIndex = filename.lastIndexOf(".");
+  return lastDotIndex > 0 ? filename.substring(0, lastDotIndex) : filename;
+}
+
 export function GenerateButton() {
-  const { uploadedVideo, isGenerating, setIsGenerating, selectedModelId } = useApp();
+  const {
+    uploadedVideo,
+    uploadedSubtitle,
+    isGenerating,
+    setIsGenerating,
+    selectedModelId,
+    addNote,
+    setUploadedVideo,
+    setUploadedSubtitle,
+  } = useApp();
 
   const canGenerate = uploadedVideo && selectedModelId && !isGenerating;
 
   const handleGenerate = async () => {
-    if (!canGenerate) return;
+    if (!canGenerate || !uploadedVideo) return;
 
     setIsGenerating(true);
 
     // 模拟生成过程
     setTimeout(() => {
+      // 创建笔记，标题为视频文件名（不含扩展名）
+      const noteTitle = getBaseName(uploadedVideo.name);
+
+      addNote({
+        folderId: "1", // 默认放到学习笔记文件夹
+        title: noteTitle,
+        videoPath: uploadedVideo.path,
+        subtitlePath: uploadedSubtitle?.path || null,
+        thumbnailPath: null,
+        content: `# ${noteTitle}\n\n正在生成笔记内容...`,
+        duration: 0,
+      });
+
+      // 清空上传状态
+      setUploadedVideo(null);
+      setUploadedSubtitle(null);
+
       setIsGenerating(false);
-      // TODO: 实际调用后端生成笔记
-    }, 3000);
+    }, 1500);
   };
 
   return (

@@ -6,6 +6,7 @@ import SettingsPage from "./SettingsPage";
 import { AppProvider, useApp } from "./context/AppContext";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
+import { NotePage } from "./components/Note";
 import "./index.css";
 
 function AppContent() {
@@ -164,12 +165,7 @@ function AppContent() {
               onClose={() => setCurrentView("home")}
             />
           ) : currentView === "note" ? (
-            <div className="flex-1 flex items-center justify-center text-slate-500">
-              <div className="text-center">
-                <p className="text-lg mb-2">笔记详情页</p>
-                <p className="text-sm text-slate-600">待实现...</p>
-              </div>
-            </div>
+            <NotePage />
           ) : (
             <HomePage />
           )}

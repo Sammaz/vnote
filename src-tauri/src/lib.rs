@@ -137,6 +137,16 @@ fn delete_ai_config(id: i64) -> Result<(), String> {
     get_db().delete_ai_config(id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn set_default_ai_config(id: i64) -> Result<(), String> {
+    get_db().set_default_ai_config(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unset_default_ai_config(id: i64) -> Result<(), String> {
+    get_db().unset_default_ai_config(id).map_err(|e| e.to_string())
+}
+
 // App settings commands
 #[tauri::command]
 fn get_app_settings() -> Result<AppSettings, String> {
@@ -150,9 +160,17 @@ fn set_theme(theme: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn read_file_content(path: String) -> Result<String, String> {
+    std::fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read file '{}': {}", path, e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             // Initialize database
             let app_data_dir = app
@@ -172,6 +190,28 @@ pub fn run() {
 
             DATABASE.set(db).expect("Database already initialized");
 
+            // 设置窗口大小为屏幕的90%
+            if let Some(window) = app.get_webview_window("main") {
+                let (width, height) = if let Some(monitor) = window.primary_monitor().ok().flatten() {
+                    let screen_size = monitor.size();
+                    let scale_factor = monitor.scale_factor();
+
+                    // 计算90%的屏幕尺寸（考虑缩放因子）
+                    let w = (screen_size.width as f64 / scale_factor * 0.9) as f64;
+                    let h = (screen_size.height as f64 / scale_factor * 0.9) as f64;
+                    (w, h)
+                } else {
+                    // 备用尺寸：如果无法获取屏幕尺寸
+                    (1440.0, 1000.0)
+                };
+
+                // 设置窗口大小
+                let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width, height }));
+
+                // 居中显示
+                let _ = window.center();
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -182,8 +222,11 @@ pub fn run() {
             create_ai_config,
             update_ai_config,
             delete_ai_config,
+            set_default_ai_config,
+            unset_default_ai_config,
             get_app_settings,
             set_theme,
+            read_file_content,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

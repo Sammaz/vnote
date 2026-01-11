@@ -1,8 +1,9 @@
 import {
-    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2
+    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useApp } from "./context/AppContext";
 
 interface SettingsPageProps {
     currentTheme: "light" | "dark";
@@ -17,11 +18,13 @@ interface AiConfig {
     api_key: string;
     model: string;
     sort_order: number;
+    is_default: boolean;
 }
 
 type SettingsTab = "general" | "model";
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
+    const { refreshAiConfigs } = useApp();
     const [activeTab, setActiveTab] = useState<SettingsTab>("general");
     const [trayEnabled, setTrayEnabled] = useState(false);
 
@@ -78,7 +81,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         base_url: "",
         api_key: "",
         model: "",
-        sort_order: aiConfigs.length
+        sort_order: aiConfigs.length,
+        is_default: false
     });
 
     const saveAiConfig = async () => {
@@ -95,6 +99,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             }
             setEditingAiConfig(null);
             setApiKeyVisible(false);
+            await refreshAiConfigs();
         } catch (error) {
             console.error("Failed to save AI config:", error);
         }
@@ -105,8 +110,24 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             await invoke("delete_ai_config", { id });
             setAiConfigs(aiConfigs.filter(c => c.id !== id));
             setDeletingAiConfigId(null);
+            await refreshAiConfigs();
         } catch (error) {
             console.error("Failed to delete AI config:", error);
+        }
+    };
+
+    const toggleDefaultAiConfig = async (id: number, currentIsDefault: boolean) => {
+        try {
+            if (currentIsDefault) {
+                await invoke("unset_default_ai_config", { id });
+                setAiConfigs(aiConfigs.map(c => c.id === id ? { ...c, is_default: false } : c));
+            } else {
+                await invoke("set_default_ai_config", { id });
+                setAiConfigs(aiConfigs.map(c => ({ ...c, is_default: c.id === id })));
+            }
+            await refreshAiConfigs();
+        } catch (error) {
+            console.error("Failed to toggle default AI config:", error);
         }
     };
 
@@ -345,9 +366,23 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                 <Bot size={16} className="text-slate-600 dark:text-slate-400" />
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="font-medium text-slate-800 dark:text-slate-200 text-sm">{config.title || "未命名"}</div>
+                                                <div className="font-medium text-slate-800 dark:text-slate-200 text-sm flex items-center gap-2">
+                                                    {config.title || "未命名"}
+                                                    {config.is_default && (
+                                                        <span className="px-1.5 py-0.5 text-xs rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">默认</span>
+                                                    )}
+                                                </div>
                                                 <div className="text-xs text-slate-500 truncate">{config.model || config.base_url || "未配置"}</div>
                                             </div>
+                                            <button
+                                                onClick={() => toggleDefaultAiConfig(config.id, config.is_default)}
+                                                className={config.is_default
+                                                    ? "text-yellow-500 hover:text-yellow-600"
+                                                    : "text-slate-400 hover:text-yellow-500"}
+                                                title={config.is_default ? "取消默认" : "设为默认"}
+                                            >
+                                                <Star size={14} fill={config.is_default ? "currentColor" : "none"} />
+                                            </button>
                                             <button
                                                 onClick={() => setEditingAiConfig(config)}
                                                 className="text-slate-400 hover:text-blue-600 text-xs"

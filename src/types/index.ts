@@ -41,12 +41,14 @@ export interface AiConfig {
   api_key: string;
   model: string;
   sort_order: number;
+  is_default: boolean;
 }
 
 // 上传文件信息
 export interface UploadedFile {
-  file: File;
+  name: string;
   path: string;
+  size: number;
   type: "video" | "subtitle";
 }
 
