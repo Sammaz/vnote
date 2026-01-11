@@ -85,9 +85,12 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [showQuestionPopover, setShowQuestionPopover] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const questionPopoverRef = useRef<HTMLDivElement>(null);
+  const questionButtonRef = useRef<HTMLButtonElement>(null);
+  const popoverContentRef = useRef<HTMLDivElement>(null);
   const popoutRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -110,10 +113,12 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
   // 点击外部关闭推荐问题 Popover
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (
-        questionPopoverRef.current &&
-        !questionPopoverRef.current.contains(event.target as Node)
-      ) {
+      const target = event.target as Node;
+      // 检查点击是否在按钮或弹出菜单外部
+      const isOutsideButton = questionButtonRef.current && !questionButtonRef.current.contains(target);
+      const isOutsidePopover = popoverContentRef.current && !popoverContentRef.current.contains(target);
+
+      if (isOutsideButton && isOutsidePopover) {
         setShowQuestionPopover(false);
       }
     };
@@ -430,6 +435,18 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
     setInput(question);
   };
 
+  const handleToggleQuestionPopover = () => {
+    if (!showQuestionPopover && questionButtonRef.current) {
+      const rect = questionButtonRef.current.getBoundingClientRect();
+      // 计算弹出菜单位置：在按钮上方，左对齐
+      setPopoverPosition({
+        x: rect.left,
+        y: rect.top - 8, // 8px 间距
+      });
+    }
+    setShowQuestionPopover(!showQuestionPopover);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -677,7 +694,8 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
             {questions.length > 0 && (
               <div className="relative" ref={questionPopoverRef}>
                 <button
-                  onClick={() => setShowQuestionPopover(!showQuestionPopover)}
+                  ref={questionButtonRef}
+                  onClick={handleToggleQuestionPopover}
                   className={cn(
                     "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors",
                     showQuestionPopover
@@ -691,11 +709,19 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
                     {questions.length}
                   </span>
                 </button>
-                {/* Popover 内容 */}
-                {showQuestionPopover && (
+                {/* Popover 内容 - 使用 Portal 渲染到 body 避免被父容器 overflow 裁剪 */}
+                {showQuestionPopover && createPortal(
                   <div
-                    className="absolute bottom-full left-0 mb-2 w-80 bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border rounded-xl shadow-lg overflow-hidden z-50"
-                    style={{ animation: "popoverSlideUp 0.2s ease-out" }}
+                    ref={popoverContentRef}
+                    className="w-80 bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border rounded-xl shadow-lg overflow-hidden"
+                    style={{
+                      position: "fixed",
+                      left: popoverPosition.x,
+                      top: popoverPosition.y,
+                      transform: "translateY(-100%)",
+                      zIndex: 9999,
+                      animation: "popoverSlideUp 0.2s ease-out",
+                    }}
                   >
                     <div className="px-3 py-2 border-b border-slate-200 dark:border-vnote-border">
                       <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
@@ -717,7 +743,8 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
                         </button>
                       ))}
                     </div>
-                  </div>
+                  </div>,
+                  document.body
                 )}
               </div>
             )}
