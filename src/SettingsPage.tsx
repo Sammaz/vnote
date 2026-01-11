@@ -588,7 +588,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     </div>
                                     <div className="flex-1">
                                         <div className="text-sm font-medium text-slate-900 dark:text-slate-100">视频缓存</div>
-                                        <div className="text-sm text-slate-500 dark:text-slate-400">TS 视频转换后的临时文件</div>
+                                        <div className="text-sm text-slate-500 dark:text-slate-400">视频转换后的临时文件</div>
                                     </div>
                                     <div className="text-sm text-slate-500 dark:text-slate-400 mr-2">
                                         {formatBytes(videoCacheSize)}

@@ -198,6 +198,17 @@
   pointer-events: none;
 }
 
+/* 确保 plyr 容器和 video-wrapper 有正确的定位上下文 */
+.plyr-container .plyr {
+  position: relative;
+  overflow: hidden;
+}
+
+.plyr-container .plyr__video-wrapper {
+  position: relative;
+  overflow: hidden;
+}
+
 /* 聊天窗口样式 */
 .chat-container {
   scrollbar-width: thin;

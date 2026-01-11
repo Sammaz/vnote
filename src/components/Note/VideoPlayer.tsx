@@ -328,36 +328,6 @@ export function VideoPlayer({
       const cleanupRef = {
         captionBtn: null as Element | null,
         handler: null as (() => void) | null,
-        resizeObserver: null as ResizeObserver | null,
-        resizeTimeout: null as ReturnType<typeof setTimeout> | null,
-        assModule: null as any,
-        assContent: null as string | null,
-        lastWidth: 0,
-      };
-
-      const createAssInstance = () => {
-        if (!cleanupRef.assModule || !cleanupRef.assContent || !containerRef.current) return;
-        const plyrContainer = containerRef.current.querySelector(".plyr");
-        const videoEl = containerRef.current.querySelector("video");
-        if (!plyrContainer || !videoEl) return;
-
-        if (assRef.current) {
-          assRef.current.destroy();
-          assRef.current = null;
-        }
-
-        const ASS = cleanupRef.assModule.default;
-        assRef.current = new ASS(cleanupRef.assContent, videoEl as HTMLVideoElement, {
-          container: plyrContainer as HTMLElement,
-          resampling: "video_height",
-        });
-
-        if (!assVisibleRef.current) {
-          const assBox = plyrContainer.querySelector(".ASS-box") as HTMLElement;
-          if (assBox) {
-            assBox.style.display = "none";
-          }
-        }
       };
 
       if (isAssSubtitle && subtitleUrl) {
@@ -368,37 +338,79 @@ export function VideoPlayer({
           .then(([assModule, assContent]) => {
             if (!isMounted || !assContent || !containerRef.current) return;
 
-            cleanupRef.assModule = assModule;
-            cleanupRef.assContent = assContent;
+            // 修复双语字幕堆叠问题：为每个对话添加 \pos 标签实现精确定位
+            // assjs 的碰撞检测在 resize 后可能失效，使用显式定位更可靠
+            let fixedAssContent = assContent;
+
+            // 解析 PlayResY 获取脚本分辨率高度
+            const playResYMatch = assContent.match(/PlayResY:\s*(\d+)/i);
+            const playResY = playResYMatch ? parseInt(playResYMatch[1], 10) : 720;
+            const playResXMatch = assContent.match(/PlayResX:\s*(\d+)/i);
+            const playResX = playResXMatch ? parseInt(playResXMatch[1], 10) : 1280;
+
+            // 计算字幕位置（基于脚本分辨率）
+            // 原始顺序：中文在上，英文在下
+            // Secondary (英文): 底部稍高位置，y = playResY - 28
+            // Default (中文): 英文上方，间隔约32px -> y = playResY - 60
+            const secondaryY = playResY - 28; // 英文在底部，但稍微高一点
+            const defaultY = playResY - 60;   // 中文在上方，与英文间隔32px
+            const centerX = playResX / 2;
+
+            // 为所有 Dialogue 行添加 \pos 标签
+            fixedAssContent = fixedAssContent.replace(
+              /^(Dialogue:\s*\d+,[^,]+,[^,]+,)(Default)(,.*?,,)(.*)$/gm,
+              (match, prefix, style, middle, text) => {
+                // 如果已经有 \pos 标签，不修改
+                if (text.includes("\\pos(")) return match;
+                return `${prefix}${style}${middle}{\\pos(${centerX},${defaultY})}${text}`;
+              }
+            );
+
+            fixedAssContent = fixedAssContent.replace(
+              /^(Dialogue:\s*\d+,[^,]+,[^,]+,)(Secondary)(,.*?,,)(.*)$/gm,
+              (match, prefix, style, middle, text) => {
+                // 如果已经有 \pos 标签，不修改
+                if (text.includes("\\pos(")) return match;
+                return `${prefix}${style}${middle}{\\pos(${centerX},${secondaryY})}${text}`;
+              }
+            );
+
+            console.log("[ASS] Added explicit positioning:", {
+              playResX,
+              playResY,
+              defaultY,
+              secondaryY,
+            });
 
             const plyrContainer = containerRef.current.querySelector(".plyr");
-            if (!plyrContainer) return;
+            const videoWrapper = containerRef.current.querySelector(".plyr__video-wrapper") || plyrContainer;
+            if (!videoWrapper) return;
 
-            cleanupRef.lastWidth = plyrContainer.clientWidth;
-            createAssInstance();
+            const videoEl = containerRef.current.querySelector("video") as HTMLVideoElement;
+            if (!videoEl) return;
 
-            const resizeObserver = new ResizeObserver((entries) => {
-              const entry = entries[0];
-              if (!entry) return;
-              const newWidth = entry.contentRect.width;
-              if (Math.abs(newWidth - cleanupRef.lastWidth) < 50) return;
-              if (cleanupRef.resizeTimeout) {
-                clearTimeout(cleanupRef.resizeTimeout);
-              }
-              cleanupRef.resizeTimeout = setTimeout(() => {
-                if (!isMounted) return;
-                cleanupRef.lastWidth = newWidth;
-                createAssInstance();
-              }, 350);
+            // 销毁旧实例（如果存在）
+            if (assRef.current) {
+              assRef.current.destroy();
+              assRef.current = null;
+            }
+
+            // 创建 ASS 实例 - assjs 内部有 ResizeObserver，会自动处理尺寸变化
+            // 由于使用了 \pos 固定定位，assjs 的内置 resize 处理足够了
+            const ASS = assModule.default;
+            assRef.current = new ASS(fixedAssContent, videoEl, {
+              container: videoWrapper as HTMLElement,
+              resampling: "video_height",
             });
-            resizeObserver.observe(plyrContainer);
-            cleanupRef.resizeObserver = resizeObserver;
 
-            const btn = plyrContainer.querySelector('[data-plyr="captions"]');
+            console.log("[ASS] Instance created with fixed positioning");
+
+            // 字幕切换按钮处理
+            const btn = plyrContainer?.querySelector('[data-plyr="captions"]');
             if (btn) {
               const handler = () => {
                 assVisibleRef.current = !assVisibleRef.current;
-                const assBox = plyrContainer.querySelector(".ASS-box") as HTMLElement;
+                const assBox = videoWrapper.querySelector(".ASS-box") as HTMLElement;
                 if (assBox) {
                   assBox.style.display = assVisibleRef.current ? "" : "none";
                 }
@@ -424,12 +436,6 @@ export function VideoPlayer({
         }
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current);
-        }
-        if (cleanupRef.resizeTimeout) {
-          clearTimeout(cleanupRef.resizeTimeout);
-        }
-        if (cleanupRef.resizeObserver) {
-          cleanupRef.resizeObserver.disconnect();
         }
         if (cleanupRef.captionBtn && cleanupRef.handler) {
           cleanupRef.captionBtn.removeEventListener("click", cleanupRef.handler);
