@@ -227,6 +227,18 @@
   transform: translateY(-1px);
 }
 
+/* 推荐问题 Popover 动画 */
+@keyframes popoverSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* ===== 聊天窗口 Markdown 样式 ===== */
 .chat-markdown {
   font-size: 0.875rem;

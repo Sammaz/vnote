@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Paperclip, Video, Send, Maximize2, Minimize2, Eraser, X, Square } from "lucide-react";
+import { Paperclip, Video, Send, Maximize2, Minimize2, Eraser, X, Square, Lightbulb } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "../../utils/cn";
@@ -84,8 +84,10 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
+  const [showQuestionPopover, setShowQuestionPopover] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const questionPopoverRef = useRef<HTMLDivElement>(null);
   const popoutRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -104,6 +106,26 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
       uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     };
   }, []);
+
+  // 点击外部关闭推荐问题 Popover
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        questionPopoverRef.current &&
+        !questionPopoverRef.current.contains(event.target as Node)
+      ) {
+        setShowQuestionPopover(false);
+      }
+    };
+
+    if (showQuestionPopover) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showQuestionPopover]);
 
   // 初始化弹窗位置
   useEffect(() => {
@@ -582,23 +604,6 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 建议问题 - 仅在有问题时显示 */}
-      {questions.length > 0 && (
-        <div className="px-4 py-2 border-t border-slate-200 dark:border-vnote-border">
-          <div className="flex flex-wrap gap-2">
-            {questions.map((question, index) => (
-              <button
-                key={index}
-                onClick={() => handleSuggestedQuestion(question)}
-                className="suggestion-tag px-3 py-1.5 text-xs bg-slate-100 dark:bg-vnote-surface text-slate-600 dark:text-slate-400 rounded-full hover:bg-slate-200 dark:hover:bg-vnote-hover hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-              >
-                {question}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* 输入区域 */}
       <div className="p-4 border-t border-slate-200 dark:border-vnote-border">
         {/* 隐藏的文件输入 */}
@@ -668,6 +673,54 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
               <Video className="w-4 h-4" />
               {basedOnVideo ? "基于视频" : "不基于视频"}
             </button>
+            {/* 推荐问题按钮 + Popover */}
+            {questions.length > 0 && (
+              <div className="relative" ref={questionPopoverRef}>
+                <button
+                  onClick={() => setShowQuestionPopover(!showQuestionPopover)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors",
+                    showQuestionPopover
+                      ? "text-amber-400 border border-amber-400/50 bg-amber-400/10"
+                      : "text-slate-400 hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                  )}
+                >
+                  <Lightbulb className="w-4 h-4" />
+                  <span>推荐问题</span>
+                  <span className="ml-0.5 px-1.5 py-0.5 text-xs bg-slate-200 dark:bg-vnote-surface rounded-full">
+                    {questions.length}
+                  </span>
+                </button>
+                {/* Popover 内容 */}
+                {showQuestionPopover && (
+                  <div
+                    className="absolute bottom-full left-0 mb-2 w-80 bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border rounded-xl shadow-lg overflow-hidden z-50"
+                    style={{ animation: "popoverSlideUp 0.2s ease-out" }}
+                  >
+                    <div className="px-3 py-2 border-b border-slate-200 dark:border-vnote-border">
+                      <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-200">
+                        <Lightbulb className="w-4 h-4 text-amber-400" />
+                        推荐问题
+                      </div>
+                    </div>
+                    <div className="p-2 max-h-64 overflow-y-auto">
+                      {questions.map((question, index) => (
+                        <button
+                          key={index}
+                          onClick={() => {
+                            handleSuggestedQuestion(question);
+                            setShowQuestionPopover(false);
+                          }}
+                          className="w-full text-left px-3 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors mb-1 last:mb-0"
+                        >
+                          {question}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           {isStreaming ? (
             <button
