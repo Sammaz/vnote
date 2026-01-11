@@ -1,5 +1,5 @@
 import {
-    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles
+    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, HardDrive
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -71,20 +71,26 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const [testingApi, setTestingApi] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
+    // Video cache state
+    const [videoCacheSize, setVideoCacheSize] = useState<number>(0);
+    const [clearingCache, setClearingCache] = useState(false);
+
     // Load settings from database on mount
     useEffect(() => {
         const loadSettings = async () => {
             try {
-                const [tray, aiCfgs, embCfgs, rerCfgs] = await Promise.all([
+                const [tray, aiCfgs, embCfgs, rerCfgs, cacheSize] = await Promise.all([
                     invoke<boolean>("get_tray_enabled"),
                     invoke<AiConfig[]>("get_ai_configs"),
                     invoke<EmbeddingConfig[]>("get_embedding_configs"),
                     invoke<RerankerConfig[]>("get_reranker_configs"),
+                    invoke<number>("get_video_cache_size"),
                 ]);
                 setTrayEnabled(tray);
                 setAiConfigs(aiCfgs);
                 setEmbeddingConfigs(embCfgs);
                 setRerankerConfigs(rerCfgs);
+                setVideoCacheSize(cacheSize);
             } catch (error) {
                 console.error("Failed to load settings:", error);
             } finally {
@@ -110,6 +116,28 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             setTrayEnabled(newValue);
         } catch (error) {
             console.error("Failed to update tray:", error);
+        }
+    };
+
+    // Format bytes to human readable size
+    const formatBytes = (bytes: number): string => {
+        if (bytes === 0) return "0 B";
+        const k = 1024;
+        const sizes = ["B", "KB", "MB", "GB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    };
+
+    const handleClearVideoCache = async () => {
+        setClearingCache(true);
+        try {
+            const clearedSize = await invoke<number>("clear_video_cache");
+            setVideoCacheSize(0);
+            console.log(`Cleared ${formatBytes(clearedSize)} of video cache`);
+        } catch (error) {
+            console.error("Failed to clear video cache:", error);
+        } finally {
+            setClearingCache(false);
         }
     };
 
@@ -519,33 +547,65 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 </div>
 
                 {activeTab === "general" ? (
-                    <div className="space-y-4">
-                        <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4">界面设置</h3>
-                        <div className="space-y-3">
-                            <div className="flex items-center gap-4 p-4 rounded-lg border border-slate-200 dark:border-vnote-border">
-                                <div className="h-8 w-8 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
-                                    <Palette size={16} className="text-slate-600 dark:text-slate-400" />
+                    <div className="space-y-6">
+                        <div className="space-y-4">
+                            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4">界面设置</h3>
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-4 p-4 rounded-lg border border-slate-200 dark:border-vnote-border">
+                                    <div className="h-8 w-8 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                                        <Palette size={16} className="text-slate-600 dark:text-slate-400" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">主题</div>
+                                        <div className="text-sm text-slate-500 dark:text-slate-400">选择应用的外观主题</div>
+                                    </div>
+                                    <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
+                                        <button onClick={() => handleThemeChange("light")} className={themeButtonClass("light")}><Sun size={16} /></button>
+                                        <button onClick={() => handleThemeChange("dark")} className={themeButtonClass("dark")}><Moon size={16} /></button>
+                                    </div>
                                 </div>
-                                <div className="flex-1">
-                                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">主题</div>
-                                    <div className="text-sm text-slate-500 dark:text-slate-400">选择应用的外观主题</div>
-                                </div>
-                                <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
-                                    <button onClick={() => handleThemeChange("light")} className={themeButtonClass("light")}><Sun size={16} /></button>
-                                    <button onClick={() => handleThemeChange("dark")} className={themeButtonClass("dark")}><Moon size={16} /></button>
+                                <div className="flex items-center gap-4 p-4 rounded-lg border border-slate-200 dark:border-vnote-border">
+                                    <div className="h-8 w-8 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                                        <Monitor size={16} className="text-slate-600 dark:text-slate-400" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">系统托盘</div>
+                                        <div className="text-sm text-slate-500 dark:text-slate-400">关闭窗口时保持后台运行</div>
+                                    </div>
+                                    <button onClick={handleTrayToggle} className={["relative inline-flex h-6 w-11 items-center rounded-full transition-colors", trayEnabled ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-600"].join(" ")}>
+                                        <span className={["inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform", trayEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
+                                    </button>
                                 </div>
                             </div>
-                            <div className="flex items-center gap-4 p-4 rounded-lg border border-slate-200 dark:border-vnote-border">
-                                <div className="h-8 w-8 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
-                                    <Monitor size={16} className="text-slate-600 dark:text-slate-400" />
+                        </div>
+
+                        <div className="space-y-4">
+                            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4">数据管理</h3>
+                            <div className="space-y-3">
+                                <div className="flex items-center gap-4 p-4 rounded-lg border border-slate-200 dark:border-vnote-border">
+                                    <div className="h-8 w-8 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
+                                        <HardDrive size={16} className="text-slate-600 dark:text-slate-400" />
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">视频缓存</div>
+                                        <div className="text-sm text-slate-500 dark:text-slate-400">TS 视频转换后的临时文件</div>
+                                    </div>
+                                    <div className="text-sm text-slate-500 dark:text-slate-400 mr-2">
+                                        {formatBytes(videoCacheSize)}
+                                    </div>
+                                    <button
+                                        onClick={handleClearVideoCache}
+                                        disabled={clearingCache || videoCacheSize === 0}
+                                        className="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                    >
+                                        {clearingCache ? (
+                                            <Loader2 size={14} className="animate-spin" />
+                                        ) : (
+                                            <Trash2 size={14} />
+                                        )}
+                                        {clearingCache ? "清除中..." : "清除"}
+                                    </button>
                                 </div>
-                                <div className="flex-1">
-                                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">系统托盘</div>
-                                    <div className="text-sm text-slate-500 dark:text-slate-400">关闭窗口时保持后台运行</div>
-                                </div>
-                                <button onClick={handleTrayToggle} className={["relative inline-flex h-6 w-11 items-center rounded-full transition-colors", trayEnabled ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-600"].join(" ")}>
-                                    <span className={["inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform", trayEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
-                                </button>
                             </div>
                         </div>
                     </div>

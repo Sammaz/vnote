@@ -5,6 +5,8 @@ mod subtitle;
 
 use chat::ChatRequest;
 use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, RerankerConfig};
+use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::image::Image;
@@ -182,6 +184,126 @@ fn set_setting(key: String, value: String) -> Result<(), String> {
 fn read_file_content(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read file '{}': {}", path, e))
+}
+
+/// Convert TS file to MP4 using ffmpeg (fast remux, no re-encoding)
+/// Returns the path to the converted MP4 file
+#[tauri::command]
+async fn convert_ts_to_mp4(app: AppHandle, ts_path: String) -> Result<String, String> {
+    let ts_path = Path::new(&ts_path);
+
+    // Verify it's a .ts file
+    if ts_path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) != Some("ts".to_string()) {
+        return Err("Not a .ts file".to_string());
+    }
+
+    // Create output path in app cache directory
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+
+    // Generate output filename based on input file hash
+    let file_name = ts_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let mp4_path = cache_dir.join(format!("{}.mp4", file_name));
+
+    // If already converted, return existing file
+    if mp4_path.exists() {
+        // Check if the mp4 file is newer than the ts file
+        let ts_modified = std::fs::metadata(&ts_path)
+            .and_then(|m| m.modified())
+            .ok();
+        let mp4_modified = std::fs::metadata(&mp4_path)
+            .and_then(|m| m.modified())
+            .ok();
+
+        if let (Some(ts_time), Some(mp4_time)) = (ts_modified, mp4_modified) {
+            if mp4_time > ts_time {
+                return Ok(mp4_path.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // Run ffmpeg to remux (copy streams, no re-encoding)
+    let output = Command::new("ffmpeg")
+        .args([
+            "-y",                           // Overwrite output
+            "-i", &ts_path.to_string_lossy(), // Input file
+            "-c", "copy",                   // Copy all streams (no re-encoding)
+            "-movflags", "+faststart",      // Enable fast start for streaming
+            &mp4_path.to_string_lossy(),    // Output file
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run ffmpeg: {}. Please ensure ffmpeg is installed.", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ffmpeg conversion failed: {}", stderr));
+    }
+
+    Ok(mp4_path.to_string_lossy().to_string())
+}
+
+/// Check if ffmpeg is available
+#[tauri::command]
+fn check_ffmpeg() -> Result<bool, String> {
+    match Command::new("ffmpeg").arg("-version").output() {
+        Ok(output) => Ok(output.status.success()),
+        Err(_) => Ok(false),
+    }
+}
+
+/// Get the total size of video cache (converted MP4 files)
+#[tauri::command]
+fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
+    let cache_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+
+    if !cache_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut total_size: u64 = 0;
+
+    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
+                if let Ok(metadata) = std::fs::metadata(&path) {
+                    total_size += metadata.len();
+                }
+            }
+        }
+    }
+
+    Ok(total_size)
+}
+
+/// Clear video cache (delete all converted MP4 files)
+#[tauri::command]
+fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
+    let cache_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+
+    if !cache_dir.exists() {
+        return Ok(0);
+    }
+
+    let mut cleared_size: u64 = 0;
+
+    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
+                if let Ok(metadata) = std::fs::metadata(&path) {
+                    let file_size = metadata.len();
+                    if std::fs::remove_file(&path).is_ok() {
+                        cleared_size += file_size;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(cleared_size)
 }
 
 // Note commands
@@ -411,6 +533,10 @@ pub fn run() {
             get_setting,
             set_setting,
             read_file_content,
+            convert_ts_to_mp4,
+            check_ffmpeg,
+            get_video_cache_size,
+            clear_video_cache,
             get_notes,
             get_note,
             create_note,

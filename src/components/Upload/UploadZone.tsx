@@ -8,7 +8,7 @@ import type { UploadedFile } from "../../types";
 
 // 字幕格式优先级（越靠前优先级越高）
 const SUBTITLE_PRIORITY = ["ass", "srt", "vtt", "ssa"];
-const VIDEO_EXTENSIONS = ["mp4", "mkv", "avi", "mov", "webm", "flv"];
+const VIDEO_EXTENSIONS = ["mp4", "mkv", "avi", "mov", "webm", "flv", "ts"];
 const SUBTITLE_EXTENSIONS = ["ass", "srt", "vtt", "ssa"];
 
 // 获取文件扩展名
@@ -287,7 +287,7 @@ export function UploadZone() {
             拖拽视频和字幕文件到这里
           </h3>
           <p className="text-sm text-slate-500 mb-4">
-            支持 MP4, MKV, AVI 等视频格式 · SRT, VTT, ASS 字幕格式
+            支持 MP4, MKV, AVI, TS 等视频格式 · SRT, VTT, ASS 字幕格式
           </p>
           <button
             onClick={(e) => {
