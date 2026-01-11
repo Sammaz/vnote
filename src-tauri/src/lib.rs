@@ -1,6 +1,6 @@
 mod db;
 
-use db::{AiConfig, AppSettings, Database};
+use db::{AiConfig, AppSettings, CreateNoteRequest, Database, Note};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::image::Image;
@@ -166,6 +166,32 @@ fn read_file_content(path: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to read file '{}': {}", path, e))
 }
 
+// Note commands
+#[tauri::command]
+fn get_notes() -> Result<Vec<Note>, String> {
+    get_db().get_all_notes().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_note(id: i64) -> Result<Option<Note>, String> {
+    get_db().get_note_by_id(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_note(req: CreateNoteRequest) -> Result<Note, String> {
+    get_db().create_note(&req).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_note(note: Note) -> Result<(), String> {
+    get_db().update_note(&note).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_note(id: i64) -> Result<(), String> {
+    get_db().delete_note(id).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -227,6 +253,11 @@ pub fn run() {
             get_app_settings,
             set_theme,
             read_file_content,
+            get_notes,
+            get_note,
+            create_note,
+            update_note,
+            delete_note,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

@@ -1,69 +1,18 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile } from "../types";
+import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest } from "../types";
 
-// Mock 数据
+// Mock 数据 - 文件夹暂时保留
 const mockFolders: Folder[] = [
   { id: "1", name: "学习笔记", parentId: null, createdAt: new Date(), updatedAt: new Date() },
   { id: "2", name: "工作资料", parentId: null, createdAt: new Date(), updatedAt: new Date() },
   { id: "3", name: "React 教程", parentId: "1", createdAt: new Date(), updatedAt: new Date() },
 ];
 
-const mockNotes: Note[] = [
-  {
-    id: "n1",
-    folderId: "3",
-    title: "React Hooks 入门教程",
-    videoPath: "/videos/react-hooks.mp4",
-    subtitlePath: "/subtitles/react-hooks.srt",
-    thumbnailPath: null,
-    content: "# React Hooks\n\n这是一个关于 React Hooks 的笔记...",
-    duration: 3600,
-    createdAt: new Date(Date.now() - 86400000),
-    updatedAt: new Date(Date.now() - 86400000),
-  },
-  {
-    id: "n2",
-    folderId: "1",
-    title: "TypeScript 高级技巧",
-    videoPath: "/videos/typescript.mp4",
-    subtitlePath: null,
-    thumbnailPath: null,
-    content: "# TypeScript 高级技巧\n\n...",
-    duration: 2400,
-    createdAt: new Date(Date.now() - 172800000),
-    updatedAt: new Date(Date.now() - 172800000),
-  },
-  {
-    id: "n3",
-    folderId: "2",
-    title: "项目管理最佳实践",
-    videoPath: "/videos/pm.mp4",
-    subtitlePath: "/subtitles/pm.vtt",
-    thumbnailPath: null,
-    content: "# 项目管理\n\n...",
-    duration: 5400,
-    createdAt: new Date(Date.now() - 259200000),
-    updatedAt: new Date(Date.now() - 259200000),
-  },
-  {
-    id: "n4",
-    folderId: "1",
-    title: "Rust 语言基础",
-    videoPath: "/videos/rust.mp4",
-    subtitlePath: null,
-    thumbnailPath: null,
-    content: "# Rust 基础\n\n...",
-    duration: 4200,
-    createdAt: new Date(Date.now() - 345600000),
-    updatedAt: new Date(Date.now() - 345600000),
-  },
-];
-
 const mockStats: AppStats = {
-  totalNotes: 4,
-  totalWatchTime: 15600,
-  notesThisWeek: 2,
+  totalNotes: 0,
+  totalWatchTime: 0,
+  notesThisWeek: 0,
   lastActivityDate: new Date(),
 };
 
@@ -81,7 +30,8 @@ interface AppContextType {
   stats: AppStats;
   aiConfigs: AiConfig[];
   refreshAiConfigs: () => Promise<void>;
-  addNote: (note: Omit<Note, "id" | "createdAt" | "updatedAt">) => Note;
+  refreshNotes: () => Promise<void>;
+  createNote: (req: CreateNoteRequest) => Promise<Note>;
 
   // 上传状态
   uploadedVideo: UploadedFile | null;
@@ -104,8 +54,8 @@ interface AppContextType {
   // 当前视图
   currentView: "home" | "settings" | "note";
   setCurrentView: (view: "home" | "settings" | "note") => void;
-  selectedNoteId: string | null;
-  setSelectedNoteId: (id: string | null) => void;
+  selectedNoteId: number | null;
+  setSelectedNoteId: (id: number | null) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -118,9 +68,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     expandedFolders: new Set(["1"]),
   });
 
-  // 数据（暂用 mock）
+  // 数据（文件夹暂用 mock）
   const [folders] = useState<Folder[]>(mockFolders);
-  const [notes, setNotes] = useState<Note[]>(mockNotes);
+  const [notes, setNotes] = useState<Note[]>([]);
   const [stats, setStats] = useState<AppStats>(mockStats);
   const [aiConfigs, setAiConfigs] = useState<AiConfig[]>([]);
 
@@ -139,7 +89,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // 视图
   const [currentView, setCurrentView] = useState<"home" | "settings" | "note">("home");
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
+
+  // 加载笔记列表
+  const refreshNotes = useCallback(async () => {
+    try {
+      const notesList = await invoke<Note[]>("get_notes");
+      setNotes(notesList);
+
+      // 更新统计
+      setStats(prev => ({
+        ...prev,
+        totalNotes: notesList.length,
+        lastActivityDate: new Date(),
+      }));
+    } catch (error) {
+      console.error("Failed to load notes:", error);
+    }
+  }, []);
+
+  // 创建笔记
+  const createNote = useCallback(async (req: CreateNoteRequest): Promise<Note> => {
+    const newNote = await invoke<Note>("create_note", { req });
+    // 刷新笔记列表
+    await refreshNotes();
+    return newNote;
+  }, [refreshNotes]);
 
   // 加载 AI 配置
   const refreshAiConfigs = useCallback(async () => {
@@ -161,9 +136,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [selectedModelId]);
 
-  // 初始加载 AI 配置
+  // 初始加载
   useEffect(() => {
     refreshAiConfigs();
+    refreshNotes();
   }, []);
 
   // 侧边栏操作
@@ -187,29 +163,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  // 添加笔记
-  const addNote = useCallback((noteData: Omit<Note, "id" | "createdAt" | "updatedAt">): Note => {
-    const now = new Date();
-    const newNote: Note = {
-      ...noteData,
-      id: `n${Date.now()}`,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    setNotes((prev) => [newNote, ...prev]);
-
-    // 更新统计
-    setStats((prev) => ({
-      ...prev,
-      totalNotes: prev.totalNotes + 1,
-      notesThisWeek: prev.notesThisWeek + 1,
-      lastActivityDate: now,
-    }));
-
-    return newNote;
-  }, []);
-
   const value: AppContextType = {
     sidebar,
     toggleSidebar,
@@ -220,7 +173,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     stats,
     aiConfigs,
     refreshAiConfigs,
-    addNote,
+    refreshNotes,
+    createNote,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,

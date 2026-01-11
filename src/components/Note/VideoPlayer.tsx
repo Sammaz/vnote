@@ -1,5 +1,6 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { AlertCircle, Video } from "lucide-react";
 import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 
@@ -7,16 +8,23 @@ interface VideoPlayerProps {
   videoUrl: string;
   subtitleUrl?: string | null;
   compact?: boolean;
+  autoPlay?: boolean;
 }
 
-export function VideoPlayer({ videoUrl, subtitleUrl, compact = false }: VideoPlayerProps) {
+export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay = false }: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Plyr | null>(null);
   const assRef = useRef<any>(null);
   const assVisibleRef = useRef<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // 重置状态
+    setError(null);
+    setLoading(true);
 
     // 清理旧的播放器和 ASS 实例
     if (assRef.current) {
@@ -29,12 +37,20 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false }: VideoPla
     }
     assVisibleRef.current = true;
 
+    // 检查视频路径是否有效
+    if (!videoUrl) {
+      setError("视频路径为空");
+      setLoading(false);
+      return;
+    }
+
     // 创建新的 video 元素
     const videoSrc = convertFileSrc(videoUrl);
     const video = document.createElement("video");
     video.preload = "metadata";
     video.playsInline = true;
     video.crossOrigin = "anonymous";
+    video.autoplay = autoPlay;
 
     const source = document.createElement("source");
     source.src = videoSrc;
@@ -47,7 +63,7 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false }: VideoPla
     const hasSubtitle = isAssSubtitle || isVttSubtitle;
 
     // 如果是 VTT/SRT 字幕，添加 track 元素
-    if (isVttSubtitle) {
+    if (isVttSubtitle && subtitleUrl) {
       const track = document.createElement("track");
       track.kind = "captions";
       track.label = "中文";
@@ -67,6 +83,17 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false }: VideoPla
       track.default = true;
       video.appendChild(track);
     }
+
+    // 视频加载成功
+    video.addEventListener("loadedmetadata", () => {
+      setLoading(false);
+    });
+
+    // 视频加载失败
+    video.addEventListener("error", () => {
+      setError("无法加载视频文件，请检查文件路径是否正确");
+      setLoading(false);
+    });
 
     // 清空容器并添加新的 video
     containerRef.current.innerHTML = "";
@@ -123,7 +150,7 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false }: VideoPla
       handler: null as (() => void) | null,
     };
 
-    if (isAssSubtitle) {
+    if (isAssSubtitle && subtitleUrl) {
       Promise.all([
         import("assjs"),
         invoke<string>("read_file_content", { path: subtitleUrl }),
@@ -177,12 +204,38 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false }: VideoPla
         playerRef.current = null;
       }
     };
-  }, [videoUrl, subtitleUrl, compact]);
+  }, [videoUrl, subtitleUrl, compact, autoPlay]);
+
+  // 错误状态
+  if (error) {
+    return (
+      <div className={`w-full ${compact ? "h-48" : "aspect-video"} bg-slate-900 rounded-lg overflow-hidden flex items-center justify-center`}>
+        <div className="text-center p-6">
+          <AlertCircle className="w-12 h-12 text-red-400 mx-auto mb-3" />
+          <p className="text-sm text-slate-400">{error}</p>
+          <p className="text-xs text-slate-500 mt-2 truncate max-w-[300px]" title={videoUrl}>
+            {videoUrl}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div
-      ref={containerRef}
-      className={`w-full ${compact ? "" : "aspect-video"} bg-black rounded-lg overflow-hidden plyr-container relative`}
-    />
+    <div className="relative">
+      {/* 加载状态覆盖层 */}
+      {loading && (
+        <div className={`absolute inset-0 ${compact ? "h-48" : "aspect-video"} bg-slate-900 rounded-lg overflow-hidden flex items-center justify-center z-10`}>
+          <div className="text-center">
+            <Video className="w-12 h-12 text-slate-600 mx-auto mb-3 animate-pulse" />
+            <p className="text-sm text-slate-500">加载视频中...</p>
+          </div>
+        </div>
+      )}
+      <div
+        ref={containerRef}
+        className={`w-full ${compact ? "" : "aspect-video"} bg-black rounded-lg overflow-hidden plyr-container relative`}
+      />
+    </div>
   );
 }

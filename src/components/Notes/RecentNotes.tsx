@@ -6,10 +6,8 @@ import { NoteCard } from "./NoteCard";
 export function RecentNotes() {
   const { notes, setSelectedNoteId, setCurrentView } = useApp();
 
-  // 按时间排序，取最近 4 条
-  const recentNotes = [...notes]
-    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-    .slice(0, 4);
+  // 按时间排序，取最近 4 条（数据库已经按 created_at DESC 排序）
+  const recentNotes = notes.slice(0, 4);
 
   if (recentNotes.length === 0) {
     return null;

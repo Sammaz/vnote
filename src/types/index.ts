@@ -13,16 +13,27 @@ export interface Folder {
 
 // 笔记
 export interface Note {
-  id: string;
-  folderId: string;
+  id: number;
   title: string;
-  videoPath: string;
-  subtitlePath: string | null;
-  thumbnailPath: string | null;
-  content: string; // AI 生成的 markdown 内容
-  duration: number; // 视频时长（秒）
-  createdAt: Date;
-  updatedAt: Date;
+  video_path: string;
+  subtitle_path: string | null;
+  model_id: number | null; // AI model ID used for generating notes
+  full_summary: string | null;
+  detailed_reading: string | null;
+  highlights: string | null;
+  visual_summary: string | null;
+  custom_summary: string | null;
+  suggested_questions: string | null; // JSON array of questions
+  created_at: string;
+  updated_at: string;
+}
+
+// 创建笔记请求
+export interface CreateNoteRequest {
+  title: string;
+  video_path: string;
+  subtitle_path: string | null;
+  model_id: number | null;
 }
 
 // 应用统计

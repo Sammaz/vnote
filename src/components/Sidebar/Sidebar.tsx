@@ -6,7 +6,6 @@ import {
   Search,
   PanelLeftClose,
   PanelLeft,
-  FileText,
   ChevronDown,
   Video,
   MoreHorizontal,
@@ -44,26 +43,22 @@ function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
 
 interface FolderItemProps {
   folder: Folder;
-  notes: Note[];
   level: number;
   childFolders: Folder[];
   allFolders: Folder[];
-  allNotes: Note[];
 }
 
 function FolderItem({
   folder,
-  notes,
   level,
   childFolders,
   allFolders,
-  allNotes,
 }: FolderItemProps) {
-  const { sidebar, toggleFolderExpand, setSelectedFolder, setCurrentView, setSelectedNoteId } =
+  const { sidebar, toggleFolderExpand, setSelectedFolder } =
     useApp();
   const isExpanded = sidebar.expandedFolders.has(folder.id);
   const isSelected = sidebar.selectedFolderId === folder.id;
-  const hasChildren = childFolders.length > 0 || notes.length > 0;
+  const hasChildren = childFolders.length > 0;
 
   return (
     <div className="animate-fade-in">
@@ -97,41 +92,19 @@ function FolderItem({
           <FolderClosed className="w-4 h-4 text-slate-500 flex-shrink-0" />
         )}
         <span className="truncate">{folder.name}</span>
-        <span className="ml-auto text-xs text-slate-600">{notes.length}</span>
       </button>
 
-      {isExpanded && (
+      {isExpanded && hasChildren && (
         <div className="mt-0.5">
           {/* 子文件夹 */}
           {childFolders.map((child) => (
             <FolderItem
               key={child.id}
               folder={child}
-              notes={allNotes.filter((n) => n.folderId === child.id)}
               level={level + 1}
               childFolders={allFolders.filter((f) => f.parentId === child.id)}
               allFolders={allFolders}
-              allNotes={allNotes}
             />
-          ))}
-
-          {/* 笔记列表 */}
-          {notes.map((note) => (
-            <button
-              key={note.id}
-              onClick={() => {
-                setSelectedNoteId(note.id);
-                setCurrentView("note");
-              }}
-              className={cn(
-                "w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all duration-150",
-                "hover:bg-slate-100 dark:hover:bg-vnote-hover text-sm text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
-              )}
-              style={{ paddingLeft: `${8 + (level + 1) * 12}px` }}
-            >
-              <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-              <span className="truncate">{note.title}</span>
-            </button>
           ))}
         </div>
       )}
@@ -145,8 +118,9 @@ interface NoteItemProps {
 }
 
 function NoteItem({ note }: NoteItemProps) {
-  const { setSelectedNoteId, setCurrentView } = useApp();
+  const { setSelectedNoteId, setCurrentView, selectedNoteId } = useApp();
   const [isHovered, setIsHovered] = useState(false);
+  const isSelected = selectedNoteId === note.id;
 
   return (
     <button
@@ -158,7 +132,10 @@ function NoteItem({ note }: NoteItemProps) {
       onMouseLeave={() => setIsHovered(false)}
       className={cn(
         "w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all duration-150 group",
-        "hover:bg-slate-100 dark:hover:bg-vnote-hover text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+        "text-sm",
+        isSelected
+          ? "bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400"
+          : "hover:bg-slate-100 dark:hover:bg-vnote-hover text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
       )}
     >
       <Video className="w-4 h-4 text-blue-400 flex-shrink-0" />
@@ -281,11 +258,9 @@ export function Sidebar() {
               <FolderItem
                 key={folder.id}
                 folder={folder}
-                notes={notes.filter((n) => n.folderId === folder.id)}
                 level={0}
                 childFolders={folders.filter((f) => f.parentId === folder.id)}
                 allFolders={folders}
-                allNotes={notes}
               />
             ))}
           </div>

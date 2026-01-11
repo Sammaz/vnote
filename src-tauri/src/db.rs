@@ -20,6 +20,31 @@ pub struct AppSettings {
     pub tray_enabled: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Note {
+    pub id: i64,
+    pub title: String,
+    pub video_path: String,
+    pub subtitle_path: Option<String>,
+    pub model_id: Option<i64>, // AI model ID used for generating notes
+    pub full_summary: Option<String>,
+    pub detailed_reading: Option<String>,
+    pub highlights: Option<String>,
+    pub visual_summary: Option<String>,
+    pub custom_summary: Option<String>,
+    pub suggested_questions: Option<String>, // JSON array of questions
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateNoteRequest {
+    pub title: String,
+    pub video_path: String,
+    pub subtitle_path: Option<String>,
+    pub model_id: Option<i64>,
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -90,6 +115,40 @@ impl Database {
             "INSERT OR IGNORE INTO app_settings (key, value) VALUES ('tray_enabled', 'false')",
             [],
         )?;
+
+        // Notes table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                video_path TEXT NOT NULL,
+                subtitle_path TEXT,
+                model_id INTEGER,
+                full_summary TEXT,
+                detailed_reading TEXT,
+                highlights TEXT,
+                visual_summary TEXT,
+                custom_summary TEXT,
+                suggested_questions TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+            )",
+            [],
+        )?;
+
+        // Migration: Add model_id column if not exists
+        let has_model_id: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='model_id'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_model_id {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN model_id INTEGER",
+                [],
+            )?;
+        }
 
         Ok(())
     }
@@ -185,5 +244,130 @@ impl Database {
             theme,
             tray_enabled,
         })
+    }
+
+    // Notes CRUD
+    pub fn get_all_notes(&self) -> SqliteResult<Vec<Note>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+                    highlights, visual_summary, custom_summary, suggested_questions,
+                    created_at, updated_at
+             FROM notes ORDER BY created_at DESC"
+        )?;
+
+        let notes = stmt.query_map([], |row| {
+            Ok(Note {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                video_path: row.get(2)?,
+                subtitle_path: row.get(3)?,
+                model_id: row.get(4)?,
+                full_summary: row.get(5)?,
+                detailed_reading: row.get(6)?,
+                highlights: row.get(7)?,
+                visual_summary: row.get(8)?,
+                custom_summary: row.get(9)?,
+                suggested_questions: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        })?;
+
+        notes.collect()
+    }
+
+    pub fn get_note_by_id(&self, id: i64) -> SqliteResult<Option<Note>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+                    highlights, visual_summary, custom_summary, suggested_questions,
+                    created_at, updated_at
+             FROM notes WHERE id = ?1"
+        )?;
+
+        let result = stmt.query_row([id], |row| {
+            Ok(Note {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                video_path: row.get(2)?,
+                subtitle_path: row.get(3)?,
+                model_id: row.get(4)?,
+                full_summary: row.get(5)?,
+                detailed_reading: row.get(6)?,
+                highlights: row.get(7)?,
+                visual_summary: row.get(8)?,
+                custom_summary: row.get(9)?,
+                suggested_questions: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        });
+
+        match result {
+            Ok(note) => Ok(Some(note)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn create_note(&self, req: &CreateNoteRequest) -> SqliteResult<Note> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO notes (title, video_path, subtitle_path, model_id) VALUES (?1, ?2, ?3, ?4)",
+            (&req.title, &req.video_path, &req.subtitle_path, &req.model_id),
+        )?;
+        let id = conn.last_insert_rowid();
+
+        // Return the created note
+        let mut stmt = conn.prepare(
+            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+                    highlights, visual_summary, custom_summary, suggested_questions,
+                    created_at, updated_at
+             FROM notes WHERE id = ?1"
+        )?;
+
+        stmt.query_row([id], |row| {
+            Ok(Note {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                video_path: row.get(2)?,
+                subtitle_path: row.get(3)?,
+                model_id: row.get(4)?,
+                full_summary: row.get(5)?,
+                detailed_reading: row.get(6)?,
+                highlights: row.get(7)?,
+                visual_summary: row.get(8)?,
+                custom_summary: row.get(9)?,
+                suggested_questions: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
+            })
+        })
+    }
+
+    pub fn update_note(&self, note: &Note) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE notes SET
+                title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4,
+                full_summary = ?5, detailed_reading = ?6, highlights = ?7,
+                visual_summary = ?8, custom_summary = ?9, suggested_questions = ?10,
+                updated_at = datetime('now', 'localtime')
+             WHERE id = ?11",
+            (
+                &note.title, &note.video_path, &note.subtitle_path, &note.model_id,
+                &note.full_summary, &note.detailed_reading, &note.highlights,
+                &note.visual_summary, &note.custom_summary, &note.suggested_questions,
+                note.id,
+            ),
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_note(&self, id: i64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM notes WHERE id = ?1", [id])?;
+        Ok(())
     }
 }

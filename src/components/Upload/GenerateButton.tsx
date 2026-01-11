@@ -15,9 +15,11 @@ export function GenerateButton() {
     isGenerating,
     setIsGenerating,
     selectedModelId,
-    addNote,
+    createNote,
     setUploadedVideo,
     setUploadedSubtitle,
+    setCurrentView,
+    setSelectedNoteId,
   } = useApp();
 
   const canGenerate = uploadedVideo && selectedModelId && !isGenerating;
@@ -27,27 +29,29 @@ export function GenerateButton() {
 
     setIsGenerating(true);
 
-    // 模拟生成过程
-    setTimeout(() => {
+    try {
       // 创建笔记，标题为视频文件名（不含扩展名）
       const noteTitle = getBaseName(uploadedVideo.name);
 
-      addNote({
-        folderId: "1", // 默认放到学习笔记文件夹
+      const newNote = await createNote({
         title: noteTitle,
-        videoPath: uploadedVideo.path,
-        subtitlePath: uploadedSubtitle?.path || null,
-        thumbnailPath: null,
-        content: `# ${noteTitle}\n\n正在生成笔记内容...`,
-        duration: 0,
+        video_path: uploadedVideo.path,
+        subtitle_path: uploadedSubtitle?.path || null,
+        model_id: selectedModelId,
       });
 
       // 清空上传状态
       setUploadedVideo(null);
       setUploadedSubtitle(null);
 
+      // 跳转到笔记页面
+      setSelectedNoteId(newNote.id);
+      setCurrentView("note");
+    } catch (error) {
+      console.error("Failed to create note:", error);
+    } finally {
       setIsGenerating(false);
-    }, 1500);
+    }
   };
 
   return (
