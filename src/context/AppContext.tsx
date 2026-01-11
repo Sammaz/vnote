@@ -33,6 +33,7 @@ interface AppContextType {
   refreshNotes: () => Promise<void>;
   createNote: (req: CreateNoteRequest) => Promise<Note>;
   deleteNote: (id: number) => Promise<void>;
+  updateNoteSuggestedQuestions: (noteId: number, questions: string[]) => void;
 
   // 上传状态
   uploadedVideo: UploadedFile | null;
@@ -198,6 +199,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [refreshNotes, selectedNoteId]);
 
+  // 更新笔记的建议问题（用于局部刷新）
+  const updateNoteSuggestedQuestions = useCallback((noteId: number, questions: string[]) => {
+    setNotes(prev => prev.map(note =>
+      note.id === noteId
+        ? { ...note, suggested_questions: JSON.stringify(questions) }
+        : note
+    ));
+  }, []);
+
   // 加载 AI 配置
   const refreshAiConfigs = useCallback(async () => {
     try {
@@ -259,6 +269,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshNotes,
     createNote,
     deleteNote,
+    updateNoteSuggestedQuestions,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,

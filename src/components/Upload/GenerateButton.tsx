@@ -1,6 +1,7 @@
 import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { invoke } from "@tauri-apps/api/core";
 
 // 获取文件名（不含扩展名）
 function getBaseName(filename: string): string {
@@ -20,6 +21,7 @@ export function GenerateButton() {
     setUploadedSubtitle,
     setCurrentView,
     setSelectedNoteId,
+    updateNoteSuggestedQuestions,
   } = useApp();
 
   const canGenerate = uploadedVideo && selectedModelId && !isGenerating;
@@ -47,6 +49,16 @@ export function GenerateButton() {
       // 跳转到笔记页面
       setSelectedNoteId(newNote.id);
       setCurrentView("note");
+
+      // 异步生成建议问题（导航后执行，不阻塞用户）
+      if (uploadedSubtitle && selectedModelId) {
+        invoke<string[]>("generate_questions_for_note", { noteId: newNote.id })
+          .then(questions => {
+            // 更新 Context 中的笔记数据，触发 ChatWindow 重新渲染
+            updateNoteSuggestedQuestions(newNote.id, questions);
+          })
+          .catch(err => console.error("生成问题失败:", err));
+      }
     } catch (error) {
       console.error("Failed to create note:", error);
     } finally {

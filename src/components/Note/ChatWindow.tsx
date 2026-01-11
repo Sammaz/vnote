@@ -1,7 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Paperclip, Video, Send, Maximize2, Minimize2, Eraser, X } from "lucide-react";
+import { Paperclip, Video, Send, Maximize2, Minimize2, Eraser, X, Square } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "../../utils/cn";
+import { invoke } from "@tauri-apps/api/core";
+import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
 interface Message {
   id: string;
@@ -17,15 +21,31 @@ interface UploadedImage {
 }
 
 interface ChatWindowProps {
+  noteId: number;
+  modelId: number | null;
   noteTitle?: string;
   suggestedQuestions?: string[];
 }
 
-const DEFAULT_QUESTIONS = [
-  "这个视频的核心内容是什么?",
-  "有哪些关键知识点?",
-  "如何在实际项目中应用?",
-];
+interface StreamEvent {
+  type: "Start" | "Delta" | "Done";
+  message_id?: string;
+  content?: string;
+  success?: boolean;
+  error?: string;
+}
+
+interface ImageData {
+  data: string; // Base64 encoded with data URL prefix
+}
+
+interface ChatRequest {
+  note_id: number;
+  messages: Array<{ role: string; content: string }>;
+  images?: ImageData[];
+  use_rag: boolean;
+  model_id: number | null;
+}
 
 // 最小和最大尺寸限制
 const MIN_WIDTH = 320;
@@ -38,9 +58,10 @@ const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp,image/sv
 
 type ResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw" | null;
 
-export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: ChatWindowProps) {
-  // 使用数据库中的问题，如果没有则使用默认问题
-  const questions = suggestedQuestions.length > 0 ? suggestedQuestions : DEFAULT_QUESTIONS;
+export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQuestions = [] }: ChatWindowProps) {
+  // 直接使用传入的问题，不再 fallback 到默认问题
+  // 如果没有问题（新笔记等待生成），显示空数组
+  const questions = suggestedQuestions;
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -61,6 +82,8 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, posX: 0, posY: 0 });
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const popoutRef = useRef<HTMLDivElement>(null);
@@ -235,33 +258,150 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
     fileInputRef.current?.click();
   };
 
-  const handleSend = () => {
-    if (!input.trim() && uploadedImages.length === 0) return;
+  // 将文件转换为 Base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
 
+  // 停止生成
+  const handleStopGeneration = async () => {
+    if (currentRequestId) {
+      try {
+        await invoke("abort_chat", { requestId: currentRequestId });
+      } catch (error) {
+        console.error("Failed to abort chat:", error);
+      }
+    }
+  };
+
+  const handleSend = async () => {
+    if ((!input.trim() && uploadedImages.length === 0) || isStreaming) return;
+
+    // 检查是否选择了模型
+    if (!modelId) {
+      const errorMessage: Message = {
+        id: Date.now().toString(),
+        role: "assistant",
+        content: "请先在设置中配置 AI 模型，然后在工具栏中选择一个模型。",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+      return;
+    }
+
+    const userContent = input.trim();
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
-      content: input.trim(),
+      content: userContent,
       timestamp: new Date(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
 
+    // 准备图片数据
+    let imageDataArray: ImageData[] | undefined;
+    if (uploadedImages.length > 0) {
+      imageDataArray = await Promise.all(
+        uploadedImages.map(async (img) => ({
+          data: await fileToBase64(img.file),
+        }))
+      );
+    }
+
     // 清除上传的图片
     uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     setUploadedImages([]);
 
-    // 模拟 AI 回复
-    setTimeout(() => {
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
+    // 创建 assistant 消息占位符
+    const assistantId = (Date.now() + 1).toString();
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: assistantId,
         role: "assistant",
-        content: "这是一个模拟的 AI 回复。实际功能将在后续版本中实现。",
+        content: "",
         timestamp: new Date(),
+      },
+    ]);
+
+    setIsStreaming(true);
+
+    try {
+      // 构建消息历史（不包括刚添加的空 assistant 消息）
+      const chatMessages = messages
+        .filter((m) => m.id !== "1") // 排除初始欢迎消息
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+        }));
+
+      // 添加当前用户消息
+      chatMessages.push({ role: "user", content: userContent });
+
+      const request: ChatRequest = {
+        note_id: noteId,
+        messages: chatMessages,
+        images: imageDataArray,
+        use_rag: basedOnVideo,
+        model_id: modelId,
       };
-      setMessages((prev) => [...prev, assistantMessage]);
-    }, 1000);
+
+      // 调用流式聊天 API
+      const requestId = await invoke<string>("chat_stream", { request });
+      setCurrentRequestId(requestId);
+
+      // 监听流式事件
+      const unlisten: UnlistenFn = await listen<StreamEvent>(
+        `chat-stream-${requestId}`,
+        (event) => {
+          const data = event.payload;
+
+          if (data.type === "Delta" && data.content) {
+            // 追加内容到 assistant 消息
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === assistantId
+                  ? { ...msg, content: msg.content + data.content }
+                  : msg
+              )
+            );
+          } else if (data.type === "Done") {
+            unlisten();
+            setIsStreaming(false);
+            setCurrentRequestId(null);
+
+            if (!data.success && data.error) {
+              // 显示错误
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantId
+                    ? { ...msg, content: `错误: ${data.error}` }
+                    : msg
+                )
+              );
+            }
+          }
+        }
+      );
+    } catch (error) {
+      console.error("Chat error:", error);
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === assistantId
+            ? { ...msg, content: `错误: ${error}` }
+            : msg
+        )
+      );
+      setIsStreaming(false);
+      setCurrentRequestId(null);
+    }
   };
 
   const handleSuggestedQuestion = (question: string) => {
@@ -421,27 +561,43 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
                   : "bg-blue-500 text-white rounded-tr-sm"
               )}
             >
-              {message.content}
+              {message.role === "assistant" && message.content === "" && isStreaming ? (
+                <div className="flex items-center gap-1 py-1">
+                  <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                  <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                  <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce"></span>
+                </div>
+              ) : message.role === "assistant" ? (
+                <div className="chat-markdown">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <span className="whitespace-pre-wrap">{message.content}</span>
+              )}
             </div>
           </div>
         ))}
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 建议问题 */}
-      <div className="px-4 py-2 border-t border-slate-200 dark:border-vnote-border">
-        <div className="flex flex-wrap gap-2">
-          {questions.map((question, index) => (
-            <button
-              key={index}
-              onClick={() => handleSuggestedQuestion(question)}
-              className="suggestion-tag px-3 py-1.5 text-xs bg-slate-100 dark:bg-vnote-surface text-slate-600 dark:text-slate-400 rounded-full hover:bg-slate-200 dark:hover:bg-vnote-hover hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
-            >
-              {question}
-            </button>
-          ))}
+      {/* 建议问题 - 仅在有问题时显示 */}
+      {questions.length > 0 && (
+        <div className="px-4 py-2 border-t border-slate-200 dark:border-vnote-border">
+          <div className="flex flex-wrap gap-2">
+            {questions.map((question, index) => (
+              <button
+                key={index}
+                onClick={() => handleSuggestedQuestion(question)}
+                className="suggestion-tag px-3 py-1.5 text-xs bg-slate-100 dark:bg-vnote-surface text-slate-600 dark:text-slate-400 rounded-full hover:bg-slate-200 dark:hover:bg-vnote-hover hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+              >
+                {question}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 输入区域 */}
       <div className="p-4 border-t border-slate-200 dark:border-vnote-border">
@@ -513,18 +669,28 @@ export function ChatWindow({ noteTitle: _noteTitle, suggestedQuestions = [] }: C
               {basedOnVideo ? "基于视频" : "不基于视频"}
             </button>
           </div>
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() && uploadedImages.length === 0}
-            className={cn(
-              "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
-              input.trim() || uploadedImages.length > 0
-                ? "bg-slate-700 dark:bg-slate-600 text-white hover:bg-slate-600 dark:hover:bg-slate-500"
-                : "bg-slate-200 dark:bg-vnote-surface text-slate-400 cursor-not-allowed"
-            )}
-          >
-            <Send className="w-5 h-5" />
-          </button>
+          {isStreaming ? (
+            <button
+              onClick={handleStopGeneration}
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
+              title="停止生成"
+            >
+              <Square className="w-4 h-4 fill-current" />
+            </button>
+          ) : (
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() && uploadedImages.length === 0}
+              className={cn(
+                "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
+                input.trim() || uploadedImages.length > 0
+                  ? "bg-slate-700 dark:bg-slate-600 text-white hover:bg-slate-600 dark:hover:bg-slate-500"
+                  : "bg-slate-200 dark:bg-vnote-surface text-slate-400 cursor-not-allowed"
+              )}
+            >
+              <Send className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
     </>

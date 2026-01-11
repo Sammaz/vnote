@@ -83,6 +83,8 @@ export function NotePage() {
       {/* 聊天窗口 */}
       <div className="flex-1 min-h-0">
         <ChatWindow
+          noteId={currentNote.id}
+          modelId={currentModelId}
           noteTitle={currentNote.title}
           suggestedQuestions={suggestedQuestions}
         />

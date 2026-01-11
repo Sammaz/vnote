@@ -1,6 +1,10 @@
+mod chat;
 mod db;
+mod rag;
+mod subtitle;
 
-use db::{AiConfig, AppSettings, CreateNoteRequest, Database, Note};
+use chat::ChatRequest;
+use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, RerankerConfig};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::image::Image;
@@ -11,7 +15,7 @@ use tauri::{AppHandle, Manager, WindowEvent};
 const TRAY_ICON: &[u8] = include_bytes!("../icons/icon.png");
 static TRAY_ENABLED: AtomicBool = AtomicBool::new(false);
 const TRAY_ID: &str = "vnote-tray";
-static DATABASE: OnceLock<Database> = OnceLock::new();
+pub static DATABASE: OnceLock<Database> = OnceLock::new();
 
 fn get_db() -> &'static Database {
     DATABASE.get().expect("Database not initialized")
@@ -206,6 +210,139 @@ fn delete_note(id: i64) -> Result<(), String> {
     get_db().delete_note(id).map_err(|e| e.to_string())
 }
 
+// Chat commands
+#[tauri::command]
+async fn chat_stream(app: AppHandle, request: ChatRequest) -> Result<String, String> {
+    chat::chat_stream(app, get_db(), request).await
+}
+
+#[tauri::command]
+async fn abort_chat(request_id: String) -> Result<(), String> {
+    chat::abort_chat_stream(request_id).await
+}
+
+// Clear subtitle index (for re-indexing)
+#[tauri::command]
+fn clear_subtitle_index(note_id: i64) -> Result<(), String> {
+    rag::clear_subtitle_index(note_id)
+}
+
+// Generate suggested questions for a note
+#[tauri::command]
+async fn generate_questions_for_note(note_id: i64) -> Result<Vec<String>, String> {
+    let db = get_db();
+
+    // Get note
+    let note = db
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到")?;
+
+    // Default questions
+    let default_questions = vec![
+        "这个视频的核心内容是什么?".to_string(),
+        "有哪些关键知识点?".to_string(),
+        "如何在实际项目中应用?".to_string(),
+    ];
+
+    // Check if subtitle and model exist
+    let subtitle_path = match &note.subtitle_path {
+        Some(p) => p.clone(),
+        None => {
+            // No subtitle, save and return default
+            let questions_json = serde_json::to_string(&default_questions).map_err(|e| e.to_string())?;
+            db.update_note_questions(note_id, &questions_json).map_err(|e| e.to_string())?;
+            return Ok(default_questions);
+        }
+    };
+    let model_id = match note.model_id {
+        Some(id) => id,
+        None => {
+            // No model, save and return default
+            let questions_json = serde_json::to_string(&default_questions).map_err(|e| e.to_string())?;
+            db.update_note_questions(note_id, &questions_json).map_err(|e| e.to_string())?;
+            return Ok(default_questions);
+        }
+    };
+
+    // Generate questions (use default on failure)
+    let questions = chat::generate_suggested_questions(db, &subtitle_path, model_id)
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to generate questions: {}", e);
+            default_questions.clone()
+        });
+
+    // Save to database
+    let questions_json = serde_json::to_string(&questions).map_err(|e| e.to_string())?;
+    db.update_note_questions(note_id, &questions_json).map_err(|e| e.to_string())?;
+
+    // Return questions to frontend
+    Ok(questions)
+}
+
+// Embedding config commands
+#[tauri::command]
+fn get_embedding_configs() -> Result<Vec<EmbeddingConfig>, String> {
+    get_db().get_all_embedding_configs().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_embedding_config(config: EmbeddingConfig) -> Result<i64, String> {
+    get_db().create_embedding_config(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_embedding_config(config: EmbeddingConfig) -> Result<(), String> {
+    get_db().update_embedding_config(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_embedding_config(id: i64) -> Result<(), String> {
+    get_db().delete_embedding_config(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_default_embedding_config(id: i64) -> Result<(), String> {
+    get_db().set_default_embedding_config(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unset_default_embedding_config(id: i64) -> Result<(), String> {
+    get_db().unset_default_embedding_config(id).map_err(|e| e.to_string())
+}
+
+// Reranker config commands
+#[tauri::command]
+fn get_reranker_configs() -> Result<Vec<RerankerConfig>, String> {
+    get_db().get_all_reranker_configs().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_reranker_config(config: RerankerConfig) -> Result<i64, String> {
+    get_db().create_reranker_config(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_reranker_config(config: RerankerConfig) -> Result<(), String> {
+    get_db().update_reranker_config(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_reranker_config(id: i64) -> Result<(), String> {
+    get_db().delete_reranker_config(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_default_reranker_config(id: i64) -> Result<(), String> {
+    get_db().set_default_reranker_config(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unset_default_reranker_config(id: i64) -> Result<(), String> {
+    get_db().unset_default_reranker_config(id).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -274,6 +411,22 @@ pub fn run() {
             create_note,
             update_note,
             delete_note,
+            chat_stream,
+            abort_chat,
+            clear_subtitle_index,
+            generate_questions_for_note,
+            get_embedding_configs,
+            create_embedding_config,
+            update_embedding_config,
+            delete_embedding_config,
+            set_default_embedding_config,
+            unset_default_embedding_config,
+            get_reranker_configs,
+            create_reranker_config,
+            update_reranker_config,
+            delete_reranker_config,
+            set_default_reranker_config,
+            unset_default_reranker_config,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

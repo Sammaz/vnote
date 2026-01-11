@@ -20,3 +20,16 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 directories = "5"
+
+# HTTP client with streaming support
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# Utilities
+base64 = "0.22"
+uuid = { version = "1", features = ["v4"] }
+regex = "1"
