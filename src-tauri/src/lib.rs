@@ -256,7 +256,7 @@ fn check_ffmpeg() -> Result<bool, String> {
 /// Get the total size of video cache (converted MP4 files)
 #[tauri::command]
 fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
-    let cache_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
 
     if !cache_dir.exists() {
         return Ok(0);
@@ -281,7 +281,7 @@ fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
 /// Clear video cache (delete all converted MP4 files)
 #[tauri::command]
 fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
-    let cache_dir = app.path().app_local_data_dir().map_err(|e| e.to_string())?;
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
 
     if !cache_dir.exists() {
         return Ok(0);
@@ -328,8 +328,29 @@ fn update_note(note: Note) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_note(id: i64) -> Result<(), String> {
-    get_db().delete_note(id).map_err(|e| e.to_string())
+fn delete_note(app: AppHandle, id: i64) -> Result<(), String> {
+    let db = get_db();
+
+    // Get note info before deleting to check if we need to clean up cache
+    if let Ok(Some(note)) = db.get_note_by_id(id) {
+        let video_path = Path::new(&note.video_path);
+
+        // Check if this is a TS video file
+        if video_path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) == Some("ts".to_string()) {
+            // Calculate the cache file path
+            if let Ok(cache_dir) = app.path().app_cache_dir() {
+                if let Some(file_name) = video_path.file_stem().and_then(|s| s.to_str()) {
+                    let cache_file = cache_dir.join(format!("{}.mp4", file_name));
+                    // Delete the cache file if it exists
+                    if cache_file.exists() {
+                        let _ = std::fs::remove_file(&cache_file);
+                    }
+                }
+            }
+        }
+    }
+
+    db.delete_note(id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
