@@ -161,6 +161,20 @@ fn set_theme(theme: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn get_setting(key: String) -> Result<Option<String>, String> {
+    get_db()
+        .get_setting(&key)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_setting(key: String, value: String) -> Result<(), String> {
+    get_db()
+        .set_setting(&key, &value)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn read_file_content(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read file '{}': {}", path, e))
@@ -252,6 +266,8 @@ pub fn run() {
             unset_default_ai_config,
             get_app_settings,
             set_theme,
+            get_setting,
+            set_setting,
             read_file_content,
             get_notes,
             get_note,

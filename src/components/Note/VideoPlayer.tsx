@@ -148,6 +148,41 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
     const cleanupRef = {
       captionBtn: null as Element | null,
       handler: null as (() => void) | null,
+      resizeObserver: null as ResizeObserver | null,
+      resizeTimeout: null as ReturnType<typeof setTimeout> | null,
+      assModule: null as any,
+      assContent: null as string | null,
+      lastWidth: 0,
+    };
+
+    // 创建 ASS 实例的函数
+    const createAssInstance = () => {
+      if (!cleanupRef.assModule || !cleanupRef.assContent || !containerRef.current) return;
+
+      const plyrContainer = containerRef.current.querySelector(".plyr");
+      const videoEl = containerRef.current.querySelector("video");
+      if (!plyrContainer || !videoEl) return;
+
+      // 销毁旧实例
+      if (assRef.current) {
+        assRef.current.destroy();
+        assRef.current = null;
+      }
+
+      // 创建新实例
+      const ASS = cleanupRef.assModule.default;
+      assRef.current = new ASS(cleanupRef.assContent, videoEl as HTMLVideoElement, {
+        container: plyrContainer as HTMLElement,
+        resampling: "video_height",
+      });
+
+      // 恢复可见性状态
+      if (!assVisibleRef.current) {
+        const assBox = plyrContainer.querySelector(".ASS-box") as HTMLElement;
+        if (assBox) {
+          assBox.style.display = "none";
+        }
+      }
     };
 
     if (isAssSubtitle && subtitleUrl) {
@@ -159,29 +194,56 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
           // 如果组件已卸载，不执行后续操作
           if (!isMounted || !assContent || !containerRef.current) return;
 
-          const ASS = assModule.default;
-          const plyrContainer = containerRef.current.querySelector(".plyr");
-          const videoEl = containerRef.current.querySelector("video");
-          if (plyrContainer && videoEl) {
-            assRef.current = new ASS(assContent, videoEl as HTMLVideoElement, {
-              container: plyrContainer as HTMLElement,
-              resampling: "video_width",
-            });
+          // 保存模块和内容以便后续重建
+          cleanupRef.assModule = assModule;
+          cleanupRef.assContent = assContent;
 
-            // 监听字幕按钮点击来控制 ASS 字幕
-            const btn = plyrContainer.querySelector('[data-plyr="captions"]');
-            if (btn) {
-              const handler = () => {
-                assVisibleRef.current = !assVisibleRef.current;
-                const assBox = plyrContainer.querySelector(".ASS-box") as HTMLElement;
-                if (assBox) {
-                  assBox.style.display = assVisibleRef.current ? "" : "none";
-                }
-              };
-              cleanupRef.captionBtn = btn;
-              cleanupRef.handler = handler;
-              btn.addEventListener("click", handler);
+          const plyrContainer = containerRef.current.querySelector(".plyr");
+          if (!plyrContainer) return;
+
+          // 记录初始宽度
+          cleanupRef.lastWidth = plyrContainer.clientWidth;
+
+          // 创建初始 ASS 实例
+          createAssInstance();
+
+          // 添加 ResizeObserver 以在容器大小改变时重建字幕实例
+          const resizeObserver = new ResizeObserver((entries) => {
+            const entry = entries[0];
+            if (!entry) return;
+
+            const newWidth = entry.contentRect.width;
+            // 只有当宽度变化超过 50px 时才重建（避免频繁重建）
+            if (Math.abs(newWidth - cleanupRef.lastWidth) < 50) return;
+
+            // 清除之前的定时器
+            if (cleanupRef.resizeTimeout) {
+              clearTimeout(cleanupRef.resizeTimeout);
             }
+
+            // 等待 CSS 过渡完成后重建 ASS 实例
+            cleanupRef.resizeTimeout = setTimeout(() => {
+              if (!isMounted) return;
+              cleanupRef.lastWidth = newWidth;
+              createAssInstance();
+            }, 350);
+          });
+          resizeObserver.observe(plyrContainer);
+          cleanupRef.resizeObserver = resizeObserver;
+
+          // 监听字幕按钮点击来控制 ASS 字幕
+          const btn = plyrContainer.querySelector('[data-plyr="captions"]');
+          if (btn) {
+            const handler = () => {
+              assVisibleRef.current = !assVisibleRef.current;
+              const assBox = plyrContainer.querySelector(".ASS-box") as HTMLElement;
+              if (assBox) {
+                assBox.style.display = assVisibleRef.current ? "" : "none";
+              }
+            };
+            cleanupRef.captionBtn = btn;
+            cleanupRef.handler = handler;
+            btn.addEventListener("click", handler);
           }
         })
         .catch((err) => {
@@ -191,6 +253,14 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
 
     return () => {
       isMounted = false;
+      // 清除 resize 定时器
+      if (cleanupRef.resizeTimeout) {
+        clearTimeout(cleanupRef.resizeTimeout);
+      }
+      // 移除 ResizeObserver
+      if (cleanupRef.resizeObserver) {
+        cleanupRef.resizeObserver.disconnect();
+      }
       // 移除事件监听器
       if (cleanupRef.captionBtn && cleanupRef.handler) {
         cleanupRef.captionBtn.removeEventListener("click", cleanupRef.handler);

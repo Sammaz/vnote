@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Sparkles,
   FolderClosed,
@@ -9,6 +9,7 @@ import {
   ChevronDown,
   Video,
   MoreHorizontal,
+  Trash2,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
@@ -118,32 +119,94 @@ interface NoteItemProps {
 }
 
 function NoteItem({ note }: NoteItemProps) {
-  const { setSelectedNoteId, setCurrentView, selectedNoteId } = useApp();
+  const { setSelectedNoteId, setCurrentView, selectedNoteId, deleteNote } = useApp();
   const [isHovered, setIsHovered] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const isSelected = selectedNoteId === note.id;
 
+  // 点击外部关闭菜单
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    }
+
+    if (showMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showMenu]);
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowMenu(false);
+    try {
+      await deleteNote(note.id);
+    } catch (error) {
+      console.error("Failed to delete note:", error);
+    }
+  };
+
+  const handleMenuClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setShowMenu(!showMenu);
+  };
+
   return (
-    <button
-      onClick={() => {
-        setSelectedNoteId(note.id);
-        setCurrentView("note");
-      }}
+    <div
+      className="relative"
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      className={cn(
-        "w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all duration-150 group",
-        "text-sm",
-        isSelected
-          ? "bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400"
-          : "hover:bg-slate-100 dark:hover:bg-vnote-hover text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-      )}
+      onMouseLeave={() => {
+        setIsHovered(false);
+        if (!showMenu) setShowMenu(false);
+      }}
     >
-      <Video className="w-4 h-4 text-blue-400 flex-shrink-0" />
-      <span className="flex-1 truncate text-left">{note.title}</span>
-      {isHovered && (
-        <MoreHorizontal className="w-4 h-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0" />
+      <button
+        onClick={() => {
+          setSelectedNoteId(note.id);
+          setCurrentView("note");
+        }}
+        className={cn(
+          "w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all duration-150 group",
+          "text-sm",
+          isSelected
+            ? "bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400"
+            : "hover:bg-slate-100 dark:hover:bg-vnote-hover text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+        )}
+      >
+        <Video className="w-4 h-4 text-blue-400 flex-shrink-0" />
+        <span className="flex-1 truncate text-left">{note.title}</span>
+        {(isHovered || showMenu) && (
+          <div
+            onClick={handleMenuClick}
+            className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-neutral-700 flex-shrink-0"
+          >
+            <MoreHorizontal className="w-4 h-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
+          </div>
+        )}
+      </button>
+
+      {/* 下拉菜单 */}
+      {showMenu && (
+        <div
+          ref={menuRef}
+          className="absolute left-full top-0 ml-1 w-36 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-50"
+        >
+          <div className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-neutral-400 border-b border-slate-100 dark:border-neutral-700">
+            操作
+          </div>
+          <button
+            onClick={handleDelete}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>删除</span>
+          </button>
+        </div>
       )}
-    </button>
+    </div>
   );
 }
 

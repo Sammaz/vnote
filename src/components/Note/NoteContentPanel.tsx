@@ -48,14 +48,14 @@ export function NoteContentPanel({ note }: NoteContentPanelProps) {
   return (
     <div className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden">
       {/* 标签页头部 */}
-      <div className="flex items-center border-b border-slate-200 dark:border-vnote-border">
-        <div className="flex-1 flex items-center overflow-x-auto">
+      <div className="border-b border-slate-200 dark:border-vnote-border">
+        <div className="flex flex-wrap">
           {TABS.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                "flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap border-b-2 transition-colors",
+                "flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors",
                 activeTab === tab.id
                   ? "border-blue-500 text-blue-500"
                   : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
@@ -63,11 +63,6 @@ export function NoteContentPanel({ note }: NoteContentPanelProps) {
             >
               {tab.icon}
               {tab.label}
-              {tab.id === "highlights" && (
-                <span className="ml-1 px-1.5 py-0.5 text-xs bg-slate-200 dark:bg-vnote-surface rounded">
-                  0
-                </span>
-              )}
             </button>
           ))}
         </div>

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest } from "../types";
+import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, LayoutRatio } from "../types";
 
 // Mock 数据 - 文件夹暂时保留
 const mockFolders: Folder[] = [
@@ -32,6 +32,7 @@ interface AppContextType {
   refreshAiConfigs: () => Promise<void>;
   refreshNotes: () => Promise<void>;
   createNote: (req: CreateNoteRequest) => Promise<Note>;
+  deleteNote: (id: number) => Promise<void>;
 
   // 上传状态
   uploadedVideo: UploadedFile | null;
@@ -56,6 +57,13 @@ interface AppContextType {
   setCurrentView: (view: "home" | "settings" | "note") => void;
   selectedNoteId: number | null;
   setSelectedNoteId: (id: number | null) => void;
+
+  // 视频工具栏设置（全局）
+  toolbarSettings: VideoToolbarSettings;
+  setVideoVisible: (visible: boolean) => void;
+  setAutoPlay: (autoPlay: boolean) => void;
+  setLayoutSwapped: (swapped: boolean) => void;
+  setLayoutRatio: (ratio: LayoutRatio) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -91,6 +99,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [currentView, setCurrentView] = useState<"home" | "settings" | "note">("home");
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
 
+  // 视频工具栏设置（全局）
+  const [toolbarSettings, setToolbarSettings] = useState<VideoToolbarSettings>({
+    videoVisible: true,
+    autoPlay: false,
+    layoutSwapped: false,
+    layoutRatio: "4:6",
+  });
+
+  // 加载工具栏设置
+  const loadToolbarSettings = useCallback(async () => {
+    try {
+      const [videoVisible, autoPlay, layoutSwapped, layoutRatio] = await Promise.all([
+        invoke<string | null>("get_setting", { key: "toolbar_video_visible" }),
+        invoke<string | null>("get_setting", { key: "toolbar_auto_play" }),
+        invoke<string | null>("get_setting", { key: "toolbar_layout_swapped" }),
+        invoke<string | null>("get_setting", { key: "toolbar_layout_ratio" }),
+      ]);
+
+      setToolbarSettings({
+        videoVisible: videoVisible !== "false",
+        autoPlay: autoPlay === "true",
+        layoutSwapped: layoutSwapped === "true",
+        layoutRatio: (layoutRatio as LayoutRatio) || "4:6",
+      });
+    } catch (error) {
+      console.error("Failed to load toolbar settings:", error);
+    }
+  }, []);
+
+  // 保存单个设置
+  const saveSetting = useCallback(async (key: string, value: string) => {
+    try {
+      await invoke("set_setting", { key, value });
+    } catch (error) {
+      console.error(`Failed to save setting ${key}:`, error);
+    }
+  }, []);
+
+  // 设置视频可见性
+  const setVideoVisible = useCallback((visible: boolean) => {
+    setToolbarSettings(prev => ({ ...prev, videoVisible: visible }));
+    saveSetting("toolbar_video_visible", visible.toString());
+  }, [saveSetting]);
+
+  // 设置自动播放
+  const setAutoPlay = useCallback((autoPlay: boolean) => {
+    setToolbarSettings(prev => ({ ...prev, autoPlay }));
+    saveSetting("toolbar_auto_play", autoPlay.toString());
+  }, [saveSetting]);
+
+  // 设置布局交换
+  const setLayoutSwapped = useCallback((swapped: boolean) => {
+    setToolbarSettings(prev => ({ ...prev, layoutSwapped: swapped }));
+    saveSetting("toolbar_layout_swapped", swapped.toString());
+  }, [saveSetting]);
+
+  // 设置布局比例
+  const setLayoutRatio = useCallback((ratio: LayoutRatio) => {
+    setToolbarSettings(prev => ({ ...prev, layoutRatio: ratio }));
+    saveSetting("toolbar_layout_ratio", ratio);
+  }, [saveSetting]);
+
   // 加载笔记列表
   const refreshNotes = useCallback(async () => {
     try {
@@ -116,6 +186,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return newNote;
   }, [refreshNotes]);
 
+  // 删除笔记
+  const deleteNote = useCallback(async (id: number): Promise<void> => {
+    await invoke("delete_note", { id });
+    // 刷新笔记列表
+    await refreshNotes();
+    // 如果删除的是当前选中的笔记，清除选中状态并返回首页
+    if (selectedNoteId === id) {
+      setSelectedNoteId(null);
+      setCurrentView("home");
+    }
+  }, [refreshNotes, selectedNoteId]);
+
   // 加载 AI 配置
   const refreshAiConfigs = useCallback(async () => {
     try {
@@ -140,6 +222,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refreshAiConfigs();
     refreshNotes();
+    loadToolbarSettings();
   }, []);
 
   // 侧边栏操作
@@ -175,6 +258,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshAiConfigs,
     refreshNotes,
     createNote,
+    deleteNote,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,
@@ -189,6 +273,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCurrentView,
     selectedNoteId,
     setSelectedNoteId,
+    toolbarSettings,
+    setVideoVisible,
+    setAutoPlay,
+    setLayoutSwapped,
+    setLayoutRatio,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

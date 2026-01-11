@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { VideoPlayer } from "./VideoPlayer";
 import { ChatWindow } from "./ChatWindow";
 import { NoteContentPanel } from "./NoteContentPanel";
@@ -6,23 +6,20 @@ import { VideoToolbar } from "./VideoToolbar";
 import { useApp } from "../../context/AppContext";
 
 export function NotePage() {
-  const { notes, selectedNoteId } = useApp();
+  const { notes, selectedNoteId, toolbarSettings } = useApp();
 
-  // Toolbar state
-  const [videoVisible, setVideoVisible] = useState(true);
-  const [autoPlay, setAutoPlay] = useState(false);
-  const [layoutSwapped, setLayoutSwapped] = useState(false);
+  // 当前笔记的模型ID（从笔记记录获取）
   const [currentModelId, setCurrentModelId] = useState<number | null>(null);
 
   // 找到当前选中的笔记
   const currentNote = notes.find((note) => note.id === selectedNoteId);
 
-  // 初始化当前模型ID（从笔记的model_id获取）
-  useState(() => {
-    if (currentNote?.model_id && currentModelId === null) {
+  // 当笔记变化时，更新模型ID
+  useEffect(() => {
+    if (currentNote?.model_id) {
       setCurrentModelId(currentNote.model_id);
     }
-  });
+  }, [currentNote?.model_id]);
 
   if (!currentNote) {
     return (
@@ -35,27 +32,32 @@ export function NotePage() {
     );
   }
 
-  // 如果还没设置当前模型ID，使用笔记的model_id
-  if (currentModelId === null && currentNote.model_id) {
-    setCurrentModelId(currentNote.model_id);
-  }
-
   // 解析建议问题
   const suggestedQuestions: string[] = currentNote.suggested_questions
     ? JSON.parse(currentNote.suggested_questions)
     : [];
 
+  // 从全局设置获取工具栏状态
+  const { videoVisible, autoPlay, layoutSwapped, layoutRatio } = toolbarSettings;
+
+  // 计算实际的宽度比例
+  // layoutRatio: "4:6" 或 "6:4" 决定基础比例
+  // layoutSwapped: 是否交换左右位置
+  const getWidths = () => {
+    const isWide = layoutRatio === "6:4";
+    // 视频面板的基础宽度
+    const videoWidth = isWide ? "w-[60%]" : "w-[40%]";
+    const noteWidth = isWide ? "w-[40%]" : "w-[60%]";
+    return { videoWidth, noteWidth };
+  };
+
+  const { videoWidth, noteWidth } = getWidths();
+
   // 视频+聊天面板
   const videoPanel = (
-    <div className={`${layoutSwapped ? "w-[60%]" : "w-[40%]"} flex flex-col gap-4 flex-shrink-0`}>
+    <div className={`${videoWidth} flex flex-col gap-4 flex-shrink-0`}>
       {/* 工具栏 */}
       <VideoToolbar
-        videoVisible={videoVisible}
-        onToggleVideo={() => setVideoVisible(!videoVisible)}
-        autoPlay={autoPlay}
-        onToggleAutoPlay={() => setAutoPlay(!autoPlay)}
-        layoutSwapped={layoutSwapped}
-        onToggleLayout={() => setLayoutSwapped(!layoutSwapped)}
         currentModelId={currentModelId}
         onModelChange={setCurrentModelId}
       />
@@ -90,7 +92,7 @@ export function NotePage() {
 
   // 笔记内容面板
   const notePanel = (
-    <div className={`${layoutSwapped ? "w-[40%]" : "w-[60%]"} min-w-0`}>
+    <div className={`${noteWidth} min-w-0`}>
       <NoteContentPanel note={currentNote} />
     </div>
   );

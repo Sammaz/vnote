@@ -6,18 +6,13 @@ import {
   Pause,
   ArrowLeftRight,
   ChevronDown,
+  Columns2,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import type { AiConfig } from "../../types";
 
 interface VideoToolbarProps {
-  videoVisible: boolean;
-  onToggleVideo: () => void;
-  autoPlay: boolean;
-  onToggleAutoPlay: () => void;
-  layoutSwapped: boolean;
-  onToggleLayout: () => void;
   currentModelId: number | null;
   onModelChange: (modelId: number) => void;
 }
@@ -127,16 +122,29 @@ function ModelSelector({ models, currentModelId, onModelChange }: ModelSelectorP
 }
 
 export function VideoToolbar({
-  videoVisible,
-  onToggleVideo,
-  autoPlay,
-  onToggleAutoPlay,
-  layoutSwapped,
-  onToggleLayout,
   currentModelId,
   onModelChange,
 }: VideoToolbarProps) {
-  const { aiConfigs } = useApp();
+  const {
+    aiConfigs,
+    toolbarSettings,
+    setVideoVisible,
+    setAutoPlay,
+    setLayoutSwapped,
+    setLayoutRatio,
+  } = useApp();
+
+  const { videoVisible, autoPlay, layoutSwapped, layoutRatio } = toolbarSettings;
+
+  // 切换布局比例
+  const handleToggleRatio = () => {
+    setLayoutRatio(layoutRatio === "4:6" ? "6:4" : "4:6");
+  };
+
+  // 切换左右交换
+  const handleToggleSwap = () => {
+    setLayoutSwapped(!layoutSwapped);
+  };
 
   return (
     <div className="flex items-center justify-between">
@@ -145,20 +153,30 @@ export function VideoToolbar({
         <TooltipButton
           icon={videoVisible ? <MonitorPlay className="w-4 h-4" /> : <MonitorOff className="w-4 h-4" />}
           tooltip={videoVisible ? "隐藏视频" : "显示视频"}
-          onClick={onToggleVideo}
+          onClick={() => setVideoVisible(!videoVisible)}
           active={!videoVisible}
         />
         <TooltipButton
           icon={autoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           tooltip={autoPlay ? "关闭自动播放" : "开启自动播放"}
-          onClick={onToggleAutoPlay}
+          onClick={() => setAutoPlay(!autoPlay)}
           active={autoPlay}
         />
         <TooltipButton
           icon={<ArrowLeftRight className="w-4 h-4" />}
           tooltip="左右交换"
-          onClick={onToggleLayout}
+          onClick={handleToggleSwap}
           active={layoutSwapped}
+        />
+        <TooltipButton
+          icon={
+            <div className="flex items-center gap-0.5 text-[10px] font-medium">
+              <Columns2 className="w-3.5 h-3.5" />
+            </div>
+          }
+          tooltip={layoutRatio === "4:6" ? "扩展视频区域" : "收缩视频区域"}
+          onClick={handleToggleRatio}
+          active={layoutRatio === "6:4"}
         />
       </div>
 
