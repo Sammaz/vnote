@@ -69,6 +69,8 @@ export function NotePage() {
             videoUrl={currentNote.video_path}
             subtitleUrl={currentNote.subtitle_path}
             autoPlay={autoPlay}
+            noteId={currentNote.id}
+            lastPlaybackPosition={currentNote.last_playback_position}
           />
 
           {/* 视频信息 */}

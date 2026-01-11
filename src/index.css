@@ -486,3 +486,19 @@
 .dark .chat-markdown .footnotes {
   border-top-color: #374151;
 }
+
+/* 播放位置恢复提示动画 */
+@keyframes slideInFromBottom {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-in-bottom {
+  animation: slideInFromBottom 0.3s ease-out forwards;
+}

@@ -210,6 +210,11 @@ fn delete_note(id: i64) -> Result<(), String> {
     get_db().delete_note(id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn update_playback_position(note_id: i64, position: f64) -> Result<(), String> {
+    get_db().update_playback_position(note_id, position).map_err(|e| e.to_string())
+}
+
 // Chat commands
 #[tauri::command]
 async fn chat_stream(app: AppHandle, request: ChatRequest) -> Result<String, String> {
@@ -411,6 +416,7 @@ pub fn run() {
             create_note,
             update_note,
             delete_note,
+            update_playback_position,
             chat_stream,
             abort_chat,
             clear_subtitle_index,

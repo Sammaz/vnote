@@ -24,6 +24,7 @@ export interface Note {
   visual_summary: string | null;
   custom_summary: string | null;
   suggested_questions: string | null; // JSON array of questions
+  last_playback_position: number | null; // Last playback position in seconds
   created_at: string;
   updated_at: string;
 }

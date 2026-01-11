@@ -33,6 +33,7 @@ pub struct Note {
     pub visual_summary: Option<String>,
     pub custom_summary: Option<String>,
     pub suggested_questions: Option<String>, // JSON array of questions
+    pub last_playback_position: Option<f64>, // Last playback position in seconds
     pub created_at: String,
     pub updated_at: String,
 }
@@ -180,6 +181,20 @@ impl Database {
         if !has_model_id {
             conn.execute(
                 "ALTER TABLE notes ADD COLUMN model_id INTEGER",
+                [],
+            )?;
+        }
+
+        // Migration: Add last_playback_position column if not exists
+        let has_playback_position: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='last_playback_position'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_playback_position {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN last_playback_position REAL",
                 [],
             )?;
         }
@@ -336,7 +351,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, suggested_questions,
+                    highlights, visual_summary, custom_summary, suggested_questions, last_playback_position,
                     created_at, updated_at
              FROM notes ORDER BY created_at DESC"
         )?;
@@ -354,8 +369,9 @@ impl Database {
                 visual_summary: row.get(8)?,
                 custom_summary: row.get(9)?,
                 suggested_questions: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                last_playback_position: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })?;
 
@@ -366,7 +382,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, suggested_questions,
+                    highlights, visual_summary, custom_summary, suggested_questions, last_playback_position,
                     created_at, updated_at
              FROM notes WHERE id = ?1"
         )?;
@@ -384,8 +400,9 @@ impl Database {
                 visual_summary: row.get(8)?,
                 custom_summary: row.get(9)?,
                 suggested_questions: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                last_playback_position: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         });
 
@@ -407,7 +424,7 @@ impl Database {
         // Return the created note
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, suggested_questions,
+                    highlights, visual_summary, custom_summary, suggested_questions, last_playback_position,
                     created_at, updated_at
              FROM notes WHERE id = ?1"
         )?;
@@ -425,8 +442,9 @@ impl Database {
                 visual_summary: row.get(8)?,
                 custom_summary: row.get(9)?,
                 suggested_questions: row.get(10)?,
-                created_at: row.get(11)?,
-                updated_at: row.get(12)?,
+                last_playback_position: row.get(11)?,
+                created_at: row.get(12)?,
+                updated_at: row.get(13)?,
             })
         })
     }
@@ -438,14 +456,25 @@ impl Database {
                 title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4,
                 full_summary = ?5, detailed_reading = ?6, highlights = ?7,
                 visual_summary = ?8, custom_summary = ?9, suggested_questions = ?10,
+                last_playback_position = ?11,
                 updated_at = datetime('now', 'localtime')
-             WHERE id = ?11",
+             WHERE id = ?12",
             (
                 &note.title, &note.video_path, &note.subtitle_path, &note.model_id,
                 &note.full_summary, &note.detailed_reading, &note.highlights,
                 &note.visual_summary, &note.custom_summary, &note.suggested_questions,
+                &note.last_playback_position,
                 note.id,
             ),
+        )?;
+        Ok(())
+    }
+
+    pub fn update_playback_position(&self, note_id: i64, position: f64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE notes SET last_playback_position = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
+            (position, note_id),
         )?;
         Ok(())
     }

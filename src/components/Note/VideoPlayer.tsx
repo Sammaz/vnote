@@ -1,23 +1,119 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { AlertCircle, Video } from "lucide-react";
 import Plyr from "plyr";
 import "plyr/dist/plyr.css";
+import { PlaybackResume } from "./PlaybackResume";
+
+// 视频扩展名到 MIME 类型的映射
+const VIDEO_MIME_TYPES: Record<string, string> = {
+  mp4: "video/mp4",
+  mkv: "video/x-matroska",
+  avi: "video/x-msvideo",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  flv: "video/x-flv",
+  ts: "video/mp2t",
+};
+
+// 根据文件路径获取 MIME 类型
+function getVideoMimeType(filePath: string): string {
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
+  return VIDEO_MIME_TYPES[ext] || "video/mp4";
+}
 
 interface VideoPlayerProps {
   videoUrl: string;
   subtitleUrl?: string | null;
   compact?: boolean;
   autoPlay?: boolean;
+  noteId?: number;
+  lastPlaybackPosition?: number | null;
 }
 
-export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay = false }: VideoPlayerProps) {
+export function VideoPlayer({
+  videoUrl,
+  subtitleUrl,
+  compact = false,
+  autoPlay = false,
+  noteId,
+  lastPlaybackPosition: initialLastPlaybackPosition,
+}: VideoPlayerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Plyr | null>(null);
   const assRef = useRef<any>(null);
   const assVisibleRef = useRef<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showResumePrompt, setShowResumePrompt] = useState(false);
+  const [lastPlaybackPosition, setLastPlaybackPosition] = useState<number | null>(
+    initialLastPlaybackPosition ?? null
+  );
+  const [videoDuration, setVideoDuration] = useState<number>(0);
+
+  // 使用 ref 存储最新值，供事件处理器使用
+  const lastSavedPositionRef = useRef<number>(0);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noteIdRef = useRef<number | undefined>(noteId);
+  const showResumePromptRef = useRef<boolean>(false);
+  const lastPlaybackPositionRef = useRef<number | null>(lastPlaybackPosition);
+
+  // 从数据库获取最新的播放位置
+  useEffect(() => {
+    if (!noteId) return;
+
+    const fetchLatestPosition = async () => {
+      try {
+        const note = await invoke<{ last_playback_position: number | null } | null>("get_note", { id: noteId });
+        if (note && note.last_playback_position !== null && note.last_playback_position > 0) {
+          setLastPlaybackPosition(note.last_playback_position);
+        }
+      } catch (err) {
+        console.error("Failed to fetch latest playback position:", err);
+      }
+    };
+
+    fetchLatestPosition();
+  }, [noteId]);
+
+  // 保持 ref 同步
+  useEffect(() => {
+    noteIdRef.current = noteId;
+  }, [noteId]);
+
+  useEffect(() => {
+    showResumePromptRef.current = showResumePrompt;
+  }, [showResumePrompt]);
+
+  useEffect(() => {
+    lastPlaybackPositionRef.current = lastPlaybackPosition;
+  }, [lastPlaybackPosition]);
+
+  // 当视频加载完成且有播放位置时，检查是否显示恢复提示
+  useEffect(() => {
+    if (
+      !loading &&
+      videoDuration > 0 &&
+      lastPlaybackPosition &&
+      lastPlaybackPosition > 10 &&
+      lastPlaybackPosition < videoDuration - 10
+    ) {
+      setShowResumePrompt(true);
+    }
+  }, [loading, videoDuration, lastPlaybackPosition]);
+
+  // 跳转到上次播放位置
+  const handleResume = useCallback(() => {
+    if (playerRef.current && lastPlaybackPosition) {
+      playerRef.current.currentTime = lastPlaybackPosition;
+      setShowResumePrompt(false);
+    }
+  }, [lastPlaybackPosition]);
+
+  // 关闭恢复提示
+  const handleDismissResume = useCallback(() => {
+    setShowResumePrompt(false);
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -25,6 +121,9 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
     // 重置状态
     setError(null);
     setLoading(true);
+    setShowResumePrompt(false);
+    setVideoDuration(0);
+    lastSavedPositionRef.current = 0;
 
     // 清理旧的播放器和 ASS 实例
     if (assRef.current) {
@@ -54,7 +153,7 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
 
     const source = document.createElement("source");
     source.src = videoSrc;
-    source.type = "video/mp4";
+    source.type = getVideoMimeType(videoUrl);
     video.appendChild(source);
 
     // 判断字幕类型
@@ -87,6 +186,7 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
     // 视频加载成功
     video.addEventListener("loadedmetadata", () => {
       setLoading(false);
+      setVideoDuration(video.duration);
     });
 
     // 视频加载失败
@@ -100,7 +200,7 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
     containerRef.current.appendChild(video);
 
     // 初始化 Plyr
-    playerRef.current = new Plyr(video, {
+    const player = new Plyr(video, {
       controls: compact
         ? ["play", "progress", "current-time", "mute", "fullscreen"]
         : [
@@ -142,6 +242,70 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
         disableCaptions: "关闭字幕",
       },
     });
+    playerRef.current = player;
+
+    // ========== 播放进度跟踪事件监听器 ==========
+    // 保存播放位置到数据库
+    const savePlaybackPosition = async (position: number) => {
+      const currentNoteId = noteIdRef.current;
+      if (!currentNoteId || position < 1) return;
+      // 只有当位置变化超过 1 秒时才保存
+      if (Math.abs(position - lastSavedPositionRef.current) < 1) return;
+      lastSavedPositionRef.current = position;
+      try {
+        await invoke("update_playback_position", { noteId: currentNoteId, position });
+      } catch (err) {
+        console.error("Failed to save playback position:", err);
+      }
+    };
+
+    // 时间更新事件（防抖保存）
+    const handleTimeUpdate = () => {
+      const currentTime = player.currentTime;
+
+      // 清除之前的定时器
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      // 5秒后保存
+      saveTimeoutRef.current = setTimeout(() => {
+        savePlaybackPosition(currentTime);
+      }, 5000);
+
+      // 当播放位置超过上次记忆位置时，隐藏恢复提示
+      const lastPos = lastPlaybackPositionRef.current;
+      if (showResumePromptRef.current && lastPos && currentTime > lastPos) {
+        setShowResumePrompt(false);
+      }
+    };
+
+    // 暂停时立即保存
+    const handlePause = () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      savePlaybackPosition(player.currentTime);
+    };
+
+    // 视频结束时清除播放位置
+    const handleEnded = async () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+      const currentNoteId = noteIdRef.current;
+      if (currentNoteId) {
+        try {
+          await invoke("update_playback_position", { noteId: currentNoteId, position: 0 });
+          lastSavedPositionRef.current = 0;
+        } catch (err) {
+          console.error("Failed to clear playback position:", err);
+        }
+      }
+    };
+
+    player.on("timeupdate", handleTimeUpdate);
+    player.on("pause", handlePause);
+    player.on("ended", handleEnded);
 
     // 如果是 ASS 字幕，动态导入 assjs 并渲染
     let isMounted = true;
@@ -253,6 +417,18 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
 
     return () => {
       isMounted = false;
+      // 组件卸载时立即保存当前播放位置
+      const currentTime = player.currentTime;
+      const currentNoteId = noteIdRef.current;
+      if (currentNoteId && currentTime > 1) {
+        invoke("update_playback_position", { noteId: currentNoteId, position: currentTime }).catch((err) => {
+          console.error("Failed to save playback position on unmount:", err);
+        });
+      }
+      // 清除保存定时器
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
       // 清除 resize 定时器
       if (cleanupRef.resizeTimeout) {
         clearTimeout(cleanupRef.resizeTimeout);
@@ -265,6 +441,10 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
       if (cleanupRef.captionBtn && cleanupRef.handler) {
         cleanupRef.captionBtn.removeEventListener("click", cleanupRef.handler);
       }
+      // 移除播放进度监听器
+      player.off("timeupdate", handleTimeUpdate);
+      player.off("pause", handlePause);
+      player.off("ended", handleEnded);
       if (assRef.current) {
         assRef.current.destroy();
         assRef.current = null;
@@ -306,6 +486,14 @@ export function VideoPlayer({ videoUrl, subtitleUrl, compact = false, autoPlay =
         ref={containerRef}
         className={`w-full ${compact ? "" : "aspect-video"} bg-black rounded-lg overflow-hidden plyr-container relative`}
       />
+      {/* 播放位置恢复提示 */}
+      {showResumePrompt && lastPlaybackPosition && (
+        <PlaybackResume
+          position={lastPlaybackPosition}
+          onResume={handleResume}
+          onDismiss={handleDismissResume}
+        />
+      )}
     </div>
   );
 }
