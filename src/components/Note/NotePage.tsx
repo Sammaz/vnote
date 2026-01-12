@@ -6,7 +6,7 @@ import { VideoToolbar } from "./VideoToolbar";
 import { useApp } from "../../context/AppContext";
 
 export function NotePage() {
-  const { notes, selectedNoteId, toolbarSettings, aiConfigs, refreshNotes } = useApp();
+  const { notes, selectedNoteId, toolbarSettings, aiConfigs, promptConfigs, refreshNotes } = useApp();
 
   // 当前笔记的模型ID（从笔记记录获取）
   const [currentModelId, setCurrentModelId] = useState<number | null>(null);
@@ -102,6 +102,7 @@ export function NotePage() {
         onGenerationComplete={refreshNotes}
         aiConfigs={aiConfigs}
         currentModelId={currentModelId}
+        promptConfigs={promptConfigs}
       />
     </div>
   );

@@ -56,7 +56,7 @@ const categoryColors: Record<PromptCategory, { bg: string; text: string; label: 
 };
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
-    const { refreshAiConfigs } = useApp();
+    const { refreshAiConfigs, refreshPromptConfigs } = useApp();
     const [activeTab, setActiveTab] = useState<SettingsTab>("general");
     const [trayEnabled, setTrayEnabled] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -378,6 +378,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 setPromptConfigs(promptConfigs.map(c => c.id === editingPromptConfig.id ? editingPromptConfig : c));
             }
             setEditingPromptConfig(null);
+            // 同步更新全局状态
+            refreshPromptConfigs();
         } catch (error) {
             console.error("Failed to save prompt config:", error);
         }
@@ -388,6 +390,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             await invoke("delete_prompt_config", { id });
             setPromptConfigs(promptConfigs.filter(c => c.id !== id));
             setDeletingPromptConfigId(null);
+            // 同步更新全局状态
+            refreshPromptConfigs();
         } catch (error) {
             console.error("Failed to delete prompt config:", error);
         }
@@ -602,7 +606,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                     <button
                         onClick={() => setActiveTab("general")}
                         className={[
-                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all",
+                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all cursor-pointer",
                             activeTab === "general"
                                 ? "bg-blue-600 text-white shadow-sm"
                                 : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover",
@@ -614,7 +618,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                     <button
                         onClick={() => setActiveTab("model")}
                         className={[
-                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all mt-1",
+                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all mt-1 cursor-pointer",
                             activeTab === "model"
                                 ? "bg-blue-600 text-white shadow-sm"
                                 : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover",
@@ -626,7 +630,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                     <button
                         onClick={() => setActiveTab("prompt")}
                         className={[
-                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all mt-1",
+                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all mt-1 cursor-pointer",
                             activeTab === "prompt"
                                 ? "bg-blue-600 text-white shadow-sm"
                                 : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover",

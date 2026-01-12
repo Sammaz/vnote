@@ -319,8 +319,14 @@ pub async fn generate_suggested_questions(
     }
 
     // 3. Build prompt
-    let system_prompt = "你是一个学习助手。根据视频字幕内容，生成3个最能帮助用户理解视频核心内容的问题。
-只输出3个问题，每个问题一行，不要编号，不要其他内容。";
+    let system_prompt = "你是一个专业的学习助手。根据视频字幕内容，生成3-10个最能帮助用户理解视频核心内容的重要问题。
+
+要求：
+1. 根据内容的复杂度和信息量，自动决定生成3-10个问题
+2. 问题应该覆盖视频的核心概念、关键知识点和重要细节
+3. 问题应该由浅入深，帮助用户逐步理解内容
+4. 每个问题一行，不要编号，不要其他多余内容
+5. 问题要具体、有针对性，避免过于宽泛";
 
     let body = json!({
         "model": ai_config.model,
@@ -361,12 +367,12 @@ pub async fn generate_suggested_questions(
         .as_str()
         .ok_or("响应格式错误")?;
 
-    // 6. Parse questions (split by lines, take first 3 non-empty lines)
+    // 6. Parse questions (split by lines, take up to 10 non-empty lines)
     let questions: Vec<String> = content
         .lines()
         .map(|l| l.trim())
         .filter(|l| !l.is_empty())
-        .take(3)
+        .take(10)
         .map(String::from)
         .collect();
 

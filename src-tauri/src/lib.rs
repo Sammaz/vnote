@@ -524,11 +524,12 @@ async fn generate_note_content(
     regenerate: bool,
     tabs_to_generate: Vec<String>,
     custom_prompt: Option<String>,
-) -> Result<(), String> {
+) -> Result<String, String> {
     use note_generation::{GenerateNoteRequest, GenerationOptions, TabType};
 
     // 使用前端传入的 generationId，或生成新的
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let return_id = generation_id.clone();
 
     // 转换标签页类型
     let tabs: Vec<TabType> = tabs_to_generate
@@ -564,7 +565,15 @@ async fn generate_note_content(
         options,
     };
 
-    note_generation::generate_note(app, get_db(), generation_id, request).await
+    // 在后台任务中执行生成，立即返回 generation_id
+    tokio::spawn(async move {
+        if let Err(e) = note_generation::generate_note(app, get_db(), generation_id, request).await {
+            eprintln!("[generate_note_content] 生成失败: {}", e);
+        }
+    });
+
+    // 立即返回 generation_id，前端通过事件监听进度
+    Ok(return_id)
 }
 
 #[tauri::command]
