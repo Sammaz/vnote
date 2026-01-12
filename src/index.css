@@ -710,12 +710,14 @@
 }
 
 /* 粗体和斜体 */
-.note-markdown strong {
-  font-weight: 600;
+.note-markdown strong,
+.note-markdown b {
+  font-weight: 700 !important;
   color: inherit;
 }
 
-.note-markdown em {
+.note-markdown em,
+.note-markdown i {
   font-style: italic;
 }
 
