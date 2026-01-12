@@ -80,6 +80,20 @@ pub struct RerankerConfig {
     pub is_default: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PromptConfig {
+    pub id: i64,
+    pub title: String,
+    pub description: Option<String>,
+    pub content: String,
+    pub category: String,
+    pub recommended_model_id: Option<i64>,
+    pub sort_order: i32,
+    pub is_default: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -246,6 +260,24 @@ impl Database {
                 model TEXT NOT NULL,
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 is_default INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        )?;
+
+        // Prompt configs table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS prompt_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                content TEXT NOT NULL,
+                category TEXT NOT NULL DEFAULT 'other',
+                recommended_model_id INTEGER,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_default INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (recommended_model_id) REFERENCES ai_configs(id) ON DELETE SET NULL
             )",
             [],
         )?;
@@ -829,6 +861,79 @@ impl Database {
                 [],
             )?;
         }
+        Ok(())
+    }
+
+    // Prompt Config CRUD
+    pub fn get_all_prompt_configs(&self) -> SqliteResult<Vec<PromptConfig>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, description, content, category, recommended_model_id,
+                    sort_order, is_default, created_at, updated_at
+             FROM prompt_configs ORDER BY is_default DESC, updated_at DESC"
+        )?;
+
+        let configs = stmt.query_map([], |row| {
+            Ok(PromptConfig {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                description: row.get(2)?,
+                content: row.get(3)?,
+                category: row.get(4)?,
+                recommended_model_id: row.get(5)?,
+                sort_order: row.get(6)?,
+                is_default: row.get::<_, i64>(7)? != 0,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?;
+
+        configs.collect()
+    }
+
+    pub fn create_prompt_config(&self, config: &PromptConfig) -> SqliteResult<i64> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO prompt_configs (title, description, content, category, recommended_model_id, sort_order, is_default)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            (
+                &config.title,
+                &config.description,
+                &config.content,
+                &config.category,
+                &config.recommended_model_id,
+                config.sort_order,
+                config.is_default as i32
+            ),
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn update_prompt_config(&self, config: &PromptConfig) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE prompt_configs SET
+                title = ?1, description = ?2, content = ?3, category = ?4,
+                recommended_model_id = ?5, sort_order = ?6, is_default = ?7,
+                updated_at = datetime('now', 'localtime')
+             WHERE id = ?8",
+            (
+                &config.title,
+                &config.description,
+                &config.content,
+                &config.category,
+                &config.recommended_model_id,
+                config.sort_order,
+                config.is_default as i32,
+                config.id
+            ),
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_prompt_config(&self, id: i64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM prompt_configs WHERE id = ?1", [id])?;
         Ok(())
     }
 }

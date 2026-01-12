@@ -4,7 +4,7 @@ mod rag;
 mod subtitle;
 
 use chat::ChatRequest;
-use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, RerankerConfig};
+use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, PromptConfig, RerankerConfig};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -491,6 +491,27 @@ fn unset_default_reranker_config(id: i64) -> Result<(), String> {
     get_db().unset_default_reranker_config(id).map_err(|e| e.to_string())
 }
 
+// Prompt config commands
+#[tauri::command]
+fn get_prompt_configs() -> Result<Vec<PromptConfig>, String> {
+    get_db().get_all_prompt_configs().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_prompt_config(config: PromptConfig) -> Result<i64, String> {
+    get_db().create_prompt_config(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_prompt_config(config: PromptConfig) -> Result<(), String> {
+    get_db().update_prompt_config(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_prompt_config(id: i64) -> Result<(), String> {
+    get_db().delete_prompt_config(id).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -580,6 +601,10 @@ pub fn run() {
             delete_reranker_config,
             set_default_reranker_config,
             unset_default_reranker_config,
+            get_prompt_configs,
+            create_prompt_config,
+            update_prompt_config,
+            delete_prompt_config,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

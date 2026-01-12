@@ -1,9 +1,10 @@
 import {
-    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, HardDrive
+    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, HardDrive, MessageSquareText, Search
 } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useApp } from "./context/AppContext";
+import type { PromptCategory, PromptConfig } from "./types";
 
 interface SettingsPageProps {
     currentTheme: "light" | "dark";
@@ -41,8 +42,17 @@ interface RerankerConfig {
     is_default: boolean;
 }
 
-type SettingsTab = "general" | "model";
+type SettingsTab = "general" | "model" | "prompt";
 type EditingType = "ai" | "embedding" | "reranker" | null;
+
+// 分类颜色映射
+const categoryColors: Record<PromptCategory, { bg: string; text: string; label: string }> = {
+    summary: { bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-600 dark:text-blue-400", label: "总结类" },
+    analysis: { bg: "bg-purple-100 dark:bg-purple-900/30", text: "text-purple-600 dark:text-purple-400", label: "分析类" },
+    qa: { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-600 dark:text-green-400", label: "问答类" },
+    creative: { bg: "bg-orange-100 dark:bg-orange-900/30", text: "text-orange-600 dark:text-orange-400", label: "创作类" },
+    other: { bg: "bg-slate-100 dark:bg-slate-700/30", text: "text-slate-600 dark:text-slate-400", label: "其他" },
+};
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
     const { refreshAiConfigs } = useApp();
@@ -75,22 +85,34 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const [videoCacheSize, setVideoCacheSize] = useState<number>(0);
     const [clearingCache, setClearingCache] = useState(false);
 
+    // Prompt config state
+    const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
+    const [editingPromptConfig, setEditingPromptConfig] = useState<PromptConfig | null>(null);
+    const [deletingPromptConfigId, setDeletingPromptConfigId] = useState<number | null>(null);
+
+    // Prompt filter state
+    const [promptSearchQuery, setPromptSearchQuery] = useState("");
+    const [promptCategoryFilter, setPromptCategoryFilter] = useState<PromptCategory | "all">("all");
+    const [promptSortBy, setPromptSortBy] = useState<"recent" | "name">("recent");
+
     // Load settings from database on mount
     useEffect(() => {
         const loadSettings = async () => {
             try {
-                const [tray, aiCfgs, embCfgs, rerCfgs, cacheSize] = await Promise.all([
+                const [tray, aiCfgs, embCfgs, rerCfgs, cacheSize, promptCfgs] = await Promise.all([
                     invoke<boolean>("get_tray_enabled"),
                     invoke<AiConfig[]>("get_ai_configs"),
                     invoke<EmbeddingConfig[]>("get_embedding_configs"),
                     invoke<RerankerConfig[]>("get_reranker_configs"),
                     invoke<number>("get_video_cache_size"),
+                    invoke<PromptConfig[]>("get_prompt_configs"),
                 ]);
                 setTrayEnabled(tray);
                 setAiConfigs(aiCfgs);
                 setEmbeddingConfigs(embCfgs);
                 setRerankerConfigs(rerCfgs);
                 setVideoCacheSize(cacheSize);
+                setPromptConfigs(promptCfgs);
             } catch (error) {
                 console.error("Failed to load settings:", error);
             } finally {
@@ -329,11 +351,87 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
+    // Prompt Config handlers
+    const createEmptyPromptConfig = (): PromptConfig => ({
+        id: 0,
+        title: "",
+        description: null,
+        content: "",
+        category: "other",
+        recommended_model_id: null,
+        sort_order: promptConfigs.length,
+        is_default: false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+    });
+
+    const savePromptConfig = async () => {
+        if (!editingPromptConfig) return;
+        try {
+            if (editingPromptConfig.id === 0) {
+                const newId = await invoke<number>("create_prompt_config", { config: editingPromptConfig });
+                setPromptConfigs([...promptConfigs, { ...editingPromptConfig, id: newId }]);
+            } else {
+                await invoke("update_prompt_config", { config: editingPromptConfig });
+                setPromptConfigs(promptConfigs.map(c => c.id === editingPromptConfig.id ? editingPromptConfig : c));
+            }
+            setEditingPromptConfig(null);
+        } catch (error) {
+            console.error("Failed to save prompt config:", error);
+        }
+    };
+
+    const deletePromptConfig = async (id: number) => {
+        try {
+            await invoke("delete_prompt_config", { id });
+            setPromptConfigs(promptConfigs.filter(c => c.id !== id));
+            setDeletingPromptConfigId(null);
+        } catch (error) {
+            console.error("Failed to delete prompt config:", error);
+        }
+    };
+
+    const openPromptEditor = (config: PromptConfig) => {
+        setEditingPromptConfig(config);
+    };
+
+    // Filtered and sorted prompts
+    const filteredPrompts = useMemo(() => {
+        let filtered = promptConfigs;
+
+        // Apply search filter
+        if (promptSearchQuery) {
+            const query = promptSearchQuery.toLowerCase();
+            filtered = filtered.filter(p =>
+                p.title.toLowerCase().includes(query) ||
+                p.description?.toLowerCase().includes(query) ||
+                p.content.toLowerCase().includes(query)
+            );
+        }
+
+        // Apply category filter
+        if (promptCategoryFilter !== "all") {
+            filtered = filtered.filter(p => p.category === promptCategoryFilter);
+        }
+
+        // Apply sorting
+        switch (promptSortBy) {
+            case "name":
+                return [...filtered].sort((a, b) => a.title.localeCompare(b.title, "zh-CN"));
+            case "recent":
+            default:
+                return [...filtered].sort((a, b) =>
+                    new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
+                );
+        }
+    }, [promptConfigs, promptSearchQuery, promptCategoryFilter, promptSortBy]);
+
     const closeEditor = () => {
         setEditingType(null);
         setEditingAiConfig(null);
         setEditingEmbeddingConfig(null);
         setEditingRerankerConfig(null);
+        setEditingPromptConfig(null);
         setApiKeyVisible(false);
         setTestResult(null);
     };
@@ -523,6 +621,18 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         <Bot size={16} />
                         模型配置
                     </button>
+                    <button
+                        onClick={() => setActiveTab("prompt")}
+                        className={[
+                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all mt-1",
+                            activeTab === "prompt"
+                                ? "bg-blue-600 text-white shadow-sm"
+                                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover",
+                        ].join(" ")}
+                    >
+                        <MessageSquareText size={16} />
+                        提示词管理
+                    </button>
                 </nav>
             </aside>
 
@@ -530,11 +640,11 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 <div className="flex items-center justify-between mb-6">
                     <div>
                         <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                            {activeTab === "general" ? <SettingsIcon size={20} /> : <Bot size={20} />}
-                            {activeTab === "general" ? "常规设置" : "模型配置"}
+                            {activeTab === "general" ? <SettingsIcon size={20} /> : activeTab === "model" ? <Bot size={20} /> : <MessageSquareText size={20} />}
+                            {activeTab === "general" ? "常规设置" : activeTab === "model" ? "模型配置" : "提示词管理"}
                         </h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                            {activeTab === "general" ? "界面显示与桌面行为" : "配置对话模型、Embedding 和 Reranker"}
+                            {activeTab === "general" ? "界面显示与桌面行为" : activeTab === "model" ? "配置对话模型、Embedding 和 Reranker" : "创建和管理自定义提示词模板"}
                         </p>
                     </div>
                     <button
@@ -609,6 +719,210 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                             </div>
                         </div>
                     </div>
+                ) : activeTab === "prompt" ? (
+                    // Prompt tab
+                    editingPromptConfig ? (
+                        // Prompt editor view
+                        <>
+                            <div className="flex items-center gap-3 mb-6">
+                                <button
+                                    onClick={() => setEditingPromptConfig(null)}
+                                    className="p-2 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors"
+                                >
+                                    <ArrowLeft size={20} className="text-slate-500" />
+                                </button>
+                                <div>
+                                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+                                        {editingPromptConfig.id === 0 ? "新增提示词" : "编辑提示词"}
+                                    </h3>
+                                    <p className="text-sm text-slate-500">创建自定义提示词模板</p>
+                                </div>
+                            </div>
+                            <div className="space-y-6">
+                                <div className="flex flex-col w-full">
+                                    <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">标题</div>
+                                    <input
+                                        type="text"
+                                        value={editingPromptConfig.title || ""}
+                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, title: e.target.value })}
+                                        placeholder="例如：视频内容总结助手"
+                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                    />
+                                    <p className="text-sm text-slate-500 mt-2">为提示词设置一个易于识别的名称</p>
+                                </div>
+
+                                <div className="flex flex-col w-full">
+                                    <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">描述</div>
+                                    <input
+                                        type="text"
+                                        value={editingPromptConfig.description || ""}
+                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, description: e.target.value || null })}
+                                        placeholder="简要说明提示词的用途和使用场景"
+                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                    />
+                                    <p className="text-sm text-slate-500 mt-2">可选，帮助你快速了解这个提示词的作用</p>
+                                </div>
+
+                                <div className="flex flex-col w-full">
+                                    <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">提示词内容</div>
+                                    <textarea
+                                        value={editingPromptConfig.content || ""}
+                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, content: e.target.value })}
+                                        placeholder="输入完整的 Prompt 指令内容"
+                                        rows={8}
+                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm resize-y min-h-[200px]"
+                                    />
+                                    <p className="text-sm text-slate-500 mt-2">编写清晰、详细的 Prompt 指令，让 AI 能够准确理解你的需求</p>
+                                </div>
+
+                                <div className="flex flex-col w-full">
+                                    <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">分类</div>
+                                    <select
+                                        value={editingPromptConfig.category}
+                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, category: e.target.value as PromptCategory })}
+                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                    >
+                                        <option value="summary">总结类</option>
+                                        <option value="analysis">分析类</option>
+                                        <option value="qa">问答类</option>
+                                        <option value="creative">创作类</option>
+                                        <option value="other">其他</option>
+                                    </select>
+                                    <p className="text-sm text-slate-500 mt-2">选择提示词的类型，便于分类管理</p>
+                                </div>
+
+                                <div className="flex flex-col w-full">
+                                    <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">推荐模型</div>
+                                    <select
+                                        value={editingPromptConfig.recommended_model_id?.toString() || ""}
+                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, recommended_model_id: e.target.value ? Number(e.target.value) : null })}
+                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                    >
+                                        <option value="">无</option>
+                                        {aiConfigs.map(config => (
+                                            <option key={config.id} value={config.id.toString()}>{config.title}</option>
+                                        ))}
+                                    </select>
+                                    <p className="text-sm text-slate-500 mt-2">可选，指定使用此提示词时推荐的模型</p>
+                                </div>
+                            </div>
+                            <div className="flex gap-3 pt-6">
+                                <button
+                                    onClick={() => setEditingPromptConfig(null)}
+                                    className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-md transition-colors"
+                                >
+                                    取消
+                                </button>
+                                <button
+                                    onClick={savePromptConfig}
+                                    disabled={!editingPromptConfig.title || !editingPromptConfig.content}
+                                    className="flex-1 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    保存
+                                </button>
+                            </div>
+                        </>
+                    ) : (
+                        // Prompt list view
+                        <div className="space-y-6">
+                            {/* Filter bar */}
+                            <div className="flex items-center gap-3">
+                                <div className="flex-1 relative">
+                                    <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                                    <input
+                                        type="text"
+                                        value={promptSearchQuery}
+                                        onChange={e => setPromptSearchQuery(e.target.value)}
+                                        placeholder="搜索提示词..."
+                                        className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    />
+                                </div>
+                                <select
+                                    value={promptCategoryFilter}
+                                    onChange={e => setPromptCategoryFilter(e.target.value as PromptCategory | "all")}
+                                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="all">全部分类</option>
+                                    <option value="summary">总结类</option>
+                                    <option value="analysis">分析类</option>
+                                    <option value="qa">问答类</option>
+                                    <option value="creative">创作类</option>
+                                    <option value="other">其他</option>
+                                </select>
+                                <select
+                                    value={promptSortBy}
+                                    onChange={e => setPromptSortBy(e.target.value as "recent" | "name")}
+                                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="recent">最近更新</option>
+                                    <option value="name">名称排序</option>
+                                </select>
+                                <button
+                                    onClick={() => openPromptEditor(createEmptyPromptConfig())}
+                                    className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                                >
+                                    <Plus size={16} />
+                                    新增提示词
+                                </button>
+                            </div>
+
+                            {/* Prompt card grid */}
+                            {filteredPrompts.length > 0 ? (
+                                <div className="grid grid-cols-3 gap-4">
+                                    {filteredPrompts.map((prompt) => {
+                                        const colors = categoryColors[prompt.category];
+                                        return (
+                                            <div
+                                                key={prompt.id}
+                                                className="group relative rounded-xl overflow-hidden p-5 bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 flex flex-col h-full"
+                                            >
+                                                <span className={`px-2 py-0.5 text-xs rounded ${colors.bg} ${colors.text} self-start`}>
+                                                    {colors.label}
+                                                </span>
+                                                <h3 className="text-slate-900 dark:text-slate-100 font-medium mt-3 line-clamp-1">
+                                                    {prompt.title}
+                                                </h3>
+                                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 line-clamp-2 flex-1">
+                                                    {prompt.description || prompt.content}
+                                                </p>
+                                                <div className="flex gap-2 mt-4">
+                                                    <button
+                                                        onClick={() => openPromptEditor(prompt)}
+                                                        className="flex-1 py-2 text-sm text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700/50 rounded-lg flex items-center justify-center gap-1 transition-colors"
+                                                    >
+                                                        编辑
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setDeletingPromptConfigId(prompt.id)}
+                                                        className="p-2 text-slate-400 hover:text-red-500 bg-slate-100 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                    >
+                                                        <Trash2 size={14} />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ) : (
+                                <div className="col-span-3 text-center py-16 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
+                                    <MessageSquareText size={48} className="mx-auto text-slate-600 mb-4" />
+                                    <h3 className="text-lg font-medium text-slate-500 dark:text-slate-400 mb-2">暂无提示词</h3>
+                                    <p className="text-sm text-slate-500 mb-4">
+                                        {promptSearchQuery || promptCategoryFilter !== "all"
+                                            ? "没有找到匹配的提示词"
+                                            : "创建您的第一个提示词模板，提升笔记生成效率"}
+                                    </p>
+                                    <button
+                                        onClick={() => openPromptEditor(createEmptyPromptConfig())}
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 mx-auto"
+                                    >
+                                        <Plus size={16} />
+                                        创建提示词
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )
                 ) : editingType ? (
                     // Editor view
                     <>
@@ -843,6 +1157,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         title={rerankerConfigs.find(c => c.id === deletingRerankerConfigId)?.title || "未命名"}
                         onCancel={() => setDeletingRerankerConfigId(null)}
                         onConfirm={() => deleteRerankerConfig(deletingRerankerConfigId)}
+                    />
+                )}
+                {deletingPromptConfigId !== null && (
+                    <DeleteModal
+                        title={promptConfigs.find(c => c.id === deletingPromptConfigId)?.title || "未命名"}
+                        onCancel={() => setDeletingPromptConfigId(null)}
+                        onConfirm={() => deletePromptConfig(deletingPromptConfigId)}
                     />
                 )}
             </div>
