@@ -50,10 +50,67 @@ const TAB_TYPE_MAPPING: Record<string, TabType> = {
   custom: "custom_summary",
 };
 
-// 全局追踪正在生成的笔记ID（跨组件实例持久化）
-const generatingNoteIds = new Set<number>();
+// ============================================================================
+// 全局生成状态管理器（跨组件实例持久化）
+// ============================================================================
+
+interface NoteGenerationState {
+  isGenerating: boolean;
+  generationId: string | null;
+  regeneratingTabs: Set<TabType>;
+  progress: { current: number; total: number; message: string };
+  completedTabs: Set<TabType>;
+  failedTabs: Map<TabType, string>;
+}
+
+// 全局存储每个笔记的生成状态
+const noteGenerationStates = new Map<number, NoteGenerationState>();
+
 // 全局追踪已尝试自动生成的笔记ID（避免重复触发）
 const attemptedAutoGenerateNoteIds = new Set<number>();
+
+// 全局事件监听器管理（避免重复监听同一个generationId）
+const activeListeners = new Map<string, () => void>();
+
+// 获取或初始化笔记的生成状态
+function getNoteGenerationState(noteId: number): NoteGenerationState {
+  if (!noteGenerationStates.has(noteId)) {
+    noteGenerationStates.set(noteId, {
+      isGenerating: false,
+      generationId: null,
+      regeneratingTabs: new Set(),
+      progress: { current: 0, total: 0, message: "" },
+      completedTabs: new Set(),
+      failedTabs: new Map(),
+    });
+  }
+  return noteGenerationStates.get(noteId)!;
+}
+
+// 设置笔记的生成状态
+function setNoteGenerationState(noteId: number, updates: Partial<NoteGenerationState>) {
+  const state = getNoteGenerationState(noteId);
+  Object.assign(state, updates);
+}
+
+// 清理笔记的生成状态（导出供外部使用）
+export function clearNoteGenerationState(noteId: number) {
+  const state = noteGenerationStates.get(noteId);
+  if (state?.generationId) {
+    // 清理事件监听器
+    const unlisten = activeListeners.get(state.generationId);
+    if (unlisten) {
+      unlisten();
+      activeListeners.delete(state.generationId);
+    }
+  }
+  noteGenerationStates.delete(noteId);
+}
+
+// 判断笔记是否正在生成中（导出供外部使用）
+export function isNoteGenerating(noteId: number): boolean {
+  return getNoteGenerationState(noteId).isGenerating;
+}
 
 interface NoteContentPanelProps {
   note: Note;
@@ -66,17 +123,168 @@ interface NoteContentPanelProps {
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>("summary");
 
-  // 生成状态
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [regeneratingTabs, setRegeneratingTabs] = useState<Set<TabType>>(new Set()); // 跟踪正在重新生成的标签页
-  const [progress, setProgress] = useState<{ current: number; total: number; message: string }>({
-    current: 0,
-    total: 0,
-    message: "",
-  });
-  const [completedTabs, setCompletedTabs] = useState<Set<TabType>>(new Set());
-  const [failedTabs, setFailedTabs] = useState<Map<TabType, string>>(new Map());
-  const [generationId, setGenerationId] = useState<string | null>(null);
+  // 从全局状态同步组件state
+  const syncStateFromGlobal = useCallback(() => {
+    const globalState = getNoteGenerationState(note.id);
+    return globalState;
+  }, [note.id]);
+
+  // 生成状态（从全局状态同步）
+  const [isGenerating, setIsGenerating] = useState(() => syncStateFromGlobal().isGenerating);
+  const [regeneratingTabs, setRegeneratingTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().regeneratingTabs));
+  const [progress, setProgress] = useState<{ current: number; total: number; message: string }>(() => ({ ...syncStateFromGlobal().progress }));
+  const [completedTabs, setCompletedTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().completedTabs));
+  const [failedTabs, setFailedTabs] = useState<Map<TabType, string>>(() => new Map(syncStateFromGlobal().failedTabs));
+  const [generationId, setGenerationId] = useState<string | null>(() => syncStateFromGlobal().generationId);
+
+  // 用于触发重新渲染的计数器
+  const [, forceUpdate] = useState({});
+
+  // 切换笔记时从全局状态恢复，而不是盲目重置
+  useEffect(() => {
+    // 从全局状态恢复当前笔记的生成状态
+    const globalState = getNoteGenerationState(note.id);
+
+    setIsGenerating(globalState.isGenerating);
+    setGenerationId(globalState.generationId);
+    setProgress({ ...globalState.progress });
+    setCompletedTabs(new Set(globalState.completedTabs));
+    setFailedTabs(new Map(globalState.failedTabs));
+    setRegeneratingTabs(new Set(globalState.regeneratingTabs));
+
+    // 触发重新渲染以更新UI
+    forceUpdate({});
+
+    // 如果该笔记正在生成中，确保事件监听器已设置
+    if (globalState.generationId && globalState.isGenerating) {
+      setupGenerationListener(note.id, globalState.generationId);
+    }
+  }, [note.id]);
+
+  // 设置生成事件监听器
+  const setupGenerationListener = useCallback((noteId: number, genId: string) => {
+    // 如果已经监听过这个generationId，跳过
+    if (activeListeners.has(genId)) {
+      return;
+    }
+
+    const unlistenPromise = listen<GenerationEvent>(`note-generation-${genId}`, (event) => {
+      const data = event.payload;
+      const state = getNoteGenerationState(noteId);
+
+      switch (data.status) {
+        case "Starting":
+          setNoteGenerationState(noteId, {
+            progress: { current: 0, total: data.total_tabs, message: "准备生成..." },
+          });
+          break;
+
+        case "TabStarted":
+          setNoteGenerationState(noteId, {
+            progress: { ...state.progress, message: `正在生成 ${data.tab_name}...` },
+          });
+          break;
+
+        case "TabProgress":
+          setNoteGenerationState(noteId, {
+            progress: { current: data.current, total: data.total, message: data.message },
+          });
+          break;
+
+        case "TabCompleted":
+          const completedTab = data.tab_type as TabType;
+          const newCompleted = new Set([...state.completedTabs, completedTab]);
+          const newRegenerating = new Set([...state.regeneratingTabs].filter(t => t !== completedTab));
+          setNoteGenerationState(noteId, {
+            completedTabs: newCompleted,
+            regeneratingTabs: newRegenerating,
+          });
+          break;
+
+        case "TabError":
+          const failedTab = data.tab_type as TabType;
+          const newFailed = new Map([...state.failedTabs, [failedTab, data.error]]);
+          const newRegenerating2 = new Set([...state.regeneratingTabs].filter(t => t !== failedTab));
+          setNoteGenerationState(noteId, {
+            failedTabs: newFailed,
+            regeneratingTabs: newRegenerating2,
+          });
+          break;
+
+        case "AllCompleted":
+          setNoteGenerationState(noteId, {
+            isGenerating: false,
+            generationId: null,
+            regeneratingTabs: new Set(),
+            progress: { current: data.total, total: data.total, message: "生成完成!" },
+            completedTabs: new Set([...state.completedTabs]),
+          });
+          // 清理事件监听器
+          const unlisten = activeListeners.get(genId);
+          if (unlisten) {
+            unlisten();
+            activeListeners.delete(genId);
+          }
+          onGenerationComplete?.();
+          // 刷新笔记数据
+          invoke("get_note", { noteId }).then(() => {
+            // 触发笔记更新（通过事件或其他方式通知父组件）
+          });
+          break;
+
+        case "Aborted":
+          setNoteGenerationState(noteId, {
+            isGenerating: false,
+            generationId: null,
+            regeneratingTabs: new Set(),
+            progress: { ...state.progress, message: "已中止" },
+          });
+          const unlisten2 = activeListeners.get(genId);
+          if (unlisten2) {
+            unlisten2();
+            activeListeners.delete(genId);
+          }
+          break;
+      }
+
+      // 通知当前显示的笔记更新UI（如果是当前笔记）
+      if (noteId === note.id) {
+        const updatedState = getNoteGenerationState(noteId);
+        setIsGenerating(updatedState.isGenerating);
+        setGenerationId(updatedState.generationId);
+        setProgress({ ...updatedState.progress });
+        setCompletedTabs(new Set(updatedState.completedTabs));
+        setFailedTabs(new Map(updatedState.failedTabs));
+        setRegeneratingTabs(new Set(updatedState.regeneratingTabs));
+        forceUpdate({});
+      }
+    });
+
+    unlistenPromise.then((unlisten) => {
+      activeListeners.set(genId, unlisten);
+    });
+  }, [note.id]);
+
+  // 定期同步全局状态到组件state（用于跨组件更新）
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const globalState = getNoteGenerationState(note.id);
+
+      // 只有当状态真正变化时才更新
+      if (globalState.isGenerating !== isGenerating ||
+          globalState.generationId !== generationId ||
+          globalState.progress.message !== progress.message) {
+        setIsGenerating(globalState.isGenerating);
+        setGenerationId(globalState.generationId);
+        setProgress({ ...globalState.progress });
+        setCompletedTabs(new Set(globalState.completedTabs));
+        setFailedTabs(new Map(globalState.failedTabs));
+        setRegeneratingTabs(new Set(globalState.regeneratingTabs));
+      }
+    }, 200); // 每200ms同步一次
+
+    return () => clearInterval(interval);
+  }, [note.id, isGenerating, generationId, progress.message]);
 
   // 自定义提示词弹窗状态
   const [showPromptDialog, setShowPromptDialog] = useState(false);
@@ -118,28 +326,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 切换笔记时清理可能残留的全局状态
-  useEffect(() => {
-    // 清理该笔记在全局集合中的旧状态
-    generatingNoteIds.delete(note.id);
-    // 注意：不清理 attemptedAutoGenerateNoteIds，保持已生成的记录
-    return () => {
-      // 组件卸载时清理生成中状态
-      generatingNoteIds.delete(note.id);
-    };
-  }, [note.id]);
-
-  // 切换笔记时重置生成状态（修复显示bug）
-  useEffect(() => {
-    // 重置所有生成相关状态
-    setIsGenerating(false);
-    setGenerationId(null);
-    setProgress({ current: 0, total: 0, message: "" });
-    setCompletedTabs(new Set());
-    setFailedTabs(new Map());
-    setRegeneratingTabs(new Set());
-  }, [note.id]);
-
   // 解析全文总结JSON
   const parseFullSummary = useCallback((content: string | null): FullSummaryData | null => {
     if (!content) return null;
@@ -158,20 +344,35 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     // 检查是否已经在生成中
-    if (generatingNoteIds.has(note.id)) {
+    const currentState = getNoteGenerationState(note.id);
+    if (currentState.isGenerating) {
       console.log(`[自动生成] 笔记 ${note.id} 正在生成中，跳过重复触发`);
       return;
     }
 
     try {
       const id = crypto.randomUUID();
-      setGenerationId(id);
+
+      // 更新全局状态
+      setNoteGenerationState(note.id, {
+        isGenerating: true,
+        generationId: id,
+        regeneratingTabs: new Set(),
+        progress: { current: 0, total: 0, message: "准备生成..." },
+        completedTabs: new Set(),
+        failedTabs: new Map(),
+      });
+
+      // 更新组件state
       setIsGenerating(true);
+      setGenerationId(id);
       setCompletedTabs(new Set());
       setFailedTabs(new Map());
+      setRegeneratingTabs(new Set());
+      setProgress({ current: 0, total: 0, message: "准备生成..." });
 
-      // 添加到全局生成中集合
-      generatingNoteIds.add(note.id);
+      // 设置事件监听器
+      setupGenerationListener(note.id, id);
 
       // 等待状态更新和事件监听器设置完成
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -186,93 +387,18 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         tabsToGenerate: [] as string[],
       });
     } catch (error) {
+      // 出错时重置状态
+      setNoteGenerationState(note.id, {
+        isGenerating: false,
+        generationId: null,
+        regeneratingTabs: new Set(),
+      });
       setIsGenerating(false);
       setGenerationId(null);
       setRegeneratingTabs(new Set());
-      generatingNoteIds.delete(note.id);
       alert(`生成失败: ${error}`);
     }
   };
-
-  // 监听生成事件
-  useEffect(() => {
-    if (!generationId) return;
-
-    const unlistenPromises = [
-      listen<GenerationEvent>(`note-generation-${generationId}`, (event) => {
-        const data = event.payload;
-        switch (data.status) {
-          case "Starting":
-            setProgress({ current: 0, total: data.total_tabs, message: "准备生成..." });
-            break;
-
-          case "TabStarted":
-            setProgress((prev) => ({
-              ...prev,
-              message: `正在生成 ${data.tab_name}...`,
-            }));
-            break;
-
-          case "TabProgress":
-            setProgress({
-              current: data.current,
-              total: data.total,
-              message: data.message,
-            });
-            break;
-
-          case "TabCompleted":
-            const completedTab = data.tab_type as TabType;
-            setCompletedTabs((prev) => new Set([...prev, completedTab]));
-            // 从重新生成集合中移除
-            setRegeneratingTabs((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(completedTab);
-              return newSet;
-            });
-            break;
-
-          case "TabError":
-            const failedTab = data.tab_type as TabType;
-            setFailedTabs((prev) => new Map([...prev, [failedTab, data.error]]));
-            // 从重新生成集合中移除
-            setRegeneratingTabs((prev) => {
-              const newSet = new Set(prev);
-              newSet.delete(failedTab);
-              return newSet;
-            });
-            break;
-
-          case "AllCompleted":
-            setIsGenerating(false);
-            setGenerationId(null);
-            setRegeneratingTabs(new Set()); // 清空重新生成集合
-            setProgress({ current: data.total, total: data.total, message: "生成完成!" });
-            // 从生成中集合移除，标记为已尝试生成
-            generatingNoteIds.delete(note.id);
-            if (data.generated > 0) {
-              attemptedAutoGenerateNoteIds.add(note.id);
-            }
-            onGenerationComplete?.();
-            break;
-
-          case "Aborted":
-            setIsGenerating(false);
-            setGenerationId(null);
-            setRegeneratingTabs(new Set()); // 清空重新生成集合
-            setProgress((prev) => ({ ...prev, message: "已中止" }));
-            generatingNoteIds.delete(note.id);
-            break;
-        }
-      }),
-    ];
-
-    return () => {
-      Promise.all(unlistenPromises).then((unlisteners) => {
-        unlisteners.forEach((u) => u());
-      });
-    };
-  }, [generationId, onGenerationComplete]);
 
   // 自动生成：当组件挂载且没有全文总结时，自动开始生成（仅触发一次）
   useEffect(() => {
@@ -282,7 +408,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     // 如果正在生成中，跳过
-    if (generatingNoteIds.has(note.id)) {
+    const currentState = getNoteGenerationState(note.id);
+    if (currentState.isGenerating) {
       console.log(`[自动生成] 笔记 ${note.id} 正在生成中，跳过重复触发`);
       return;
     }
@@ -406,7 +533,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     // 检查是否已经在生成中
-    if (generatingNoteIds.has(note.id)) {
+    const currentState = getNoteGenerationState(note.id);
+    if (currentState.isGenerating) {
       alert("该笔记正在生成中，请稍后再试");
       return;
     }
@@ -427,18 +555,28 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     try {
       const id = crypto.randomUUID();
-      const currentTabType = TAB_TYPE_MAPPING[activeTab];
+      const currentTabType = TAB_TYPE_MAPPING[activeTab] as TabType;
+      const newRegeneratingTabs = currentTabType ? new Set<TabType>([currentTabType]) : new Set<TabType>();
+
+      // 更新全局状态
+      setNoteGenerationState(note.id, {
+        isGenerating: true,
+        generationId: id,
+        regeneratingTabs: newRegeneratingTabs,
+        progress: { current: 0, total: 0, message: "准备生成..." },
+        completedTabs: new Set<TabType>(),
+        failedTabs: new Map<TabType, string>(),
+      });
+
+      // 更新组件state
       setGenerationId(id);
       setIsGenerating(true);
       setCompletedTabs(new Set());
       setFailedTabs(new Map());
-      // 标记当前标签页为正在重新生成
-      if (currentTabType) {
-        setRegeneratingTabs(new Set([currentTabType]));
-      }
+      setRegeneratingTabs(newRegeneratingTabs);
 
-      // 添加到全局生成中集合
-      generatingNoteIds.add(note.id);
+      // 设置事件监听器
+      setupGenerationListener(note.id, id);
 
       // 等待状态更新和事件监听器设置完成
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -454,10 +592,15 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         customPrompt: finalPrompt,
       });
     } catch (error) {
+      // 出错时重置状态
+      setNoteGenerationState(note.id, {
+        isGenerating: false,
+        generationId: null,
+        regeneratingTabs: new Set(),
+      });
       setIsGenerating(false);
       setGenerationId(null);
       setRegeneratingTabs(new Set());
-      generatingNoteIds.delete(note.id);
       alert(`生成失败: ${error}`);
     }
   };

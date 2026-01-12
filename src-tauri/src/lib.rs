@@ -1,3 +1,4 @@
+mod ai_pool;
 mod chat;
 mod db;
 mod note_generation;

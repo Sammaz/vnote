@@ -7,11 +7,10 @@
 //! - 视觉化总结 (VisualSummary)
 //! - 自定义总结 (CustomSummary)
 
+use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
 use crate::db::{AiConfig, Database};
 use crate::subtitle::parse_subtitle_file;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -169,26 +168,34 @@ pub struct TabResult {
 // 全局中止标志管理
 // ============================================================================
 
-/// 全局生成任务中止标志
+/// 全局生成任务中止标志（保持兼容，但现在委托给ai_pool）
 static GENERATION_ABORT_FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
     OnceLock::new();
 
-/// 获取中止标志锁
+/// 获取中止标志锁（保持向后兼容）
 fn get_abort_flags_lock() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     GENERATION_ABORT_FLAGS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// 获取或创建中止标志
+/// 获取或创建中止标志（保持向后兼容，同时注册到ai_pool）
 async fn get_abort_flag(generation_id: &str) -> Arc<AtomicBool> {
+    // 同时在ai_pool中注册
+    let pool_flag: Arc<AtomicBool> = get_ai_pool_manager().register_abort_flag(generation_id.to_string()).await;
+
+    // 也在本地注册以保持兼容
     let mut flags = get_abort_flags_lock().lock().await;
     flags
         .entry(generation_id.to_string())
-        .or_insert_with(|| Arc::new(AtomicBool::new(false)))
+        .or_insert_with(|| pool_flag.clone())
         .clone()
 }
 
 /// 清理中止标志
 async fn cleanup_abort_flag(generation_id: &str) {
+    // 清理ai_pool中的标志
+    get_ai_pool_manager().cleanup_abort_flag(generation_id).await;
+
+    // 清理本地标志
     let mut flags = get_abort_flags_lock().lock().await;
     flags.remove(generation_id);
 }
@@ -557,28 +564,10 @@ fn find_semantic_boundary(text: &str, around: usize) -> Option<usize> {
 }
 
 // ============================================================================
-// AI API 调用
+// AI API 调用（使用ai_pool统一管理）
 // ============================================================================
 
-/// HTTP客户端
-static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
-
-fn get_http_client() -> &'static Client {
-    HTTP_CLIENT.get_or_init(|| {
-        // 配置连接池以支持并发请求
-        Client::builder()
-            .timeout(std::time::Duration::from_secs(180))
-            .pool_max_idle_per_host(20)  // 每个主机最多20个空闲连接
-            .pool_idle_timeout(std::time::Duration::from_secs(90))
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .http2_keep_alive_interval(std::time::Duration::from_secs(30))
-            .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
-            .build()
-            .expect("Failed to create HTTP client")
-    })
-}
-
-/// 调用AI API（非流式）
+/// 调用AI API（非流式，通过ai_pool统一管理并发）
 async fn call_ai_api(
     ai_config: &AiConfig,
     prompt: &str,
@@ -589,58 +578,20 @@ async fn call_ai_api(
         return Err("已中止".to_string());
     }
 
-    let client = get_http_client();
+    // 通过ai_pool执行请求
+    let req = NonStreamingRequest {
+        config: ai_config.clone(),
+        prompt: prompt.to_string(),
+    };
 
-    let base_url = ai_config.base_url.trim_end_matches('/');
-    let api_url = format!("{}/chat/completions", base_url);
-
-    let body = json!({
-        "model": ai_config.model,
-        "messages": [
-            {
-                "role": "system",
-                "content": "你是一个专业的视频内容分析师，擅长提取和总结信息。"
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "temperature": 0.7
-    });
-
-    let response: reqwest::Response = client
-        .post(&api_url)
-        .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", ai_config.api_key))
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
 
     // 再次检查中止
     if abort_flag.load(Ordering::Relaxed) {
         return Err("已中止".to_string());
     }
 
-    let status = response.status();
-
-    if !status.is_success() {
-        let error_text = response.text().await.unwrap_or_default();
-        return Err(format!("API错误 {}: {}", status, error_text));
-    }
-
-    let json_value: Value = response
-        .json()
-        .await
-        .map_err(|e| format!("解析响应失败: {}", e))?;
-
-    let content = json_value["choices"][0]["message"]["content"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| "响应格式错误".to_string())?;
-
-    Ok(content)
+    Ok(response.content)
 }
 
 // ============================================================================
