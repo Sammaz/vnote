@@ -375,13 +375,6 @@ export function VideoPlayer({
               }
             );
 
-            console.log("[ASS] Added explicit positioning:", {
-              playResX,
-              playResY,
-              defaultY,
-              secondaryY,
-            });
-
             const plyrContainer = containerRef.current.querySelector(".plyr");
             const videoWrapper = containerRef.current.querySelector(".plyr__video-wrapper") || plyrContainer;
             if (!videoWrapper) return;
@@ -402,8 +395,6 @@ export function VideoPlayer({
               container: videoWrapper as HTMLElement,
               resampling: "video_height",
             });
-
-            console.log("[ASS] Instance created with fixed positioning");
 
             // 字幕切换按钮处理
             const btn = plyrContainer?.querySelector('[data-plyr="captions"]');
