@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, LayoutRatio } from "../types";
+import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, LayoutRatio, PromptConfig } from "../types";
 
 // Mock 数据 - 文件夹暂时保留
 const mockFolders: Folder[] = [
@@ -29,7 +29,9 @@ interface AppContextType {
   notes: Note[];
   stats: AppStats;
   aiConfigs: AiConfig[];
+  promptConfigs: PromptConfig[];
   refreshAiConfigs: () => Promise<void>;
+  refreshPromptConfigs: () => Promise<void>;
   refreshNotes: () => Promise<void>;
   createNote: (req: CreateNoteRequest) => Promise<Note>;
   deleteNote: (id: number) => Promise<void>;
@@ -82,6 +84,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [stats, setStats] = useState<AppStats>(mockStats);
   const [aiConfigs, setAiConfigs] = useState<AiConfig[]>([]);
+  const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
 
   // 上传状态
   const [uploadedVideo, setUploadedVideo] = useState<UploadedFile | null>(null);
@@ -228,9 +231,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [selectedModelId]);
 
+  // 加载提示词配置
+  const refreshPromptConfigs = useCallback(async () => {
+    try {
+      const configs = await invoke<PromptConfig[]>("get_prompt_configs");
+      setPromptConfigs(configs);
+    } catch (error) {
+      console.error("Failed to load prompt configs:", error);
+    }
+  }, []);
+
   // 初始加载
   useEffect(() => {
     refreshAiConfigs();
+    refreshPromptConfigs();
     refreshNotes();
     loadToolbarSettings();
   }, []);
@@ -265,7 +279,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     notes,
     stats,
     aiConfigs,
+    promptConfigs,
     refreshAiConfigs,
+    refreshPromptConfigs,
     refreshNotes,
     createNote,
     deleteNote,

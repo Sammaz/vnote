@@ -20,6 +20,7 @@ interface AiConfig {
     model: string;
     sort_order: number;
     is_default: boolean;
+    concurrent_limit: number;
 }
 
 interface EmbeddingConfig {
@@ -171,7 +172,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         api_key: "",
         model: "",
         sort_order: aiConfigs.length,
-        is_default: false
+        is_default: false,
+        concurrent_limit: 5
     });
 
     const saveAiConfig = async () => {
@@ -996,6 +998,26 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 />
                                 <p className="text-sm text-slate-500 mt-2">要使用的模型 ID</p>
                             </div>
+
+                            {editingType === "ai" && (
+                                <div className="flex flex-col w-full">
+                                    <div className="text-sm mb-3 font-bold text-slate-900 dark:text-slate-100">并发生成数</div>
+                                    <div className="flex items-center gap-4">
+                                        <input
+                                            type="range"
+                                            min="1"
+                                            max="10"
+                                            value={(currentConfig as AiConfig | null)?.concurrent_limit ?? 5}
+                                            onChange={e => setCurrentEditingConfig({ concurrent_limit: Number(e.target.value) })}
+                                            className="flex-1 h-2 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-blue-500"
+                                        />
+                                        <span className="text-lg font-semibold text-blue-600 dark:text-blue-400 w-8 text-center">
+                                            {(currentConfig as AiConfig | null)?.concurrent_limit ?? 5}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-slate-500 mt-3">同时生成的标签页数量，范围1-10，默认5</p>
+                                </div>
+                            )}
 
                             {testResult && (
                                 <div className={`p-3 rounded-md text-sm text-center ${testResult.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800'}`}>

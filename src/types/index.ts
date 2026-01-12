@@ -54,6 +54,7 @@ export interface AiConfig {
   model: string;
   sort_order: number;
   is_default: boolean;
+  concurrent_limit: number; // 并发生成数，范围1-10，默认5
 }
 
 // 上传文件信息
@@ -105,4 +106,62 @@ export interface PromptConfig {
   is_default: boolean;
   created_at: string;
   updated_at: string;
+}
+
+// ============================================================================
+// 笔记生成相关类型
+// ============================================================================
+
+// 标签页类型
+export type TabType =
+  | "full_summary"
+  | "detailed_reading"
+  | "highlights"
+  | "visual_summary"
+  | "custom_summary";
+
+// 全文总结结构化数据
+export interface FullSummaryData {
+  abstract: string;                    // 摘要
+  highlights: HighlightItem[];         // 亮点
+  tags: string[];                      // 标签
+  qa_pairs?: QaPair[];                 // 疑问解答（可选）
+  thoughts?: string[];                 // 思考问题（可选）
+  glossary: GlossaryItem[];            // 术语表
+}
+
+export interface HighlightItem {
+  emoji: string;
+  title: string;
+  description: string;
+  timestamp?: string; // 视频时间戳，格式如 00:01:23
+}
+
+export interface QaPair {
+  question: string;
+  answer: string;
+}
+
+export interface GlossaryItem {
+  term: string;
+  explanation: string;
+}
+
+// 生成进度事件
+export type GenerationEvent =
+  | { status: "Starting"; total_tabs: number; tabs_to_generate: string[] }
+  | { status: "TabStarted"; tab_type: string; tab_name: string }
+  | { status: "TabProgress"; tab_type: string; current: number; total: number; message: string }
+  | { status: "TabCompleted"; tab_type: string; content: string }
+  | { status: "TabError"; tab_type: string; error: string }
+  | { status: "AllCompleted"; generated: number; failed: number; total: number }
+  | { status: "Aborted"; reason: string };
+
+// 生成状态
+export interface GenerationState {
+  isGenerating: boolean;
+  currentTab: TabType | null;
+  progress: { current: number; total: number; message: string };
+  completedTabs: Set<TabType>;
+  failedTabs: Map<TabType, string>;
 }

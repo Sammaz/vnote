@@ -1,5 +1,6 @@
 mod chat;
 mod db;
+mod note_generation;
 mod rag;
 mod subtitle;
 
@@ -512,6 +513,65 @@ fn delete_prompt_config(id: i64) -> Result<(), String> {
     get_db().delete_prompt_config(id).map_err(|e| e.to_string())
 }
 
+// Note generation commands
+#[tauri::command]
+async fn generate_note_content(
+    app: AppHandle,
+    generation_id: Option<String>,
+    note_id: i64,
+    model_id: i64,
+    concurrent: bool,
+    regenerate: bool,
+    tabs_to_generate: Vec<String>,
+    custom_prompt: Option<String>,
+) -> Result<(), String> {
+    use note_generation::{GenerateNoteRequest, GenerationOptions, TabType};
+
+    // 使用前端传入的 generationId，或生成新的
+    let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    // 转换标签页类型
+    let tabs: Vec<TabType> = tabs_to_generate
+        .into_iter()
+        .filter_map(|t| match t.as_str() {
+            "full_summary" => Some(TabType::FullSummary),
+            "detailed_reading" => Some(TabType::DetailedReading),
+            "highlights" => Some(TabType::Highlights),
+            "visual_summary" => Some(TabType::VisualSummary),
+            "custom_summary" => Some(TabType::CustomSummary),
+            _ => None,
+        })
+        .collect();
+
+    // 从AI配置中获取并发数
+    let concurrent_limit = if let Ok(Some(ai_config)) = get_db().get_ai_config_by_id(model_id) {
+        ai_config.concurrent_limit as usize
+    } else {
+        5 // 默认5个
+    };
+
+    let options = GenerationOptions {
+        concurrent,
+        tabs_to_generate: tabs,
+        regenerate,
+        concurrent_limit,
+        custom_prompt,
+    };
+
+    let request = GenerateNoteRequest {
+        note_id,
+        model_id,
+        options,
+    };
+
+    note_generation::generate_note(app, get_db(), generation_id, request).await
+}
+
+#[tauri::command]
+async fn abort_note_generation(generation_id: String) -> Result<(), String> {
+    note_generation::abort_generation(generation_id).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -605,6 +665,8 @@ pub fn run() {
             create_prompt_config,
             update_prompt_config,
             delete_prompt_config,
+            generate_note_content,
+            abort_note_generation,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
