@@ -19,6 +19,8 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -161,6 +163,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [note.id]);
 
+  // 监听笔记内容变化，确保生成完成后更新显示
+  useEffect(() => {
+    // 当笔记内容更新时，触发重新渲染
+    forceUpdate({});
+  }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.full_summary]);
+
   // 设置生成事件监听器
   const setupGenerationListener = useCallback((noteId: number, genId: string) => {
     // 如果已经监听过这个generationId，跳过
@@ -225,11 +233,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             unlisten();
             activeListeners.delete(genId);
           }
+          // 刷新笔记数据并等待完成
           onGenerationComplete?.();
-          // 刷新笔记数据
-          invoke("get_note", { noteId }).then(() => {
-            // 触发笔记更新（通过事件或其他方式通知父组件）
-          });
           break;
 
         case "Aborted":
@@ -1075,11 +1080,12 @@ function SummaryContent({
   }
 
   if (!summaryData) {
+    // JSON 解析失败，尝试作为 Markdown 渲染
     return (
-      <div className="prose prose-sm dark:prose-invert max-w-none">
-        <pre className="whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300">
+      <div className="note-markdown">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
           {rawContent}
-        </pre>
+        </ReactMarkdown>
       </div>
     );
   }
@@ -1212,11 +1218,10 @@ function TabContent({
   }
 
   return (
-    <div className="prose prose-slate dark:prose-invert max-w-none">
-      <div
-        className="whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300"
-        dangerouslySetInnerHTML={{ __html: content }}
-      />
+    <div className="note-markdown">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -1253,11 +1258,10 @@ function HighlightsContent({
   }
 
   return (
-    <div className="prose prose-slate dark:prose-invert max-w-none">
-      <div
-        className="whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300"
-        dangerouslySetInnerHTML={{ __html: content }}
-      />
+    <div className="note-markdown">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

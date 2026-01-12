@@ -773,7 +773,7 @@ pub async fn generate_note(
         .join(" ");
 
     // 确定要生成的标签页
-    // TODO: 测试阶段只生成全文总结，避免浪费token
+    // 如果用户指定了要生成的标签页，则使用用户指定的；否则使用默认的全文总结
     let tabs_to_generate = if request.options.tabs_to_generate.is_empty() {
         vec![
             TabType::FullSummary,
@@ -783,11 +783,8 @@ pub async fn generate_note(
             // TabType::CustomSummary,
         ]
     } else {
-        // 测试阶段：过滤掉非全文总结的标签页
+        // 使用用户指定的标签页
         request.options.tabs_to_generate
-            .into_iter()
-            .filter(|t| matches!(t, TabType::FullSummary))
-            .collect()
     };
 
     // 检查是否需要重新生成
