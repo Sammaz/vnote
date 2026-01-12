@@ -129,6 +129,17 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     };
   }, [note.id]);
 
+  // 切换笔记时重置生成状态（修复显示bug）
+  useEffect(() => {
+    // 重置所有生成相关状态
+    setIsGenerating(false);
+    setGenerationId(null);
+    setProgress({ current: 0, total: 0, message: "" });
+    setCompletedTabs(new Set());
+    setFailedTabs(new Map());
+    setRegeneratingTabs(new Set());
+  }, [note.id]);
+
   // 解析全文总结JSON
   const parseFullSummary = useCallback((content: string | null): FullSummaryData | null => {
     if (!content) return null;
