@@ -350,8 +350,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 - **术语1**：解释
 - **术语2**：解释
 
----
-
 视频字幕内容：`;
 
       // 更新全局状态
@@ -565,8 +563,6 @@ Detailed description of this highlight
 - **Term 1**: Explanation
 - **Term 2**: Explanation
 
----
-
 Video subtitles content:`;
     } else {
       // 中文提示词
@@ -594,8 +590,6 @@ Video subtitles content:`;
 # 关键术语
 - **术语1**：解释
 - **术语2**：解释
-
----
 
 视频字幕内容：`;
     }
