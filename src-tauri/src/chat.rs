@@ -41,26 +41,21 @@ pub async fn chat_stream(
         .map_err(|e| e.to_string())?
         .ok_or("AI config not found")?;
 
-    // Get note for RAG context if needed
-    let rag_context = if request.use_rag {
-        if let Some(ref note) = db.get_note_by_id(request.note_id)
-            .map_err(|e| e.to_string())?
-        {
-            if let Some(ref subtitle_path) = note.subtitle_path {
-                Some(rag::get_rag_context(
-                    subtitle_path,
-                    request.note_id,
-                    &request.messages.last().map(|m| m.content.clone()).unwrap_or_default(),
-                ).await.unwrap_or_default())
-            } else {
-                None
-            }
+    // Get note info (for RAG) - only need subtitle_path, not the full RAG context
+    let subtitle_path = if request.use_rag {
+        let note_result = db.get_note_by_id(request.note_id);
+        let note = note_result.map_err(|e| e.to_string())?;
+        if let Some(ref note) = note {
+            note.subtitle_path.clone()
         } else {
             None
         }
     } else {
         None
     };
+
+    // Get query for RAG
+    let rag_query = request.messages.last().map(|m| m.content.clone()).unwrap_or_default();
 
     // Convert messages to ai_pool format
     let pool_messages: Vec<crate::ai_pool::ChatMessage> = request.messages
@@ -88,8 +83,34 @@ pub async fn chat_stream(
         images: pool_images,
     };
 
-    // Spawn async task for streaming
-    tokio::spawn(async move {
+    // Spawn async task for streaming (RAG will be done inside the task)
+    let note_id_for_rag = request.note_id;
+    let use_rag = request.use_rag;
+    let request_id_for_abort = request_id.clone();
+
+    // 注册 abort_flag（需要在 spawn 之前，这样 RAG 才能使用）
+    let pool = get_ai_pool_manager();
+    let abort_flag = pool.register_abort_flag(request_id_for_abort.clone()).await;
+
+    // Spawn the task and get its handle
+    let join_handle = tokio::spawn(async move {
+        // Get RAG context inside the spawned task (so it doesn't block chat_stream return)
+        let rag_context = if use_rag {
+            if let Some(ref path) = subtitle_path {
+                let context = rag::get_rag_context(
+                    path,
+                    note_id_for_rag,
+                    &rag_query,
+                    Some(&abort_flag), // 传入 abort_flag
+                ).await.unwrap_or_default();
+                Some(context)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let result = execute_streaming_chat(stream_req, rag_context).await;
 
         // Send completion event if not already sent by execute_streaming_chat
@@ -101,6 +122,9 @@ pub async fn chat_stream(
             let _ = app.emit(&event_name, done_event);
         }
     });
+
+    // Register the abort handle for cancellation
+    pool.register_abort_handle(request_id_for_abort, join_handle.abort_handle()).await;
 
     Ok(request_id)
 }

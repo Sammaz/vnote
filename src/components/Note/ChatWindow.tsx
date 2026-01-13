@@ -84,6 +84,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
+  const [currentStreamingMessageId, setCurrentStreamingMessageId] = useState<string | null>(null);
   const [showQuestionPopover, setShowQuestionPopover] = useState(false);
   const [popoverPosition, setPopoverPosition] = useState({ x: 0, y: 0 });
 
@@ -94,6 +95,13 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
   const popoutRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const unlistenRef = useRef<UnlistenFn | null>(null);
+  // 使用 ref 来跟踪 isStreaming，避免闭包捕获旧值
+  const isStreamingRef = useRef(false);
+  // 同步 isStreaming 到 ref
+  useEffect(() => {
+    isStreamingRef.current = isStreaming;
+  }, [isStreaming]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -297,17 +305,72 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
 
   // 停止生成
   const handleStopGeneration = async () => {
-    if (currentRequestId) {
+    console.log("[handleStopGeneration] Called, currentRequestId:", currentRequestId, "isStreaming:", isStreaming);
+
+    // 保存当前 ID 到局部变量（避免闭包问题）
+    const requestIdToAbort = currentRequestId;
+    const messageIdToCheck = currentStreamingMessageId;
+
+    // 立即重置所有前端状态（无论是否成功中止）
+    // 取消事件监听
+    if (unlistenRef.current) {
+      console.log("[handleStopGeneration] Unlistening events");
+      unlistenRef.current();
+      unlistenRef.current = null;
+    }
+
+    // 如果当前生成的消息是空的或很少内容，显示"已取消"提示
+    if (messageIdToCheck) {
+      setMessages((prev) => {
+        let updated = false;
+        const newMessages = prev.map((msg) => {
+          if (msg.id === messageIdToCheck) {
+            updated = true;
+            // 如果内容为空或很短，显示取消提示；否则保留已有内容
+            if (msg.content === "" || msg.content.length < 10) {
+              return { ...msg, content: "_已取消_" };
+            }
+          }
+          return msg;
+        });
+        console.log("[handleStopGeneration] Updated cancel message:", updated);
+        return newMessages;
+      });
+    }
+
+    // 重置状态
+    setIsStreaming(false);
+    setCurrentRequestId(null);
+    setCurrentStreamingMessageId(null);
+
+    console.log("[handleStopGeneration] State reset complete");
+
+    // 然后异步调用中止 API（不阻塞 UI 更新）
+    if (requestIdToAbort) {
       try {
-        await invoke("abort_chat", { requestId: currentRequestId });
+        console.log("[handleStopGeneration] Calling abort_chat with:", requestIdToAbort);
+        await invoke("abort_chat", { requestId: requestIdToAbort });
+        console.log("[handleStopGeneration] Abort successful");
       } catch (error) {
-        console.error("Failed to abort chat:", error);
+        console.error("[handleStopGeneration] Failed to abort chat:", error);
       }
+    } else {
+      console.log("[handleStopGeneration] No requestId to abort, but state was reset");
     }
   };
 
   const handleSend = async () => {
-    if ((!input.trim() && uploadedImages.length === 0) || isStreaming) return;
+    console.log("[handleSend] Called. input empty?", !input.trim(), "no images?", uploadedImages.length === 0, "isStreaming (state):", isStreaming, "isStreaming (ref):", isStreamingRef.current);
+
+    if ((!input.trim() && uploadedImages.length === 0)) return;
+
+    // 使用 ref 检查是否正在流式传输（避免闭包捕获旧值）
+    if (isStreamingRef.current) {
+      console.log("[handleSend] Already streaming, returning early");
+      return;
+    }
+
+    console.log("[handleSend] Proceeding with request");
 
     // 检查是否选择了模型
     if (!modelId) {
@@ -359,18 +422,20 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
     ]);
 
     setIsStreaming(true);
+    setCurrentStreamingMessageId(assistantId);
+    console.log("[handleSend] Starting stream, assistantId:", assistantId);
 
     try {
-      // 构建消息历史（不包括刚添加的空 assistant 消息）
-      const chatMessages = messages
-        .filter((m) => m.id !== "1") // 排除初始欢迎消息
-        .map((m) => ({
+      // 构建消息历史（使用函数式更新获取最新状态）
+      const chatMessages = [
+        // 添加历史消息（不包括初始欢迎消息）
+        ...messages.filter((m) => m.id !== "1").map((m) => ({
           role: m.role,
           content: m.content,
-        }));
-
-      // 添加当前用户消息
-      chatMessages.push({ role: "user", content: userContent });
+        })),
+        // 添加当前用户消息
+        { role: "user", content: userContent },
+      ];
 
       const request: ChatRequest = {
         note_id: noteId,
@@ -383,6 +448,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
       // 调用流式聊天 API
       const requestId = await invoke<string>("chat_stream", { request });
       setCurrentRequestId(requestId);
+      console.log("[handleSend] chat_stream returned requestId:", requestId);
 
       // 监听流式事件
       const unlisten: UnlistenFn = await listen<StreamEvent>(
@@ -401,8 +467,10 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
             );
           } else if (data.type === "Done") {
             unlisten();
+            unlistenRef.current = null;
             setIsStreaming(false);
             setCurrentRequestId(null);
+            setCurrentStreamingMessageId(null);
 
             if (!data.success && data.error) {
               // 显示错误
@@ -417,6 +485,8 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
           }
         }
       );
+      // 保存 unlisten 函数到 ref，以便停止时调用
+      unlistenRef.current = unlisten;
     } catch (error) {
       console.error("Chat error:", error);
       setMessages((prev) =>
@@ -428,6 +498,8 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
       );
       setIsStreaming(false);
       setCurrentRequestId(null);
+      setCurrentStreamingMessageId(null);
+      unlistenRef.current = null;
     }
   };
 
@@ -600,7 +672,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
                   : "bg-blue-500 text-white rounded-tr-sm"
               )}
             >
-              {message.role === "assistant" && message.content === "" && isStreaming ? (
+              {message.role === "assistant" && message.content === "" && isStreaming && message.id === currentStreamingMessageId ? (
                 <div className="flex items-center gap-1 py-1">
                   <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
                   <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]"></span>

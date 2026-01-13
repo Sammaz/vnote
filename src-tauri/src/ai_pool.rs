@@ -15,8 +15,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::{Mutex, Semaphore};
-use tokio::task::JoinHandle;
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::task::AbortHandle;
 
 // ============================================================================
 // 全局单例
@@ -103,6 +103,31 @@ impl ConfigConcurrencyController {
         self.semaphore.clone()
     }
 
+    /// 获取槽位（支持中止检查）
+    /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
+    async fn acquire_with_abort(&self, abort_flag: &Arc<AtomicBool>) -> Result<OwnedSemaphorePermit, &'static str> {
+        self.waiting_count.fetch_add(1, Ordering::Relaxed);
+
+        loop {
+            // 检查是否被中止
+            if abort_flag.load(Ordering::Relaxed) {
+                self.waiting_count.fetch_sub(1, Ordering::Relaxed);
+                return Err("请求已取消");
+            }
+
+            // 尝试非阻塞获取许可
+            if let Ok(permit) = self.semaphore.clone().try_acquire_owned() {
+                self.waiting_count.fetch_sub(1, Ordering::Relaxed);
+                self.active_count.fetch_add(1, Ordering::Relaxed);
+                // 返回 OwnedSemaphorePermit，调用者需要持有它直到请求完成
+                return Ok(permit);
+            }
+
+            // 等待一小段时间再重试（定期检查 abort_flag）
+            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+        }
+    }
+
     /// 释放槽位
     fn release(&self) {
         self.active_count.fetch_sub(1, Ordering::Relaxed);
@@ -130,8 +155,8 @@ pub struct AiPoolManager {
     controllers: Mutex<HashMap<i64, Arc<ConfigConcurrencyController>>>,
     /// 所有中止标志：request_id -> abort_flag
     abort_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
-    /// 运行中的任务句柄：request_id -> JoinHandle
-    running_tasks: Mutex<HashMap<String, JoinHandle<()>>>,
+    /// 运行中的任务中止句柄：request_id -> AbortHandle
+    abort_handles: Mutex<HashMap<String, AbortHandle>>,
 }
 
 impl AiPoolManager {
@@ -141,7 +166,7 @@ impl AiPoolManager {
             http_client: OnceLock::new(),
             controllers: Mutex::new(HashMap::new()),
             abort_flags: Mutex::new(HashMap::new()),
-            running_tasks: Mutex::new(HashMap::new()),
+            abort_handles: Mutex::new(HashMap::new()),
         }
     }
 
@@ -194,11 +219,25 @@ impl AiPoolManager {
             .clone()
     }
 
+    /// 注册中止句柄
+    pub async fn register_abort_handle(&self, request_id: String, handle: AbortHandle) {
+        let mut handles = self.abort_handles.lock().await;
+        handles.insert(request_id, handle);
+    }
+
     /// 取消请求
     pub async fn abort_request(&self, request_id: &str) -> Result<(), String> {
+        // 设置中止标志
         let flags = self.abort_flags.lock().await;
         if let Some(flag) = flags.get(request_id) {
             flag.store(true, Ordering::Relaxed);
+        }
+        drop(flags);
+
+        // 调用 AbortHandle 来真正中断任务
+        let handles = self.abort_handles.lock().await;
+        if let Some(handle) = handles.get(request_id) {
+            handle.abort();
             Ok(())
         } else {
             Err("请求不存在".to_string())
@@ -210,9 +249,9 @@ impl AiPoolManager {
         let mut flags = self.abort_flags.lock().await;
         flags.remove(request_id);
 
-        // 同时清理任务句柄
-        let mut tasks = self.running_tasks.lock().await;
-        tasks.remove(request_id);
+        // 同时清理中止句柄
+        let mut handles = self.abort_handles.lock().await;
+        handles.remove(request_id);
     }
 
     /// 获取状态（预留用于监控）
@@ -261,16 +300,27 @@ pub async fn execute_streaming_chat(
         .ensure_controller(req.config.id, req.config.concurrent_limit)
         .await;
 
-    // 获取许可（FIFO排队）
-    let _permit = controller.acquire().await;
-
     // 保存app和event_name的克隆用于后续发送事件
     let app = req.app.clone();
     let event_name = req.event_name.clone();
 
-    // 检查中止
+    // 获取许可（FIFO排队，支持中止）
+    // permit 会被持有直到函数结束，确保信号量在整个请求期间被占用
+    let _permit = match controller.acquire_with_abort(&abort_flag).await {
+        Ok(p) => p,
+        Err(_) => {
+            pool.cleanup_abort_flag(&request_id).await;
+            let _ = app.emit(&event_name, StreamEvent::Done {
+                success: false,
+                error: Some("请求已取消".to_string()),
+            });
+            return Err("请求已取消".to_string());
+        }
+    };
+
+    // 再次检查中止（在获取许可后）
     if abort_flag.load(Ordering::Relaxed) {
-        controller.release();
+        // permit 会在 drop 时自动释放
         pool.cleanup_abort_flag(&request_id).await;
         let _ = app.emit(&event_name, StreamEvent::Done {
             success: false,
@@ -280,6 +330,7 @@ pub async fn execute_streaming_chat(
     }
 
     // 执行实际的API调用
+    // permit 在此作用域内被持有，确保信号量不会被释放
     let result = execute_streaming_chat_impl(pool, req, rag_context, abort_flag).await;
 
     // 发送完成事件
@@ -296,7 +347,7 @@ pub async fn execute_streaming_chat(
     let _ = app.emit(&event_name, done_event);
 
     // 清理
-    controller.release();
+    // permit 在这里 drop，自动释放信号量
     pool.cleanup_abort_flag(&request_id).await;
 
     result

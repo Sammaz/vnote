@@ -4,7 +4,8 @@ use crate::DATABASE;
 use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex;
 
 static EMBEDDING_CLIENT: OnceLock<Client> = OnceLock::new();
@@ -31,26 +32,42 @@ const RERANK_TOP_K: usize = 5;    // Final results after reranking
 const EMBEDDING_BATCH_SIZE: usize = 50;
 
 /// Get RAG context for a query
+/// abort_flag: 可选的中止标志，如果设置则会在长时间操作时检查是否被中止
 pub async fn get_rag_context(
     subtitle_path: &str,
     note_id: i64,
     query: &str,
+    abort_flag: Option<&Arc<AtomicBool>>,
 ) -> Result<String, String> {
+    // 在开始时检查是否被中止
+    if let Some(flag) = abort_flag {
+        if flag.load(Ordering::Relaxed) {
+            return Err("请求已取消".to_string());
+        }
+    }
+
     let db = DATABASE.get().ok_or("Database not initialized")?;
 
-    // Get default embedding config
+    // Check if subtitle file exists (快速检查，不持有锁太久)
+    if !std::path::Path::new(subtitle_path).exists() {
+        return Err("Subtitle file not found".to_string());
+    }
+
+    // Ensure subtitles are indexed (这个函数内部会获取 embedding config)
+    ensure_indexed_with_config(subtitle_path, note_id, abort_flag).await?;
+
+    // Get embedding config for query
     let embedding_config = db
         .get_default_embedding_config()
         .map_err(|e| e.to_string())?
         .ok_or("Embedding 模型未配置，请在设置中配置 Embedding 模型并设为默认")?;
 
-    // Check if subtitle file exists
-    if !std::path::Path::new(subtitle_path).exists() {
-        return Err("Subtitle file not found".to_string());
+    // 再次检查是否被中止
+    if let Some(flag) = abort_flag {
+        if flag.load(Ordering::Relaxed) {
+            return Err("请求已取消".to_string());
+        }
     }
-
-    // Ensure subtitles are indexed
-    ensure_indexed(&embedding_config, subtitle_path, note_id).await?;
 
     // Generate query embedding
     let query_embedding = generate_embedding(&embedding_config, query).await?;
@@ -83,31 +100,151 @@ pub async fn get_rag_context(
     Ok(context)
 }
 
+/// Ensure subtitles are indexed for a note (获取 embedding config 并检查 abort)
+/// 这个函数会在获取数据库锁之前检查 abort_flag，避免死锁
+async fn ensure_indexed_with_config(
+    subtitle_path: &str,
+    note_id: i64,
+    abort_flag: Option<&Arc<AtomicBool>>,
+) -> Result<String, String> {
+    // 在获取数据库锁之前检查 abort_flag
+    if let Some(flag) = abort_flag {
+        if flag.load(Ordering::Relaxed) {
+            return Err("请求已取消".to_string());
+        }
+    }
+
+    // 获取 embedding config（可能持有数据库锁）
+    let db = DATABASE.get().ok_or("Database not initialized")?;
+    let embedding_config = db
+        .get_default_embedding_config()
+        .map_err(|e| e.to_string())?
+        .ok_or("Embedding 模型未配置，请在设置中配置 Embedding 模型并设为默认")?;
+
+    // 再次检查 abort_flag（在持有锁的时候获取 config，需要尽快释放）
+    if let Some(flag) = abort_flag {
+        if flag.load(Ordering::Relaxed) {
+            return Err("请求已取消".to_string());
+        }
+    }
+
+    // 调用实际的索引函数
+    ensure_indexed(&embedding_config, subtitle_path, note_id, abort_flag).await?;
+
+    // 返回一个空字符串（调用者可能不使用）
+    Ok(String::new())
+}
+
 /// Ensure subtitles are indexed for a note
 async fn ensure_indexed(
     embedding_config: &EmbeddingConfig,
     subtitle_path: &str,
     note_id: i64,
+    abort_flag: Option<&Arc<AtomicBool>>,
 ) -> Result<(), String> {
-    // Check if already indexing
+    // Check if already indexing - 使用超时机制防止死锁
     {
-        let mut locks = get_indexing_locks().lock().await;
+        // 使用超时获取锁，避免无限期阻塞
+        let locks_result = tokio::time::timeout(
+            tokio::time::Duration::from_millis(100),
+            get_indexing_locks().lock()
+        ).await;
+
+        let locks = match locks_result {
+            Ok(l) => l,
+            Err(_) => {
+                clear_indexing_lock(note_id).await;
+                get_indexing_locks().lock().await
+            }
+        };
+
         if locks.get(&note_id).copied().unwrap_or(false) {
-            // Wait for indexing to complete
             drop(locks);
+
+            // 使用超时等待，避免无限期阻塞
+            let timeout_duration = tokio::time::Duration::from_secs(3); // 3秒超时
+            let start = std::time::Instant::now();
+
             loop {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-                let locks = get_indexing_locks().lock().await;
+                // 检查是否被中止
+                if let Some(flag) = abort_flag {
+                    if flag.load(Ordering::Relaxed) {
+                        return Err("请求已取消".to_string());
+                    }
+                }
+
+                // 检查超时
+                if start.elapsed() > timeout_duration {
+                    // 强制清理卡住的锁
+                    clear_indexing_lock(note_id).await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                    break;
+                }
+
+                // 短暂休眠后重试
+                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+                // 使用超时获取锁
+                let locks_result = tokio::time::timeout(
+                    tokio::time::Duration::from_millis(100),
+                    get_indexing_locks().lock()
+                ).await;
+
+                let locks = match locks_result {
+                    Ok(l) => l,
+                    Err(_) => {
+                        clear_indexing_lock(note_id).await;
+                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                        continue;
+                    }
+                };
+
                 if !locks.get(&note_id).copied().unwrap_or(false) {
                     break;
                 }
             }
-            return Ok(());
+        } else {
+            drop(locks);
         }
+
+        // Set indexing lock
+        // 使用超时获取锁，避免无限期阻塞
+        let locks_result = tokio::time::timeout(
+            tokio::time::Duration::from_millis(200),
+            get_indexing_locks().lock()
+        ).await;
+
+        let mut locks = match locks_result {
+            Ok(l) => l,
+            Err(_) => {
+                clear_indexing_lock(note_id).await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+                get_indexing_locks().lock().await
+            }
+        };
+
         locks.insert(note_id, true);
+        drop(locks);  // 立即释放锁
+
+        // 在释放锁后再次检查是否被中止
+        if let Some(flag) = abort_flag {
+            if flag.load(Ordering::Relaxed) {
+                // 清理锁
+                clear_indexing_lock(note_id).await;
+                return Err("请求已取消".to_string());
+            }
+        }
     }
 
     // Check if chunks exist
+    // 再次检查 abort_flag（在获取数据库锁之前）
+    if let Some(flag) = abort_flag {
+        if flag.load(Ordering::Relaxed) {
+            clear_indexing_lock(note_id).await;
+            return Err("请求已取消".to_string());
+        }
+    }
+
     let db = DATABASE.get().ok_or("Database not initialized")?;
     let existing_chunks = db
         .get_subtitle_chunks(note_id)
@@ -378,6 +515,28 @@ pub fn clear_subtitle_index(note_id: i64) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Clear the indexing lock for a note (call this when aborting a request)
+/// 使用带超时的锁获取，确保可以清理锁
+pub async fn clear_indexing_lock(note_id: i64) {
+    // 使用超时获取锁，避免死锁
+    let locks_result = tokio::time::timeout(
+        tokio::time::Duration::from_millis(500),
+        get_indexing_locks().lock()
+    ).await;
+
+    if let Ok(mut locks) = locks_result {
+        locks.remove(&note_id);
+    } else {
+        // 如果超时，等待一小段时间后重试
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // 再次尝试
+        let _ = get_indexing_locks().try_lock().map(|mut locks| {
+            locks.remove(&note_id);
+        });
+    }
+}
+
 /// Rerank chunks using a reranker API
 async fn rerank_chunks(
     config: &RerankerConfig,
@@ -417,10 +576,8 @@ async fn rerank_chunks(
         .map_err(|e| format!("Rerank request failed: {}", e))?;
 
     if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response.text().await.unwrap_or_default();
+        let _error_text = response.text().await.unwrap_or_default();
         // If reranker fails, fallback to original order
-        eprintln!("Reranker API error {}: {}", status, error_text);
         let mut result = chunks;
         result.truncate(top_k);
         return Ok(result);
