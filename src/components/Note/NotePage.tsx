@@ -52,23 +52,10 @@ function Resizer({ onDrag, isDragging }: ResizerProps) {
 export function NotePage() {
   const { notes, selectedNoteId, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth } = useApp();
 
-  // 当前笔记的模型ID（从笔记记录获取）
-  const [currentModelId, setCurrentModelId] = useState<number | null>(null);
-
-  // 拖拽状态
-  const [isDragging, setIsDragging] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
   // 找到当前选中的笔记
   const currentNote = notes.find((note) => note.id === selectedNoteId);
 
-  // 当笔记变化时，更新模型ID
-  useEffect(() => {
-    if (currentNote?.model_id) {
-      setCurrentModelId(currentNote.model_id);
-    }
-  }, [currentNote?.model_id]);
-
+  // 条件返回必须在所有 hooks 之前，违反此规则会导致 "Rendered fewer hooks" 错误
   if (!currentNote) {
     return (
       <div className="flex-1 flex items-center justify-center text-slate-500">
@@ -79,6 +66,20 @@ export function NotePage() {
       </div>
     );
   }
+
+  // 当前笔记的模型ID（从笔记记录获取）
+  const [currentModelId, setCurrentModelId] = useState<number | null>(null);
+
+  // 拖拽状态
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // 当笔记变化时，更新模型ID
+  useEffect(() => {
+    if (currentNote.model_id) {
+      setCurrentModelId(currentNote.model_id);
+    }
+  }, [currentNote.model_id]);
 
   // 解析建议问题
   const suggestedQuestions: string[] = currentNote.suggested_questions
