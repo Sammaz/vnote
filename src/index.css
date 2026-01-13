@@ -453,8 +453,12 @@
 
 /* 粗体和斜体 */
 .chat-markdown strong {
-  font-weight: 600;
-  color: inherit;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.dark .chat-markdown strong {
+  color: #e2e8f0;
 }
 
 .chat-markdown em {
