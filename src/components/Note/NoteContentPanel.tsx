@@ -8,16 +8,14 @@ import {
   Sparkles,
   Copy,
   Download,
-  Share2,
   Edit3,
   RefreshCw,
   CheckCircle2,
-  FolderPlus,
-  List,
   X,
   ChevronDown,
   Check,
 } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -477,6 +475,61 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     setShowPromptDialog(true);
   };
 
+  // 获取当前标签页的内容
+  const getCurrentContent = useCallback((): string | null => {
+    const tabType = TAB_TYPE_MAPPING[activeTab];
+    if (!tabType) return null;
+    return note[tabType] || null;
+  }, [activeTab, note]);
+
+  // 复制当前内容到剪贴板
+  const handleCopy = async () => {
+    const content = getCurrentContent();
+    if (!content) {
+      message.warning("暂无内容可复制");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      message.success("已复制到剪贴板");
+    } catch {
+      message.error("复制失败");
+    }
+  };
+
+  // 下载当前内容为 Markdown 文件
+  const handleDownload = async () => {
+    const content = getCurrentContent();
+    if (!content) {
+      message.warning("暂无内容可下载");
+      return;
+    }
+    try {
+      // 弹出保存文件对话框
+      const filePath = await save({
+        defaultPath: note.title,
+        filters: [
+          {
+            name: "Markdown",
+            extensions: ["md"],
+          },
+        ],
+      });
+
+      if (!filePath) {
+        // 用户取消了选择
+        return;
+      }
+
+      // 调用 Rust 端保存文件
+      await invoke("save_file_content", { path: filePath, content });
+      message.success("下载成功");
+    } catch (error) {
+      console.error("下载失败:", error);
+      message.error(`下载失败: ${error}`);
+    }
+  };
+
   // 根据配置生成动态提示词（Markdown 格式）
   const generateDynamicPrompt = useCallback((): string => {
     const isEnglish = configLanguage === "en";
@@ -666,36 +719,6 @@ Video subtitles content:`;
         </div>
       </div>
 
-      {/* 工具栏 */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border">
-        <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
-            <FolderPlus className="w-4 h-4" />
-            添加合集
-          </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
-            <List className="w-4 h-4" />
-            章节
-            <span className="ml-1 text-xs text-slate-400">(6)</span>
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1">
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
-            <Copy className="w-4 h-4" />
-            复制
-          </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
-            <Download className="w-4 h-4" />
-            下载
-          </button>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors cursor-pointer">
-            <Share2 className="w-4 h-4" />
-            分享
-          </button>
-        </div>
-      </div>
-
       {/* 次级工具栏 */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
         <div className="flex items-center gap-2">
@@ -716,13 +739,31 @@ Video subtitles content:`;
             思维导图
           </button>
         </div>
-        <button
-          onClick={openPromptDialog}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-        >
-          <RefreshCw className="w-4 h-4" />
-          重新总结
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+          >
+            <Copy className="w-4 h-4" />
+            复制
+          </button>
+          <span className="text-slate-300 dark:text-slate-600">|</span>
+          <button
+            onClick={handleDownload}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            下载
+          </button>
+          <span className="text-slate-300 dark:text-slate-600">|</span>
+          <button
+            onClick={openPromptDialog}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+          >
+            <RefreshCw className="w-4 h-4" />
+            重新总结
+          </button>
+        </div>
       </div>
 
       {/* 内容区域 */}

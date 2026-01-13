@@ -189,6 +189,13 @@ fn read_file_content(path: String) -> Result<String, String> {
         .map_err(|e| format!("Failed to read file '{}': {}", path, e))
 }
 
+/// Save content to a file
+#[tauri::command]
+fn save_file_content(path: String, content: String) -> Result<(), String> {
+    std::fs::write(&path, content)
+        .map_err(|e| format!("Failed to write file '{}': {}", path, e))
+}
+
 /// Convert TS file to MP4 using ffmpeg (fast remux, no re-encoding)
 /// Returns the path to the converted MP4 file
 #[tauri::command]
@@ -670,6 +677,7 @@ pub fn run() {
             get_setting,
             set_setting,
             read_file_content,
+            save_file_content,
             convert_ts_to_mp4,
             check_ffmpeg,
             get_video_cache_size,
