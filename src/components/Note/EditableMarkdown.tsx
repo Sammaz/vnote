@@ -1,5 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
-import MDEditor from "@uiw/react-md-editor";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import CodeMirror from "@uiw/react-codemirror";
+import { markdown as markdownLanguage } from "@codemirror/lang-markdown";
+import { languages } from "@codemirror/language-data";
+import { EditorView } from "@codemirror/view";
+import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
 import { invoke } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -94,12 +98,38 @@ export function EditableMarkdown({
   }, [content, tabType]);
 
   const [markdown, setMarkdown] = useState(displayContent);
-  const [isSaving, setIsSaving] = useState(false);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const prevIsEditMode = useRef(isEditMode);
 
   // 检测当前主题模式
   const isDarkMode = document.documentElement.classList.contains("dark");
+
+  // Markdown 扩展配置 + 自动换行
+  const extensions = useMemo(() => [
+    markdownLanguage({ codeLanguages: languages }),
+    EditorView.lineWrapping,
+  ], []);
+
+  // 退出编辑模式时自动保存
+  useEffect(() => {
+    // 当从编辑模式退出到预览模式时，保存内容
+    if (prevIsEditMode.current && !isEditMode) {
+      const saveContent = async () => {
+        try {
+          await invoke("update_note_content", {
+            noteId,
+            tabType,
+            content: markdown,
+          });
+          // 保存成功后通知父组件刷新
+          onContentUpdate?.(markdown);
+        } catch (error) {
+          console.error("保存失败:", error);
+        }
+      };
+      saveContent();
+    }
+    prevIsEditMode.current = isEditMode;
+  }, [isEditMode, noteId, tabType, markdown, onContentUpdate]);
 
   // 同步外部 content 变化（当不在编辑模式且有新内容时）
   useEffect(() => {
@@ -108,29 +138,10 @@ export function EditableMarkdown({
     }
   }, [displayContent, isEditMode, markdown]);
 
-  const handleSave = async () => {
-    setIsSaving(true);
-    setSaveError(null);
-    try {
-      await invoke("update_note_content", {
-        noteId,
-        tabType,
-        content: markdown,
-      });
-      setHasUnsavedChanges(false);
-      onContentUpdate?.(markdown);
-    } catch (error) {
-      setSaveError(`保存失败: ${error}`);
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  const handleMarkdownChange = useCallback((value: string | undefined) => {
-    const newValue = value || "";
-    setMarkdown(newValue);
-    setHasUnsavedChanges(newValue !== displayContent);
-  }, [displayContent]);
+  const handleMarkdownChange = useCallback((value: string) => {
+    setMarkdown(value);
+    // 不再实时更新父组件，只在退出时保存
+  }, []);
 
   // 加载状态
   if (isGenerating) {
@@ -153,68 +164,41 @@ export function EditableMarkdown({
     );
   }
 
-  // 编辑模式
+  // 编辑模式 - 使用 CodeMirror 6 + GitHub 主题
   if (isEditMode) {
     return (
-      <div className="h-full flex flex-col -m-6">
-        <div className="flex-1 min-h-0">
-          <MDEditor
-            value={markdown}
-            onChange={handleMarkdownChange}
-            height="100%"
-            preview="live"
-            hideToolbar={false}
-            visibleDragbar={false}
-            data-color-mode={isDarkMode ? "dark" : "light"}
-            className="!border-0 !rounded-none"
-            textareaProps={{
-              placeholder: "在此输入 Markdown 内容...",
-            }}
-          />
-        </div>
-        <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div className="flex items-center gap-3">
-            {hasUnsavedChanges && (
-              <span className="text-sm text-orange-500 flex items-center gap-1">
-                <span className="w-2 h-2 bg-orange-500 rounded-full animate-pulse" />
-                有未保存的更改
-              </span>
-            )}
-            {!hasUnsavedChanges && (
-              <span className="text-sm text-slate-500">已保存</span>
-            )}
-            {saveError && (
-              <span className="text-sm text-red-500">{saveError}</span>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                setMarkdown(displayContent);
-                setHasUnsavedChanges(false);
-                setSaveError(null);
-              }}
-              disabled={!hasUnsavedChanges}
-              className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              重置
-            </button>
-            <button
-              onClick={handleSave}
-              disabled={!hasUnsavedChanges || isSaving}
-              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 transition-colors"
-            >
-              {isSaving ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  保存中...
-                </>
-              ) : (
-                "保存更改"
-              )}
-            </button>
-          </div>
-        </div>
+      <div className="h-full">
+        <CodeMirror
+          value={markdown}
+          height="100%"
+          onChange={handleMarkdownChange}
+          extensions={extensions}
+          className="cm-editor-vnote"
+          basicSetup={{
+            lineNumbers: false,
+            highlightActiveLineGutter: false,
+            highlightSpecialChars: true,
+            foldGutter: false,
+            drawSelection: true,
+            dropCursor: true,
+            allowMultipleSelections: true,
+            indentOnInput: true,
+            bracketMatching: true,
+            closeBrackets: true,
+            autocompletion: true,
+            rectangularSelection: true,
+            crosshairCursor: true,
+            highlightActiveLine: true,
+            highlightSelectionMatches: true,
+            closeBracketsKeymap: true,
+            searchKeymap: true,
+            foldKeymap: false,
+            completionKeymap: true,
+            lintKeymap: true,
+          }}
+          theme={isDarkMode ? githubDark : githubLight}
+          placeholder="在此输入 Markdown 内容..."
+        />
       </div>
     );
   }

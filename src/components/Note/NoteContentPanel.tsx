@@ -714,7 +714,7 @@ Video subtitles content:`;
             )}
           >
             <Edit3 className="w-4 h-4" />
-            {isEditMode ? "完成" : "编辑"}
+            {isEditMode ? "预览" : "编辑"}
           </button>
           <span className="text-slate-300 dark:text-slate-600">|</span>
           <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
@@ -731,7 +731,10 @@ Video subtitles content:`;
       </div>
 
       {/* 内容区域 */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className={cn(
+        "flex-1 overflow-y-auto",
+        isEditMode ? "p-0" : "p-6"
+      )}>
         {activeTab === "summary" && (
           <EditableMarkdown
             noteId={note.id}
