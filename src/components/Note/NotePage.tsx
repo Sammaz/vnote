@@ -107,10 +107,11 @@ export function NotePage() {
     const deltaPercent = (deltaX / containerWidth) * 100;
 
     // 根据是否交换左右，调整相应的面板
+    // layoutPanelWidth 始终表示左侧面板的宽度百分比
     if (layoutSwapped) {
       // 右侧是视频面板，左侧是笔记面板
-      // 向右拖动 = 笔记面板变宽
-      const newWidth = leftWidth + deltaPercent;
+      // 向右拖动 = 笔记面板变窄（视频面板变宽）
+      const newWidth = leftWidth - deltaPercent;
       setLayoutPanelWidth(newWidth);
     } else {
       // 左侧是视频面板，右侧是笔记面板
