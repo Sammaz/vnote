@@ -4,6 +4,7 @@ import { AlertCircle, Video, Loader2 } from "lucide-react";
 import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 import { PlaybackResume } from "./PlaybackResume";
+import { useApp } from "../../context/AppContext";
 
 // 检查是否是 TS 格式
 function isTsFormat(filePath: string): boolean {
@@ -73,10 +74,12 @@ export function VideoPlayer({
   noteId,
   lastPlaybackPosition: initialLastPlaybackPosition,
 }: VideoPlayerProps) {
+  const { toolbarSettings, setCaptionsEnabled } = useApp();
+  const { captionsEnabled } = toolbarSettings;
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Plyr | null>(null);
   const assRef = useRef<any>(null);
-  const assVisibleRef = useRef<boolean>(true);
+  const assVisibleRef = useRef<boolean>(captionsEnabled);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [converting, setConverting] = useState(false);
@@ -249,6 +252,7 @@ export function VideoPlayer({
 
     // 初始化播放器的通用函数
     const initPlyr = () => {
+      console.log('[VideoPlayer] Initializing Plyr with captionsEnabled:', captionsEnabled, 'hasSubtitle:', hasSubtitle);
       const player = new Plyr(video, {
         controls: compact
           ? ["play", "progress", "current-time", "mute", "fullscreen"]
@@ -267,7 +271,7 @@ export function VideoPlayer({
             ],
         settings: ["captions", "quality", "speed"],
         speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
-        captions: { active: !!hasSubtitle, language: "zh", update: true },
+        captions: { active: captionsEnabled && !!hasSubtitle, language: "zh", update: true },
         keyboard: { focused: true, global: false },
         tooltips: { controls: true, seek: true },
         i18n: {
@@ -354,11 +358,53 @@ export function VideoPlayer({
       player.on("pause", handlePause);
       player.on("ended", handleEnded);
 
-      // ASS 字幕相关
+      // ASS 字幕相关清理函数
       const cleanupRef = {
-        captionBtn: null as Element | null,
-        handler: null as (() => void) | null,
+        assHandler: null as (() => void) | null,
+        srtHandler: null as (() => void) | null,
       };
+
+      // 监听字幕状态变化（适用于所有字幕类型）
+      const handleCaptionsChange = () => {
+        // 延迟执行以等待 Plyr 内部状态更新
+        setTimeout(() => {
+          // currentTrack: -1 表示无字幕，0+ 表示有字幕选中
+          const isCaptionsActive = player.currentTrack >= 0;
+          console.log('[VideoPlayer] Captions state changed:', isCaptionsActive, 'currentTrack:', player.currentTrack);
+          setCaptionsEnabled(isCaptionsActive);
+          assVisibleRef.current = isCaptionsActive;
+
+          // 如果是 ASS 字幕，同步更新 ASS-box 显示状态
+          if (isAssSubtitle) {
+            const videoWrapper = containerRef.current?.querySelector(".plyr__video-wrapper");
+            const assBox = videoWrapper?.querySelector(".ASS-box") as HTMLElement;
+            if (assBox) {
+              assBox.style.display = isCaptionsActive ? "" : "none";
+            }
+          }
+        }, 50);
+      };
+
+      // 监听字幕按钮点击和语言切换
+      // 使用多种方式确保捕获字幕状态变化
+      player.on("languagechange", handleCaptionsChange);
+
+      // 监听字幕按钮点击
+      const captionBtn = (player.elements as any).buttons?.captions;
+      if (captionBtn) {
+        const clickHandler = (e: Event) => {
+          e.stopPropagation();
+          // 预测下一个状态
+          const currentState = player.currentTrack !== null;
+          const nextState = !currentState;
+          console.log('[VideoPlayer] Caption button clicked, current:', currentState, 'next:', nextState);
+          setTimeout(() => {
+            handleCaptionsChange();
+          }, 100);
+        };
+        captionBtn.addEventListener("click", clickHandler);
+        cleanupRef.srtHandler = clickHandler;
+      }
 
       if (isAssSubtitle && subtitleUrl) {
         Promise.all([
@@ -426,20 +472,16 @@ export function VideoPlayer({
               resampling: "video_height",
             });
 
-            // 字幕切换按钮处理
-            const btn = plyrContainer?.querySelector('[data-plyr="captions"]');
-            if (btn) {
-              const handler = () => {
-                assVisibleRef.current = !assVisibleRef.current;
-                const assBox = videoWrapper.querySelector(".ASS-box") as HTMLElement;
-                if (assBox) {
-                  assBox.style.display = assVisibleRef.current ? "" : "none";
-                }
-              };
-              cleanupRef.captionBtn = btn;
-              cleanupRef.handler = handler;
-              btn.addEventListener("click", handler);
-            }
+            // 根据保存的字幕状态设置初始显示/隐藏
+            // ASS-box 是由 assjs 库动态创建的，需要等待创建完成
+            setTimeout(() => {
+              const assBox = videoWrapper.querySelector(".ASS-box") as HTMLElement;
+              if (assBox) {
+                assBox.style.display = captionsEnabled ? "" : "none";
+              }
+              assVisibleRef.current = captionsEnabled;
+              console.log('[VideoPlayer] ASS box initial state:', captionsEnabled);
+            }, 0);
           })
           .catch((err) => {
             console.error("Failed to load ASS subtitle:", err);
@@ -458,8 +500,11 @@ export function VideoPlayer({
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current);
         }
-        if (cleanupRef.captionBtn && cleanupRef.handler) {
-          cleanupRef.captionBtn.removeEventListener("click", cleanupRef.handler);
+        // 移除字幕状态变化监听器
+        player.off("languagechange", handleCaptionsChange);
+        const captionBtn = (player.elements as any).buttons?.captions;
+        if (captionBtn && cleanupRef.srtHandler) {
+          captionBtn.removeEventListener("click", cleanupRef.srtHandler);
         }
         player.off("timeupdate", handleTimeUpdate);
         player.off("pause", handlePause);
@@ -482,6 +527,8 @@ export function VideoPlayer({
     let subtitleObjectUrl: string | null = null;
 
     const setupPlayer = async () => {
+      console.log('[VideoPlayer] setupPlayer: captionsEnabled from context =', captionsEnabled);
+
       if (isSrtSubtitle && subtitleUrl) {
         try {
           const srtContent = await invoke<string>("read_file_content", { path: subtitleUrl });
@@ -495,7 +542,8 @@ export function VideoPlayer({
           track.label = "中文";
           track.srclang = "zh";
           track.src = subtitleObjectUrl;
-          track.default = true;
+          // 根据全局字幕状态设置 default
+          track.default = captionsEnabled;
           video.appendChild(track);
         } catch (err) {
           console.error("Failed to load SRT subtitle:", err);
@@ -508,7 +556,8 @@ export function VideoPlayer({
         track.label = "中文";
         track.srclang = "zh";
         track.src = convertFileSrc(subtitleUrl);
-        track.default = true;
+        // 根据全局字幕状态设置 default
+        track.default = captionsEnabled;
         video.appendChild(track);
       }
 
@@ -518,7 +567,8 @@ export function VideoPlayer({
         track.label = "中文";
         track.srclang = "zh";
         track.src = "data:text/vtt;base64,V0VCVlRUCgo=";
-        track.default = true;
+        // ASS 字幕也根据全局状态设置
+        track.default = captionsEnabled;
         video.appendChild(track);
       }
 
@@ -552,7 +602,28 @@ export function VideoPlayer({
         playerRef.current = null;
       }
     };
-  }, [actualVideoUrl, subtitleUrl, compact, autoPlay, converting]);
+  }, [actualVideoUrl, subtitleUrl, compact, autoPlay, converting, setCaptionsEnabled]);
+
+  // 当字幕状态变化时，更新播放器的字幕显示状态
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player) return;
+
+    // 更新 SRT/VTT 字幕状态
+    const textTracks = (containerRef.current?.querySelector("video") as HTMLVideoElement)?.textTracks;
+    if (textTracks && textTracks.length > 0) {
+      for (let i = 0; i < textTracks.length; i++) {
+        textTracks[i].mode = captionsEnabled ? "showing" : "hidden";
+      }
+    }
+
+    // 更新 ASS 字幕状态
+    const assBox = containerRef.current?.querySelector(".ASS-box") as HTMLElement;
+    if (assBox) {
+      assBox.style.display = captionsEnabled ? "" : "none";
+    }
+    assVisibleRef.current = captionsEnabled;
+  }, [captionsEnabled]);
 
   // 错误状态
   if (error) {
