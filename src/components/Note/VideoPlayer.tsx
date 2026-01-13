@@ -27,6 +27,35 @@ function getVideoMimeType(filePath: string): string {
   return VIDEO_MIME_TYPES[ext] || "video/mp4";
 }
 
+// 将 SRT 内容转换为 WebVTT
+function convertSrtToVtt(content: string): string {
+  const normalized = content
+    .replace(/^\uFEFF/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+
+  const lines = normalized.split("\n");
+  const output: string[] = ["WEBVTT", ""];
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\d+$/.test(trimmed)) {
+      continue;
+    }
+
+    if (line.includes("-->")) {
+      output.push(
+        line.replace(/(\d{2}:\d{2}:\d{2})[,.](\d{3})/g, "$1.$2")
+      );
+      continue;
+    }
+
+    output.push(line);
+  }
+
+  return output.join("\n");
+}
+
 interface VideoPlayerProps {
   videoUrl: string;
   subtitleUrl?: string | null;
@@ -199,8 +228,9 @@ export function VideoPlayer({
 
     // 判断字幕类型
     const isAssSubtitle = subtitleUrl && /\.(ass|ssa)$/i.test(subtitleUrl);
-    const isVttSubtitle = subtitleUrl && /\.(vtt|srt)$/i.test(subtitleUrl);
-    const hasSubtitle = isAssSubtitle || isVttSubtitle;
+    const isSrtSubtitle = subtitleUrl && /\.srt$/i.test(subtitleUrl);
+    const isVttSubtitle = subtitleUrl && /\.(vtt|webvtt)$/i.test(subtitleUrl);
+    const hasSubtitle = isAssSubtitle || isSrtSubtitle || isVttSubtitle;
 
     // 创建 video 元素
     const video = document.createElement("video");
@@ -449,25 +479,53 @@ export function VideoPlayer({
     source.type = getVideoMimeType(actualVideoUrl);
     video.appendChild(source);
 
-    if (isVttSubtitle && subtitleUrl) {
-      const track = document.createElement("track");
-      track.kind = "captions";
-      track.label = "中文";
-      track.srclang = "zh";
-      track.src = convertFileSrc(subtitleUrl);
-      track.default = true;
-      video.appendChild(track);
-    }
+    let subtitleObjectUrl: string | null = null;
 
-    if (isAssSubtitle) {
-      const track = document.createElement("track");
-      track.kind = "captions";
-      track.label = "中文";
-      track.srclang = "zh";
-      track.src = "data:text/vtt;base64,V0VCVlRUCgo=";
-      track.default = true;
-      video.appendChild(track);
-    }
+    const setupPlayer = async () => {
+      if (isSrtSubtitle && subtitleUrl) {
+        try {
+          const srtContent = await invoke<string>("read_file_content", { path: subtitleUrl });
+          if (!isMounted) return;
+          const vttContent = convertSrtToVtt(srtContent);
+          subtitleObjectUrl = URL.createObjectURL(
+            new Blob([vttContent], { type: "text/vtt" })
+          );
+          const track = document.createElement("track");
+          track.kind = "captions";
+          track.label = "中文";
+          track.srclang = "zh";
+          track.src = subtitleObjectUrl;
+          track.default = true;
+          video.appendChild(track);
+        } catch (err) {
+          console.error("Failed to load SRT subtitle:", err);
+        }
+      }
+
+      if (isVttSubtitle && subtitleUrl) {
+        const track = document.createElement("track");
+        track.kind = "captions";
+        track.label = "中文";
+        track.srclang = "zh";
+        track.src = convertFileSrc(subtitleUrl);
+        track.default = true;
+        video.appendChild(track);
+      }
+
+      if (isAssSubtitle) {
+        const track = document.createElement("track");
+        track.kind = "captions";
+        track.label = "中文";
+        track.srclang = "zh";
+        track.src = "data:text/vtt;base64,V0VCVlRUCgo=";
+        track.default = true;
+        video.appendChild(track);
+      }
+
+      if (!isMounted) return;
+      const player = initPlyr();
+      cleanupPlayerEvents = setupPlayerEvents(player);
+    };
 
     video.addEventListener("loadedmetadata", () => {
       setLoading(false);
@@ -479,11 +537,13 @@ export function VideoPlayer({
       setLoading(false);
     });
 
-    const player = initPlyr();
-    cleanupPlayerEvents = setupPlayerEvents(player);
+    setupPlayer();
 
     return () => {
       isMounted = false;
+      if (subtitleObjectUrl) {
+        URL.revokeObjectURL(subtitleObjectUrl);
+      }
       if (cleanupPlayerEvents) {
         cleanupPlayerEvents();
       }
