@@ -23,6 +23,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
+import { message } from "../ui/Message";
 
 type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom";
 
@@ -351,7 +352,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 开始生成笔记（一键生成全部）
   const handleGenerate = async () => {
     if (!note.model_id) {
-      alert("请先选择AI模型");
+      message.warning("请先选择AI模型");
       return;
     }
 
@@ -408,7 +409,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setIsGenerating(false);
       setGenerationId(null);
       setRegeneratingTabs(new Set());
-      alert(`生成失败: ${error}`);
+      message.error(`生成失败: ${error}`);
     }
   };
 
@@ -556,14 +557,14 @@ Video subtitles content:`;
   // 执行生成
   const handleCustomGenerate = async () => {
     if (!selectedModelId) {
-      alert("请选择AI模型");
+      message.warning("请选择AI模型");
       return;
     }
 
     // 检查是否已经在生成中
     const currentState = getNoteGenerationState(note.id);
     if (currentState.isGenerating) {
-      alert("该笔记正在生成中，请稍后再试");
+      message.warning("该笔记正在生成中，请稍后再试");
       return;
     }
 
@@ -572,7 +573,7 @@ Video subtitles content:`;
     if (dialogTab === "custom") {
       finalPrompt = customPrompt;
       if (!finalPrompt) {
-        alert("请输入自定义提示词");
+        message.warning("请输入自定义提示词");
         return;
       }
     } else {
@@ -629,7 +630,7 @@ Video subtitles content:`;
       setIsGenerating(false);
       setGenerationId(null);
       setRegeneratingTabs(new Set());
-      alert(`生成失败: ${error}`);
+      message.error(`生成失败: ${error}`);
     }
   };
 
