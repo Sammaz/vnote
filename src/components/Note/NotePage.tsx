@@ -1,15 +1,63 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { VideoPlayer } from "./VideoPlayer";
 import { ChatWindow } from "./ChatWindow";
 import { NoteContentPanel } from "./NoteContentPanel";
 import { VideoToolbar } from "./VideoToolbar";
 import { useApp } from "../../context/AppContext";
 
+// 拖拽分隔条组件
+interface ResizerProps {
+  onDrag: (deltaX: number) => void;
+  isDragging: boolean;
+}
+
+function Resizer({ onDrag, isDragging }: ResizerProps) {
+  const resizerRef = useRef<HTMLDivElement>(null);
+  const startXRef = useRef<number>(0);
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    startXRef.current = e.clientX;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = e.clientX - startXRef.current;
+      onDrag(deltaX);
+    };
+
+    const handleMouseUp = () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+  }, [onDrag]);
+
+  return (
+    <div className="flex flex-col items-center justify-center flex-shrink-0" style={{ width: "16px" }}>
+      <div
+        ref={resizerRef}
+        onMouseDown={handleMouseDown}
+        className={`
+          w-1 h-8 rounded-full flex-shrink-0
+          hover:bg-blue-500 dark:hover:bg-blue-400
+          transition-all duration-200 cursor-col-resize
+          ${isDragging ? "bg-blue-500 dark:bg-blue-400 w-1.5" : "bg-slate-300 dark:bg-slate-600 hover:w-1.5"}
+        `}
+      />
+    </div>
+  );
+}
+
 export function NotePage() {
-  const { notes, selectedNoteId, toolbarSettings, aiConfigs, promptConfigs, refreshNotes } = useApp();
+  const { notes, selectedNoteId, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth } = useApp();
 
   // 当前笔记的模型ID（从笔记记录获取）
   const [currentModelId, setCurrentModelId] = useState<number | null>(null);
+
+  // 拖拽状态
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // 找到当前选中的笔记
   const currentNote = notes.find((note) => note.id === selectedNoteId);
@@ -38,24 +86,54 @@ export function NotePage() {
     : [];
 
   // 从全局设置获取工具栏状态
-  const { videoVisible, autoPlay, layoutSwapped, layoutRatio } = toolbarSettings;
+  const { videoVisible, autoPlay, layoutSwapped, layoutPanelWidth } = toolbarSettings;
 
-  // 计算实际的宽度比例
-  // layoutRatio: "4:6" 或 "6:4" 决定基础比例
+  // 计算实际的宽度百分比
+  // layoutPanelWidth: 左侧面板的宽度百分比 (20-80)
   // layoutSwapped: 是否交换左右位置
   const getWidths = () => {
-    const isWide = layoutRatio === "6:4";
-    // 视频面板的基础宽度
-    const videoWidth = isWide ? "w-[60%]" : "w-[40%]";
-    const noteWidth = isWide ? "w-[40%]" : "w-[60%]";
-    return { videoWidth, noteWidth };
+    const leftWidth = layoutPanelWidth;
+    const rightWidth = 100 - leftWidth;
+    return { leftWidth, rightWidth };
   };
 
-  const { videoWidth, noteWidth } = getWidths();
+  const { leftWidth, rightWidth } = getWidths();
+
+  // 处理拖拽调整宽度
+  const handleResize = useCallback((deltaX: number) => {
+    if (!containerRef.current) return;
+
+    const containerWidth = containerRef.current.offsetWidth;
+    const deltaPercent = (deltaX / containerWidth) * 100;
+
+    // 根据是否交换左右，调整相应的面板
+    if (layoutSwapped) {
+      // 右侧是视频面板，左侧是笔记面板
+      // 向右拖动 = 笔记面板变宽
+      const newWidth = leftWidth + deltaPercent;
+      setLayoutPanelWidth(newWidth);
+    } else {
+      // 左侧是视频面板，右侧是笔记面板
+      // 向右拖动 = 视频面板变宽
+      const newWidth = leftWidth + deltaPercent;
+      setLayoutPanelWidth(newWidth);
+    }
+
+    setIsDragging(true);
+  }, [layoutSwapped, leftWidth, setLayoutPanelWidth]);
+
+  // 拖拽结束
+  useEffect(() => {
+    const handleMouseUp = () => setIsDragging(false);
+    if (isDragging) {
+      document.addEventListener("mouseup", handleMouseUp);
+      return () => document.removeEventListener("mouseup", handleMouseUp);
+    }
+  }, [isDragging]);
 
   // 视频+聊天面板
   const videoPanel = (
-    <div className={`${videoWidth} flex flex-col gap-4 flex-shrink-0`}>
+    <div className="flex flex-col gap-4 flex-shrink-0" style={{ width: `${leftWidth}%` }}>
       {/* 工具栏 */}
       <VideoToolbar
         currentModelId={currentModelId}
@@ -96,7 +174,7 @@ export function NotePage() {
 
   // 笔记内容面板
   const notePanel = (
-    <div className={`${noteWidth} min-w-0`}>
+    <div className="min-w-0" style={{ width: `${rightWidth}%` }}>
       <NoteContentPanel
         note={currentNote}
         onGenerationComplete={refreshNotes}
@@ -108,15 +186,17 @@ export function NotePage() {
   );
 
   return (
-    <div className="flex-1 flex gap-4 p-4 overflow-hidden">
+    <div ref={containerRef} className="flex-1 flex gap-0 p-4 overflow-hidden">
       {layoutSwapped ? (
         <>
           {notePanel}
+          <Resizer onDrag={handleResize} isDragging={isDragging} />
           {videoPanel}
         </>
       ) : (
         <>
           {videoPanel}
+          <Resizer onDrag={handleResize} isDragging={isDragging} />
           {notePanel}
         </>
       )}

@@ -177,6 +177,7 @@
 
 .plyr-container .plyr__video-wrapper {
   background: #000;
+  cursor: pointer;
 }
 
 /* 确保 Plyr 控件可见 */
@@ -186,6 +187,40 @@
 
 .plyr-container .plyr--video .plyr__controls {
   background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+}
+
+/* 进度条样式 - 添加小手光标 */
+.plyr-container .plyr__progress {
+  cursor: pointer;
+}
+
+.plyr-container .plyr__progress input[type="range"] {
+  cursor: pointer;
+}
+
+.plyr-container .plyr__progress__buffer {
+  cursor: pointer;
+}
+
+.plyr-container .plyr__progress__buffer,
+.plyr-container .plyr__progress__buffer::-webkit-slider-thumb,
+.plyr-container .plyr__progress__buffer::-webkit-slider-runnable-track {
+  cursor: pointer;
+}
+
+/* 视频区域点击播放 */
+.plyr-container .plyr__video-wrapper {
+  cursor: pointer;
+}
+
+/* 播放按钮区域 */
+.plyr-container .plyr__controls__item {
+  cursor: pointer;
+}
+
+/* 大播放按钮 */
+.plyr-container .plyr__play-large {
+  cursor: pointer;
 }
 
 /* 暗色模式下的 Plyr 样式 */

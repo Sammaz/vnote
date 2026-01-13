@@ -67,6 +67,7 @@ interface AppContextType {
   setAutoPlay: (autoPlay: boolean) => void;
   setLayoutSwapped: (swapped: boolean) => void;
   setLayoutRatio: (ratio: LayoutRatio) => void;
+  setLayoutPanelWidth: (width: number) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -109,16 +110,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     autoPlay: false,
     layoutSwapped: false,
     layoutRatio: "4:6",
+    layoutPanelWidth: 40, // 默认左侧占 40%
   });
 
   // 加载工具栏设置
   const loadToolbarSettings = useCallback(async () => {
     try {
-      const [videoVisible, autoPlay, layoutSwapped, layoutRatio] = await Promise.all([
+      const [videoVisible, autoPlay, layoutSwapped, layoutRatio, layoutPanelWidth] = await Promise.all([
         invoke<string | null>("get_setting", { key: "toolbar_video_visible" }),
         invoke<string | null>("get_setting", { key: "toolbar_auto_play" }),
         invoke<string | null>("get_setting", { key: "toolbar_layout_swapped" }),
         invoke<string | null>("get_setting", { key: "toolbar_layout_ratio" }),
+        invoke<string | null>("get_setting", { key: "toolbar_layout_panel_width" }),
       ]);
 
       setToolbarSettings({
@@ -126,6 +129,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         autoPlay: autoPlay === "true",
         layoutSwapped: layoutSwapped === "true",
         layoutRatio: (layoutRatio as LayoutRatio) || "4:6",
+        layoutPanelWidth: layoutPanelWidth ? Math.max(20, Math.min(80, parseInt(layoutPanelWidth, 10))) : 40,
       });
     } catch (error) {
       console.error("Failed to load toolbar settings:", error);
@@ -163,6 +167,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setLayoutRatio = useCallback((ratio: LayoutRatio) => {
     setToolbarSettings(prev => ({ ...prev, layoutRatio: ratio }));
     saveSetting("toolbar_layout_ratio", ratio);
+  }, [saveSetting]);
+
+  // 设置布局面板宽度
+  const setLayoutPanelWidth = useCallback((width: number) => {
+    const clampedWidth = Math.max(20, Math.min(80, width));
+    setToolbarSettings(prev => ({ ...prev, layoutPanelWidth: clampedWidth }));
+    saveSetting("toolbar_layout_panel_width", clampedWidth.toString());
   }, [saveSetting]);
 
   // 加载笔记列表
@@ -309,6 +320,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAutoPlay,
     setLayoutSwapped,
     setLayoutRatio,
+    setLayoutPanelWidth,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

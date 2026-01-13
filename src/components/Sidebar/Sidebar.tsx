@@ -212,7 +212,7 @@ function NoteItem({ note }: NoteItemProps) {
 }
 
 export function Sidebar() {
-  const { sidebar, toggleSidebar, folders, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, selectedNoteId } = useApp();
+  const { sidebar, toggleSidebar, folders, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId } = useApp();
   const { collapsed } = sidebar;
   const [isHovered, setIsHovered] = useState(false);
 

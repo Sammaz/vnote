@@ -84,6 +84,7 @@ export interface VideoToolbarSettings {
   autoPlay: boolean;
   layoutSwapped: boolean;
   layoutRatio: LayoutRatio;
+  layoutPanelWidth: number; // 左侧面板宽度百分比 (20-80)，默认 40
 }
 
 // 提示词分类
