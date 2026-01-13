@@ -583,6 +583,30 @@ async fn abort_note_generation(generation_id: String) -> Result<(), String> {
     note_generation::abort_generation(generation_id).await
 }
 
+/// Update a specific content field of a note
+#[tauri::command]
+fn update_note_content(
+    note_id: i64,
+    tab_type: String,
+    content: String,
+) -> Result<(), String> {
+    let mut note = get_db()
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到")?;
+
+    match tab_type.as_str() {
+        "full_summary" => note.full_summary = Some(content),
+        "detailed_reading" => note.detailed_reading = Some(content),
+        "highlights" => note.highlights = Some(content),
+        "visual_summary" => note.visual_summary = Some(content),
+        "custom_summary" => note.custom_summary = Some(content),
+        _ => return Err("无效的标签页类型".to_string()),
+    }
+
+    get_db().update_note(&note).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -656,6 +680,7 @@ pub fn run() {
             update_note,
             delete_note,
             update_playback_position,
+            update_note_content,
             chat_stream,
             abort_chat,
             clear_subtitle_index,

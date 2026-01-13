@@ -119,7 +119,7 @@ interface NoteItemProps {
 }
 
 function NoteItem({ note }: NoteItemProps) {
-  const { setSelectedNoteId, setCurrentView, selectedNoteId, deleteNote } = useApp();
+  const { setSelectedNoteId, setCurrentView, selectedNoteId, deleteNote, setSelectedFolder } = useApp();
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -165,6 +165,7 @@ function NoteItem({ note }: NoteItemProps) {
     >
       <button
         onClick={() => {
+          setSelectedFolder(null); // 清除文件夹选中
           setSelectedNoteId(note.id);
           setCurrentView("note");
         }}
@@ -211,7 +212,7 @@ function NoteItem({ note }: NoteItemProps) {
 }
 
 export function Sidebar() {
-  const { sidebar, toggleSidebar, folders, notes, currentView, setCurrentView } = useApp();
+  const { sidebar, toggleSidebar, folders, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, selectedNoteId } = useApp();
   const { collapsed } = sidebar;
   const [isHovered, setIsHovered] = useState(false);
 
@@ -288,9 +289,13 @@ export function Sidebar() {
         <NavItem
           icon={<Sparkles className="w-5 h-5" />}
           label="新笔记"
-          active={currentView === "home"}
+          active={currentView === "home" && !sidebar.selectedFolderId && !selectedNoteId}
           collapsed={collapsed}
-          onClick={() => setCurrentView("home")}
+          onClick={() => {
+            setCurrentView("home");
+            setSelectedFolder(null);
+            setSelectedNoteId(null);
+          }}
         />
         <NavItem
           icon={<Search className="w-5 h-5" />}
@@ -298,7 +303,8 @@ export function Sidebar() {
           collapsed={collapsed}
           onClick={() => {
             setCurrentView("home");
-            // 聚焦搜索框
+            setSelectedFolder(null);
+            setSelectedNoteId(null);
           }}
         />
       </nav>

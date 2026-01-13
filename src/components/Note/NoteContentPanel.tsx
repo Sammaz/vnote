@@ -15,16 +15,14 @@ import {
   FolderPlus,
   List,
   X,
-  Loader2,
   ChevronDown,
   Check,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, FullSummaryData, GenerationEvent, TabType, AiConfig, PromptConfig } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig } from "../../types";
+import { EditableMarkdown } from "./EditableMarkdown";
 
 type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom";
 
@@ -124,6 +122,9 @@ interface NoteContentPanelProps {
 
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>("summary");
+
+  // 编辑模式状态
+  const [isEditMode, setIsEditMode] = useState(false);
 
   // 从全局状态同步组件state
   const syncStateFromGlobal = useCallback(() => {
@@ -294,7 +295,23 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 自定义提示词弹窗状态
   const [showPromptDialog, setShowPromptDialog] = useState(false);
   const [dialogTab, setDialogTab] = useState<"default" | "custom">("default");
-  const [selectedModelId, setSelectedModelId] = useState<number>(note.model_id || aiConfigs[0]?.id || 0);
+
+  // 获取默认 AI 配置或使用笔记的 model_id
+  const getDefaultModelId = useCallback(() => {
+    // 优先使用笔记保存的 model_id
+    if (note.model_id) return note.model_id;
+
+    // 其次使用用户设置的默认模型 (is_default = true)
+    const defaultConfig = aiConfigs.find(c => c.is_default);
+    if (defaultConfig) return defaultConfig.id;
+
+    // 最后使用第一个可用模型
+    if (aiConfigs.length > 0) return aiConfigs[0].id;
+
+    return 0;
+  }, [note.model_id, aiConfigs]);
+
+  const [selectedModelId, setSelectedModelId] = useState<number>(getDefaultModelId());
 
   // 自定义下拉框状态
   const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -329,16 +346,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // 解析全文总结JSON
-  const parseFullSummary = useCallback((content: string | null): FullSummaryData | null => {
-    if (!content) return null;
-    try {
-      return JSON.parse(content);
-    } catch {
-      return null;
-    }
   }, []);
 
   // 开始生成笔记（一键生成全部）
@@ -475,59 +482,75 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     setShowPromptDialog(true);
   };
 
-  // 根据配置生成动态提示词
+  // 根据配置生成动态提示词（Markdown 格式）
   const generateDynamicPrompt = useCallback((): string => {
-    const langText = configLanguage === "zh" ? "中文" : "英文";
-    const emojiInstruction = configShowEmoji
-      ? "每个亮点必须包含emoji字段，填入一个合适的表情符号"
-      : "每个亮点的emoji字段留空（设为空字符串）";
-    const timestampInstruction = configShowTimestamp
-      ? "，并在timestamp字段中标注该亮点对应的视频时间戳（格式如 00:01:23）"
-      : "";
+    const isEnglish = configLanguage === "en";
+    const showEmoji = configShowEmoji;
+    const emojiExample = showEmoji ? "🔥 " : "";
+    const emojiExample2 = showEmoji ? "💡 " : "";
+    const timestampExample = configShowTimestamp ? " [00:01:23]" : "";
 
-    // 根据是否需要时间戳动态生成JSON结构示例
-    const highlightExample = configShowTimestamp
-      ? `{"emoji": "${configShowEmoji ? "🔥" : ""}", "title": "亮点标题", "description": "详细描述", "timestamp": "00:01:23"}`
-      : `{"emoji": "${configShowEmoji ? "🔥" : ""}", "title": "亮点标题", "description": "详细描述"}`;
+    if (isEnglish) {
+      // 英文提示词
+      return `You are a professional video content analyst. Analyze the following video subtitles and generate a structured summary.
 
-    return `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
+Output Requirements:
+1. Use Markdown format (do not use code block markers)
+2. Must output ALL content in English
+3. Follow this exact format:
+
+# Summary
+A summary paragraph describing the core content of the video, each sentence no more than ${configSentenceLength} words
+
+# Key Highlights
+Extract the most important ${configHighlightCount} key points/highlights${configShowTimestamp ? ", and add the video timestamp (format: [00:01:23]) after each highlight title" : ""}${configShowEmoji ? ", and add an appropriate emoji symbol before each highlight title" : ""}
+
+## ${emojiExample}Highlight Title 1${timestampExample}
+Detailed description of this highlight
+
+## ${emojiExample2}Highlight Title 2
+Detailed description of this highlight
+
+(Continue with ${configHighlightCount} highlights)
+
+# Key Terms
+- **Term 1**: Explanation
+- **Term 2**: Explanation
+
+---
+
+Video subtitles content:`;
+    } else {
+      // 中文提示词
+      return `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
 
 输出要求：
-1. 必须以JSON格式输出，不要有任何其他文字（包括markdown代码块标记）
-2. 使用${langText}输出所有内容
-3. JSON结构如下：
-{
-  "abstract": "100-150字的摘要段落，概括视频核心内容",
-  "highlights": [
-    ${highlightExample},
-    ...
-    （共${configHighlightCount}个亮点）
-  ],
-  "tags": ["标签1", "标签2", "标签3"],
-  "qa_pairs": [
-    {"question": "问题", "answer": "回答"},
-    ...
-    （3个Q&A，如果是技术教学类视频）
-  ],
-  "thoughts": [
-    "引导性的思考问题",
-    ...
-    （2个思考问题，如果是应用介绍类视频）
-  ],
-  "glossary": [
-    {"term": "术语", "explanation": "解释"},
-    ...
-    （5个关键术语）
-  ]
-}
+1. 使用 Markdown 格式输出（不要使用代码块标记）
+2. 必须使用中文输出所有内容
+3. 严格按照以下格式输出：
 
-内容要求：
-- abstract: 简洁概括视频核心内容，每句话不超过${configSentenceLength}字
-- highlights: 提取最重要的${configHighlightCount}个知识点/亮点，${emojiInstruction}${timestampInstruction}
-- tags: 3-5个相关标签，用于分类和搜索
-- qa_pairs: 技术教学类视频需要3个常见问题及答案，应用介绍类可省略（设为null）
-- thoughts: 应用介绍类视频需要2个引导性思考问题，技术教学类可省略（设为null）
-- glossary: 提取5个关键术语并解释`;
+# 摘要
+摘要段落，概括视频核心内容，每句话不超过${configSentenceLength}字
+
+# 核心亮点
+提取最重要的${configHighlightCount}个知识点/亮点${configShowEmoji ? "，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）" : ""}${configShowTimestamp ? "，并在每个亮点标题后标注该亮点对应的视频时间戳（格式如 [00:01:23]）" : ""}
+
+## ${emojiExample}亮点标题1${timestampExample}
+详细描述该亮点的内容
+
+## ${emojiExample2}亮点标题2
+详细描述该亮点的内容
+
+（继续提取${configHighlightCount}个亮点）
+
+# 关键术语
+- **术语1**：解释
+- **术语2**：解释
+
+---
+
+视频字幕内容：`;
+    }
   }, [configLanguage, configShowEmoji, configShowTimestamp, configHighlightCount, configSentenceLength]);
 
   // 执行生成
@@ -681,9 +704,17 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       {/* 次级工具栏 */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
         <div className="flex items-center gap-2">
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
+          <button
+            onClick={() => setIsEditMode(!isEditMode)}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+              isEditMode
+                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+            )}
+          >
             <Edit3 className="w-4 h-4" />
-            编辑
+            {isEditMode ? "完成" : "编辑"}
           </button>
           <span className="text-slate-300 dark:text-slate-600">|</span>
           <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
@@ -702,39 +733,59 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       {/* 内容区域 */}
       <div className="flex-1 overflow-y-auto p-6">
         {activeTab === "summary" && (
-          <SummaryContent
-            summaryData={parseFullSummary(note.full_summary)}
-            rawContent={note.full_summary}
+          <EditableMarkdown
+            noteId={note.id}
+            tabType="full_summary"
+            content={note.full_summary}
             isGenerating={isTabGenerating("summary")}
+            emptyMessage="全文总结内容将在AI分析后生成"
+            isEditMode={isEditMode}
+            onContentUpdate={onGenerationComplete}
           />
         )}
         {activeTab === "original" && (
-          <TabContent
+          <EditableMarkdown
+            noteId={note.id}
+            tabType="detailed_reading"
             content={note.detailed_reading}
             isGenerating={isTabGenerating("original")}
             emptyMessage="原文细读内容将在AI分析后生成"
+            isEditMode={isEditMode}
+            onContentUpdate={onGenerationComplete}
           />
         )}
         {activeTab === "highlights" && (
-          <HighlightsContent
+          <EditableMarkdown
+            noteId={note.id}
+            tabType="highlights"
             content={note.highlights}
             isGenerating={isTabGenerating("highlights")}
             emptyMessage="暂无高光笔记"
+            isEditMode={isEditMode}
+            onContentUpdate={onGenerationComplete}
           />
         )}
         {activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} />}
         {activeTab === "visual" && (
-          <TabContent
+          <EditableMarkdown
+            noteId={note.id}
+            tabType="visual_summary"
             content={note.visual_summary}
             isGenerating={isTabGenerating("visual")}
             emptyMessage="视觉化总结 (Beta) - 即将推出"
+            isEditMode={isEditMode}
+            onContentUpdate={onGenerationComplete}
           />
         )}
         {activeTab === "custom" && (
-          <TabContent
+          <EditableMarkdown
+            noteId={note.id}
+            tabType="custom_summary"
             content={note.custom_summary}
             isGenerating={isTabGenerating("custom")}
             emptyMessage="自定义总结 - 根据您的需求定制总结内容"
+            isEditMode={isEditMode}
+            onContentUpdate={onGenerationComplete}
           />
         )}
       </div>
@@ -1043,225 +1094,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-// 全文总结内容
-function SummaryContent({
-  summaryData,
-  rawContent,
-  isGenerating,
-}: {
-  summaryData: FullSummaryData | null;
-  rawContent: string | null;
-  isGenerating: boolean;
-}) {
-  if (isGenerating) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-500">正在生成全文总结...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!rawContent) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-500">正在生成全文总结...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!summaryData) {
-    // JSON 解析失败，尝试作为 Markdown 渲染
-    return (
-      <div className="note-markdown">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-          {rawContent}
-        </ReactMarkdown>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* 摘要 */}
-      <section>
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">摘要</h2>
-        <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-          {summaryData.abstract}
-        </p>
-      </section>
-
-      {/* 亮点 */}
-      <section>
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">亮点</h2>
-        <ul className="space-y-3">
-          {summaryData.highlights.map((item, index) => (
-            <li key={index} className="flex items-start gap-3 text-sm text-slate-600 dark:text-slate-300">
-              <span className="text-xl mt-0.5">{item.emoji}</span>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-medium text-slate-700 dark:text-slate-200">{item.title}</h3>
-                  {item.timestamp && (
-                    <span className="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-md font-mono">
-                      {item.timestamp}
-                    </span>
-                  )}
-                </div>
-                <p className="text-slate-500 dark:text-slate-400 mt-1">{item.description}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* 标签 */}
-      <section>
-        <div className="flex flex-wrap gap-2">
-          {summaryData.tags.map((tag, index) => (
-            <span
-              key={index}
-              className="px-3 py-1 text-xs bg-slate-100 dark:bg-vnote-surface text-slate-600 dark:text-slate-400 rounded-full"
-            >
-              #{tag}
-            </span>
-          ))}
-        </div>
-      </section>
-
-      {/* 疑问解答（可选） */}
-      {summaryData.qa_pairs && summaryData.qa_pairs.length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">疑问解答</h2>
-          <div className="space-y-4">
-            {summaryData.qa_pairs.map((pair, index) => (
-              <div key={index}>
-                <h3 className="text-sm font-medium text-slate-700 dark:text-slate-200 mb-2">
-                  Q: {pair.question}
-                </h3>
-                <p className="text-sm text-slate-600 dark:text-slate-400 pl-4">
-                  A: {pair.answer}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* 思考问题（可选） */}
-      {summaryData.thoughts && summaryData.thoughts.length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">思考</h2>
-          <div className="space-y-2">
-            {summaryData.thoughts.map((thought, index) => (
-              <p key={index} className="text-sm text-slate-600 dark:text-slate-400">
-                Q: {thought}
-              </p>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* 术语表 */}
-      <section>
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100 mb-3">术语表</h2>
-        <div className="space-y-2">
-          {summaryData.glossary.map((item, index) => (
-            <div key={index} className="text-sm">
-              <span className="font-medium text-slate-700 dark:text-slate-200">
-                {item.term}：
-              </span>
-              <span className="text-slate-600 dark:text-slate-400">{item.explanation}</span>
-            </div>
-          ))}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-// 通用标签页内容
-function TabContent({
-  content,
-  isGenerating,
-  emptyMessage,
-}: {
-  content: string | null;
-  isGenerating: boolean;
-  emptyMessage: string;
-}) {
-  if (isGenerating) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-500">正在生成...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!content) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400">
-        <p>{emptyMessage}</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="note-markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {content}
-      </ReactMarkdown>
-    </div>
-  );
-}
-
-// 高光笔记内容
-function HighlightsContent({
-  content,
-  isGenerating,
-  emptyMessage,
-}: {
-  content: string | null;
-  isGenerating: boolean;
-  emptyMessage: string;
-}) {
-  if (isGenerating) {
-    return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-500">正在生成高光笔记...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!content) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400">
-        <Highlighter className="w-12 h-12 mb-4 opacity-50" />
-        <p>{emptyMessage}</p>
-        <p className="text-sm mt-2">观看视频时添加高光笔记</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="note-markdown">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-        {content}
-      </ReactMarkdown>
     </div>
   );
 }

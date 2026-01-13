@@ -208,46 +208,33 @@ async fn cleanup_abort_flag(generation_id: &str) {
 struct PromptTemplates;
 
 impl PromptTemplates {
-    /// 全文总结提示词 - 返回JSON格式
+    /// 全文总结提示词 - 返回 Markdown 格式
     fn full_summary(subtitle_content: &str) -> String {
         format!(
             r#"你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
 
 输出要求：
-1. 必须以JSON格式输出，不要有任何其他文字（包括markdown代码块标记）
-2. JSON结构如下：
-{{
-  "abstract": "100-150字的摘要段落，概括视频核心内容",
-  "highlights": [
-    {{"emoji": "表情符号", "title": "亮点标题", "description": "详细描述"}},
-    ...
-    （共5个亮点）
-  ],
-  "tags": ["标签1", "标签2", "标签3"],
-  "qa_pairs": [
-    {{"question": "问题", "answer": "回答"}},
-    ...
-    （3个Q&A，如果是技术教学类视频）
-  ],
-  "thoughts": [
-    "引导性的思考问题",
-    ...
-    （2个思考问题，如果是应用介绍类视频）
-  ],
-  "glossary": [
-    {{"term": "术语", "explanation": "解释"}},
-    ...
-    （5个关键术语）
-  ]
-}}
+1. 使用 Markdown 格式输出（不要使用代码块标记）
+2. 包含以下结构：
 
-内容要求：
-- abstract: 简洁概括视频核心内容，让读者快速了解视频讲什么
-- highlights: 提取最重要的5个知识点/亮点，每个包含emoji、标题和详细描述
-- tags: 3-5个相关标签，用于分类和搜索
-- qa_pairs: 技术教学类视频需要3个常见问题及答案，应用介绍类可省略（设为null）
-- thoughts: 应用介绍类视频需要2个引导性思考问题，技术教学类可省略（设为null）
-- glossary: 提取5个关键术语并解释
+# 摘要
+100-150字的摘要段落，概括视频核心内容
+
+# 核心亮点
+
+## 🔥 亮点标题1
+详细描述该亮点的内容
+
+## 💡 亮点标题2
+详细描述该亮点的内容
+
+（继续提取3-5个最重要的亮点）
+
+# 关键术语
+- **术语1**：解释
+- **术语2**：解释
+
+---
 
 视频字幕内容：
 {}"#,
@@ -362,7 +349,7 @@ mindmap
         )
     }
 
-    /// 基于框架生成完整总结的提示词
+    /// 基于框架生成完整总结的提示词（Markdown 格式）
     fn framework_expand(framework: &str) -> String {
         format!(
             r#"基于以下视频摘要框架，生成完整的结构化全文总结。
@@ -370,38 +357,23 @@ mindmap
 摘要框架：
 {}
 
-请严格按照以下JSON格式输出（不要有任何其他文字，不要有markdown代码块标记）：
+请严格按照以下 Markdown 格式输出（不要使用代码块标记）：
 
-{{
-  "abstract": "100-150字的摘要段落，概括视频核心内容",
-  "highlights": [
-    {{"emoji": "🔥", "title": "亮点标题1", "description": "详细描述该亮点的内容"}},
-    {{"emoji": "💡", "title": "亮点标题2", "description": "详细描述该亮点的内容"}},
-    {{"emoji": "📊", "title": "亮点标题3", "description": "详细描述该亮点的内容"}},
-    {{"emoji": "🎯", "title": "亮点标题4", "description": "详细描述该亮点的内容"}},
-    {{"emoji": "⚡", "title": "亮点标题5", "description": "详细描述该亮点的内容"}}
-  ],
-  "tags": ["标签1", "标签2", "标签3", "标签4", "标签5"],
-  "qa_pairs": [
-    {{"question": "问题1", "answer": "回答1"}},
-    {{"question": "问题2", "answer": "回答2"}},
-    {{"question": "问题3", "answer": "回答3"}}
-  ],
-  "glossary": [
-    {{"term": "术语1", "explanation": "解释1"}},
-    {{"term": "术语2", "explanation": "解释2"}},
-    {{"term": "术语3", "explanation": "解释3"}},
-    {{"term": "术语4", "explanation": "解释4"}},
-    {{"term": "术语5", "explanation": "解释5"}}
-  ]
-}}
+# 摘要
+100-150字的摘要段落
 
-要求：
-1. abstract: 根据框架内容写100-150字的摘要
-2. highlights: 提取5个最重要的亮点，每个亮点配合适的emoji
-3. tags: 提取3-5个关键标签
-4. qa_pairs: 生成3个常见问题及回答（可选，如果内容适合）
-5. glossary: 提取5个关键术语及解释"#,
+# 核心亮点
+
+## 🔥 亮点标题
+详细描述
+
+## 💡 亮点标题
+详细描述
+
+（继续提取3-5个亮点）
+
+# 关键术语
+- **术语**：解释"#,
             framework
         )
     }
@@ -877,7 +849,7 @@ pub async fn generate_note(
         if result.success {
             generated_count += 1;
             // 更新数据库
-            update_note_tab(db, request.note_id, &result.tab_type, &result.content)?;
+            update_note_tab(db, request.note_id, &result.tab_type, &result.content, request.model_id)?;
         } else {
             failed_count += 1;
         }
@@ -1009,15 +981,8 @@ async fn generate_single_tab(
 fn post_process_content(tab_type: &TabType, content: &str) -> Result<String, String> {
     match tab_type {
         TabType::FullSummary => {
-            // 尝试解析为JSON，如果失败则返回原始内容（可能是自定义提示词的结果）
-            let cleaned = clean_json_output(content);
-            if let Ok(parsed) = serde_json::from_str::<FullSummaryData>(&cleaned) {
-                // 重新序列化确保格式正确
-                serde_json::to_string_pretty(&parsed).map_err(|e| e.to_string())
-            } else {
-                // JSON解析失败，返回清理后的原始内容
-                Ok(cleaned)
-            }
+            // 直接返回清理后的 Markdown 内容
+            Ok(content.trim().to_string())
         }
         _ => Ok(content.trim().to_string()),
     }
@@ -1048,6 +1013,7 @@ fn update_note_tab(
     note_id: i64,
     tab_type: &TabType,
     content: &str,
+    model_id: i64,
 ) -> Result<(), String> {
     let mut note = db
         .get_note_by_id(note_id)
@@ -1061,6 +1027,9 @@ fn update_note_tab(
         TabType::VisualSummary => note.visual_summary = Some(content.to_string()),
         TabType::CustomSummary => note.custom_summary = Some(content.to_string()),
     }
+
+    // 同时更新 model_id，确保使用的模型被记录
+    note.model_id = Some(model_id);
 
     db.update_note(&note).map_err(|e| e.to_string())
 }

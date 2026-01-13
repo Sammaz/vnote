@@ -256,7 +256,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const setSelectedFolder = useCallback((folderId: string | null) => {
     setSidebar((prev) => ({ ...prev, selectedFolderId: folderId }));
-  }, []);
+    // 选择文件夹时，清除笔记选中状态
+    setSelectedNoteId(null);
+  }, [setSelectedNoteId]);
 
   const toggleFolderExpand = useCallback((folderId: string) => {
     setSidebar((prev) => {
