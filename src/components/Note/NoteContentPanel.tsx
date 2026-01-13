@@ -170,6 +170,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             failedTabs: newFailed,
             regeneratingTabs: newRegenerating2,
           });
+          // 显示错误提示
+          const tabName = failedTab === "full_summary" ? "全文总结" :
+            failedTab === "detailed_reading" ? "原文细读" :
+            failedTab === "highlights" ? "高光笔记" :
+            failedTab === "visual_summary" ? "视觉化总结" :
+            "自定义总结";
+          message.error(`${tabName}生成失败: ${data.error}`);
+          console.error(`[TabError] ${tabName} 生成失败:`, data.error);
           break;
 
         case "AllCompleted":
@@ -186,8 +194,10 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             unlisten();
             activeListeners.delete(genId);
           }
-          // 刷新笔记数据并等待完成
-          onGenerationComplete?.();
+          // 延迟刷新笔记数据，避免与事件处理冲突
+          setTimeout(() => {
+            onGenerationComplete?.();
+          }, 200);
           break;
 
         case "Aborted":
@@ -300,7 +310,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 开始生成笔记（一键生成全部）
+  // 开始生成笔记（一键生成全文总结，使用默认配置）
   const handleGenerate = async () => {
     if (!note.model_id) {
       message.warning("请先选择AI模型");
@@ -310,19 +320,50 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 检查是否已经在生成中
     const currentState = getNoteGenerationState(note.id);
     if (currentState.isGenerating) {
-      console.log(`[自动生成] 笔记 ${note.id} 正在生成中，跳过重复触发`);
+      console.log(`[handleGenerate] 笔记 ${note.id} 正在生成中，跳过重复触发`);
       return;
     }
 
     try {
       const id = crypto.randomUUID();
+      console.log(`[handleGenerate] 开始生成全文总结，noteId: ${note.id}，modelId: ${note.model_id}`);
+
+      // 生成默认提示词（中文、emoji、无时间戳、5个亮点、30字句子）
+      const finalPrompt = `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
+
+输出要求：
+1. 使用 Markdown 格式输出（不要使用代码块标记）
+2. 必须使用中文输出所有内容
+3. 严格按照以下格式输出：
+
+# 摘要
+摘要段落，概括视频核心内容，每句话不超过30字
+
+# 核心亮点
+提取最重要的5个知识点/亮点，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）
+
+## 🔥亮点标题1
+详细描述该亮点的内容
+
+## 💡亮点标题2
+详细描述该亮点的内容
+
+（继续提取5个亮点）
+
+# 关键术语
+- **术语1**：解释
+- **术语2**：解释
+
+---
+
+视频字幕内容：`;
 
       // 更新全局状态
       setNoteGenerationState(note.id, {
         isGenerating: true,
         generationId: id,
-        regeneratingTabs: new Set(),
-        progress: { current: 0, total: 0, message: "准备生成..." },
+        regeneratingTabs: new Set(["full_summary"]),
+        progress: { current: 0, total: 1, message: "正在生成全文总结..." },
         completedTabs: new Set(),
         failedTabs: new Map(),
       });
@@ -332,8 +373,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setGenerationId(id);
       setCompletedTabs(new Set());
       setFailedTabs(new Map());
-      setRegeneratingTabs(new Set());
-      setProgress({ current: 0, total: 0, message: "准备生成..." });
+      setRegeneratingTabs(new Set(["full_summary"]));
+      setProgress({ current: 0, total: 1, message: "正在生成全文总结..." });
 
       // 设置事件监听器
       setupGenerationListener(note.id, id);
@@ -341,16 +382,20 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       // 等待状态更新和事件监听器设置完成
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // 后端会立即返回 generation_id，实际生成在后台进行
+      // 调用后端生成接口（只生成全文总结）
+      console.log(`[handleGenerate] 调用后端接口`);
       await invoke("generate_note_content", {
         generationId: id,
         noteId: note.id,
         modelId: note.model_id,
-        concurrent: true,
-        regenerate: false,
-        tabsToGenerate: [] as string[],
+        concurrent: false,  // 不并发，只生成一个
+        regenerate: true,   // 使用重新生成模式
+        tabsToGenerate: ["full_summary"],
+        customPrompt: finalPrompt,
       });
+      console.log(`[handleGenerate] 后端调用成功`);
     } catch (error) {
+      console.error(`[handleGenerate] 生成失败:`, error);
       // 出错时重置状态
       setNoteGenerationState(note.id, {
         isGenerating: false,
@@ -393,17 +438,21 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     if (!tabType) return false;
     // 如果正在重新生成该标签页，显示加载状态
     if (regeneratingTabs.has(tabType)) return true;
+    // 检查全局生成状态
+    const globalState = getNoteGenerationState(note.id);
+    if (globalState.isGenerating) {
+      const isNotCompleted = !globalState.completedTabs.has(tabType);
+      const isNotFailed = !globalState.failedTabs.has(tabType);
+      // 正在生成中，且该标签页未完成未失败，就显示加载状态
+      if (isNotCompleted && isNotFailed) {
+        return true;
+      }
+    }
+    // 降级到组件状态
     if (!isGenerating) return false;
-    const tabName = tabType === "full_summary" ? "全文总结" :
-      tabType === "detailed_reading" ? "原文细读" :
-      tabType === "highlights" ? "高光笔记" :
-      tabType === "visual_summary" ? "视觉化总结" :
-      "自定义总结";
-    const isInProgress = progress.message.includes(tabName);
     const isNotCompleted = !completedTabs.has(tabType);
     const isNotFailed = !failedTabs.has(tabType);
-    // 正在生成中，且该标签页未完成未失败，就显示加载状态
-    return isInProgress || (isNotCompleted && isNotFailed && progress.total === 0);
+    return isNotCompleted && isNotFailed;
   };
 
   // 检查标签页是否已完成生成
