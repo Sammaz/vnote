@@ -7,6 +7,7 @@
 //! - 流式/非流式请求支持
 
 use crate::db::AiConfig;
+use crate::prompts;
 use futures::StreamExt;
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -313,17 +314,12 @@ async fn execute_streaming_chat_impl(
     // 构建消息数组
     let mut api_messages: Vec<Value> = Vec::new();
 
-    // 添加RAG上下文
-    if let Some(context) = rag_context {
-        if !context.is_empty() {
-            api_messages.push(json!({
-                "role": "system",
-                "content": format!(
-                    "基于以下视频字幕片段回答用户问题。如果问题与字幕内容无关，可以根据你的知识回答。\n\n{}\n",
-                    context
-                )
-            }));
-        }
+    // 添加系统提示词（根据RAG上下文是否可用）
+    if let Some(system_prompt) = prompts::build_chat_system_prompt(rag_context) {
+        api_messages.push(json!({
+            "role": "system",
+            "content": system_prompt
+        }));
     }
 
     // 添加对话历史

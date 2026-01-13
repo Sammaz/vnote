@@ -2,6 +2,7 @@ mod ai_pool;
 mod chat;
 mod db;
 mod note_generation;
+mod prompts;
 mod rag;
 mod subtitle;
 
