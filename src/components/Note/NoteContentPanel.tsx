@@ -320,13 +320,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 检查是否已经在生成中
     const currentState = getNoteGenerationState(note.id);
     if (currentState.isGenerating) {
-      console.log(`[handleGenerate] 笔记 ${note.id} 正在生成中，跳过重复触发`);
       return;
     }
 
     try {
       const id = crypto.randomUUID();
-      console.log(`[handleGenerate] 开始生成全文总结，noteId: ${note.id}，modelId: ${note.model_id}`);
 
       // 生成默认提示词（中文、emoji、无时间戳、5个亮点、30字句子）
       const finalPrompt = `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
@@ -383,7 +381,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       await new Promise(resolve => setTimeout(resolve, 100));
 
       // 调用后端生成接口（只生成全文总结）
-      console.log(`[handleGenerate] 调用后端接口`);
       await invoke("generate_note_content", {
         generationId: id,
         noteId: note.id,
@@ -393,7 +390,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         tabsToGenerate: ["full_summary"],
         customPrompt: finalPrompt,
       });
-      console.log(`[handleGenerate] 后端调用成功`);
     } catch (error) {
       console.error(`[handleGenerate] 生成失败:`, error);
       // 出错时重置状态
@@ -419,7 +415,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 如果正在生成中，跳过
     const currentState = getNoteGenerationState(note.id);
     if (currentState.isGenerating) {
-      console.log(`[自动生成] 笔记 ${note.id} 正在生成中，跳过重复触发`);
       return;
     }
 
@@ -427,7 +422,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
                          !note.highlights && !note.visual_summary && !note.custom_summary;
 
     if (hasNoContent && note.model_id && !isGenerating) {
-      console.log(`[自动生成] 触发笔记 ${note.id} 的自动生成`);
       handleGenerate();
     }
   }, [note.id, note.full_summary, note.model_id]);

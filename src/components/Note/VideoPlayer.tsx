@@ -252,7 +252,6 @@ export function VideoPlayer({
 
     // 初始化播放器的通用函数
     const initPlyr = () => {
-      console.log('[VideoPlayer] Initializing Plyr with captionsEnabled:', captionsEnabled, 'hasSubtitle:', hasSubtitle);
       const player = new Plyr(video, {
         controls: compact
           ? ["play", "progress", "current-time", "mute", "fullscreen"]
@@ -370,7 +369,6 @@ export function VideoPlayer({
         setTimeout(() => {
           // currentTrack: -1 表示无字幕，0+ 表示有字幕选中
           const isCaptionsActive = player.currentTrack >= 0;
-          console.log('[VideoPlayer] Captions state changed:', isCaptionsActive, 'currentTrack:', player.currentTrack);
           setCaptionsEnabled(isCaptionsActive);
           assVisibleRef.current = isCaptionsActive;
 
@@ -397,7 +395,6 @@ export function VideoPlayer({
           // 预测下一个状态
           const currentState = player.currentTrack !== null;
           const nextState = !currentState;
-          console.log('[VideoPlayer] Caption button clicked, current:', currentState, 'next:', nextState);
           setTimeout(() => {
             handleCaptionsChange();
           }, 100);
@@ -480,7 +477,6 @@ export function VideoPlayer({
                 assBox.style.display = captionsEnabled ? "" : "none";
               }
               assVisibleRef.current = captionsEnabled;
-              console.log('[VideoPlayer] ASS box initial state:', captionsEnabled);
             }, 0);
           })
           .catch((err) => {
@@ -527,8 +523,6 @@ export function VideoPlayer({
     let subtitleObjectUrl: string | null = null;
 
     const setupPlayer = async () => {
-      console.log('[VideoPlayer] setupPlayer: captionsEnabled from context =', captionsEnabled);
-
       if (isSrtSubtitle && subtitleUrl) {
         try {
           const srtContent = await invoke<string>("read_file_content", { path: subtitleUrl });

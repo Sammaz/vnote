@@ -305,8 +305,6 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
 
   // 停止生成
   const handleStopGeneration = async () => {
-    console.log("[handleStopGeneration] Called, currentRequestId:", currentRequestId, "isStreaming:", isStreaming);
-
     // 保存当前 ID 到局部变量（避免闭包问题）
     const requestIdToAbort = currentRequestId;
     const messageIdToCheck = currentStreamingMessageId;
@@ -314,7 +312,6 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
     // 立即重置所有前端状态（无论是否成功中止）
     // 取消事件监听
     if (unlistenRef.current) {
-      console.log("[handleStopGeneration] Unlistening events");
       unlistenRef.current();
       unlistenRef.current = null;
     }
@@ -333,7 +330,6 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
           }
           return msg;
         });
-        console.log("[handleStopGeneration] Updated cancel message:", updated);
         return newMessages;
       });
     }
@@ -343,34 +339,23 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
     setCurrentRequestId(null);
     setCurrentStreamingMessageId(null);
 
-    console.log("[handleStopGeneration] State reset complete");
-
     // 然后异步调用中止 API（不阻塞 UI 更新）
     if (requestIdToAbort) {
       try {
-        console.log("[handleStopGeneration] Calling abort_chat with:", requestIdToAbort);
         await invoke("abort_chat", { requestId: requestIdToAbort });
-        console.log("[handleStopGeneration] Abort successful");
       } catch (error) {
         console.error("[handleStopGeneration] Failed to abort chat:", error);
       }
-    } else {
-      console.log("[handleStopGeneration] No requestId to abort, but state was reset");
     }
   };
 
   const handleSend = async () => {
-    console.log("[handleSend] Called. input empty?", !input.trim(), "no images?", uploadedImages.length === 0, "isStreaming (state):", isStreaming, "isStreaming (ref):", isStreamingRef.current);
-
     if ((!input.trim() && uploadedImages.length === 0)) return;
 
     // 使用 ref 检查是否正在流式传输（避免闭包捕获旧值）
     if (isStreamingRef.current) {
-      console.log("[handleSend] Already streaming, returning early");
       return;
     }
-
-    console.log("[handleSend] Proceeding with request");
 
     // 检查是否选择了模型
     if (!modelId) {
@@ -423,7 +408,6 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
 
     setIsStreaming(true);
     setCurrentStreamingMessageId(assistantId);
-    console.log("[handleSend] Starting stream, assistantId:", assistantId);
 
     try {
       // 构建消息历史（使用函数式更新获取最新状态）
@@ -448,7 +432,6 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
       // 调用流式聊天 API
       const requestId = await invoke<string>("chat_stream", { request });
       setCurrentRequestId(requestId);
-      console.log("[handleSend] chat_stream returned requestId:", requestId);
 
       // 监听流式事件
       const unlisten: UnlistenFn = await listen<StreamEvent>(
