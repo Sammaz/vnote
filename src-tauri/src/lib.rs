@@ -137,8 +137,18 @@ fn create_ai_config(config: AiConfig) -> Result<i64, String> {
 }
 
 #[tauri::command]
-fn update_ai_config(config: AiConfig) -> Result<(), String> {
-    get_db().update_ai_config(&config).map_err(|e| e.to_string())
+async fn update_ai_config(config: AiConfig) -> Result<(), String> {
+    // 先更新数据库
+    get_db().update_ai_config(&config).map_err(|e| e.to_string())?;
+
+    // 动态更新 AI 线程池的并发限制
+    crate::ai_pool::get_ai_pool_manager()
+        .update_concurrent_limit(config.id, config.concurrent_limit)
+        .await
+        // 忽略控制器不存在的错误（可能是首次创建配置）
+        .ok();
+
+    Ok(())
 }
 
 #[tauri::command]

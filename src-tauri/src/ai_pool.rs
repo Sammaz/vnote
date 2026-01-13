@@ -73,8 +73,10 @@ pub enum StreamEvent {
 
 /// 单个AiConfig的并发控制器
 struct ConfigConcurrencyController {
-    /// 信号量：控制并发数
-    semaphore: Arc<Semaphore>,
+    /// 信号量：控制并发数（使用 Arc<Mutex<>> 支持动态替换）
+    semaphore: Arc<Mutex<Arc<Semaphore>>>,
+    /// 当前并发限制（用于读取配置）
+    concurrent_limit: Arc<Mutex<usize>>,
     /// 当前活跃请求数（用于监控）
     active_count: Arc<AtomicUsize>,
     /// 等待队列长度（用于监控）
@@ -86,21 +88,54 @@ impl ConfigConcurrencyController {
     fn new(concurrent_limit: i32) -> Self {
         let limit = concurrent_limit.max(1).min(10) as usize;
         Self {
-            semaphore: Arc::new(Semaphore::new(limit)),
+            semaphore: Arc::new(Mutex::new(Arc::new(Semaphore::new(limit)))),
+            concurrent_limit: Arc::new(Mutex::new(limit)),
             active_count: Arc::new(AtomicUsize::new(0)),
             waiting_count: Arc::new(AtomicUsize::new(0)),
         }
     }
 
+    /// 动态更新并发限制
+    pub async fn update_concurrent_limit(&self, new_limit: i32) {
+        let limit = new_limit.max(1).min(10) as usize;
+
+        // 更新存储的并发限制
+        *self.concurrent_limit.lock().await = limit;
+
+        // 创建新的信号量并替换旧的
+        let new_semaphore = Arc::new(Semaphore::new(limit));
+        let mut semaphore_guard = self.semaphore.lock().await;
+        *semaphore_guard = new_semaphore;
+    }
+
+    /// 获取当前并发限制
+    #[allow(dead_code)]
+    pub async fn get_concurrent_limit(&self) -> usize {
+        *self.concurrent_limit.lock().await
+    }
+
     /// 获取槽位（异步等待，FIFO顺序）
-    async fn acquire(&self) -> Arc<Semaphore> {
+    /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
+    async fn acquire(&self) -> OwnedSemaphorePermit {
         self.waiting_count.fetch_add(1, Ordering::Relaxed);
-        // 等待获取信号量许可
-        let _permit = self.semaphore.acquire().await.unwrap();
-        self.waiting_count.fetch_sub(1, Ordering::Relaxed);
-        self.active_count.fetch_add(1, Ordering::Relaxed);
-        // 返回信号量的引用，用于在Drop时释放
-        self.semaphore.clone()
+
+        loop {
+            // 获取当前信号量的克隆
+            let semaphore = {
+                let guard = self.semaphore.lock().await;
+                guard.clone()
+            };
+
+            // 尝试获取 OwnedSemaphorePermit
+            if let Ok(permit) = semaphore.clone().try_acquire_owned() {
+                self.waiting_count.fetch_sub(1, Ordering::Relaxed);
+                self.active_count.fetch_add(1, Ordering::Relaxed);
+                return permit;
+            }
+
+            // 等待一小段时间再重试
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
     }
 
     /// 获取槽位（支持中止检查）
@@ -115,22 +150,20 @@ impl ConfigConcurrencyController {
                 return Err("请求已取消");
             }
 
+            // 获取当前信号量的克隆（每次循环都重新获取，以支持动态更新）
+            let semaphore = self.semaphore.lock().await.clone();
+
             // 尝试非阻塞获取许可
-            if let Ok(permit) = self.semaphore.clone().try_acquire_owned() {
+            if let Ok(permit) = semaphore.try_acquire_owned() {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
                 self.active_count.fetch_add(1, Ordering::Relaxed);
                 // 返回 OwnedSemaphorePermit，调用者需要持有它直到请求完成
                 return Ok(permit);
             }
 
-            // 等待一小段时间再重试（定期检查 abort_flag）
+            // 等待一小段时间再重试（定期检查 abort_flag 和信号量更新）
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
-    }
-
-    /// 释放槽位
-    fn release(&self) {
-        self.active_count.fetch_sub(1, Ordering::Relaxed);
     }
 
     /// 获取状态（预留用于监控）
@@ -202,12 +235,19 @@ impl AiPoolManager {
         }
     }
 
-    /// 更新并发限制（用于配置更新后）
-    #[allow(dead_code)]
-    pub async fn update_concurrent_limit(&self, config_id: i64, _new_limit: i32) {
-        let mut controllers = self.controllers.lock().await;
-        // 移除旧的控制器（会在下一次请求时重新创建）
-        controllers.remove(&config_id);
+    /// 更新并发限制（动态更新，不影响正在进行的请求）
+    pub async fn update_concurrent_limit(&self, config_id: i64, new_limit: i32) -> Result<(), String> {
+        let controllers = self.controllers.lock().await;
+
+        if let Some(controller) = controllers.get(&config_id) {
+            // 动态更新现有控制器的并发限制
+            controller.update_concurrent_limit(new_limit).await;
+            Ok(())
+        } else {
+            // 控制器不存在，可能还没有创建过
+            // 这是正常情况，下次请求时会使用新的并发限制创建控制器
+            Err("AI配置不存在，尚未创建过并发控制器".to_string())
+        }
     }
 
     /// 注册中止标志（public供note_generation模块使用）
@@ -519,15 +559,11 @@ pub async fn execute_non_streaming(req: NonStreamingRequest) -> Result<NonStream
         .await;
 
     // 获取许可（FIFO排队）
+    // permit 会在 Drop 时自动释放
     let _permit = controller.acquire().await;
 
     // 执行实际的API调用
-    let result = execute_non_streaming_impl(pool, req).await;
-
-    // 释放许可
-    controller.release();
-
-    result
+    execute_non_streaming_impl(pool, req).await
 }
 
 /// 实际的非流式API调用实现
@@ -596,11 +632,12 @@ pub async fn execute_non_streaming_with_abort(
         .await;
 
     // 获取许可（FIFO排队）
-    let _permit = controller.acquire().await;
+    // permit 会在 Drop 时自动释放
+    let permit = controller.acquire().await;
 
     // 检查中止
     if abort_flag.load(Ordering::Relaxed) {
-        controller.release();
+        drop(permit); // 提前释放许可
         return Err("请求已取消".to_string());
     }
 
@@ -609,12 +646,10 @@ pub async fn execute_non_streaming_with_abort(
 
     // 再次检查中止（处理请求过程中被取消的情况）
     if abort_flag.load(Ordering::Relaxed) {
-        controller.release();
+        drop(permit); // 提前释放许可
         return Err("请求已取消".to_string());
     }
 
-    // 释放许可
-    controller.release();
-
+    // permit 在这里 drop，自动释放许可
     result
 }

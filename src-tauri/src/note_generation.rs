@@ -388,23 +388,26 @@ fn select_strategy(
     subtitle_length: usize,
     tab_type: TabType,
     model_context_size: usize,
+    _has_custom_prompt: bool,
 ) -> GenerationStrategy {
     // 估算token数（中文约1.5字符/token，保守估计1:1）
     let estimated_tokens = subtitle_length + 3000; // 加上prompt和输出预留
 
     match (subtitle_length, tab_type) {
-        // 短字幕：直接发送（效果最好）
+        // 短字幕（< 10,000字符）：直接发送
         (len, _) if len < 10_000 => GenerationStrategy::Direct,
 
-        // 中等长度 + 高上下文模型：直接发送（效果好）
+        // 中等长度 + 大上下文模型：直接发送
         (len, _) if estimated_tokens < model_context_size * 8 / 10
             && model_context_size >= 32_000 =>
         {
             GenerationStrategy::Direct
         }
 
-        // 全文总结 + 长字幕：分层递进（推荐）
-        (_, TabType::FullSummary) if subtitle_length >= 30_000 => GenerationStrategy::Layered,
+        // 字幕 >= 10,000字符：使用分层递进策略（包括自定义总结）
+        (len, TabType::FullSummary | TabType::CustomSummary) if len >= 10_000 => {
+            GenerationStrategy::Layered
+        }
 
         // 原文细读 + 长字幕：分段生成
         (_, TabType::DetailedReading) if subtitle_length >= 20_000 => GenerationStrategy::Chunked,
@@ -457,45 +460,43 @@ fn ceil_char_boundary(s: &str, index: usize) -> usize {
 }
 
 /// 语义分段（按字幕时间戳和语义边界）
-/// num_chunks: 期望的分段数量，如果为0则根据内容长度自动计算
-fn split_subtitle_by_semantic(subtitle: &str, num_chunks: usize) -> Vec<String> {
-    // 动态计算分段数：每段约10000字符
-    let actual_num_chunks = if num_chunks == 0 {
-        // 根据字幕长度动态计算，最小3段，最大20段
-        let calculated = subtitle.len() / 10000;
-        calculated.max(3).min(20)
-    } else {
-        num_chunks
-    };
-
-    if subtitle.len() < actual_num_chunks * 500 {
-        // 内容太短，不需要分段
+/// 分段策略：每段约 10000 字符
+fn split_subtitle_by_semantic(subtitle: &str, _num_chunks: usize) -> Vec<String> {
+    if subtitle.len() < 10000 {
+        // 内容少于10000字，不需要分段
         return vec![subtitle.to_string()];
     }
 
-    let chars_per_chunk = subtitle.len() / actual_num_chunks;
     let mut chunks = Vec::new();
     let mut last_split = 0;
 
-    for _i in 1..actual_num_chunks {
-        let target_pos = last_split + chars_per_chunk;
-        // 确保 target_pos 在字符边界上
-        let target_pos = floor_char_boundary(subtitle, target_pos);
+    // 目标每段约 10000 字符
+    let target_chunk_size = 10000;
 
-        // 寻找最近的语义边界
-        let split_pos = find_semantic_boundary(subtitle, target_pos)
+    while last_split + target_chunk_size < subtitle.len() {
+        // 计算目标分割位置
+        let target_pos = last_split + target_chunk_size;
+
+        // 寻找最近的语义边界（限制搜索范围避免偏离太多）
+        let split_pos = find_semantic_boundary_near(subtitle, target_pos, target_chunk_size / 10)
             .unwrap_or(target_pos);
 
         // 确保 split_pos 在字符边界上
         let split_pos = ceil_char_boundary(subtitle, split_pos);
 
-        if split_pos > last_split && split_pos < subtitle.len() {
+        // 确保分段有效且有合理长度
+        if split_pos > last_split && split_pos > last_split + 1000 {
             chunks.push(subtitle[last_split..split_pos].to_string());
             last_split = split_pos;
+        } else {
+            // 如果找不到合适的边界，强制按目标位置分割
+            let forced_pos = ceil_char_boundary(subtitle, target_pos);
+            chunks.push(subtitle[last_split..forced_pos].to_string());
+            last_split = forced_pos;
         }
     }
 
-    // 添加最后一段
+    // 添加剩余内容作为最后一段
     if last_split < subtitle.len() {
         chunks.push(subtitle[last_split..].to_string());
     }
@@ -509,10 +510,11 @@ fn split_subtitle_by_semantic(subtitle: &str, num_chunks: usize) -> Vec<String> 
 }
 
 /// 寻找最近的语义边界（句号、换行等）
-fn find_semantic_boundary(text: &str, around: usize) -> Option<usize> {
-    // 确保边界在字符边界上
-    let search_start = floor_char_boundary(text, around.saturating_sub(500));
-    let search_end = ceil_char_boundary(text, (around + 500).min(text.len()));
+/// around: 目标位置
+/// max_distance: 最大搜索距离（避免偏离太远）
+fn find_semantic_boundary_near(text: &str, around: usize, max_distance: usize) -> Option<usize> {
+    let search_start = floor_char_boundary(text, around.saturating_sub(max_distance));
+    let search_end = ceil_char_boundary(text, (around + max_distance).min(text.len()));
 
     if search_start >= search_end || search_start >= text.len() {
         return None;
@@ -571,47 +573,52 @@ async fn call_ai_api(
 // ============================================================================
 
 /// 分层递进生成全文总结
+/// 并发控制完全由 AI 线程池管理（ai_pool.rs）
 async fn generate_full_summary_layered(
     ai_config: &AiConfig,
     full_subtitle: &str,
     abort_flag: &Arc<AtomicBool>,
     event_name: &str,
     app: &AppHandle,
-    concurrent_limit: usize,
     custom_prompt: Option<&str>,
 ) -> Result<String, String> {
     // 将 event_name 转换为 String 以便在异步任务中使用
     let event_name = event_name.to_string();
 
-    // 如果有自定义提示词，直接使用（跳过分层生成）
-    if let Some(custom) = custom_prompt {
-        let prompt = format!("{}\n\n视频字幕内容：\n{}", custom, full_subtitle);
-        return call_ai_api(ai_config, &prompt, abort_flag).await;
-    }
+    let generation_type = if custom_prompt.is_some() { "自定义总结" } else { "全文总结" };
+    eprintln!("[笔记生成] ========================================");
+    eprintln!("[笔记生成] 开始生成: {}", generation_type);
+    eprintln!("[笔记生成] 字幕总长度: {} 字符", full_subtitle.len());
+    eprintln!("[笔记生成] 使用模型: {}", ai_config.model);
 
-    // 第一层：动态分段生成摘要框架（传入0自动计算段数）
+    // 第一层：动态分段生成摘要框架（按字数/10000+1计算段数）
     let chunks = split_subtitle_by_semantic(full_subtitle, 0);
     let total_chunks = chunks.len();
 
-    // 并发生成各段摘要
-    let semaphore = Arc::new(Semaphore::new(concurrent_limit));
+    eprintln!("[笔记生成] 分段策略: 字数/10000+1 = {} 段", total_chunks);
+    for (i, chunk) in chunks.iter().enumerate() {
+        eprintln!("[笔记生成]   段 {}: {} 字符", i + 1, chunk.len());
+    }
+    eprintln!("[笔记生成] ========================================");
+
+    // 并发生成各段摘要（并发控制由 AI 线程池统一管理）
     let mut tasks = Vec::new();
 
     for (i, chunk) in chunks.iter().enumerate() {
-        let semaphore = semaphore.clone();
         let app = app.clone();
         let event_name_for_task = event_name.clone();
         let ai_config = ai_config.clone();
         let chunk = chunk.clone();
         let abort_flag = abort_flag.clone();
         let chunk_index = i;
+        let custom_prompt_for_task = custom_prompt.map(|p| p.to_string());
 
         let task = tokio::spawn(async move {
-            // 获取信号量（限制并发数）
-            let _permit = semaphore.acquire().await.unwrap();
+            eprintln!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
 
             // 检查中止
             if abort_flag.load(Ordering::Relaxed) {
+                eprintln!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
                 return Err::<(String, usize), String>("已中止".to_string());
             }
 
@@ -626,10 +633,24 @@ async fn generate_full_summary_layered(
                 },
             );
 
-            let prompt = PromptTemplates::chunk_summary(&chunk);
+            // 使用自定义提示词或默认提示词生成分段摘要
+            // 并发控制由 call_ai_api 内部的 AI 线程池管理
+            let prompt = if let Some(custom) = &custom_prompt_for_task {
+                // 自定义提示词：为每段字幕生成摘要
+                format!("{}\n\n视频字幕片段：\n{}", custom, chunk)
+            } else {
+                PromptTemplates::chunk_summary(&chunk)
+            };
+
             match call_ai_api(&ai_config, &prompt, &abort_flag).await {
-                Ok(summary) => Ok((summary, chunk_index)),
-                Err(e) => Err(e),
+                Ok(summary) => {
+                    eprintln!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
+                    Ok((summary, chunk_index))
+                }
+                Err(e) => {
+                    eprintln!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
+                    Err(e)
+                }
             }
         });
 
@@ -638,10 +659,13 @@ async fn generate_full_summary_layered(
 
     // 等待所有任务完成
     let mut results = Vec::new();
+    let mut success_count = 0;
+
     for task in tasks {
         match task.await {
             Ok(Ok((summary, index))) => {
                 results.push((index, summary));
+                success_count += 1;
             }
             Ok(Err(e)) => {
                 return Err(format!("分段生成失败: {}", e));
@@ -651,6 +675,9 @@ async fn generate_full_summary_layered(
             }
         }
     }
+
+    let failed_count = total_chunks - success_count;
+    eprintln!("[笔记生成] 分段生成完成: 成功 {}, 失败 {}", success_count, failed_count);
 
     // 按原始顺序排序
     results.sort_by_key(|(index, _)| *index);
@@ -662,6 +689,7 @@ async fn generate_full_summary_layered(
         chunk_summaries.join("\n\n---\n\n")
     );
 
+    eprintln!("[笔记生成] 开始整合摘要框架...");
     // 发送进度事件
     let _ = app.emit(
         &event_name,
@@ -674,10 +702,17 @@ async fn generate_full_summary_layered(
     );
 
     let framework = call_ai_api(ai_config, &framework_prompt, abort_flag).await?;
+    eprintln!("[笔记生成] 框架整合完成 (生成 {} 字符)", framework.len());
 
     // 第二层：基于框架生成完整的结构化全文总结
-    let final_prompt = PromptTemplates::framework_expand(&framework);
+    let final_prompt = if let Some(custom) = custom_prompt {
+        // 使用自定义提示词生成最终总结
+        format!("{}\n\n请基于以下框架生成完整总结：\n{}", custom, framework)
+    } else {
+        PromptTemplates::framework_expand(&framework)
+    };
 
+    eprintln!("[笔记生成] 开始生成最终总结...");
     // 发送进度事件
     let _ = app.emit(
         &event_name,
@@ -690,13 +725,25 @@ async fn generate_full_summary_layered(
     );
 
     let final_content = call_ai_api(ai_config, &final_prompt, abort_flag).await?;
+    eprintln!("[笔记生成] 最终总结完成 (生成 {} 字符)", final_content.len());
+    eprintln!("[笔记生成] ========================================");
 
-    // 验证JSON格式
-    let cleaned_content = clean_json_output(&final_content);
-
-    match serde_json::from_str::<FullSummaryData>(&cleaned_content) {
-        Ok(_) => Ok(cleaned_content),
-        Err(e) => Err(format!("JSON格式错误: {}", e)),
+    // 验证JSON格式（仅默认模式需要验证JSON）
+    if custom_prompt.is_none() {
+        let cleaned_content = clean_json_output(&final_content);
+        eprintln!("[笔记生成] 验证 JSON 格式...");
+        match serde_json::from_str::<FullSummaryData>(&cleaned_content) {
+            Ok(_) => {
+                eprintln!("[笔记生成] JSON 格式验证通过");
+                Ok(cleaned_content)
+            }
+            Err(e) => {
+                eprintln!("[笔记生成] JSON 格式验证失败: {}", e);
+                Err(format!("JSON格式错误: {}", e))
+            }
+        }
+    } else {
+        Ok(final_content)
     }
 }
 
@@ -818,7 +865,7 @@ pub async fn generate_note(
         let custom_prompt = request.options.custom_prompt.clone();
 
         let task = tokio::spawn(async move {
-            // 获取信号量许可
+            // 获取信号量许可（控制标签页级别的并发）
             let _permit = semaphore.acquire().await.unwrap();
 
             // 执行生成
@@ -830,7 +877,6 @@ pub async fn generate_note(
                 &subtitle_text,
                 &abort_flag,
                 model_context_size,
-                request.options.concurrent_limit,
                 tab_name,
                 custom_prompt.as_deref(),
             ).await
@@ -878,7 +924,6 @@ async fn generate_single_tab(
     subtitle_text: &str,
     abort_flag: &Arc<AtomicBool>,
     model_context_size: usize,
-    concurrent_limit: usize,
     tab_name: String,
     custom_prompt: Option<&str>,
 ) -> TabResult {
@@ -902,12 +947,17 @@ async fn generate_single_tab(
     );
 
     // 选择生成策略
-    let strategy = select_strategy(subtitle_text.len(), *tab_type, model_context_size);
+    let strategy = select_strategy(
+        subtitle_text.len(),
+        *tab_type,
+        model_context_size,
+        custom_prompt.is_some(),
+    );
 
     // 执行生成
     let content_result = match strategy {
-        GenerationStrategy::Layered if matches!(tab_type, TabType::FullSummary) => {
-            generate_full_summary_layered(ai_config, subtitle_text, abort_flag, event_name, app, concurrent_limit, custom_prompt).await
+        GenerationStrategy::Layered if matches!(tab_type, TabType::FullSummary | TabType::CustomSummary) => {
+            generate_full_summary_layered(ai_config, subtitle_text, abort_flag, event_name, app, custom_prompt).await
         }
         _ => {
             // 使用自定义提示词或默认提示词
