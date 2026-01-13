@@ -75,15 +75,11 @@ export interface SidebarState {
 // 视图类型
 export type ViewType = "home" | "settings" | "note";
 
-// 布局比例类型
-export type LayoutRatio = "4:6" | "6:4";
-
 // 视频工具栏设置（全局设置，跨笔记通用）
 export interface VideoToolbarSettings {
   videoVisible: boolean;
   autoPlay: boolean;
   layoutSwapped: boolean;
-  layoutRatio: LayoutRatio;
   layoutPanelWidth: number; // 左侧面板宽度百分比 (20-80)，默认 40
 }
 

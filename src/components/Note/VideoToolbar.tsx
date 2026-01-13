@@ -6,7 +6,6 @@ import {
   Pause,
   ArrowLeftRight,
   ChevronDown,
-  Columns2,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
@@ -131,15 +130,9 @@ export function VideoToolbar({
     setVideoVisible,
     setAutoPlay,
     setLayoutSwapped,
-    setLayoutRatio,
   } = useApp();
 
-  const { videoVisible, autoPlay, layoutSwapped, layoutRatio } = toolbarSettings;
-
-  // 切换布局比例
-  const handleToggleRatio = () => {
-    setLayoutRatio(layoutRatio === "4:6" ? "6:4" : "4:6");
-  };
+  const { videoVisible, autoPlay, layoutSwapped } = toolbarSettings;
 
   // 切换左右交换
   const handleToggleSwap = () => {
@@ -167,16 +160,6 @@ export function VideoToolbar({
           tooltip="左右交换"
           onClick={handleToggleSwap}
           active={layoutSwapped}
-        />
-        <TooltipButton
-          icon={
-            <div className="flex items-center gap-0.5 text-[10px] font-medium">
-              <Columns2 className="w-3.5 h-3.5" />
-            </div>
-          }
-          tooltip={layoutRatio === "4:6" ? "扩展视频区域" : "收缩视频区域"}
-          onClick={handleToggleRatio}
-          active={layoutRatio === "6:4"}
         />
       </div>
 
