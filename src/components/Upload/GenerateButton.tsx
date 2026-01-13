@@ -74,7 +74,7 @@ export function GenerateButton() {
         "flex items-center justify-center gap-2 px-8 py-3 rounded-xl",
         "font-medium text-white transition-all duration-200",
         canGenerate
-          ? "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 btn-glow"
+          ? "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 btn-glow cursor-pointer"
           : "bg-slate-200 dark:bg-slate-700 text-slate-400 cursor-not-allowed"
       )}
     >

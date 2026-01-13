@@ -21,7 +21,7 @@ export function RecentNotes() {
         <button
           className={cn(
             "flex items-center gap-1 text-sm text-slate-500 hover:text-blue-400",
-            "transition-colors duration-200"
+            "transition-colors duration-200 cursor-pointer"
           )}
         >
           查看全部

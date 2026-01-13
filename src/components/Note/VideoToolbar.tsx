@@ -34,7 +34,7 @@ function TooltipButton({ icon, tooltip, onClick, active }: TooltipButtonProps) {
         onMouseEnter={() => setShowTooltip(true)}
         onMouseLeave={() => setShowTooltip(false)}
         className={cn(
-          "w-8 h-8 flex items-center justify-center rounded-md transition-colors",
+          "w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer",
           active
             ? "bg-slate-200 dark:bg-neutral-700 text-slate-700 dark:text-neutral-200"
             : "bg-slate-100 dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 hover:bg-slate-200 dark:hover:bg-neutral-700 hover:text-slate-700 dark:hover:text-neutral-200"
@@ -78,7 +78,7 @@ function ModelSelector({ models, currentModelId, onModelChange }: ModelSelectorP
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-1.5 px-2.5 h-8 bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-600 dark:text-neutral-200 rounded-md transition-colors"
+        className="flex items-center gap-1.5 px-2.5 h-8 bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 text-slate-600 dark:text-neutral-200 rounded-md transition-colors cursor-pointer"
       >
         <span className="text-xs font-medium truncate max-w-[120px]">
           {currentModel?.title || "选择模型"}
@@ -101,7 +101,7 @@ function ModelSelector({ models, currentModelId, onModelChange }: ModelSelectorP
                 setIsOpen(false);
               }}
               className={cn(
-                "w-full px-3 py-1.5 text-left text-xs transition-colors",
+                "w-full px-3 py-1.5 text-left text-xs transition-colors cursor-pointer",
                 model.id === currentModelId
                   ? "bg-slate-100 dark:bg-neutral-700 text-slate-800 dark:text-white"
                   : "text-slate-600 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-neutral-700 hover:text-slate-800 dark:hover:text-white"

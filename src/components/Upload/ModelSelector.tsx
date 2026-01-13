@@ -45,7 +45,7 @@ export function ModelSelector() {
           "flex items-center gap-2 px-4 py-2.5 rounded-lg",
           "bg-slate-100 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border",
           "text-sm text-slate-600 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-600",
-          "transition-all duration-200"
+          "transition-all duration-200 cursor-pointer"
         )}
       >
         <Bot className="w-4 h-4 text-blue-400" />
@@ -72,7 +72,7 @@ export function ModelSelector() {
               }}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-2.5 text-left",
-                "hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors",
+                "hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer",
                 config.id === selectedModelId
                   ? "text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10"
                   : "text-slate-600 dark:text-slate-300"

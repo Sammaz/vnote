@@ -535,7 +535,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
         <div className="flex items-center gap-1">
           {/* 清空对话按钮 */}
           <button
-            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors"
+            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
               handleClearMessages();
@@ -546,7 +546,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
           </button>
           {isPopout ? (
             <button
-              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors"
+              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
                 handleMinimize();
@@ -556,7 +556,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
             </button>
           ) : (
             <button
-              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors"
+              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
               onClick={handlePopout}
             >
               <Maximize2 className="w-4 h-4" />
@@ -648,7 +648,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
                 />
                 <button
                   onClick={() => handleRemoveImage(image.id)}
-                  className="absolute -top-2 -right-2 w-5 h-5 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors"
+                  className="absolute -top-2 -right-2 w-5 h-5 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors cursor-pointer"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -673,7 +673,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
           <div className="flex items-center gap-1">
             <button
               onClick={handleAttachClick}
-              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors"
+              className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
               title="上传图片"
             >
               <Paperclip className="w-5 h-5" />
@@ -681,7 +681,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
             <button
               onClick={() => setBasedOnVideo(!basedOnVideo)}
               className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors",
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
                 basedOnVideo
                   ? "text-cyan-400 border border-cyan-400/50 bg-cyan-400/10"
                   : "text-slate-400 hover:text-slate-300"
@@ -697,7 +697,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
                   ref={questionButtonRef}
                   onClick={handleToggleQuestionPopover}
                   className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors",
+                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
                     showQuestionPopover
                       ? "text-amber-400 border border-amber-400/50 bg-amber-400/10"
                       : "text-slate-400 hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover"
@@ -737,7 +737,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
                             handleSuggestedQuestion(question);
                             setShowQuestionPopover(false);
                           }}
-                          className="w-full text-left px-3 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors mb-1 last:mb-0"
+                          className="w-full text-left px-3 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors mb-1 last:mb-0 cursor-pointer"
                         >
                           {question}
                         </button>
@@ -752,7 +752,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
           {isStreaming ? (
             <button
               onClick={handleStopGeneration}
-              className="w-10 h-10 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors"
+              className="w-10 h-10 flex items-center justify-center rounded-full bg-red-500 text-white hover:bg-red-600 transition-colors cursor-pointer"
               title="停止生成"
             >
               <Square className="w-4 h-4 fill-current" />
@@ -790,7 +790,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
           </div>
           <button
             onClick={handleMinimize}
-            className="mt-2 px-3 py-1.5 text-xs text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors"
+            className="mt-2 px-3 py-1.5 text-xs text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-colors cursor-pointer"
           >
             点击收回
           </button>

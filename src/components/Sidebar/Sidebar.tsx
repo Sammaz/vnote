@@ -199,7 +199,7 @@ function NoteItem({ note }: NoteItemProps) {
           </div>
           <button
             onClick={handleDelete}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
             <span>删除</span>
@@ -258,7 +258,7 @@ export function Sidebar() {
             <button
               onClick={handleCollapse}
               className={cn(
-                "flex items-center justify-center w-7 h-7 rounded-md transition-all duration-200",
+                "flex items-center justify-center w-7 h-7 rounded-md transition-all duration-200 cursor-pointer",
                 "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
               )}
               title="折叠侧边栏"
@@ -270,7 +270,7 @@ export function Sidebar() {
           <div className="w-full flex items-center justify-center">
             <button
               onClick={handleExpand}
-              className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors"
+              className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
               title="展开侧边栏"
             >
               {isHovered ? (

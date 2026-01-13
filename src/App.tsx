@@ -131,7 +131,7 @@ function AppContent() {
         <div className="flex items-center space-x-1 pr-2" data-tauri-drag-region="false">
           <button
             onClick={toggleTheme}
-            className="p-2 text-slate-400 hover:text-orange-500 dark:text-slate-400 dark:hover:text-yellow-400 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-full transition-colors"
+            className="p-2 text-slate-400 hover:text-orange-500 dark:text-slate-400 dark:hover:text-yellow-400 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-full transition-colors cursor-pointer"
           >
             <Sun size={18} className="hidden dark:block" />
             <Moon size={18} className="block dark:hidden" />
@@ -139,7 +139,7 @@ function AppContent() {
           <button
             onClick={handleSettingsClick}
             className={[
-              "p-2 rounded-full transition-colors",
+              "p-2 rounded-full transition-colors cursor-pointer",
               isSettingsView
                 ? "text-blue-500 bg-blue-500/10 dark:text-blue-400 dark:bg-blue-400/10"
                 : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
@@ -153,19 +153,19 @@ function AppContent() {
         <div className="flex items-center" data-tauri-drag-region="false">
           <button
             onClick={handleMinimize}
-            className="h-9 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors"
+            className="h-9 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
           >
             <Minus size={14} />
           </button>
           <button
             onClick={handleMaximize}
-            className="h-9 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors"
+            className="h-9 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
           >
             <Square size={12} />
           </button>
           <button
             onClick={handleClose}
-            className="h-9 w-12 flex items-center justify-center text-slate-400 hover:text-white hover:bg-red-500 transition-colors"
+            className="h-9 w-12 flex items-center justify-center text-slate-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer"
           >
             <X size={14} />
           </button>

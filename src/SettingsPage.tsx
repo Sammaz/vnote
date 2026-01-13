@@ -553,21 +553,21 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             <button
                 onClick={onToggleDefault}
                 className={config.is_default
-                    ? "text-yellow-500 hover:text-yellow-600"
-                    : "text-slate-400 hover:text-yellow-500"}
+                    ? "text-yellow-500 hover:text-yellow-600 cursor-pointer"
+                    : "text-slate-400 hover:text-yellow-500 cursor-pointer"}
                 title={config.is_default ? "取消默认" : "设为默认"}
             >
                 <Star size={14} fill={config.is_default ? "currentColor" : "none"} />
             </button>
             <button
                 onClick={onEdit}
-                className="text-slate-400 hover:text-blue-600 text-xs"
+                className="text-slate-400 hover:text-blue-600 text-xs cursor-pointer"
             >
                 编辑
             </button>
             <button
                 onClick={onDelete}
-                className="text-slate-400 hover:text-red-600"
+                className="text-slate-400 hover:text-red-600 cursor-pointer"
             >
                 <Trash2 size={14} />
             </button>
@@ -591,8 +591,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                     确定要删除配置「{title}」吗？此操作无法撤销。
                 </p>
                 <div className="flex gap-3">
-                    <button onClick={onCancel} className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors">取消</button>
-                    <button onClick={onConfirm} className="flex-1 px-4 py-2.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm">删除</button>
+                    <button onClick={onCancel} className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">取消</button>
+                    <button onClick={onConfirm} className="flex-1 px-4 py-2.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm cursor-pointer">删除</button>
                 </div>
             </div>
         </div>
@@ -655,7 +655,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                     </div>
                     <button
                         onClick={onClose}
-                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover/50 rounded-lg transition-colors"
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover/50 rounded-lg transition-colors cursor-pointer"
                     >
                         <ArrowLeft size={16} />
                         返回
@@ -676,8 +676,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         <div className="text-sm text-slate-500 dark:text-slate-400">选择应用的外观主题</div>
                                     </div>
                                     <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
-                                        <button onClick={() => handleThemeChange("light")} className={themeButtonClass("light")}><Sun size={16} /></button>
-                                        <button onClick={() => handleThemeChange("dark")} className={themeButtonClass("dark")}><Moon size={16} /></button>
+                                        <button onClick={() => handleThemeChange("light")} className={themeButtonClass("light") + " cursor-pointer"}><Sun size={16} /></button>
+                                        <button onClick={() => handleThemeChange("dark")} className={themeButtonClass("dark") + " cursor-pointer"}><Moon size={16} /></button>
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-4 p-4 rounded-lg border border-slate-200 dark:border-vnote-border">
@@ -688,7 +688,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         <div className="text-sm font-medium text-slate-900 dark:text-slate-100">系统托盘</div>
                                         <div className="text-sm text-slate-500 dark:text-slate-400">关闭窗口时保持后台运行</div>
                                     </div>
-                                    <button onClick={handleTrayToggle} className={["relative inline-flex h-6 w-11 items-center rounded-full transition-colors", trayEnabled ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-600"].join(" ")}>
+                                    <button onClick={handleTrayToggle} className={["relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer", trayEnabled ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-600"].join(" ")}>
                                         <span className={["inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform", trayEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
                                     </button>
                                 </div>
@@ -712,7 +712,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     <button
                                         onClick={handleClearVideoCache}
                                         disabled={clearingCache || videoCacheSize === 0}
-                                        className="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                                        className="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
                                     >
                                         {clearingCache ? (
                                             <Loader2 size={14} className="animate-spin" />
@@ -733,7 +733,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                             <div className="flex items-center gap-3 mb-6">
                                 <button
                                     onClick={() => setEditingPromptConfig(null)}
-                                    className="p-2 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors"
+                                    className="p-2 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
                                 >
                                     <ArrowLeft size={20} className="text-slate-500" />
                                 </button>
@@ -865,7 +865,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 </select>
                                 <button
                                     onClick={() => openPromptEditor(createEmptyPromptConfig())}
-                                    className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                                    className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 cursor-pointer"
                                 >
                                     <Plus size={16} />
                                     新增提示词
@@ -894,13 +894,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                 <div className="flex gap-2 mt-4">
                                                     <button
                                                         onClick={() => openPromptEditor(prompt)}
-                                                        className="flex-1 py-2 text-sm text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700/50 rounded-lg flex items-center justify-center gap-1 transition-colors"
+                                                        className="flex-1 py-2 text-sm text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700/50 rounded-lg flex items-center justify-center gap-1 transition-colors cursor-pointer"
                                                     >
                                                         编辑
                                                     </button>
                                                     <button
                                                         onClick={() => setDeletingPromptConfigId(prompt.id)}
-                                                        className="p-2 text-slate-400 hover:text-red-500 bg-slate-100 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                        className="p-2 text-slate-400 hover:text-red-500 bg-slate-100 dark:bg-slate-800/50 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors cursor-pointer"
                                                     >
                                                         <Trash2 size={14} />
                                                     </button>
@@ -920,7 +920,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     </p>
                                     <button
                                         onClick={() => openPromptEditor(createEmptyPromptConfig())}
-                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 mx-auto"
+                                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 mx-auto cursor-pointer"
                                     >
                                         <Plus size={16} />
                                         创建提示词
@@ -935,7 +935,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         <div className="flex items-center gap-3 mb-6">
                             <button
                                 onClick={closeEditor}
-                                className="p-2 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors"
+                                className="p-2 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
                             >
                                 <ArrowLeft size={20} className="text-slate-500" />
                             </button>
@@ -984,7 +984,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     <button
                                         type="button"
                                         onClick={() => setApiKeyVisible(!apiKeyVisible)}
-                                        className="px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                        className="px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                                     >
                                         {apiKeyVisible ? <Eye size={16} /> : <EyeOff size={16} />}
                                     </button>
@@ -1032,7 +1032,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                             <button
                                 onClick={testApiConfig}
                                 disabled={testingApi || !currentConfig?.base_url || !currentConfig?.model}
-                                className="w-full px-4 py-2.5 text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="w-full px-4 py-2.5 text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                             >
                                 {testingApi && <Loader2 size={14} className="animate-spin" />}
                                 {testingApi ? "测试中..." : "测试连接"}
@@ -1041,13 +1041,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         <div className="flex gap-3 pt-6">
                             <button
                                 onClick={closeEditor}
-                                className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-md transition-colors"
+                                className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-md transition-colors cursor-pointer"
                             >
                                 取消
                             </button>
                             <button
                                 onClick={saveCurrentConfig}
-                                className="flex-1 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors"
+                                className="flex-1 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors cursor-pointer"
                             >
                                 保存
                             </button>
@@ -1065,7 +1065,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 </div>
                                 <button
                                     onClick={() => openAiEditor(createEmptyAiConfig())}
-                                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
                                 >
                                     <Plus size={14} /> 新增配置
                                 </button>
@@ -1098,7 +1098,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 </div>
                                 <button
                                     onClick={() => openEmbeddingEditor(createEmptyEmbeddingConfig())}
-                                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
                                 >
                                     <Plus size={14} /> 新增配置
                                 </button>
@@ -1134,7 +1134,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 </div>
                                 <button
                                     onClick={() => openRerankerEditor(createEmptyRerankerConfig())}
-                                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
                                 >
                                     <Plus size={14} /> 新增配置
                                 </button>
