@@ -85,6 +85,7 @@ export interface VideoToolbarSettings {
   layoutSwapped: boolean;
   layoutRatio: LayoutRatio;
   layoutPanelWidth: number; // 左侧面板宽度百分比 (20-80)，默认 40
+  captionsEnabled: boolean; // 字幕开关状态，默认 true
 }
 
 // 提示词分类

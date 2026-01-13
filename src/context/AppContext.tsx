@@ -68,6 +68,7 @@ interface AppContextType {
   setLayoutSwapped: (swapped: boolean) => void;
   setLayoutRatio: (ratio: LayoutRatio) => void;
   setLayoutPanelWidth: (width: number) => void;
+  setCaptionsEnabled: (enabled: boolean) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -111,17 +112,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     layoutSwapped: false,
     layoutRatio: "4:6",
     layoutPanelWidth: 40, // 默认左侧占 40%
+    captionsEnabled: true, // 默认字幕开启
   });
 
   // 加载工具栏设置
   const loadToolbarSettings = useCallback(async () => {
     try {
-      const [videoVisible, autoPlay, layoutSwapped, layoutRatio, layoutPanelWidth] = await Promise.all([
+      const [videoVisible, autoPlay, layoutSwapped, layoutRatio, layoutPanelWidth, captionsEnabled] = await Promise.all([
         invoke<string | null>("get_setting", { key: "toolbar_video_visible" }),
         invoke<string | null>("get_setting", { key: "toolbar_auto_play" }),
         invoke<string | null>("get_setting", { key: "toolbar_layout_swapped" }),
         invoke<string | null>("get_setting", { key: "toolbar_layout_ratio" }),
         invoke<string | null>("get_setting", { key: "toolbar_layout_panel_width" }),
+        invoke<string | null>("get_setting", { key: "toolbar_captions_enabled" }),
       ]);
 
       setToolbarSettings({
@@ -130,6 +133,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         layoutSwapped: layoutSwapped === "true",
         layoutRatio: (layoutRatio as LayoutRatio) || "4:6",
         layoutPanelWidth: layoutPanelWidth ? Math.max(20, Math.min(80, parseInt(layoutPanelWidth, 10))) : 40,
+        captionsEnabled: captionsEnabled !== "false", // 默认开启
       });
     } catch (error) {
       console.error("Failed to load toolbar settings:", error);
@@ -174,6 +178,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const clampedWidth = Math.max(20, Math.min(80, width));
     setToolbarSettings(prev => ({ ...prev, layoutPanelWidth: clampedWidth }));
     saveSetting("toolbar_layout_panel_width", clampedWidth.toString());
+  }, [saveSetting]);
+
+  // 设置字幕开关状态
+  const setCaptionsEnabled = useCallback((enabled: boolean) => {
+    setToolbarSettings(prev => ({ ...prev, captionsEnabled: enabled }));
+    saveSetting("toolbar_captions_enabled", enabled.toString());
   }, [saveSetting]);
 
   // 加载笔记列表
@@ -321,6 +331,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLayoutSwapped,
     setLayoutRatio,
     setLayoutPanelWidth,
+    setCaptionsEnabled,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

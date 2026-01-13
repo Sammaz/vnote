@@ -4,6 +4,7 @@ import { AlertCircle, Video, Loader2 } from "lucide-react";
 import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 import { PlaybackResume } from "./PlaybackResume";
+import { useApp } from "../../context/AppContext";
 
 // 检查是否是 TS 格式
 function isTsFormat(filePath: string): boolean {
@@ -73,10 +74,12 @@ export function VideoPlayer({
   noteId,
   lastPlaybackPosition: initialLastPlaybackPosition,
 }: VideoPlayerProps) {
+  const { toolbarSettings, setCaptionsEnabled } = useApp();
+  const { captionsEnabled } = toolbarSettings;
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Plyr | null>(null);
   const assRef = useRef<any>(null);
-  const assVisibleRef = useRef<boolean>(true);
+  const assVisibleRef = useRef<boolean>(captionsEnabled);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [converting, setConverting] = useState(false);
@@ -267,7 +270,7 @@ export function VideoPlayer({
             ],
         settings: ["captions", "quality", "speed"],
         speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
-        captions: { active: !!hasSubtitle, language: "zh", update: true },
+        captions: { active: captionsEnabled && !!hasSubtitle, language: "zh", update: true },
         keyboard: { focused: true, global: false },
         tooltips: { controls: true, seek: true },
         i18n: {
@@ -354,6 +357,18 @@ export function VideoPlayer({
       player.on("pause", handlePause);
       player.on("ended", handleEnded);
 
+      // 监听字幕按钮点击（用于 SRT/VTT 字幕）
+      const captionBtn = (player.elements as any).buttons?.captions;
+      if (captionBtn) {
+        captionBtn.addEventListener("click", () => {
+          setTimeout(() => {
+            const isCaptionsActive = player.currentTrack !== null;
+            setCaptionsEnabled(isCaptionsActive);
+            assVisibleRef.current = isCaptionsActive;
+          }, 0);
+        });
+      }
+
       // ASS 字幕相关
       const cleanupRef = {
         captionBtn: null as Element | null,
@@ -430,11 +445,14 @@ export function VideoPlayer({
             const btn = plyrContainer?.querySelector('[data-plyr="captions"]');
             if (btn) {
               const handler = () => {
-                assVisibleRef.current = !assVisibleRef.current;
+                const newState = !assVisibleRef.current;
+                assVisibleRef.current = newState;
                 const assBox = videoWrapper.querySelector(".ASS-box") as HTMLElement;
                 if (assBox) {
-                  assBox.style.display = assVisibleRef.current ? "" : "none";
+                  assBox.style.display = newState ? "" : "none";
                 }
+                // 同步到全局状态
+                setCaptionsEnabled(newState);
               };
               cleanupRef.captionBtn = btn;
               cleanupRef.handler = handler;
@@ -552,7 +570,7 @@ export function VideoPlayer({
         playerRef.current = null;
       }
     };
-  }, [actualVideoUrl, subtitleUrl, compact, autoPlay, converting]);
+  }, [actualVideoUrl, subtitleUrl, compact, autoPlay, converting, captionsEnabled, setCaptionsEnabled]);
 
   // 错误状态
   if (error) {
