@@ -200,6 +200,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSelectedNoteId(null);
       setCurrentView("home");
     }
+    // 清除文件夹选中状态
+    setSidebar((prev) => ({ ...prev, selectedFolderId: null }));
   }, [refreshNotes, selectedNoteId]);
 
   // 更新笔记的建议问题（用于局部刷新）

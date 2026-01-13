@@ -289,7 +289,7 @@ export function Sidebar() {
         <NavItem
           icon={<Sparkles className="w-5 h-5" />}
           label="新笔记"
-          active={currentView === "home" && !sidebar.selectedFolderId && !selectedNoteId}
+          active={currentView === "home"}
           collapsed={collapsed}
           onClick={() => {
             setCurrentView("home");
