@@ -23,7 +23,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
-import { message } from "../ui/Message";
+import { message } from "../../utils/message";
+import {
+  getNoteGenerationState,
+  setNoteGenerationState,
+  clearNoteGenerationState,
+  isNoteGenerating,
+  attemptedAutoGenerateNoteIds,
+  activeListeners,
+} from "../../utils/noteGenerationState";
 
 type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom";
 
@@ -53,65 +61,8 @@ const TAB_TYPE_MAPPING: Record<string, TabType> = {
 
 // ============================================================================
 // 全局生成状态管理器（跨组件实例持久化）
+// 工具函数已移至 src/utils/noteGenerationState.ts 以避免 Fast Refresh 警告
 // ============================================================================
-
-interface NoteGenerationState {
-  isGenerating: boolean;
-  generationId: string | null;
-  regeneratingTabs: Set<TabType>;
-  progress: { current: number; total: number; message: string };
-  completedTabs: Set<TabType>;
-  failedTabs: Map<TabType, string>;
-}
-
-// 全局存储每个笔记的生成状态
-const noteGenerationStates = new Map<number, NoteGenerationState>();
-
-// 全局追踪已尝试自动生成的笔记ID（避免重复触发）
-const attemptedAutoGenerateNoteIds = new Set<number>();
-
-// 全局事件监听器管理（避免重复监听同一个generationId）
-const activeListeners = new Map<string, () => void>();
-
-// 获取或初始化笔记的生成状态
-function getNoteGenerationState(noteId: number): NoteGenerationState {
-  if (!noteGenerationStates.has(noteId)) {
-    noteGenerationStates.set(noteId, {
-      isGenerating: false,
-      generationId: null,
-      regeneratingTabs: new Set(),
-      progress: { current: 0, total: 0, message: "" },
-      completedTabs: new Set(),
-      failedTabs: new Map(),
-    });
-  }
-  return noteGenerationStates.get(noteId)!;
-}
-
-// 设置笔记的生成状态
-function setNoteGenerationState(noteId: number, updates: Partial<NoteGenerationState>) {
-  const state = getNoteGenerationState(noteId);
-  Object.assign(state, updates);
-}
-
-// 清理笔记的生成状态（导出供外部使用）
-export function clearNoteGenerationState(noteId: number) {
-  const state = noteGenerationStates.get(noteId);
-  if (state?.generationId) {
-    // 清理事件监听器
-    const unlisten = activeListeners.get(state.generationId);
-    if (unlisten) {
-      unlisten();
-      activeListeners.delete(state.generationId);
-    }
-  }
-  noteGenerationStates.delete(noteId);
-}
-
-// 判断笔记是否正在生成中（导出供外部使用）
-export function isNoteGenerating(noteId: number): boolean {
-  return getNoteGenerationState(noteId).isGenerating;
-}
 
 interface NoteContentPanelProps {
   note: Note;
