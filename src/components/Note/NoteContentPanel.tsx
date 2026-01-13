@@ -19,14 +19,13 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
+import { ChapterGrid } from "./ChapterGrid";
 import { message } from "../../utils/message";
 import {
   getNoteGenerationState,
   setNoteGenerationState,
-  clearNoteGenerationState,
-  isNoteGenerating,
   attemptedAutoGenerateNoteIds,
   activeListeners,
 } from "../../utils/noteGenerationState";
@@ -73,6 +72,51 @@ interface NoteContentPanelProps {
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>("summary");
 
+  // 章节相关状态
+  const [chapterData, setChapterData] = useState<ChapterData | null>(null);
+  const [isChapterMode, setIsChapterMode] = useState(false);
+
+  // 解析 detailed_reading 是否为章节数据
+  useEffect(() => {
+    if (note.detailed_reading) {
+      // 尝试解析为 JSON
+      if (typeof note.detailed_reading === "string") {
+        try {
+          const parsed = JSON.parse(note.detailed_reading);
+          console.log("[NoteContentPanel] 解析 detailed_reading:", parsed);
+          // 检查是否是 ChapterData 格式
+          if (parsed && parsed.chapters && Array.isArray(parsed.chapters)) {
+            console.log("[NoteContentPanel] 设置 chapterData, 章节数量:", parsed.chapters.length);
+            setChapterData(parsed);
+            setIsChapterMode(true);
+          } else {
+            console.log("[NoteContentPanel] 不是章节数据格式");
+            setChapterData(null);
+            setIsChapterMode(false);
+          }
+        } catch (e) {
+          // 不是 JSON，保持为普通文本模式
+          console.log("[NoteContentPanel] JSON 解析失败:", e);
+          setChapterData(null);
+          setIsChapterMode(false);
+        }
+      } else if (typeof note.detailed_reading === "object" && note.detailed_reading.chapters) {
+        // 已经是 ChapterData 对象
+        console.log("[NoteContentPanel] 已经是 ChapterData 对象");
+        setChapterData(note.detailed_reading);
+        setIsChapterMode(true);
+      } else {
+        console.log("[NoteContentPanel] 其他类型，设置为 null");
+        setChapterData(null);
+        setIsChapterMode(false);
+      }
+    } else {
+      console.log("[NoteContentPanel] detailed_reading 为空");
+      setChapterData(null);
+      setIsChapterMode(false);
+    }
+  }, [note.detailed_reading]);
+
   // 编辑模式状态
   const [isEditMode, setIsEditMode] = useState(false);
 
@@ -84,10 +128,10 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 生成状态（从全局状态同步）
   const [isGenerating, setIsGenerating] = useState(() => syncStateFromGlobal().isGenerating);
-  const [regeneratingTabs, setRegeneratingTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().regeneratingTabs));
+  const [regeneratingTabs, setRegeneratingTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().regeneratingTabs) as Set<TabType>);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string }>(() => ({ ...syncStateFromGlobal().progress }));
-  const [completedTabs, setCompletedTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().completedTabs));
-  const [failedTabs, setFailedTabs] = useState<Map<TabType, string>>(() => new Map(syncStateFromGlobal().failedTabs));
+  const [completedTabs, setCompletedTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().completedTabs) as Set<TabType>);
+  const [failedTabs, setFailedTabs] = useState<Map<TabType, string>>(() => new Map(syncStateFromGlobal().failedTabs) as Map<TabType, string>);
   const [generationId, setGenerationId] = useState<string | null>(() => syncStateFromGlobal().generationId);
 
   // 用于触发重新渲染的计数器
@@ -101,9 +145,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     setIsGenerating(globalState.isGenerating);
     setGenerationId(globalState.generationId);
     setProgress({ ...globalState.progress });
-    setCompletedTabs(new Set(globalState.completedTabs));
-    setFailedTabs(new Map(globalState.failedTabs));
-    setRegeneratingTabs(new Set(globalState.regeneratingTabs));
+    setCompletedTabs(new Set(globalState.completedTabs) as Set<TabType>);
+    setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
+    setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
 
     // 触发重新渲染以更新UI
     forceUpdate({});
@@ -219,9 +263,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         setIsGenerating(updatedState.isGenerating);
         setGenerationId(updatedState.generationId);
         setProgress({ ...updatedState.progress });
-        setCompletedTabs(new Set(updatedState.completedTabs));
-        setFailedTabs(new Map(updatedState.failedTabs));
-        setRegeneratingTabs(new Set(updatedState.regeneratingTabs));
+        setCompletedTabs(new Set(updatedState.completedTabs) as Set<TabType>);
+        setFailedTabs(new Map(updatedState.failedTabs) as Map<TabType, string>);
+        setRegeneratingTabs(new Set(updatedState.regeneratingTabs) as Set<TabType>);
         forceUpdate({});
       }
     });
@@ -243,9 +287,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         setIsGenerating(globalState.isGenerating);
         setGenerationId(globalState.generationId);
         setProgress({ ...globalState.progress });
-        setCompletedTabs(new Set(globalState.completedTabs));
-        setFailedTabs(new Map(globalState.failedTabs));
-        setRegeneratingTabs(new Set(globalState.regeneratingTabs));
+        setCompletedTabs(new Set(globalState.completedTabs) as Set<TabType>);
+        setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
+        setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
       }
     }, 200); // 每200ms同步一次
 
@@ -477,7 +521,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const getCurrentContent = useCallback((): string | null => {
     const tabType = TAB_TYPE_MAPPING[activeTab];
     if (!tabType) return null;
-    return note[tabType] || null;
+    const content = note[tabType];
+    // 处理 ChapterData 类型
+    if (typeof content === "object" && content !== null) {
+      return null; // 章节数据不支持复制为纯文本
+    }
+    return content || null;
   }, [activeTab, note]);
 
   // 复制当前内容到剪贴板
@@ -776,17 +825,39 @@ Video subtitles content:`;
             onContentUpdate={onGenerationComplete}
           />
         )}
-        {activeTab === "original" && (
-          <EditableMarkdown
-            noteId={note.id}
-            tabType="detailed_reading"
-            content={note.detailed_reading}
-            isGenerating={isTabGenerating("original")}
-            emptyMessage="原文细读内容将在AI分析后生成"
-            isEditMode={isEditMode}
-            onContentUpdate={onGenerationComplete}
-          />
-        )}
+        {activeTab === "original" && (() => {
+          // 检查是否是纯文本内容（向后兼容旧数据）
+          const isPlainText = typeof note.detailed_reading === "string" &&
+            note.detailed_reading.trim() &&
+            !note.detailed_reading.trim().startsWith("{");
+
+          return isPlainText ? (
+            <EditableMarkdown
+              noteId={note.id}
+              tabType="detailed_reading"
+              content={note.detailed_reading}
+              isGenerating={isTabGenerating("original")}
+              emptyMessage="原文细读内容将在AI分析后生成"
+              isEditMode={isEditMode}
+              onContentUpdate={onGenerationComplete}
+            />
+          ) : (
+            // 否则显示 ChapterGrid（包含空状态和有数据的状态）
+            <ChapterGrid
+              noteId={note.id}
+              videoPath={note.video_path}
+              subtitlePath={note.subtitle_path}
+              chapterData={chapterData}
+              isGenerating={isTabGenerating("original")}
+              onChapterClick={(startTime) => {
+                // 发送事件跳转视频时间
+                window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: startTime } }));
+              }}
+              onGenerationComplete={onGenerationComplete}
+              modelId={note.model_id}
+            />
+          );
+        })()}
         {activeTab === "highlights" && (
           <EditableMarkdown
             noteId={note.id}

@@ -1,5 +1,6 @@
 mod ai_pool;
 mod chat;
+mod chapter;
 mod db;
 mod note_generation;
 mod prompts;
@@ -600,6 +601,60 @@ async fn abort_note_generation(generation_id: String) -> Result<(), String> {
     note_generation::abort_generation(generation_id).await
 }
 
+// Chapter generation commands
+#[tauri::command]
+async fn generate_chapters(
+    app: AppHandle,
+    generation_id: Option<String>,
+    note_id: i64,
+    model_id: i64,
+    video_path: String,
+    subtitle_path: String,
+    capture_screenshots: bool,
+) -> Result<String, String> {
+    let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let return_id = generation_id.clone();
+
+    let request = chapter::GenerateChaptersRequest {
+        note_id,
+        model_id,
+        video_path,
+        subtitle_path,
+        capture_screenshots,
+    };
+
+    // 在后台任务中执行
+    tokio::spawn(async move {
+        if let Err(e) = chapter::generate_chapters(app, get_db(), generation_id, request).await {
+            eprintln!("[generate_chapters] 生成失败: {}", e);
+        }
+    });
+
+    Ok(return_id)
+}
+
+#[tauri::command]
+async fn abort_chapter_generation(generation_id: String) -> Result<(), String> {
+    chapter::abort_chapter_generation(generation_id).await
+}
+
+#[tauri::command]
+async fn save_chapters_to_note(
+    note_id: i64,
+    chapter_data: serde_json::Value,
+) -> Result<(), String> {
+    let mut note = get_db()
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到".to_string())?;
+
+    // 将章节数据序列化为JSON字符串存储
+    let chapter_json = serde_json::to_string(&chapter_data).map_err(|e| e.to_string())?;
+    note.detailed_reading = Some(chapter_json);
+
+    get_db().update_note(&note).map_err(|e| e.to_string())
+}
+
 /// Update a specific content field of a note
 #[tauri::command]
 fn update_note_content(
@@ -721,6 +776,9 @@ pub fn run() {
             delete_prompt_config,
             generate_note_content,
             abort_note_generation,
+            generate_chapters,
+            abort_chapter_generation,
+            save_chapters_to_note,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

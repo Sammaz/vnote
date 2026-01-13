@@ -19,7 +19,7 @@ export interface Note {
   subtitle_path: string | null;
   model_id: number | null; // AI model ID used for generating notes
   full_summary: string | null;
-  detailed_reading: string | null;
+  detailed_reading: string | ChapterData | null;  // 支持纯文本或章节数据
   highlights: string | null;
   visual_summary: string | null;
   custom_summary: string | null;
@@ -163,3 +163,31 @@ export interface GenerationState {
   completedTabs: Set<TabType>;
   failedTabs: Map<TabType, string>;
 }
+
+// ============================================================================
+// 章节相关类型 (Chapter Types)
+// ============================================================================
+
+export interface Chapter {
+  id: string;                      // UUID
+  title: string;                   // 章节标题（AI生成）
+  start_time: number;              // 开始时间（秒）
+  end_time: number;                // 结束时间（秒）
+  content: string;                 // 章节内容概要
+  screenshot_path: string | null;  // 截图文件路径
+}
+
+export interface ChapterData {
+  chapters: Chapter[];
+  total_duration: number;          // 总时长（秒）
+  generated_at: string;            // 生成时间（ISO格式）
+}
+
+export type ChapterGenerationEvent =
+  | { status: "Starting" }
+  | { status: "AnalyzingSubtitle"; message: string }
+  | { status: "GeneratingChapters"; current: number; total: number; message: string }
+  | { status: "CapturingScreenshots"; current: number; total: number; message: string }
+  | { status: "Completed"; chapter_data: ChapterData }
+  | { status: "Error"; error: string }
+  | { status: "Aborted" };
