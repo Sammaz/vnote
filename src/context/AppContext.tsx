@@ -1,6 +1,7 @@
+/* @refresh skip */
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, LayoutRatio, PromptConfig } from "../types";
+import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, PromptConfig } from "../types";
 
 // Mock 数据 - 文件夹暂时保留
 const mockFolders: Folder[] = [
@@ -66,7 +67,6 @@ interface AppContextType {
   setVideoVisible: (visible: boolean) => void;
   setAutoPlay: (autoPlay: boolean) => void;
   setLayoutSwapped: (swapped: boolean) => void;
-  setLayoutRatio: (ratio: LayoutRatio) => void;
   setLayoutPanelWidth: (width: number) => void;
   setCaptionsEnabled: (enabled: boolean) => void;
 }
@@ -110,7 +110,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     videoVisible: true,
     autoPlay: false,
     layoutSwapped: false,
-    layoutRatio: "4:6",
     layoutPanelWidth: 40, // 默认左侧占 40%
     captionsEnabled: true, // 默认字幕开启
   });
@@ -118,11 +117,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // 加载工具栏设置
   const loadToolbarSettings = useCallback(async () => {
     try {
-      const [videoVisible, autoPlay, layoutSwapped, layoutRatio, layoutPanelWidth, captionsEnabled] = await Promise.all([
+      const [videoVisible, autoPlay, layoutSwapped, layoutPanelWidth, captionsEnabled] = await Promise.all([
         invoke<string | null>("get_setting", { key: "toolbar_video_visible" }),
         invoke<string | null>("get_setting", { key: "toolbar_auto_play" }),
         invoke<string | null>("get_setting", { key: "toolbar_layout_swapped" }),
-        invoke<string | null>("get_setting", { key: "toolbar_layout_ratio" }),
         invoke<string | null>("get_setting", { key: "toolbar_layout_panel_width" }),
         invoke<string | null>("get_setting", { key: "toolbar_captions_enabled" }),
       ]);
@@ -131,7 +129,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         videoVisible: videoVisible !== "false",
         autoPlay: autoPlay === "true",
         layoutSwapped: layoutSwapped === "true",
-        layoutRatio: (layoutRatio as LayoutRatio) || "4:6",
         layoutPanelWidth: layoutPanelWidth ? Math.max(20, Math.min(80, parseInt(layoutPanelWidth, 10))) : 40,
         captionsEnabled: captionsEnabled !== "false", // 默认开启
       });
@@ -165,12 +162,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const setLayoutSwapped = useCallback((swapped: boolean) => {
     setToolbarSettings(prev => ({ ...prev, layoutSwapped: swapped }));
     saveSetting("toolbar_layout_swapped", swapped.toString());
-  }, [saveSetting]);
-
-  // 设置布局比例
-  const setLayoutRatio = useCallback((ratio: LayoutRatio) => {
-    setToolbarSettings(prev => ({ ...prev, layoutRatio: ratio }));
-    saveSetting("toolbar_layout_ratio", ratio);
   }, [saveSetting]);
 
   // 设置布局面板宽度
@@ -329,7 +320,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setVideoVisible,
     setAutoPlay,
     setLayoutSwapped,
-    setLayoutRatio,
     setLayoutPanelWidth,
     setCaptionsEnabled,
   };
