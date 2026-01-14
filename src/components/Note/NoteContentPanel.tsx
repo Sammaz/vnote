@@ -24,9 +24,10 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SubtitleEntry } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
+import { SubtitleRow } from "./SubtitleRow";
 import { message } from "../../utils/message";
 import {
   getNoteGenerationState,
@@ -1341,6 +1342,27 @@ Video subtitles content:`;
             重新生成
           </button>
         </div>
+      ) : activeTab === "script" ? (
+        // 字幕脚本标签页的专用工具栏
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-3">
+            {/* 字幕滚动开关 */}
+            <button
+              onClick={() => setAutoScroll(!autoScroll)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                autoScroll
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <Clock className="w-4 h-4" />
+              字幕滚动
+            </button>
+          </div>
+          {/* 右侧留空，不显示复制和下载按钮 */}
+          <div />
+        </div>
       ) : (
         // 其他标签页的简化工具栏
         <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
@@ -1436,7 +1458,7 @@ Video subtitles content:`;
             onContentUpdate={onGenerationComplete}
           />
         )}
-        {activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} />}
+        {activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} autoScroll={autoScroll} />}
         {activeTab === "visual" && (
           <EditableMarkdown
             noteId={note.id}
@@ -1769,32 +1791,84 @@ Video subtitles content:`;
   );
 }
 
-// 字幕脚本内容 - 直接读取字幕文件
-function ScriptContent({ subtitlePath }: { subtitlePath: string | null }) {
-  const [subtitleContent, setSubtitleContent] = useState<string | null>(null);
+// 字幕脚本内容 - 结构化展示字幕
+interface ScriptContentProps {
+  subtitlePath: string | null;
+  autoScroll: boolean;
+}
+
+function ScriptContent({ subtitlePath, autoScroll }: ScriptContentProps) {
+  const [subtitleEntries, setSubtitleEntries] = useState<SubtitleEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [currentEntryIndex, setCurrentEntryIndex] = useState<number | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
+  // 加载并解析字幕文件
   useEffect(() => {
     if (!subtitlePath) {
-      setSubtitleContent(null);
+      setSubtitleEntries([]);
       return;
     }
 
     setLoading(true);
     setError(null);
 
-    invoke<string>("read_file_content", { path: subtitlePath })
-      .then((content) => {
-        setSubtitleContent(content);
+    invoke<SubtitleEntry[]>("parse_subtitle_file", { path: subtitlePath })
+      .then((entries) => {
+        setSubtitleEntries(entries);
       })
       .catch((err) => {
-        setError(`无法读取字幕文件: ${err}`);
+        setError(`无法解析字幕文件: ${err}`);
       })
       .finally(() => {
         setLoading(false);
       });
   }, [subtitlePath]);
+
+  // 根据时间查找当前字幕条目
+  const findCurrentEntryIndex = useCallback((time: number): number | null => {
+    for (let i = 0; i < subtitleEntries.length; i++) {
+      const entry = subtitleEntries[i];
+      if (time >= entry.start_time && time <= entry.end_time) {
+        return i;
+      }
+    }
+    return null;
+  }, [subtitleEntries]);
+
+  // 监听视频时间更新
+  useEffect(() => {
+    if (!autoScroll || subtitleEntries.length === 0) return;
+
+    const handleVideoTimeUpdate = (e: Event) => {
+      const event = e as CustomEvent<{ time: number }>;
+      const currentTime = event.detail.time;
+      const index = findCurrentEntryIndex(currentTime);
+      
+      if (index !== currentEntryIndex) {
+        setCurrentEntryIndex(index);
+        
+        // 自动滚动到当前字幕行
+        if (index !== null) {
+          const element = document.getElementById(`subtitle-row-${subtitleEntries[index].index}`);
+          if (element) {
+            element.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
+      }
+    };
+
+    window.addEventListener("video-time-update", handleVideoTimeUpdate);
+    return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
+  }, [autoScroll, subtitleEntries, currentEntryIndex, findCurrentEntryIndex]);
+
+  // 当 autoScroll 关闭时，清除高亮
+  useEffect(() => {
+    if (!autoScroll) {
+      setCurrentEntryIndex(null);
+    }
+  }, [autoScroll]);
 
   if (!subtitlePath) {
     return (
@@ -1822,11 +1896,25 @@ function ScriptContent({ subtitlePath }: { subtitlePath: string | null }) {
     );
   }
 
+  if (subtitleEntries.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-slate-400">
+        <Captions className="w-12 h-12 mb-4 opacity-50" />
+        <p>字幕文件为空</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="prose prose-slate dark:prose-invert max-w-none">
-      <pre className="whitespace-pre-wrap text-sm text-slate-600 dark:text-slate-300 font-mono bg-slate-50 dark:bg-vnote-surface p-4 rounded-lg">
-        {subtitleContent}
-      </pre>
+    <div ref={containerRef} className="space-y-1">
+      {subtitleEntries.map((entry, index) => (
+        <SubtitleRow
+          key={entry.index}
+          entry={entry}
+          isActive={currentEntryIndex === index}
+          onClick={() => {}}
+        />
+      ))}
     </div>
   );
 }
