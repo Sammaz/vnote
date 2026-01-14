@@ -9,6 +9,7 @@ pub struct SubtitleEntry {
     pub start_time: f64, // seconds
     pub end_time: f64,   // seconds
     pub text: String,
+    pub second_language_text: Option<String>, // 双语字幕的第二语言文本（可选）
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -99,6 +100,7 @@ fn parse_srt(content: &str) -> Result<Vec<SubtitleEntry>, String> {
                 start_time,
                 end_time,
                 text: clean_subtitle_text(&text),
+                second_language_text: None,
             });
         }
     }
@@ -179,6 +181,7 @@ fn parse_vtt(content: &str) -> Result<Vec<SubtitleEntry>, String> {
                 start_time,
                 end_time,
                 text: clean_subtitle_text(&text),
+                second_language_text: None,
             });
         }
     }
@@ -186,31 +189,27 @@ fn parse_vtt(content: &str) -> Result<Vec<SubtitleEntry>, String> {
     Ok(entries)
 }
 
-/// Parse ASS/SSA format subtitles
+/// Parse ASS/SSA format subtitles with bilingual support
 fn parse_ass(content: &str) -> Result<Vec<SubtitleEntry>, String> {
-    let mut entries = Vec::new();
+    // 先解析 Styles，检测是否有双语
+    let styles = parse_ass_styles(content);
+    let has_bilingual = styles.len() > 1;
 
-    // ASS Dialogue format: Dialogue: 0,0:00:00.00,0:00:00.00,Style,,0,0,0,,Text
+    // Dialogue 格式
     let dialogue_regex =
-        Regex::new(r"^Dialogue:\s*\d+,(\d+):(\d{2}):(\d{2})\.(\d{2}),(\d+):(\d{2}):(\d{2})\.(\d{2}),[^,]*,[^,]*,\d+,\d+,\d+,[^,]*,(.*)$")
+        Regex::new(r"^Dialogue:\s*\d+,(\d+):(\d{2}):(\d{2})\.(\d{2}),(\d+):(\d{2}):(\d{2})\.(\d{2}),([^,]*),[^,]*,\d+,\d+,\d+,[^,]*,(.*)$")
             .unwrap();
 
-    // Alternative format with fewer fields
-    let dialogue_regex_simple =
-        Regex::new(r"^Dialogue:\s*\d+,(\d+):(\d{2}):(\d{2})\.(\d{2}),(\d+):(\d{2}):(\d{2})\.(\d{2}),.*?,.*?,.*?,.*?,.*?,(.*)$")
-            .unwrap();
+    let mut primary_entries: Vec<SubtitleEntry> = Vec::new();
+    let mut secondary_entries: Vec<SubtitleEntry> = Vec::new();
 
-    let mut index = 0;
     for line in content.lines() {
         let line = line.trim();
         if !line.starts_with("Dialogue:") {
             continue;
         }
 
-        let caps = dialogue_regex
-            .captures(line)
-            .or_else(|| dialogue_regex_simple.captures(line));
-
+        let caps = dialogue_regex.captures(line);
         let caps = match caps {
             Some(c) => c,
             None => continue,
@@ -231,23 +230,108 @@ fn parse_ass(content: &str) -> Result<Vec<SubtitleEntry>, String> {
             caps.get(8).unwrap().as_str(),
         );
 
-        let text = caps.get(9).map(|m| m.as_str()).unwrap_or("");
+        let style_name = caps.get(9).map(|m| m.as_str()).unwrap_or("Default");
+        let text = caps.get(10).map(|m| m.as_str()).unwrap_or("");
 
         // Clean ASS tags and formatting
         let cleaned_text = clean_ass_text(text);
 
-        if !cleaned_text.is_empty() {
-            index += 1;
-            entries.push(SubtitleEntry {
-                index,
-                start_time,
-                end_time,
-                text: cleaned_text,
-            });
+        if cleaned_text.is_empty() {
+            continue;
+        }
+
+        let entry = SubtitleEntry {
+            index: 0, // 稍后设置
+            start_time,
+            end_time,
+            text: cleaned_text.clone(),
+            second_language_text: None,
+        };
+
+        if has_bilingual {
+            // 根据Style分类到主语言或第二语言
+            let style_order = styles.iter().position(|s| s == style_name);
+            if let Some(0) = style_order {
+                primary_entries.push(entry);
+            } else if style_order.is_some() {
+                secondary_entries.push(entry);
+            } else {
+                // 未匹配到已知Style，放入主语言
+                primary_entries.push(entry);
+            }
+        } else {
+            // 单语模式
+            primary_entries.push(entry);
         }
     }
 
-    Ok(entries)
+    if has_bilingual {
+        // 合并双语字幕：按时间范围匹配
+        Ok(merge_bilingual_entries(primary_entries, secondary_entries))
+    } else {
+        // 单语字幕：直接设置索引并返回
+        let mut result = Vec::new();
+        for (i, entry) in primary_entries.into_iter().enumerate() {
+            result.push(SubtitleEntry {
+                index: i + 1,
+                ..entry
+            });
+        }
+        Ok(result)
+    }
+}
+
+/// 解析 ASS 文件中的 Styles，返回按顺序排列的 Style 名称列表
+fn parse_ass_styles(content: &str) -> Vec<String> {
+    let mut styles = Vec::new();
+    let style_regex = Regex::new(r"^Style:\s*([^,]+)").unwrap();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.starts_with("Style:") {
+            if let Some(caps) = style_regex.captures(line) {
+                if let Some(style_name) = caps.get(1) {
+                    let name = style_name.as_str().to_string();
+                    // 排除默认的 Default 避免重复
+                    if !styles.iter().any(|s| s == &name) {
+                        styles.push(name);
+                    }
+                }
+            }
+        }
+    }
+
+    // 如果没有找到 Styles 或者只有 Default，返回单语模式
+    if styles.is_empty() || (styles.len() == 1 && styles[0] == "Default") {
+        vec!["Default".to_string()]
+    } else {
+        styles
+    }
+}
+
+/// 合并双语字幕条目
+fn merge_bilingual_entries(
+    primary: Vec<SubtitleEntry>,
+    secondary: Vec<SubtitleEntry>,
+) -> Vec<SubtitleEntry> {
+    let mut result = Vec::new();
+
+    for (i, mut prim_entry) in primary.into_iter().enumerate() {
+        prim_entry.index = i + 1;
+
+        // 查找时间范围重叠的二级语言字幕
+        let sec_text = secondary.iter().find(|sec| {
+            // 检查时间范围是否有重叠（容差 1 秒）
+            let start_overlap = sec.start_time <= prim_entry.end_time + 1.0;
+            let end_overlap = sec.end_time >= prim_entry.start_time - 1.0;
+            start_overlap && end_overlap
+        }).map(|sec| sec.text.clone());
+
+        prim_entry.second_language_text = sec_text;
+        result.push(prim_entry);
+    }
+
+    result
 }
 
 /// Parse time components into seconds

@@ -661,6 +661,11 @@ async fn abort_chapter_generation(generation_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn parse_subtitle_file(path: String) -> Result<Vec<subtitle::SubtitleEntry>, String> {
+    subtitle::parse_subtitle_file(&path)
+}
+
+#[tauri::command]
 async fn save_chapters_to_note(
     note_id: i64,
     chapter_data: serde_json::Value,
@@ -800,6 +805,7 @@ pub fn run() {
             abort_note_generation,
             generate_chapters,
             abort_chapter_generation,
+            parse_subtitle_file,
             save_chapters_to_note,
         ])
         .on_window_event(|window, event| {

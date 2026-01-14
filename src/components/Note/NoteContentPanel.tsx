@@ -16,6 +16,7 @@ import {
   Check,
   List,
   Clock,
+  Subtitles as SubtitlesIcon,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
@@ -91,6 +92,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [currentChapterId, setCurrentChapterId] = useState<string | null>(null);
   // 用户点击章节的时间戳（用于忽略视频时间更新）
   const userClickTimeRef = useRef<number>(0);
+  // 显示章节字幕开关
+  const [showChapterSubtitles, setShowChapterSubtitles] = useState(false);
 
   // 解析 detailed_reading 是否为章节数据
   useEffect(() => {
@@ -997,6 +1000,21 @@ Video subtitles content:`;
               <Clock className="w-4 h-4" />
               字幕滚动
             </button>
+            {/* 显示字幕开关 */}
+            {note.subtitle_path && (
+              <button
+                onClick={() => setShowChapterSubtitles(!showChapterSubtitles)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                  showChapterSubtitles
+                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                )}
+              >
+                <SubtitlesIcon className="w-4 h-4" />
+                {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
+              </button>
+            )}
           </div>
           {/* 重新生成按钮 */}
           <button
@@ -1082,6 +1100,7 @@ Video subtitles content:`;
               modelId={note.model_id}
               showToolbar={false}
               currentChapterId={currentChapterId}
+              showSubtitles={showChapterSubtitles}
             />
           );
         })()}

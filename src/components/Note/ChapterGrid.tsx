@@ -2,8 +2,8 @@ import { useState, useMemo, forwardRef, useImperativeHandle, useEffect } from "r
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Play, Clock, Image as ImageIcon, Loader2 } from "lucide-react";
-import type { Chapter, ChapterData, ChapterGenerationEvent } from "../../types";
+import { Play, Clock, Image as ImageIcon, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import type { Chapter, ChapterData, ChapterGenerationEvent, SubtitleEntry } from "../../types";
 import { cn } from "../../utils/cn";
 import { setChapterGenerating } from "../../utils/noteGenerationState";
 
@@ -18,6 +18,7 @@ interface ChapterGridProps {
   modelId: number | null;
   showToolbar?: boolean; // 是否显示内置工具栏
   currentChapterId?: string | null; // 当前播放的章节ID
+  showSubtitles?: boolean; // 是否显示字幕（由父组件控制）
 }
 
 export interface ChapterGridRef {
@@ -36,14 +37,39 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
   modelId,
   showToolbar = true, // 默认显示内置工具栏
   currentChapterId,
+  showSubtitles: propShowSubtitles = false,
 }: ChapterGridProps, ref) {
   const [generating, setGenerating] = useState(isGenerating);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string } | null>(null);
+  const [subtitles, setSubtitles] = useState<SubtitleEntry[]>([]); // 字幕数据
+  const [loadingSubtitles, setLoadingSubtitles] = useState(false);
 
   // 同步父组件的 isGenerating 状态到内部状态
   useEffect(() => {
     setGenerating(isGenerating);
   }, [isGenerating]);
+
+  // 加载字幕数据
+  useEffect(() => {
+    const loadSubtitles = async () => {
+      if (!propShowSubtitles || !subtitlePath) {
+        setSubtitles([]);
+        return;
+      }
+      setLoadingSubtitles(true);
+      try {
+        const result = await invoke<SubtitleEntry[]>("parse_subtitle_file", {
+          path: subtitlePath,
+        });
+        setSubtitles(result);
+      } catch (error) {
+        console.error("[loadSubtitles] 加载字幕失败:", error);
+      } finally {
+        setLoadingSubtitles(false);
+      }
+    };
+    loadSubtitles();
+  }, [propShowSubtitles, subtitlePath]);
 
   // 暴露方法给父组件
   useImperativeHandle(ref, () => ({
@@ -215,6 +241,8 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
             index={index}
             onDoubleClick={() => handleChapterClick(chapter)}
             isCurrent={currentChapterId === chapter.id}
+            subtitles={propShowSubtitles ? subtitles : null}
+            loadingSubtitles={loadingSubtitles}
           />
         ))}
       </div>
@@ -228,9 +256,28 @@ interface ChapterCardProps {
   onDoubleClick: () => void;
   id?: string;
   isCurrent?: boolean; // 是否是当前播放的章节
+  subtitles?: SubtitleEntry[] | null; // 字幕数据
+  loadingSubtitles?: boolean; // 是否正在加载字幕
 }
 
-function ChapterCard({ chapter, index, onDoubleClick, id, isCurrent = false }: ChapterCardProps) {
+function ChapterCard({
+  chapter,
+  index,
+  onDoubleClick,
+  id,
+  isCurrent = false,
+  subtitles,
+  loadingSubtitles = false,
+}: ChapterCardProps) {
+  const [expanded, setExpanded] = useState(false); // 是否展开字幕
+
+  // 当前选中章节自动展开字幕，非选中时收起
+  useEffect(() => {
+    if (subtitles && subtitles.length > 0) {
+      setExpanded(isCurrent);
+    }
+  }, [isCurrent, subtitles]);
+
   const formatTime = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -246,66 +293,157 @@ function ChapterCard({ chapter, index, onDoubleClick, id, isCurrent = false }: C
   // 使用 Tauri 的 convertFileSrc 转换本地文件路径
   const screenshotUrl = chapter.screenshot_path ? convertFileSrc(chapter.screenshot_path) : null;
 
+  // 计算当前章节对应的字幕（支持双语）
+  const chapterSubtitles = useMemo(() => {
+    if (!subtitles || subtitles.length === 0) return null;
+
+    // 过滤出当前章节时间范围内的字幕
+    const filtered = subtitles.filter(
+      sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
+    );
+
+    if (filtered.length === 0) return null;
+
+    // 检查是否有双语字幕
+    const hasBilingual = filtered.some(sub => sub.second_language_text);
+
+    if (hasBilingual) {
+      // 双语字幕：分离主语言和第二语言
+      const primaryText = filtered
+        .map(sub => sub.text)
+        .join(" ");
+
+      const secondaryText = filtered
+        .filter(sub => sub.second_language_text)
+        .map(sub => sub.second_language_text!)
+        .join(" ");
+
+      // 格式：第一语言 + 换行 + 空行 + 第二语言
+      return { primary: primaryText, secondary: secondaryText };
+    } else {
+      // 单语字幕：直接拼接
+      const text = filtered.map(sub => sub.text).join(" ");
+      return { primary: text, secondary: null };
+    }
+  }, [subtitles, chapter.start_time, chapter.end_time]);
+
+  // 是否有字幕内容
+  const hasSubtitles = chapterSubtitles && chapterSubtitles.primary && chapterSubtitles.primary.length > 0;
+
   return (
     <div
       id={id}
-      onClick={onDoubleClick}
       className={cn(
-        "group flex bg-white dark:bg-vnote-card rounded-lg border overflow-hidden hover:shadow-md transition-all cursor-pointer",
+        "group bg-white dark:bg-vnote-card rounded-lg border overflow-hidden hover:shadow-md transition-all",
         isCurrent
           ? "border-blue-500 dark:border-blue-400 ring-2 ring-blue-500/50 shadow-md"
           : "border-slate-200 dark:border-vnote-border hover:border-blue-400 dark:hover:border-blue-500"
       )}
     >
-      {/* 左侧截图区域 - 缩略图 */}
-      <div className="relative w-48 flex-shrink-0 bg-slate-100 dark:bg-slate-800">
-        {screenshotUrl && !imageError ? (
-          <img
-            src={screenshotUrl}
-            alt={chapter.title}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-            onError={() => setImageError(true)}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900">
-            <span className="text-3xl font-bold text-slate-300 dark:text-slate-600">
-              {index + 1}
-            </span>
+      {/* 主体内容区域 - 可点击跳转视频 */}
+      <div
+        onClick={onDoubleClick}
+        className="flex cursor-pointer"
+      >
+        {/* 左侧截图区域 - 缩略图 */}
+        <div className="relative w-48 flex-shrink-0 bg-slate-100 dark:bg-slate-800">
+          {screenshotUrl && !imageError ? (
+            <img
+              src={screenshotUrl}
+              alt={chapter.title}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+              onError={() => setImageError(true)}
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 dark:from-slate-800 dark:to-slate-900">
+              <span className="text-3xl font-bold text-slate-300 dark:text-slate-600">
+                {index + 1}
+              </span>
+            </div>
+          )}
+
+          {/* 播放按钮遮罩 */}
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
+            <Play className="w-10 h-10 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
           </div>
-        )}
 
-        {/* 播放按钮遮罩 */}
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center">
-          <Play className="w-10 h-10 text-white opacity-0 group-hover:opacity-100 transition-opacity" />
-        </div>
+          {/* 章节序号 */}
+          <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs w-7 h-7 rounded-full flex items-center justify-center font-medium">
+            {index + 1}
+          </div>
 
-        {/* 章节序号 */}
-        <div className="absolute top-2 left-2 bg-blue-600 text-white text-xs w-7 h-7 rounded-full flex items-center justify-center font-medium">
-          {index + 1}
-        </div>
-
-        {/* 时间戳标签 */}
-        <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
-          <Clock className="w-3 h-3" />
-          {formatTime(chapter.start_time)}
-        </div>
-      </div>
-
-      {/* 右侧内容区域 */}
-      <div className="flex-1 p-4 min-w-0">
-        <div className="flex items-start justify-between mb-2 gap-2">
-          <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-base flex-1">
-            {chapter.title}
-          </h3>
-          <div className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-1 flex-shrink-0">
+          {/* 时间戳标签 */}
+          <div className="absolute bottom-2 left-2 bg-black/70 text-white text-xs px-2 py-0.5 rounded flex items-center gap-1">
             <Clock className="w-3 h-3" />
-            {formatTime(chapter.start_time)} - {formatTime(chapter.end_time)}
+            {formatTime(chapter.start_time)}
           </div>
         </div>
-        <p className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
-          {chapter.content}
-        </p>
+
+        {/* 右侧内容区域 */}
+        <div className="flex-1 p-4 min-w-0">
+          <div className="flex items-start justify-between mb-2 gap-2">
+            <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-base flex-1">
+              {chapter.title}
+            </h3>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-1">
+                <Clock className="w-3 h-3" />
+                {formatTime(chapter.start_time)} - {formatTime(chapter.end_time)}
+              </div>
+              {/* 展开/收起按钮 */}
+              {hasSubtitles && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setExpanded(!expanded);
+                  }}
+                  className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                  title={expanded ? "收起字幕" : "展开字幕"}
+                >
+                  {expanded ? (
+                    <ChevronUp className="w-4 h-4 text-slate-500" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-slate-500" />
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
+            {chapter.content}
+          </p>
+        </div>
       </div>
+
+      {/* 字幕展开区域 - 抽屉效果 */}
+      {hasSubtitles && expanded && (
+        <div className="px-4 pb-4 border-t border-slate-100 dark:border-slate-700/50">
+          <div className="pt-3 text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap leading-relaxed">
+            {chapterSubtitles.secondary ? (
+              // 双语字幕：两种语言换行+空行分隔
+              <>
+                {chapterSubtitles.primary}
+
+{"\n"}
+{chapterSubtitles.secondary}
+              </>
+            ) : (
+              // 单语字幕
+              chapterSubtitles.primary
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 加载字幕状态 */}
+      {loadingSubtitles && !subtitles && (
+        <div className="px-4 pb-3 border-t border-slate-100 dark:border-slate-700/50">
+          <div className="pt-3 flex items-center gap-2 text-sm text-slate-400">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            正在加载字幕...
+          </div>
+        </div>
+      )}
     </div>
   );
 }
