@@ -462,8 +462,8 @@ function ChapterCard({
 
       {/* 字幕展开区域 - 抽屉效果 */}
       {showSubtitleArea && expanded && (
-        <div className="px-4 pb-4 border-t border-slate-100 dark:border-slate-700/50">
-          <div className="pt-3 text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap leading-relaxed">
+        <div className="px-4 pb-2 border-t border-slate-100 dark:border-slate-700/50">
+          <div className="pt-5 text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap leading-relaxed">
             {/* 正在优化中 */}
             {isOptimizing && (
               <div className="flex items-center gap-2 text-slate-400">
