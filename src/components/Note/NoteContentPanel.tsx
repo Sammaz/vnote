@@ -99,35 +99,28 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       if (typeof note.detailed_reading === "string") {
         try {
           const parsed = JSON.parse(note.detailed_reading);
-          console.log("[NoteContentPanel] 解析 detailed_reading:", parsed);
           // 检查是否是 ChapterData 格式
           if (parsed && parsed.chapters && Array.isArray(parsed.chapters)) {
-            console.log("[NoteContentPanel] 设置 chapterData, 章节数量:", parsed.chapters.length);
             setChapterData(parsed);
             setIsChapterMode(true);
           } else {
-            console.log("[NoteContentPanel] 不是章节数据格式");
             setChapterData(null);
             setIsChapterMode(false);
           }
         } catch (e) {
           // 不是 JSON，保持为普通文本模式
-          console.log("[NoteContentPanel] JSON 解析失败:", e);
           setChapterData(null);
           setIsChapterMode(false);
         }
       } else if (typeof note.detailed_reading === "object" && note.detailed_reading.chapters) {
         // 已经是 ChapterData 对象
-        console.log("[NoteContentPanel] 已经是 ChapterData 对象");
         setChapterData(note.detailed_reading);
         setIsChapterMode(true);
       } else {
-        console.log("[NoteContentPanel] 其他类型，设置为 null");
         setChapterData(null);
         setIsChapterMode(false);
       }
     } else {
-      console.log("[NoteContentPanel] detailed_reading 为空");
       setChapterData(null);
       setIsChapterMode(false);
     }
@@ -390,7 +383,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       );
 
       if (currentChapter) {
-        console.log('[video-time-update] 自动更新章节:', currentChapter.id, currentChapter.title);
         setCurrentChapterId(currentChapter.id);
       } else {
         setCurrentChapterId(null);
@@ -1037,9 +1029,6 @@ Video subtitles content:`;
               chapterData={chapterData}
               isGenerating={isTabGenerating("original")}
               onChapterClick={(chapter) => {
-                // 设置当前选中的章节
-                console.log('[NoteContentPanel] 点击章节前 currentChapterId:', currentChapterId);
-                console.log('[NoteContentPanel] 点击章节:', chapter.id, chapter.title);
                 // 记录用户点击时间，防止视频时间更新干扰
                 userClickTimeRef.current = Date.now();
                 setCurrentChapterId(chapter.id);

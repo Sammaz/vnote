@@ -124,13 +124,8 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
 
   // 处理章节点击
   const handleChapterClick = (chapter: Chapter) => {
-    console.log('[ChapterGrid] 点击章节:', chapter.id, chapter.title);
-    console.log('[ChapterGrid] 点击时 currentChapterId prop:', currentChapterId);
     onChapterClick?.(chapter);
   };
-
-  // 渲染时日志
-  console.log('[ChapterGrid] 渲染 currentChapterId prop:', currentChapterId);
 
   // 如果正在生成，显示进度
   if (generating) {
@@ -210,14 +205,6 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
             isCurrent={currentChapterId === chapter.id}
           />
         ))}
-        {/* 调试信息 */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="text-xs text-slate-400 mt-4 p-2 bg-slate-100 dark:bg-slate-800 rounded">
-            <div>currentChapterId: {currentChapterId || 'null'}</div>
-            <div>first chapter.id: {effectiveChapterData.chapters[0]?.id || 'null'}</div>
-            <div>second chapter.id: {effectiveChapterData.chapters[1]?.id || 'null'}</div>
-          </div>
-        )}
       </div>
     </div>
   );
