@@ -95,6 +95,24 @@ pub struct PromptConfig {
     pub updated_at: String,
 }
 
+/// 优化后的字幕缓存
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct OptimizedSubtitle {
+    pub id: i64,
+    pub note_id: i64,
+    pub chapter_id: String,
+    pub optimized_text: String,
+    pub created_at: String,
+}
+
+/// 笔记的 UI 状态（用于恢复页面状态）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NoteUiState {
+    pub note_id: i64,
+    pub show_subtitles: bool,
+    pub subtitle_optimization_enabled: bool,
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -293,6 +311,37 @@ impl Database {
                 created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 FOREIGN KEY (recommended_model_id) REFERENCES ai_configs(id) ON DELETE SET NULL
+            )",
+            [],
+        )?;
+
+        // Optimized subtitles cache table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS optimized_subtitles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                note_id INTEGER NOT NULL,
+                chapter_id TEXT NOT NULL,
+                optimized_text TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+                UNIQUE(note_id, chapter_id)
+            )",
+            [],
+        )?;
+
+        // Create index for optimized subtitles
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_optimized_subtitles_note ON optimized_subtitles(note_id)",
+            [],
+        )?;
+
+        // Note UI state table (for restoring page state)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS note_ui_state (
+                note_id INTEGER PRIMARY KEY,
+                show_subtitles INTEGER NOT NULL DEFAULT 0,
+                subtitle_optimization_enabled INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
             )",
             [],
         )?;
@@ -951,6 +1000,86 @@ impl Database {
     pub fn delete_prompt_config(&self, id: i64) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM prompt_configs WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // Optimized Subtitles CRUD
+    pub fn get_optimized_subtitles(&self, note_id: i64) -> SqliteResult<Vec<OptimizedSubtitle>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, chapter_id, optimized_text, created_at
+             FROM optimized_subtitles WHERE note_id = ?1"
+        )?;
+
+        let subtitles = stmt.query_map([note_id], |row| {
+            Ok(OptimizedSubtitle {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                chapter_id: row.get(2)?,
+                optimized_text: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?;
+
+        subtitles.collect()
+    }
+
+    pub fn save_optimized_subtitle(
+        &self,
+        note_id: i64,
+        chapter_id: &str,
+        optimized_text: &str,
+    ) -> SqliteResult<i64> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO optimized_subtitles (note_id, chapter_id, optimized_text)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![note_id, chapter_id, optimized_text],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn delete_optimized_subtitles(&self, note_id: i64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM optimized_subtitles WHERE note_id = ?1", [note_id])?;
+        Ok(())
+    }
+
+    // Note UI State CRUD
+    pub fn get_note_ui_state(&self, note_id: i64) -> SqliteResult<Option<NoteUiState>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT note_id, show_subtitles, subtitle_optimization_enabled
+             FROM note_ui_state WHERE note_id = ?1"
+        )?;
+
+        let result = stmt.query_row([note_id], |row| {
+            Ok(NoteUiState {
+                note_id: row.get(0)?,
+                show_subtitles: row.get::<_, i64>(1)? != 0,
+                subtitle_optimization_enabled: row.get::<_, i64>(2)? != 0,
+            })
+        });
+
+        match result {
+            Ok(state) => Ok(Some(state)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn save_note_ui_state(
+        &self,
+        note_id: i64,
+        show_subtitles: bool,
+        subtitle_optimization_enabled: bool,
+    ) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO note_ui_state (note_id, show_subtitles, subtitle_optimization_enabled)
+             VALUES (?1, ?2, ?3)",
+            rusqlite::params![note_id, show_subtitles as i32, subtitle_optimization_enabled as i32],
+        )?;
         Ok(())
     }
 }

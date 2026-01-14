@@ -9,7 +9,7 @@ mod subtitle;
 mod subtitle_optimizer;
 
 use chat::ChatRequest;
-use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, PromptConfig, RerankerConfig};
+use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -707,6 +707,33 @@ fn update_note_content(
     get_db().update_note(&note).map_err(|e| e.to_string())
 }
 
+// Optimized subtitles commands
+#[tauri::command]
+fn get_optimized_subtitles(note_id: i64) -> Result<Vec<OptimizedSubtitle>, String> {
+    get_db().get_optimized_subtitles(note_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_optimized_subtitle(note_id: i64, chapter_id: String, optimized_text: String) -> Result<i64, String> {
+    get_db().save_optimized_subtitle(note_id, &chapter_id, &optimized_text).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_optimized_subtitles(note_id: i64) -> Result<(), String> {
+    get_db().delete_optimized_subtitles(note_id).map_err(|e| e.to_string())
+}
+
+// Note UI state commands
+#[tauri::command]
+fn get_note_ui_state(note_id: i64) -> Result<Option<NoteUiState>, String> {
+    get_db().get_note_ui_state(note_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_note_ui_state(note_id: i64, show_subtitles: bool, subtitle_optimization_enabled: bool) -> Result<(), String> {
+    get_db().save_note_ui_state(note_id, show_subtitles, subtitle_optimization_enabled).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -810,6 +837,12 @@ pub fn run() {
             save_chapters_to_note,
             subtitle_optimizer::optimize_chapter_subtitles,
             subtitle_optimizer::abort_subtitle_optimization,
+            subtitle_optimizer::get_subtitle_optimization_task_state,
+            get_optimized_subtitles,
+            save_optimized_subtitle,
+            delete_optimized_subtitles,
+            get_note_ui_state,
+            save_note_ui_state,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

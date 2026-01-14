@@ -9,9 +9,94 @@ use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonS
 use crate::db::AiConfig;
 use crate::get_db;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter};
+use tokio::sync::RwLock;
+
+// ============================================================================
+// 全局任务状态管理
+// ============================================================================
+
+/// 字幕优化任务状态
+#[derive(Debug, Clone, Serialize)]
+pub struct SubtitleOptimizationTaskState {
+    pub note_id: i64,
+    pub generation_id: String,
+    pub total: usize,
+    pub completed: usize,
+    pub failed: usize,
+    pub optimizing_chapter_ids: Vec<String>,
+    pub is_running: bool,
+}
+
+/// 全局任务状态管理器
+struct TaskStateManager {
+    /// note_id -> 任务状态
+    tasks: RwLock<HashMap<i64, SubtitleOptimizationTaskState>>,
+}
+
+impl TaskStateManager {
+    fn new() -> Self {
+        Self {
+            tasks: RwLock::new(HashMap::new()),
+        }
+    }
+
+    async fn start_task(&self, note_id: i64, generation_id: String, total: usize, chapter_ids: Vec<String>) {
+        let mut tasks = self.tasks.write().await;
+        tasks.insert(note_id, SubtitleOptimizationTaskState {
+            note_id,
+            generation_id,
+            total,
+            completed: 0,
+            failed: 0,
+            optimizing_chapter_ids: chapter_ids,
+            is_running: true,
+        });
+    }
+
+    async fn chapter_completed(&self, note_id: i64, chapter_id: &str) {
+        let mut tasks = self.tasks.write().await;
+        if let Some(state) = tasks.get_mut(&note_id) {
+            state.completed += 1;
+            state.optimizing_chapter_ids.retain(|id| id != chapter_id);
+        }
+    }
+
+    async fn chapter_failed(&self, note_id: i64, chapter_id: &str) {
+        let mut tasks = self.tasks.write().await;
+        if let Some(state) = tasks.get_mut(&note_id) {
+            state.failed += 1;
+            state.optimizing_chapter_ids.retain(|id| id != chapter_id);
+        }
+    }
+
+    async fn finish_task(&self, note_id: i64) {
+        let mut tasks = self.tasks.write().await;
+        if let Some(state) = tasks.get_mut(&note_id) {
+            state.is_running = false;
+            state.optimizing_chapter_ids.clear();
+        }
+    }
+
+    async fn remove_task(&self, note_id: i64) {
+        let mut tasks = self.tasks.write().await;
+        tasks.remove(&note_id);
+    }
+
+    async fn get_task(&self, note_id: i64) -> Option<SubtitleOptimizationTaskState> {
+        let tasks = self.tasks.read().await;
+        tasks.get(&note_id).cloned()
+    }
+}
+
+static TASK_STATE_MANAGER: OnceLock<TaskStateManager> = OnceLock::new();
+
+fn get_task_state_manager() -> &'static TaskStateManager {
+    TASK_STATE_MANAGER.get_or_init(TaskStateManager::new)
+}
 
 // ============================================================================
 // 数据结构定义
@@ -105,12 +190,18 @@ async fn optimize_single_chapter(
 pub async fn optimize_chapters(
     app: AppHandle,
     generation_id: String,
+    note_id: i64,
     config: AiConfig,
     chapters: Vec<ChapterSubtitleInput>,
 ) -> Result<(), String> {
     let pool = get_ai_pool_manager();
     let abort_flag = pool.register_abort_flag(generation_id.clone()).await;
     let event_name = format!("subtitle-optimization-{}", generation_id);
+    let task_manager = get_task_state_manager();
+
+    // 记录任务开始
+    let chapter_ids: Vec<String> = chapters.iter().map(|c| c.chapter_id.clone()).collect();
+    task_manager.start_task(note_id, generation_id.clone(), chapters.len(), chapter_ids).await;
 
     // 发送开始事件
     let _ = app.emit(
@@ -180,18 +271,28 @@ pub async fn optimize_chapters(
     // 并发执行所有任务
     let results = futures::future::join_all(tasks).await;
 
-    // 统计结果
-    for (_chapter_id, result) in results {
+    // 统计结果并更新任务状态
+    for (chapter_id, result) in results {
         match result {
-            Ok(_) => succeeded += 1,
-            Err(_) => failed += 1,
+            Ok(_) => {
+                succeeded += 1;
+                task_manager.chapter_completed(note_id, &chapter_id).await;
+            }
+            Err(_) => {
+                failed += 1;
+                task_manager.chapter_failed(note_id, &chapter_id).await;
+            }
         }
     }
+
+    // 标记任务完成
+    task_manager.finish_task(note_id).await;
 
     // 检查是否被中止
     if abort_flag.load(std::sync::atomic::Ordering::Relaxed) {
         let _ = app.emit(&event_name, SubtitleOptimizationEvent::Aborted);
         pool.cleanup_abort_flag(&generation_id).await;
+        task_manager.remove_task(note_id).await;
         return Err("请求已取消".to_string());
     }
 
@@ -216,7 +317,7 @@ pub async fn optimize_chapters(
 pub async fn optimize_chapter_subtitles(
     app: AppHandle,
     generation_id: String,
-    _note_id: i64,
+    note_id: i64,
     model_id: i64,
     chapters: Vec<ChapterSubtitleInput>,
 ) -> Result<(), String> {
@@ -239,7 +340,7 @@ pub async fn optimize_chapter_subtitles(
     // 在后台执行优化
     let gen_id = generation_id.clone();
     tokio::spawn(async move {
-        if let Err(e) = optimize_chapters(app, gen_id, config, chapters_to_optimize).await {
+        if let Err(e) = optimize_chapters(app, gen_id, note_id, config, chapters_to_optimize).await {
             eprintln!("[optimize_chapter_subtitles] 优化失败: {}", e);
         }
     });
@@ -247,9 +348,20 @@ pub async fn optimize_chapter_subtitles(
     Ok(())
 }
 
+/// 获取字幕优化任务状态
+#[tauri::command]
+pub async fn get_subtitle_optimization_task_state(note_id: i64) -> Option<SubtitleOptimizationTaskState> {
+    get_task_state_manager().get_task(note_id).await
+}
+
 /// 中止字幕优化
 #[tauri::command]
-pub async fn abort_subtitle_optimization(generation_id: String) -> Result<(), String> {
+pub async fn abort_subtitle_optimization(generation_id: String, note_id: i64) -> Result<(), String> {
     let pool = get_ai_pool_manager();
-    pool.abort_request(&generation_id).await
+    pool.abort_request(&generation_id).await?;
+    
+    // 清理任务状态
+    get_task_state_manager().remove_task(note_id).await;
+    
+    Ok(())
 }

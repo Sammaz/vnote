@@ -226,3 +226,33 @@ export interface SubtitleOptimizationState {
   failedChapterIds: Set<string>;                 // 优化失败的章节ID
   abortFlag: string | null;                      // 中止标识（generation_id）
 }
+
+// ============================================================================
+// 优化字幕缓存类型 (Optimized Subtitle Cache Types)
+// ============================================================================
+
+export interface OptimizedSubtitle {
+  id: number;
+  note_id: number;
+  chapter_id: string;
+  optimized_text: string;
+  created_at: string;
+}
+
+// 笔记 UI 状态（用于恢复页面状态）
+export interface NoteUiState {
+  note_id: number;
+  show_subtitles: boolean;
+  subtitle_optimization_enabled: boolean;
+}
+
+// 字幕优化任务状态（用于恢复进行中的任务）
+export interface SubtitleOptimizationTaskState {
+  note_id: number;
+  generation_id: string;
+  total: number;
+  completed: number;
+  failed: number;
+  optimizing_chapter_ids: string[];
+  is_running: boolean;
+}

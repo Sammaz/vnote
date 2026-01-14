@@ -24,7 +24,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SubtitleEntry } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
@@ -157,16 +157,196 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     loadSubtitles();
   }, [note.subtitle_path]);
 
-  // 切换笔记时重置字幕优化状态
-  useEffect(() => {
-    setSubtitleOptimizationEnabled(false);
-    setSubtitleOptimizing(false);
-    setSubtitleOptimizationProgress(null);
-    setOptimizedSubtitles(new Map());
-    setOptimizingChapterIds(new Set());
-    setFailedChapterIds(new Set());
-    subtitleOptimizationIdRef.current = null;
+  // 用于存储事件监听器的清理函数
+  const subtitleOptimizationUnlistenRef = useRef<(() => void) | null>(null);
+
+  // 设置字幕优化事件监听器
+  const setupSubtitleOptimizationListener = useCallback(async (generationId: string) => {
+    // 清理旧的监听器
+    if (subtitleOptimizationUnlistenRef.current) {
+      subtitleOptimizationUnlistenRef.current();
+      subtitleOptimizationUnlistenRef.current = null;
+    }
+
+    const eventName = `subtitle-optimization-${generationId}`;
+    const unlisten = await listen<SubtitleOptimizationEvent>(eventName, (event) => {
+      const data = event.payload;
+
+      switch (data.status) {
+        case "Starting":
+          setSubtitleOptimizationProgress({ current: 0, total: data.total });
+          break;
+
+        case "ChapterStarted":
+          // 章节开始优化
+          break;
+
+        case "ChapterCompleted":
+          setOptimizedSubtitles(prev => {
+            const newMap = new Map(prev);
+            newMap.set(data.chapter_id, data.optimized_text);
+            return newMap;
+          });
+          setOptimizingChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(data.chapter_id);
+            return newSet;
+          });
+          setSubtitleOptimizationProgress(prev => prev ? {
+            ...prev,
+            current: prev.current + 1,
+          } : null);
+          // 保存优化后的字幕到数据库
+          invoke("save_optimized_subtitle", {
+            noteId: note.id,
+            chapterId: data.chapter_id,
+            optimizedText: data.optimized_text,
+          }).catch(err => {
+            console.error("[SubtitleOptimization] 保存字幕到数据库失败:", err);
+          });
+          break;
+
+        case "ChapterFailed":
+          console.error(`[SubtitleOptimization] 章节 ${data.chapter_id} 优化失败:`, data.error);
+          setOptimizingChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(data.chapter_id);
+            return newSet;
+          });
+          setFailedChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.add(data.chapter_id);
+            return newSet;
+          });
+          setSubtitleOptimizationProgress(prev => prev ? {
+            ...prev,
+            current: prev.current + 1,
+          } : null);
+          break;
+
+        case "AllCompleted":
+          setSubtitleOptimizing(false);
+          setSubtitleOptimizationProgress(null);
+          setOptimizingChapterIds(new Set());
+          // 如果全部失败，自动禁用开关
+          if (data.succeeded === 0 && data.failed > 0) {
+            message.error("所有章节字幕优化失败");
+            setSubtitleOptimizationEnabled(false);
+          }
+          break;
+
+        case "Aborted":
+          setSubtitleOptimizing(false);
+          setSubtitleOptimizationProgress(null);
+          setOptimizingChapterIds(new Set());
+          break;
+      }
+    });
+
+    subtitleOptimizationUnlistenRef.current = unlisten;
+    return unlisten;
   }, [note.id]);
+
+  // 切换笔记时从数据库加载 UI 状态和优化后的字幕，并恢复进行中的任务
+  useEffect(() => {
+    const loadSavedState = async () => {
+      try {
+        // 加载 UI 状态
+        const uiState = await invoke<NoteUiState | null>("get_note_ui_state", { noteId: note.id });
+        if (uiState) {
+          setShowChapterSubtitles(uiState.show_subtitles);
+          setSubtitleOptimizationEnabled(uiState.subtitle_optimization_enabled);
+        } else {
+          setShowChapterSubtitles(false);
+          setSubtitleOptimizationEnabled(false);
+        }
+
+        // 加载优化后的字幕缓存
+        const savedSubtitles = await invoke<OptimizedSubtitle[]>("get_optimized_subtitles", { noteId: note.id });
+        if (savedSubtitles && savedSubtitles.length > 0) {
+          const subtitleMap = new Map<string, string>();
+          savedSubtitles.forEach(s => subtitleMap.set(s.chapter_id, s.optimized_text));
+          setOptimizedSubtitles(subtitleMap);
+        } else {
+          setOptimizedSubtitles(new Map());
+        }
+
+        // 检查是否有进行中的字幕优化任务
+        const taskState = await invoke<SubtitleOptimizationTaskState | null>("get_subtitle_optimization_task_state", { noteId: note.id });
+        if (taskState && taskState.is_running) {
+          // 恢复进行中的任务状态
+          console.log("[NoteContentPanel] 恢复进行中的字幕优化任务:", taskState);
+          subtitleOptimizationIdRef.current = taskState.generation_id;
+          setSubtitleOptimizing(true);
+          setSubtitleOptimizationEnabled(true);
+          setSubtitleOptimizationProgress({
+            current: taskState.completed + taskState.failed,
+            total: taskState.total,
+          });
+          setOptimizingChapterIds(new Set(taskState.optimizing_chapter_ids));
+          setFailedChapterIds(new Set());
+
+          // 重新订阅事件
+          await setupSubtitleOptimizationListener(taskState.generation_id);
+        } else {
+          // 没有进行中的任务，重置临时状态
+          setSubtitleOptimizing(false);
+          setSubtitleOptimizationProgress(null);
+          setOptimizingChapterIds(new Set());
+          setFailedChapterIds(new Set());
+          subtitleOptimizationIdRef.current = null;
+        }
+      } catch (error) {
+        console.error("[NoteContentPanel] 加载保存的状态失败:", error);
+        setShowChapterSubtitles(false);
+        setSubtitleOptimizationEnabled(false);
+        setOptimizedSubtitles(new Map());
+        setSubtitleOptimizing(false);
+        setSubtitleOptimizationProgress(null);
+        setOptimizingChapterIds(new Set());
+        setFailedChapterIds(new Set());
+        subtitleOptimizationIdRef.current = null;
+      }
+    };
+
+    loadSavedState();
+
+    // 清理函数
+    return () => {
+      if (subtitleOptimizationUnlistenRef.current) {
+        subtitleOptimizationUnlistenRef.current();
+        subtitleOptimizationUnlistenRef.current = null;
+      }
+    };
+  }, [note.id, setupSubtitleOptimizationListener]);
+
+  // 保存 UI 状态到数据库（防抖）
+  const saveUiStateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  useEffect(() => {
+    // 清除之前的定时器
+    if (saveUiStateTimeoutRef.current) {
+      clearTimeout(saveUiStateTimeoutRef.current);
+    }
+
+    // 延迟保存，避免频繁写入
+    saveUiStateTimeoutRef.current = setTimeout(async () => {
+      try {
+        await invoke("save_note_ui_state", {
+          noteId: note.id,
+          showSubtitles: showChapterSubtitles,
+          subtitleOptimizationEnabled: subtitleOptimizationEnabled,
+        });
+      } catch (error) {
+        console.error("[NoteContentPanel] 保存 UI 状态失败:", error);
+      }
+    }, 500);
+
+    return () => {
+      if (saveUiStateTimeoutRef.current) {
+        clearTimeout(saveUiStateTimeoutRef.current);
+      }
+    };
+  }, [note.id, showChapterSubtitles, subtitleOptimizationEnabled]);
 
   // 编辑模式状态
   const [isEditMode, setIsEditMode] = useState(false);
@@ -741,6 +921,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         try {
           await invoke("abort_subtitle_optimization", {
             generationId: subtitleOptimizationIdRef.current,
+            noteId: note.id,
           });
         } catch (e) {
           console.error("[SubtitleOptimization] 中止失败:", e);
@@ -839,73 +1020,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     setOptimizingChapterIds(new Set(chaptersToOptimize.map(c => c.chapter_id)));
     setFailedChapterIds(new Set());
 
-    // 设置事件监听
-    const eventName = `subtitle-optimization-${generationId}`;
-    const unlisten = await listen<SubtitleOptimizationEvent>(eventName, (event) => {
-      const data = event.payload;
-
-      switch (data.status) {
-        case "Starting":
-          setSubtitleOptimizationProgress({ current: 0, total: data.total });
-          break;
-
-        case "ChapterStarted":
-          // 章节开始优化
-          break;
-
-        case "ChapterCompleted":
-          setOptimizedSubtitles(prev => {
-            const newMap = new Map(prev);
-            newMap.set(data.chapter_id, data.optimized_text);
-            return newMap;
-          });
-          setOptimizingChapterIds(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(data.chapter_id);
-            return newSet;
-          });
-          setSubtitleOptimizationProgress(prev => prev ? {
-            ...prev,
-            current: prev.current + 1,
-          } : null);
-          break;
-
-        case "ChapterFailed":
-          console.error(`[SubtitleOptimization] 章节 ${data.chapter_id} 优化失败:`, data.error);
-          setOptimizingChapterIds(prev => {
-            const newSet = new Set(prev);
-            newSet.delete(data.chapter_id);
-            return newSet;
-          });
-          setFailedChapterIds(prev => {
-            const newSet = new Set(prev);
-            newSet.add(data.chapter_id);
-            return newSet;
-          });
-          setSubtitleOptimizationProgress(prev => prev ? {
-            ...prev,
-            current: prev.current + 1,
-          } : null);
-          break;
-
-        case "AllCompleted":
-          setSubtitleOptimizing(false);
-          setSubtitleOptimizationProgress(null);
-          setOptimizingChapterIds(new Set());
-          // 如果全部失败，自动禁用开关
-          if (data.succeeded === 0 && data.failed > 0) {
-            message.error("所有章节字幕优化失败");
-            setSubtitleOptimizationEnabled(false);
-          }
-          break;
-
-        case "Aborted":
-          setSubtitleOptimizing(false);
-          setSubtitleOptimizationProgress(null);
-          setOptimizingChapterIds(new Set());
-          break;
-      }
-    });
+    // 设置事件监听（使用共享的监听器设置函数）
+    await setupSubtitleOptimizationListener(generationId);
 
     try {
       await invoke("optimize_chapter_subtitles", {
@@ -921,14 +1037,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setSubtitleOptimizationEnabled(false);
       setSubtitleOptimizationProgress(null);
       setOptimizingChapterIds(new Set());
-      unlisten();
     }
-
-    // 组件卸载时清理监听器
-    return () => {
-      unlisten();
-    };
-  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries]);
+  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener]);
 
   // 获取章节的字幕文本（用于优化）
   const getChapterSubtitleText = useCallback((chapter: { start_time: number; end_time: number }) => {
@@ -1328,11 +1438,16 @@ Video subtitles content:`;
           </div>
           {/* 重新生成按钮 */}
           <button
-            onClick={() => {
-              // 清除字幕优化缓存
+            onClick={async () => {
+              // 清除字幕优化缓存（内存和数据库）
               setOptimizedSubtitles(new Map());
               setSubtitleOptimizationEnabled(false);
               setFailedChapterIds(new Set());
+              try {
+                await invoke("delete_optimized_subtitles", { noteId: note.id });
+              } catch (err) {
+                console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
+              }
               // 重新生成章节
               chapterGridRef.current?.generateChapters();
             }}
