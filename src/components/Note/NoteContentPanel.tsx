@@ -942,7 +942,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     // 无缓存，开始优化
-    if (!chapterData || !note.model_id || !note.subtitle_path) {
+    // 优先使用视频播放器右上角选择的模型
+    const effectiveModelId = currentModelId || note.model_id;
+    if (!chapterData || !effectiveModelId || !note.subtitle_path) {
       message.warning("缺少必要的数据，无法进行字幕优化");
       return;
     }
@@ -1027,7 +1029,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       await invoke("optimize_chapter_subtitles", {
         generationId,
         noteId: note.id,
-        modelId: note.model_id,
+        modelId: effectiveModelId,
         chapters: chaptersToOptimize,
       });
     } catch (error) {
@@ -1038,7 +1040,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setSubtitleOptimizationProgress(null);
       setOptimizingChapterIds(new Set());
     }
-  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener]);
+  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId]);
 
   // 获取章节的字幕文本（用于优化）
   const getChapterSubtitleText = useCallback((chapter: { start_time: number; end_time: number }) => {
@@ -1556,7 +1558,7 @@ Video subtitles content:`;
                 window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
               }}
               onGenerationComplete={onGenerationComplete}
-              modelId={note.model_id}
+              modelId={currentModelId || note.model_id}
               showToolbar={false}
               currentChapterId={currentChapterId}
               showSubtitles={showChapterSubtitles}
