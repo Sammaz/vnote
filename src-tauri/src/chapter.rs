@@ -77,7 +77,6 @@ struct AIChapterResponse {
 struct AIChapter {
     title: String,
     start_index: usize,
-    end_index: usize,
     summary: String,
 }
 
@@ -94,15 +93,16 @@ fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_info: Option<
 
 **核心要求**：
 
-1. **章节定义**：每个章节是视频中的一个完整主题段落，有明确的开始和结束
+1. **章节定义**：每个章节是视频中的一个完整主题段落
 2. **start_index 含义**：这是该章节**第一句字幕的索引**，系统将根据此索引获取对应的**视频时间戳**作为章节开始时间
-3. **跳过开场白**：第一个章节不要从索引 0 或 1 开始，应该跳过：
+3. **章节结束**：每个章节的结束时间由**下一章节的开始时间**决定，最后一个章节到视频结束
+4. **跳过开场白**：第一个章节不要从索引 0 或 1 开始，应该跳过：
    - 片头、标题、自我介绍
    - "大家好"、"欢迎来到"等客套话
    - 课程概述、 agenda 说明
    - 从**实质性内容**开始的地方划分第一个章节
-4. **合理间隔**：章节之间要有足够的内容量，建议每章至少 30 秒以上的内容
-5. **不限制数量**：根据视频内容自然划分，不要人为限制章节数量
+5. **合理间隔**：章节之间要有足够的内容量，建议每章至少 30 秒以上的内容
+6. **不限制数量**：根据视频内容自然划分，不要人为限制章节数量
 
 **示例**（假设字幕前 100 行是开场白）：
 {{
@@ -110,13 +110,11 @@ fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_info: Option<
     {{
       "title": "核心概念介绍",
       "start_index": 120,    // 跳过前 120 行开场白，从实际内容开始
-      "end_index": 280,      // 该章节包含第 120-280 行字幕
       "summary": "介绍课程的核心概念和基础知识"
     }},
     {{
       "title": "案例分析",
       "start_index": 285,    // 与上一章有少量间隔（字幕行）
-      "end_index": 450,
       "summary": "通过具体案例讲解理论应用"
     }}
   ]
@@ -128,7 +126,6 @@ fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_info: Option<
     {{
       "title": "章节标题",
       "start_index": 数字（章节第一句字幕的索引，不要从0开始）,
-      "end_index": 数字（章节最后一句字幕的索引）,
       "summary": "本章内容概要"
     }}
   ]
@@ -306,18 +303,13 @@ async fn analyze_subtitle_for_chapters(
     // 每个分段内的章节单独排序，然后按分段顺序拼接
     let mut all_chapters: Vec<AIChapter> = Vec::new();
 
-    for (_chunk_idx, start_index, end_index, mut chapters) in results {
+    for (_chunk_idx, start_index, _end_index, mut chapters) in results {
         // 该分段内的章节按 start_index 排序
         chapters.sort_by_key(|c| c.start_index);
 
         for chapter in &mut chapters {
             // AI 返回的索引是基于当前段的，需要加上该段的起始偏移
             chapter.start_index += start_index;
-            chapter.end_index += start_index;
-            // 确保不超过该段的范围
-            if chapter.end_index > end_index {
-                chapter.end_index = end_index - 1;
-            }
         }
         all_chapters.extend(chapters);
     }
