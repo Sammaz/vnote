@@ -547,7 +547,13 @@ pub async fn generate_chapters(
 
     for i in 0..chapter_count {
         let ai_ch = &ai_chapters[i];
-        let start_time = if ai_ch.start_index < subtitle_entries.len() {
+        
+        // 第一个章节的开始时间强制设为 0（或第一条字幕的开始时间）
+        // 这样可以确保不会丢失视频开头的字幕内容
+        let start_time = if i == 0 {
+            // 第一个章节从视频开头开始，使用第一条字幕的开始时间
+            subtitle_entries.first().map(|e| e.start_time).unwrap_or(0.0)
+        } else if ai_ch.start_index < subtitle_entries.len() {
             subtitle_entries[ai_ch.start_index].start_time
         } else {
             0.0
