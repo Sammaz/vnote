@@ -179,7 +179,7 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
 
   // 渲染章节卡片列表（垂直布局，一行一个）
   return (
-    <div className="p-2 overflow-y-auto">
+    <div className="p-1 overflow-y-auto">
       {showToolbar && (
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">

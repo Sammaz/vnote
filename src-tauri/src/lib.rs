@@ -210,7 +210,7 @@ fn save_file_content(path: String, content: String) -> Result<(), String> {
 /// Convert TS file to MP4 using ffmpeg (fast remux, no re-encoding)
 /// Returns the path to the converted MP4 file
 #[tauri::command]
-async fn convert_ts_to_mp4(app: AppHandle, ts_path: String) -> Result<String, String> {
+async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Result<String, String> {
     let ts_path = Path::new(&ts_path);
 
     // Verify it's a .ts file
@@ -218,15 +218,16 @@ async fn convert_ts_to_mp4(app: AppHandle, ts_path: String) -> Result<String, St
         return Err("Not a .ts file".to_string());
     }
 
-    // Create output path in app cache directory
+    // Create output path in app cache directory, organized by note ID
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    std::fs::create_dir_all(&cache_dir).map_err(|e| e.to_string())?;
+    let note_cache_dir = cache_dir.join("notes").join(note_id.to_string());
+    std::fs::create_dir_all(&note_cache_dir).map_err(|e| e.to_string())?;
 
     // Generate output filename based on input file hash
     let file_name = ts_path.file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("video");
-    let mp4_path = cache_dir.join(format!("{}.mp4", file_name));
+    let mp4_path = note_cache_dir.join(format!("{}.mp4", file_name));
 
     // If already converted, return existing file
     if mp4_path.exists() {
@@ -274,55 +275,87 @@ fn check_ffmpeg() -> Result<bool, String> {
     }
 }
 
-/// Get the total size of video cache (converted MP4 files)
+/// Get the total size of video cache (converted MP4 files only, excluding screenshots)
 #[tauri::command]
 fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let notes_cache_dir = cache_dir.join("notes");
 
-    if !cache_dir.exists() {
+    if !notes_cache_dir.exists() {
         return Ok(0);
     }
 
     let mut total_size: u64 = 0;
 
-    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
-                if let Ok(metadata) = std::fs::metadata(&path) {
-                    total_size += metadata.len();
+    // Recursively find and calculate size of MP4 files only
+    fn calculate_mp4_size(dir: &std::path::Path, total: &mut u64) -> std::io::Result<()> {
+        if dir.is_dir() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+
+                // Skip screenshots directory
+                if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("screenshots") {
+                    continue;
+                }
+
+                if path.is_dir() {
+                    calculate_mp4_size(&path, total)?;
+                } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        *total += metadata.len();
+                    }
                 }
             }
         }
+        Ok(())
     }
+
+    let _ = calculate_mp4_size(&notes_cache_dir, &mut total_size);
 
     Ok(total_size)
 }
 
-/// Clear video cache (delete all converted MP4 files)
+/// Clear video cache (delete MP4 files only, keep screenshots)
 #[tauri::command]
 fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let notes_cache_dir = cache_dir.join("notes");
 
-    if !cache_dir.exists() {
+    if !notes_cache_dir.exists() {
         return Ok(0);
     }
 
     let mut cleared_size: u64 = 0;
 
-    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
-                if let Ok(metadata) = std::fs::metadata(&path) {
-                    let file_size = metadata.len();
-                    if std::fs::remove_file(&path).is_ok() {
-                        cleared_size += file_size;
+    // Recursively find and delete MP4 files only
+    fn delete_mp4_files(dir: &std::path::Path, cleared: &mut u64) -> std::io::Result<()> {
+        if dir.is_dir() {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let path = entry.path();
+
+                // Skip screenshots directory
+                if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("screenshots") {
+                    continue;
+                }
+
+                if path.is_dir() {
+                    delete_mp4_files(&path, cleared)?;
+                } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
+                    if let Ok(metadata) = std::fs::metadata(&path) {
+                        let file_size = metadata.len();
+                        if std::fs::remove_file(&path).is_ok() {
+                            *cleared += file_size;
+                        }
                     }
                 }
             }
         }
+        Ok(())
     }
+
+    let _ = delete_mp4_files(&notes_cache_dir, &mut cleared_size);
 
     Ok(cleared_size)
 }
@@ -352,22 +385,11 @@ fn update_note(note: Note) -> Result<(), String> {
 fn delete_note(app: AppHandle, id: i64) -> Result<(), String> {
     let db = get_db();
 
-    // Get note info before deleting to check if we need to clean up cache
-    if let Ok(Some(note)) = db.get_note_by_id(id) {
-        let video_path = Path::new(&note.video_path);
-
-        // Check if this is a TS video file
-        if video_path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) == Some("ts".to_string()) {
-            // Calculate the cache file path
-            if let Ok(cache_dir) = app.path().app_cache_dir() {
-                if let Some(file_name) = video_path.file_stem().and_then(|s| s.to_str()) {
-                    let cache_file = cache_dir.join(format!("{}.mp4", file_name));
-                    // Delete the cache file if it exists
-                    if cache_file.exists() {
-                        let _ = std::fs::remove_file(&cache_file);
-                    }
-                }
-            }
+    // Delete entire note cache directory (includes TS video cache and chapter screenshots)
+    if let Ok(cache_dir) = app.path().app_cache_dir() {
+        let note_cache_dir = cache_dir.join("notes").join(id.to_string());
+        if note_cache_dir.exists() {
+            let _ = std::fs::remove_dir_all(&note_cache_dir);
         }
     }
 

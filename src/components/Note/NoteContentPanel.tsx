@@ -79,7 +79,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 章节相关状态
   const [chapterData, setChapterData] = useState<ChapterData | null>(null);
-  const [isChapterMode, setIsChapterMode] = useState(false);
 
   // 章节下拉框状态
   const [showChapterDropdown, setShowChapterDropdown] = useState(false);
@@ -102,27 +101,21 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           // 检查是否是 ChapterData 格式
           if (parsed && parsed.chapters && Array.isArray(parsed.chapters)) {
             setChapterData(parsed);
-            setIsChapterMode(true);
           } else {
             setChapterData(null);
-            setIsChapterMode(false);
           }
         } catch (e) {
           // 不是 JSON，保持为普通文本模式
           setChapterData(null);
-          setIsChapterMode(false);
         }
       } else if (typeof note.detailed_reading === "object" && note.detailed_reading.chapters) {
         // 已经是 ChapterData 对象
         setChapterData(note.detailed_reading);
-        setIsChapterMode(true);
       } else {
         setChapterData(null);
-        setIsChapterMode(false);
       }
     } else {
       setChapterData(null);
-      setIsChapterMode(false);
     }
   }, [note.detailed_reading]);
 
@@ -873,8 +866,8 @@ Video subtitles content:`;
             </button>
           </div>
         </div>
-      ) : activeTab === "original" && isChapterMode ? (
-        // 原文细读标签页（章节模式）的工具栏
+      ) : activeTab === "original" ? (
+        // 原文细读标签页的工具栏（不管有无章节数据都显示相同）
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
           <div className="flex items-center gap-3">
             {/* 章节下拉框 */}
@@ -955,7 +948,7 @@ Video subtitles content:`;
               字幕滚动
             </button>
           </div>
-          {/* 重新生成按钮 - 样式与"重新总结"一致 */}
+          {/* 重新生成按钮 */}
           <button
             onClick={() => chapterGridRef.current?.generateChapters()}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"

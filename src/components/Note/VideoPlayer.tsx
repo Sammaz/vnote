@@ -167,7 +167,10 @@ export function VideoPlayer({
         }
 
         // 转换 TS 到 MP4
-        const mp4Path = await invoke<string>("convert_ts_to_mp4", { tsPath: videoUrl });
+        const mp4Path = await invoke<string>("convert_ts_to_mp4", {
+          tsPath: videoUrl,
+          noteId: noteId
+        });
 
         if (!cancelled) {
           setActualVideoUrl(mp4Path);
