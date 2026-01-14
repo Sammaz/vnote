@@ -21,6 +21,7 @@ interface AiConfig {
     sort_order: number;
     is_default: boolean;
     concurrent_limit: number;
+    request_timeout: number;
 }
 
 interface EmbeddingConfig {
@@ -172,7 +173,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         model: "",
         sort_order: aiConfigs.length,
         is_default: false,
-        concurrent_limit: 5
+        concurrent_limit: 5,
+        request_timeout: 180
     });
 
     const saveAiConfig = async () => {
@@ -1019,6 +1021,27 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         </span>
                                     </div>
                                     <p className="text-sm text-slate-500 mt-3">同时生成的标签页数量，范围1-10，默认5</p>
+                                </div>
+                            )}
+
+                            {editingType === "ai" && (
+                                <div className="flex flex-col w-full">
+                                    <div className="text-sm mb-3 font-bold text-slate-900 dark:text-slate-100">请求超时时间</div>
+                                    <div className="flex items-center gap-4">
+                                        <input
+                                            type="range"
+                                            min="0"
+                                            max="600"
+                                            step="30"
+                                            value={(currentConfig as AiConfig | null)?.request_timeout ?? 180}
+                                            onChange={e => setCurrentEditingConfig({ request_timeout: Number(e.target.value) })}
+                                            className="flex-1 h-2 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-blue-500"
+                                        />
+                                        <span className="text-lg font-semibold text-blue-600 dark:text-blue-400 w-16 text-center">
+                                            {(currentConfig as AiConfig | null)?.request_timeout === 0 ? "无限" : `${(currentConfig as AiConfig | null)?.request_timeout ?? 180}s`}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-slate-500 mt-3">API 请求超时时间，范围0-600秒，0表示不设置超时，默认180秒</p>
                                 </div>
                             )}
 

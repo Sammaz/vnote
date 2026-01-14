@@ -34,9 +34,6 @@ pub fn get_ai_pool_manager() -> &'static AiPoolManager {
 // 配置常量
 // ============================================================================
 
-/// 请求超时时间（秒）
-const REQUEST_TIMEOUT_SECS: u64 = 600;
-
 /// HTTP连接池配置
 const POOL_MAX_IDLE_PER_HOST: usize = 20;
 const POOL_IDLE_TIMEOUT_SECS: u64 = 90;
@@ -188,8 +185,8 @@ impl ConfigConcurrencyController {
 
 /// AI线程池管理器
 pub struct AiPoolManager {
-    /// HTTP客户端（全局共享）
-    http_client: OnceLock<Client>,
+    /// 每个AiConfig的HTTP客户端：config_id -> (client, timeout_secs)
+    http_clients: Mutex<HashMap<i64, (Client, u64)>>,
     /// 每个AiConfig的并发控制器：config_id -> controller
     controllers: Mutex<HashMap<i64, Arc<ConfigConcurrencyController>>>,
     /// 所有中止标志：request_id -> abort_flag
@@ -202,26 +199,54 @@ impl AiPoolManager {
     /// 创建新的管理器
     pub fn new() -> Self {
         Self {
-            http_client: OnceLock::new(),
+            http_clients: Mutex::new(HashMap::new()),
             controllers: Mutex::new(HashMap::new()),
             abort_flags: Mutex::new(HashMap::new()),
             abort_handles: Mutex::new(HashMap::new()),
         }
     }
 
-    /// �始化或获取HTTP客户端
-    fn get_http_client(&self) -> &Client {
-        self.http_client.get_or_init(|| {
-            Client::builder()
-                .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-                .pool_max_idle_per_host(POOL_MAX_IDLE_PER_HOST)
-                .pool_idle_timeout(std::time::Duration::from_secs(POOL_IDLE_TIMEOUT_SECS))
-                .connect_timeout(std::time::Duration::from_secs(30))
-                .http2_keep_alive_interval(std::time::Duration::from_secs(30))
-                .http2_keep_alive_timeout(std::time::Duration::from_secs(10))
-                .build()
-                .expect("Failed to create HTTP client")
-        })
+    /// 获取或创建指定配置的HTTP客户端
+    async fn get_or_create_http_client(&self, config_id: i64, timeout_secs: i32) -> Client {
+        let timeout = if timeout_secs <= 0 {
+            None // 0 表示不设置超时
+        } else {
+            Some(timeout_secs.min(600) as u64)
+        };
+
+        let mut clients = self.http_clients.lock().await;
+
+        // 检查是否已有客户端且超时配置相同
+        if let Some((client, existing_timeout)) = clients.get(&config_id) {
+            let current_timeout = timeout.unwrap_or(0);
+            if *existing_timeout == current_timeout {
+                return client.clone();
+            }
+        }
+
+        // 创建新的客户端
+        let mut builder = Client::builder()
+            .pool_max_idle_per_host(POOL_MAX_IDLE_PER_HOST)
+            .pool_idle_timeout(std::time::Duration::from_secs(POOL_IDLE_TIMEOUT_SECS))
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .http2_keep_alive_interval(std::time::Duration::from_secs(30))
+            .http2_keep_alive_timeout(std::time::Duration::from_secs(10));
+
+        if let Some(t) = timeout {
+            builder = builder.timeout(std::time::Duration::from_secs(t));
+        }
+
+        let client = builder.build().expect("Failed to create HTTP client");
+        let stored_timeout = timeout.unwrap_or(0);
+        clients.insert(config_id, (client.clone(), stored_timeout));
+        client
+    }
+
+    /// 更新HTTP客户端的超时配置
+    pub async fn update_request_timeout(&self, config_id: i64, _timeout_secs: i32) {
+        // 移除旧的客户端，下次请求时会创建新的
+        let mut clients = self.http_clients.lock().await;
+        clients.remove(&config_id);
     }
 
     /// 确保并发控制器存在（不存在则创建）
@@ -475,7 +500,7 @@ async fn execute_streaming_chat_single_attempt(
     rag_context: &Option<String>,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    let client = pool.get_http_client();
+    let client = pool.get_or_create_http_client(req.config.id, req.config.request_timeout).await;
 
     // 构建消息数组
     let mut api_messages: Vec<Value> = Vec::new();
@@ -686,7 +711,7 @@ async fn execute_non_streaming_single_attempt(
     pool: &AiPoolManager,
     req: &NonStreamingRequest,
 ) -> Result<NonStreamingResponse, String> {
-    let client = pool.get_http_client();
+    let client = pool.get_or_create_http_client(req.config.id, req.config.request_timeout).await;
 
     let base_url = req.config.base_url.trim_end_matches('/');
     let api_url = format!("{}/chat/completions", base_url);

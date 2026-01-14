@@ -13,6 +13,7 @@ pub struct AiConfig {
     pub sort_order: i32,
     pub is_default: bool,
     pub concurrent_limit: i32,
+    pub request_timeout: i32, // 请求超时时间（秒），0表示不设置超时，范围0-600，默认180
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -176,6 +177,20 @@ impl Database {
         if !has_concurrent_limit {
             conn.execute(
                 "ALTER TABLE ai_configs ADD COLUMN concurrent_limit INTEGER NOT NULL DEFAULT 5",
+                [],
+            )?;
+        }
+
+        // Migration: Add request_timeout column if not exists
+        let has_request_timeout: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('ai_configs') WHERE name='request_timeout'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_request_timeout {
+            conn.execute(
+                "ALTER TABLE ai_configs ADD COLUMN request_timeout INTEGER NOT NULL DEFAULT 180",
                 [],
             )?;
         }
@@ -353,7 +368,7 @@ impl Database {
     pub fn get_all_ai_configs(&self) -> SqliteResult<Vec<AiConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit FROM ai_configs ORDER BY is_default DESC, sort_order"
+            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout FROM ai_configs ORDER BY is_default DESC, sort_order"
         )?;
 
         let configs = stmt.query_map([], |row| {
@@ -366,6 +381,7 @@ impl Database {
                 sort_order: row.get(5)?,
                 is_default: row.get::<_, i64>(6)? != 0,
                 concurrent_limit: row.get(7)?,
+                request_timeout: row.get(8)?,
             })
         })?;
 
@@ -375,8 +391,8 @@ impl Database {
     pub fn create_ai_config(&self, config: &AiConfig) -> SqliteResult<i64> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO ai_configs (title, base_url, api_key, model, sort_order, is_default, concurrent_limit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit),
+            "INSERT INTO ai_configs (title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout),
         )?;
         Ok(conn.last_insert_rowid())
     }
@@ -384,8 +400,8 @@ impl Database {
     pub fn update_ai_config(&self, config: &AiConfig) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE ai_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5, is_default = ?6, concurrent_limit = ?7 WHERE id = ?8",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.id),
+            "UPDATE ai_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5, is_default = ?6, concurrent_limit = ?7, request_timeout = ?8 WHERE id = ?9",
+            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout, config.id),
         )?;
         Ok(())
     }
@@ -595,7 +611,7 @@ impl Database {
     pub fn get_ai_config_by_id(&self, id: i64) -> SqliteResult<Option<AiConfig>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit FROM ai_configs WHERE id = ?1"
+            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout FROM ai_configs WHERE id = ?1"
         )?;
 
         let result = stmt.query_row([id], |row| {
@@ -608,6 +624,7 @@ impl Database {
                 sort_order: row.get(5)?,
                 is_default: row.get::<_, i64>(6)? != 0,
                 concurrent_limit: row.get(7)?,
+                request_timeout: row.get(8)?,
             })
         });
 

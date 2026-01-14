@@ -150,6 +150,11 @@ async fn update_ai_config(config: AiConfig) -> Result<(), String> {
         // 忽略控制器不存在的错误（可能是首次创建配置）
         .ok();
 
+    // 动态更新 AI 线程池的超时配置
+    crate::ai_pool::get_ai_pool_manager()
+        .update_request_timeout(config.id, config.request_timeout)
+        .await;
+
     Ok(())
 }
 
