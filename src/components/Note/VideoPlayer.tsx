@@ -104,8 +104,13 @@ export function VideoPlayer({
     const fetchLatestPosition = async () => {
       try {
         const note = await invoke<{ last_playback_position: number | null } | null>("get_note", { id: noteId });
-        if (note && note.last_playback_position !== null && note.last_playback_position > 0) {
-          setLastPlaybackPosition(note.last_playback_position);
+        if (note) {
+          // 无论如何都要更新 state，确保切换笔记时重置播放位置
+          setLastPlaybackPosition(
+            note.last_playback_position !== null && note.last_playback_position > 0
+              ? note.last_playback_position
+              : null
+          );
         }
       } catch (err) {
         console.error("Failed to fetch latest playback position:", err);
