@@ -41,6 +41,12 @@ const REQUEST_TIMEOUT_SECS: u64 = 180;
 const POOL_MAX_IDLE_PER_HOST: usize = 20;
 const POOL_IDLE_TIMEOUT_SECS: u64 = 90;
 
+/// 最大重试次数
+const MAX_RETRY_COUNT: u32 = 3;
+
+/// 重试间隔基数（毫秒），实际间隔 = 基数 * 2^(重试次数-1)
+const RETRY_BASE_DELAY_MS: u64 = 1000;
+
 // ============================================================================
 // 公共类型定义（复用chat.rs的结构以保持兼容）
 // ============================================================================
@@ -393,12 +399,81 @@ pub async fn execute_streaming_chat(
     result
 }
 
-/// 实际的流式API调用实现
+/// 判断错误是否可重试
+fn is_retryable_error(error: &str) -> bool {
+    // 网络错误、超时、服务端错误（5xx）可重试
+    error.contains("请求失败")
+        || error.contains("流错误")
+        || error.contains("timeout")
+        || error.contains("connection")
+        || error.contains("API错误 5")  // 5xx 错误
+        || error.contains("API错误 429") // 限流错误
+}
+
+/// 计算重试延迟（指数退避）
+fn calculate_retry_delay(attempt: u32) -> std::time::Duration {
+    let delay_ms = RETRY_BASE_DELAY_MS * (1 << (attempt - 1));
+    std::time::Duration::from_millis(delay_ms)
+}
+
+/// 实际的流式API调用实现（带重试）
 async fn execute_streaming_chat_impl(
     pool: &AiPoolManager,
     req: StreamingChatRequest,
     rag_context: Option<String>,
     abort_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    let mut last_error = String::new();
+
+    for attempt in 1..=MAX_RETRY_COUNT {
+        // 检查中止
+        if abort_flag.load(Ordering::Relaxed) {
+            return Err("请求已取消".to_string());
+        }
+
+        match execute_streaming_chat_single_attempt(pool, &req, &rag_context, &abort_flag).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_error = e.clone();
+
+                // 如果是取消请求，不重试
+                if e.contains("请求已取消") {
+                    return Err(e);
+                }
+
+                // 如果错误不可重试，直接返回
+                if !is_retryable_error(&e) {
+                    return Err(e);
+                }
+
+                // 如果还有重试机会，等待后重试
+                if attempt < MAX_RETRY_COUNT {
+                    let delay = calculate_retry_delay(attempt);
+                    eprintln!(
+                        "流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
+                        attempt,
+                        MAX_RETRY_COUNT,
+                        e,
+                        delay.as_millis()
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "请求失败，已重试 {} 次: {}",
+        MAX_RETRY_COUNT, last_error
+    ))
+}
+
+/// 单次流式API调用尝试
+async fn execute_streaming_chat_single_attempt(
+    pool: &AiPoolManager,
+    req: &StreamingChatRequest,
+    rag_context: &Option<String>,
+    abort_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
     let client = pool.get_http_client();
 
@@ -406,7 +481,7 @@ async fn execute_streaming_chat_impl(
     let mut api_messages: Vec<Value> = Vec::new();
 
     // 添加系统提示词（根据RAG上下文是否可用）
-    if let Some(system_prompt) = prompts::build_chat_system_prompt(rag_context) {
+    if let Some(system_prompt) = prompts::build_chat_system_prompt(rag_context.clone()) {
         api_messages.push(json!({
             "role": "system",
             "content": system_prompt
@@ -563,13 +638,53 @@ pub async fn execute_non_streaming(req: NonStreamingRequest) -> Result<NonStream
     let _permit = controller.acquire().await;
 
     // 执行实际的API调用
-    execute_non_streaming_impl(pool, req).await
+    execute_non_streaming_impl(pool, &req).await
 }
 
-/// 实际的非流式API调用实现
+/// 实际的非流式API调用实现（带重试）
 async fn execute_non_streaming_impl(
     pool: &AiPoolManager,
-    req: NonStreamingRequest,
+    req: &NonStreamingRequest,
+) -> Result<NonStreamingResponse, String> {
+    let mut last_error = String::new();
+
+    for attempt in 1..=MAX_RETRY_COUNT {
+        match execute_non_streaming_single_attempt(pool, req).await {
+            Ok(response) => return Ok(response),
+            Err(e) => {
+                last_error = e.clone();
+
+                // 如果错误不可重试，直接返回
+                if !is_retryable_error(&e) {
+                    return Err(e);
+                }
+
+                // 如果还有重试机会，等待后重试
+                if attempt < MAX_RETRY_COUNT {
+                    let delay = calculate_retry_delay(attempt);
+                    eprintln!(
+                        "非流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
+                        attempt,
+                        MAX_RETRY_COUNT,
+                        e,
+                        delay.as_millis()
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "请求失败，已重试 {} 次: {}",
+        MAX_RETRY_COUNT, last_error
+    ))
+}
+
+/// 单次非流式API调用尝试
+async fn execute_non_streaming_single_attempt(
+    pool: &AiPoolManager,
+    req: &NonStreamingRequest,
 ) -> Result<NonStreamingResponse, String> {
     let client = pool.get_http_client();
 
@@ -641,8 +756,8 @@ pub async fn execute_non_streaming_with_abort(
         return Err("请求已取消".to_string());
     }
 
-    // 执行实际的API调用
-    let result = execute_non_streaming_impl(&pool, req).await;
+    // 执行实际的API调用（带重试）
+    let result = execute_non_streaming_impl_with_abort(pool, &req, abort_flag).await;
 
     // 再次检查中止（处理请求过程中被取消的情况）
     if abort_flag.load(Ordering::Relaxed) {
@@ -652,4 +767,55 @@ pub async fn execute_non_streaming_with_abort(
 
     // permit 在这里 drop，自动释放许可
     result
+}
+
+/// 实际的非流式API调用实现（带中止支持和重试）
+async fn execute_non_streaming_impl_with_abort(
+    pool: &AiPoolManager,
+    req: &NonStreamingRequest,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<NonStreamingResponse, String> {
+    let mut last_error = String::new();
+
+    for attempt in 1..=MAX_RETRY_COUNT {
+        // 检查中止
+        if abort_flag.load(Ordering::Relaxed) {
+            return Err("请求已取消".to_string());
+        }
+
+        match execute_non_streaming_single_attempt(pool, req).await {
+            Ok(response) => return Ok(response),
+            Err(e) => {
+                last_error = e.clone();
+
+                // 如果是取消请求，不重试
+                if e.contains("请求已取消") {
+                    return Err(e);
+                }
+
+                // 如果错误不可重试，直接返回
+                if !is_retryable_error(&e) {
+                    return Err(e);
+                }
+
+                // 如果还有重试机会，等待后重试
+                if attempt < MAX_RETRY_COUNT {
+                    let delay = calculate_retry_delay(attempt);
+                    eprintln!(
+                        "非流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
+                        attempt,
+                        MAX_RETRY_COUNT,
+                        e,
+                        delay.as_millis()
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
+        }
+    }
+
+    Err(format!(
+        "请求失败，已重试 {} 次: {}",
+        MAX_RETRY_COUNT, last_error
+    ))
 }
