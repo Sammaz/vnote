@@ -17,12 +17,14 @@ import {
   List,
   Clock,
   Subtitles as SubtitlesIcon,
+  Wand2,
+  Loader2,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { message } from "../../utils/message";
@@ -95,6 +97,17 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 显示章节字幕开关
   const [showChapterSubtitles, setShowChapterSubtitles] = useState(false);
 
+  // 字幕优化相关状态
+  const [subtitleOptimizationEnabled, setSubtitleOptimizationEnabled] = useState(false);
+  const [subtitleOptimizing, setSubtitleOptimizing] = useState(false);
+  const [subtitleOptimizationProgress, setSubtitleOptimizationProgress] = useState<{ current: number; total: number } | null>(null);
+  const [optimizedSubtitles, setOptimizedSubtitles] = useState<Map<string, string>>(new Map());
+  const [optimizingChapterIds, setOptimizingChapterIds] = useState<Set<string>>(new Set());
+  const [failedChapterIds, setFailedChapterIds] = useState<Set<string>>(new Set());
+  const subtitleOptimizationIdRef = useRef<string | null>(null);
+  // 字幕数据（用于优化）
+  const [subtitleEntries, setSubtitleEntries] = useState<Array<{ index: number; start_time: number; end_time: number; text: string; second_language_text?: string | null }>>([]);
+
   // 解析 detailed_reading 是否为章节数据
   useEffect(() => {
     if (note.detailed_reading) {
@@ -122,6 +135,37 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setChapterData(null);
     }
   }, [note.detailed_reading]);
+
+  // 加载字幕数据（用于字幕优化）
+  useEffect(() => {
+    const loadSubtitles = async () => {
+      if (!note.subtitle_path) {
+        setSubtitleEntries([]);
+        return;
+      }
+      try {
+        const result = await invoke<Array<{ index: number; start_time: number; end_time: number; text: string; second_language_text?: string | null }>>("parse_subtitle_file", {
+          path: note.subtitle_path,
+        });
+        setSubtitleEntries(result);
+      } catch (error) {
+        console.error("[NoteContentPanel] 加载字幕失败:", error);
+        setSubtitleEntries([]);
+      }
+    };
+    loadSubtitles();
+  }, [note.subtitle_path]);
+
+  // 切换笔记时重置字幕优化状态
+  useEffect(() => {
+    setSubtitleOptimizationEnabled(false);
+    setSubtitleOptimizing(false);
+    setSubtitleOptimizationProgress(null);
+    setOptimizedSubtitles(new Map());
+    setOptimizingChapterIds(new Set());
+    setFailedChapterIds(new Set());
+    subtitleOptimizationIdRef.current = null;
+  }, [note.id]);
 
   // 编辑模式状态
   const [isEditMode, setIsEditMode] = useState(false);
@@ -686,6 +730,245 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   };
 
+  // 字幕优化开关处理
+  const handleSubtitleOptimizationToggle = useCallback(async () => {
+    if (subtitleOptimizing) return;
+
+    if (subtitleOptimizationEnabled) {
+      // 关闭优化：中止请求并重置状态
+      if (subtitleOptimizationIdRef.current) {
+        try {
+          await invoke("abort_subtitle_optimization", {
+            generationId: subtitleOptimizationIdRef.current,
+          });
+        } catch (e) {
+          console.error("[SubtitleOptimization] 中止失败:", e);
+        }
+      }
+      setSubtitleOptimizationEnabled(false);
+      setSubtitleOptimizing(false);
+      setSubtitleOptimizationProgress(null);
+      setOptimizingChapterIds(new Set());
+      return;
+    }
+
+    // 开启优化：检查是否有缓存
+    if (optimizedSubtitles.size > 0) {
+      // 有缓存，直接启用显示
+      setSubtitleOptimizationEnabled(true);
+      return;
+    }
+
+    // 无缓存，开始优化
+    if (!chapterData || !note.model_id || !note.subtitle_path) {
+      message.warning("缺少必要的数据，无法进行字幕优化");
+      return;
+    }
+
+    // 确保字幕数据已加载
+    let currentSubtitleEntries = subtitleEntries;
+    if (currentSubtitleEntries.length === 0) {
+      try {
+        message.info("正在加载字幕数据...");
+        currentSubtitleEntries = await invoke<Array<{ index: number; start_time: number; end_time: number; text: string; second_language_text?: string | null }>>("parse_subtitle_file", {
+          path: note.subtitle_path,
+        });
+        setSubtitleEntries(currentSubtitleEntries);
+      } catch (error) {
+        console.error("[SubtitleOptimization] 加载字幕失败:", error);
+        message.error("加载字幕数据失败");
+        return;
+      }
+    }
+
+    if (currentSubtitleEntries.length === 0) {
+      message.warning("没有可用的字幕数据");
+      return;
+    }
+
+    const generationId = crypto.randomUUID();
+    subtitleOptimizationIdRef.current = generationId;
+
+    // 准备章节字幕数据
+    const chaptersToOptimize = chapterData.chapters
+      .filter(chapter => chapter.id)
+      .map(chapter => {
+        // 过滤出当前章节时间范围内的字幕
+        const filtered = currentSubtitleEntries.filter(
+          sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
+        );
+        
+        if (filtered.length === 0) {
+          return { chapter_id: chapter.id, subtitle_text: "", has_bilingual: false };
+        }
+        
+        // 检查是否有双语字幕
+        const hasBilingual = filtered.some(sub => sub.second_language_text);
+        
+        let subtitleText: string;
+        if (hasBilingual) {
+          // 双语字幕：合并两种语言
+          const primaryText = filtered.map(sub => sub.text).join(" ");
+          const secondaryText = filtered
+            .filter(sub => sub.second_language_text)
+            .map(sub => sub.second_language_text!)
+            .join(" ");
+          subtitleText = `${primaryText}\n\n${secondaryText}`;
+        } else {
+          // 单语字幕：直接拼接
+          subtitleText = filtered.map(sub => sub.text).join(" ");
+        }
+        
+        return {
+          chapter_id: chapter.id,
+          subtitle_text: subtitleText,
+          has_bilingual: hasBilingual,
+        };
+      })
+      .filter(c => c.subtitle_text.trim().length > 0);
+
+    if (chaptersToOptimize.length === 0) {
+      message.warning("没有可优化的字幕内容");
+      return;
+    }
+
+    setSubtitleOptimizationEnabled(true);
+    setSubtitleOptimizing(true);
+    setSubtitleOptimizationProgress({ current: 0, total: chaptersToOptimize.length });
+    setOptimizingChapterIds(new Set(chaptersToOptimize.map(c => c.chapter_id)));
+    setFailedChapterIds(new Set());
+
+    // 设置事件监听
+    const eventName = `subtitle-optimization-${generationId}`;
+    const unlisten = await listen<SubtitleOptimizationEvent>(eventName, (event) => {
+      const data = event.payload;
+
+      switch (data.status) {
+        case "Starting":
+          setSubtitleOptimizationProgress({ current: 0, total: data.total });
+          break;
+
+        case "ChapterStarted":
+          // 章节开始优化
+          break;
+
+        case "ChapterCompleted":
+          setOptimizedSubtitles(prev => {
+            const newMap = new Map(prev);
+            newMap.set(data.chapter_id, data.optimized_text);
+            return newMap;
+          });
+          setOptimizingChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(data.chapter_id);
+            return newSet;
+          });
+          setSubtitleOptimizationProgress(prev => prev ? {
+            ...prev,
+            current: prev.current + 1,
+          } : null);
+          break;
+
+        case "ChapterFailed":
+          console.error(`[SubtitleOptimization] 章节 ${data.chapter_id} 优化失败:`, data.error);
+          setOptimizingChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(data.chapter_id);
+            return newSet;
+          });
+          setFailedChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.add(data.chapter_id);
+            return newSet;
+          });
+          setSubtitleOptimizationProgress(prev => prev ? {
+            ...prev,
+            current: prev.current + 1,
+          } : null);
+          break;
+
+        case "AllCompleted":
+          setSubtitleOptimizing(false);
+          setSubtitleOptimizationProgress(null);
+          setOptimizingChapterIds(new Set());
+          // 如果全部失败，自动禁用开关
+          if (data.succeeded === 0 && data.failed > 0) {
+            message.error("所有章节字幕优化失败");
+            setSubtitleOptimizationEnabled(false);
+          }
+          break;
+
+        case "Aborted":
+          setSubtitleOptimizing(false);
+          setSubtitleOptimizationProgress(null);
+          setOptimizingChapterIds(new Set());
+          break;
+      }
+    });
+
+    try {
+      await invoke("optimize_chapter_subtitles", {
+        generationId,
+        noteId: note.id,
+        modelId: note.model_id,
+        chapters: chaptersToOptimize,
+      });
+    } catch (error) {
+      console.error("[SubtitleOptimization] 调用失败:", error);
+      message.error(`字幕优化失败: ${error}`);
+      setSubtitleOptimizing(false);
+      setSubtitleOptimizationEnabled(false);
+      setSubtitleOptimizationProgress(null);
+      setOptimizingChapterIds(new Set());
+      unlisten();
+    }
+
+    // 组件卸载时清理监听器
+    return () => {
+      unlisten();
+    };
+  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries]);
+
+  // 获取章节的字幕文本（用于优化）
+  const getChapterSubtitleText = useCallback((chapter: { start_time: number; end_time: number }) => {
+    if (subtitleEntries.length === 0) return "";
+    
+    // 过滤出当前章节时间范围内的字幕
+    const filtered = subtitleEntries.filter(
+      sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
+    );
+    
+    if (filtered.length === 0) return "";
+    
+    // 检查是否有双语字幕
+    const hasBilingual = filtered.some(sub => sub.second_language_text);
+    
+    if (hasBilingual) {
+      // 双语字幕：合并两种语言
+      const primaryText = filtered.map(sub => sub.text).join(" ");
+      const secondaryText = filtered
+        .filter(sub => sub.second_language_text)
+        .map(sub => sub.second_language_text!)
+        .join(" ");
+      return `${primaryText}\n\n${secondaryText}`;
+    } else {
+      // 单语字幕：直接拼接
+      return filtered.map(sub => sub.text).join(" ");
+    }
+  }, [subtitleEntries]);
+
+  // 检查章节是否有双语字幕
+  const hasChapterBilingualSubtitle = useCallback((chapter: { start_time: number; end_time: number }) => {
+    if (subtitleEntries.length === 0) return false;
+    
+    // 过滤出当前章节时间范围内的字幕
+    const filtered = subtitleEntries.filter(
+      sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
+    );
+    
+    return filtered.some(sub => sub.second_language_text);
+  }, [subtitleEntries]);
+
   // 根据配置生成动态提示词（Markdown 格式）
   const generateDynamicPrompt = useCallback((): string => {
     const isEnglish = configLanguage === "en";
@@ -1015,10 +1298,43 @@ Video subtitles content:`;
                 {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
               </button>
             )}
+            {/* 字幕优化开关 - 仅在显示字幕时可用 */}
+            {note.subtitle_path && showChapterSubtitles && chapterData && (
+              <button
+                onClick={handleSubtitleOptimizationToggle}
+                disabled={subtitleOptimizing}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                  subtitleOptimizationEnabled
+                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover",
+                  subtitleOptimizing && "opacity-70"
+                )}
+              >
+                {subtitleOptimizing ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Wand2 className="w-4 h-4" />
+                )}
+                字幕优化
+                {subtitleOptimizationProgress && (
+                  <span className="text-xs ml-1">
+                    ({subtitleOptimizationProgress.current}/{subtitleOptimizationProgress.total})
+                  </span>
+                )}
+              </button>
+            )}
           </div>
           {/* 重新生成按钮 */}
           <button
-            onClick={() => chapterGridRef.current?.generateChapters()}
+            onClick={() => {
+              // 清除字幕优化缓存
+              setOptimizedSubtitles(new Map());
+              setSubtitleOptimizationEnabled(false);
+              setFailedChapterIds(new Set());
+              // 重新生成章节
+              chapterGridRef.current?.generateChapters();
+            }}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
           >
             <RefreshCw className="w-4 h-4" />
@@ -1101,6 +1417,11 @@ Video subtitles content:`;
               showToolbar={false}
               currentChapterId={currentChapterId}
               showSubtitles={showChapterSubtitles}
+              // 字幕优化相关
+              subtitleOptimizationEnabled={subtitleOptimizationEnabled}
+              optimizedSubtitles={optimizedSubtitles}
+              optimizingChapterIds={optimizingChapterIds}
+              failedChapterIds={failedChapterIds}
             />
           );
         })()}

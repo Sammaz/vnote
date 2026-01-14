@@ -6,6 +6,7 @@ mod note_generation;
 mod prompts;
 mod rag;
 mod subtitle;
+mod subtitle_optimizer;
 
 use chat::ChatRequest;
 use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, PromptConfig, RerankerConfig};
@@ -807,6 +808,8 @@ pub fn run() {
             abort_chapter_generation,
             parse_subtitle_file,
             save_chapters_to_note,
+            subtitle_optimizer::optimize_chapter_subtitles,
+            subtitle_optimizer::abort_subtitle_optimization,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

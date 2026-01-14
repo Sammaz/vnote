@@ -203,3 +203,26 @@ export type ChapterGenerationEvent =
   | { status: "Completed"; chapter_data: ChapterData }
   | { status: "Error"; error: string }
   | { status: "Aborted" };
+
+
+// ============================================================================
+// 字幕优化相关类型 (Subtitle Optimization Types)
+// ============================================================================
+
+export type SubtitleOptimizationEvent =
+  | { status: "Starting"; total: number }
+  | { status: "ChapterStarted"; chapter_id: string }
+  | { status: "ChapterCompleted"; chapter_id: string; optimized_text: string }
+  | { status: "ChapterFailed"; chapter_id: string; error: string }
+  | { status: "AllCompleted"; succeeded: number; failed: number }
+  | { status: "Aborted" };
+
+export interface SubtitleOptimizationState {
+  enabled: boolean;                              // 优化开关状态
+  optimizing: boolean;                           // 是否正在优化
+  progress: { current: number; total: number } | null;  // 优化进度
+  optimizedSubtitles: Map<string, string>;       // 章节ID -> 优化后字幕
+  optimizingChapterIds: Set<string>;             // 正在优化的章节ID
+  failedChapterIds: Set<string>;                 // 优化失败的章节ID
+  abortFlag: string | null;                      // 中止标识（generation_id）
+}

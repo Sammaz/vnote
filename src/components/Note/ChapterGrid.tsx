@@ -2,7 +2,7 @@ import { useState, useMemo, forwardRef, useImperativeHandle, useEffect } from "r
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Play, Clock, Image as ImageIcon, Loader2, ChevronDown, ChevronUp } from "lucide-react";
+import { Play, Clock, Image as ImageIcon, Loader2, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
 import type { Chapter, ChapterData, ChapterGenerationEvent, SubtitleEntry } from "../../types";
 import { cn } from "../../utils/cn";
 import { setChapterGenerating } from "../../utils/noteGenerationState";
@@ -19,6 +19,11 @@ interface ChapterGridProps {
   showToolbar?: boolean; // 是否显示内置工具栏
   currentChapterId?: string | null; // 当前播放的章节ID
   showSubtitles?: boolean; // 是否显示字幕（由父组件控制）
+  // 字幕优化相关
+  subtitleOptimizationEnabled?: boolean; // 是否启用字幕优化
+  optimizedSubtitles?: Map<string, string>; // 章节ID -> 优化后字幕
+  optimizingChapterIds?: Set<string>; // 正在优化的章节ID
+  failedChapterIds?: Set<string>; // 优化失败的章节ID
 }
 
 export interface ChapterGridRef {
@@ -38,6 +43,11 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
   showToolbar = true, // 默认显示内置工具栏
   currentChapterId,
   showSubtitles: propShowSubtitles = false,
+  // 字幕优化相关
+  subtitleOptimizationEnabled = false,
+  optimizedSubtitles,
+  optimizingChapterIds,
+  failedChapterIds,
 }: ChapterGridProps, ref) {
   const [generating, setGenerating] = useState(isGenerating);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string } | null>(null);
@@ -243,6 +253,11 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
             isCurrent={currentChapterId === chapter.id}
             subtitles={propShowSubtitles ? subtitles : null}
             loadingSubtitles={loadingSubtitles}
+            // 字幕优化相关
+            subtitleOptimizationEnabled={subtitleOptimizationEnabled}
+            optimizedSubtitle={optimizedSubtitles?.get(chapter.id)}
+            isOptimizing={optimizingChapterIds?.has(chapter.id)}
+            optimizationFailed={failedChapterIds?.has(chapter.id)}
           />
         ))}
       </div>
@@ -258,6 +273,11 @@ interface ChapterCardProps {
   isCurrent?: boolean; // 是否是当前播放的章节
   subtitles?: SubtitleEntry[] | null; // 字幕数据
   loadingSubtitles?: boolean; // 是否正在加载字幕
+  // 字幕优化相关
+  subtitleOptimizationEnabled?: boolean; // 是否启用字幕优化
+  optimizedSubtitle?: string; // 优化后的字幕
+  isOptimizing?: boolean; // 是否正在优化
+  optimizationFailed?: boolean; // 优化是否失败
 }
 
 function ChapterCard({
@@ -268,6 +288,11 @@ function ChapterCard({
   isCurrent = false,
   subtitles,
   loadingSubtitles = false,
+  // 字幕优化相关
+  subtitleOptimizationEnabled = false,
+  optimizedSubtitle,
+  isOptimizing = false,
+  optimizationFailed = false,
 }: ChapterCardProps) {
   const [expanded, setExpanded] = useState(false); // 是否展开字幕
 
@@ -330,6 +355,12 @@ function ChapterCard({
   // 是否有字幕内容
   const hasSubtitles = chapterSubtitles && chapterSubtitles.primary && chapterSubtitles.primary.length > 0;
 
+  // 是否有优化后的字幕可显示
+  const hasOptimizedSubtitle = subtitleOptimizationEnabled && optimizedSubtitle && optimizedSubtitle.length > 0;
+
+  // 是否显示字幕区域（有原始字幕或有优化后字幕）
+  const showSubtitleArea = hasSubtitles || hasOptimizedSubtitle || isOptimizing;
+
   return (
     <div
       id={id}
@@ -390,8 +421,15 @@ function ChapterCard({
                 <Clock className="w-3 h-3" />
                 {formatTime(chapter.start_time)} - {formatTime(chapter.end_time)}
               </div>
+              {/* 优化状态指示器 */}
+              {isOptimizing && (
+                <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
+              )}
+              {optimizationFailed && !isOptimizing && (
+                <AlertCircle className="w-4 h-4 text-orange-500" title="字幕优化失败" />
+              )}
               {/* 展开/收起按钮 */}
-              {hasSubtitles && (
+              {showSubtitleArea && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -416,20 +454,43 @@ function ChapterCard({
       </div>
 
       {/* 字幕展开区域 - 抽屉效果 */}
-      {hasSubtitles && expanded && (
+      {showSubtitleArea && expanded && (
         <div className="px-4 pb-4 border-t border-slate-100 dark:border-slate-700/50">
           <div className="pt-3 text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap leading-relaxed">
-            {chapterSubtitles.secondary ? (
-              // 双语字幕：两种语言换行+空行分隔
+            {/* 正在优化中 */}
+            {isOptimizing && (
+              <div className="flex items-center gap-2 text-slate-400">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                正在优化字幕...
+              </div>
+            )}
+            {/* 显示优化后的字幕 */}
+            {!isOptimizing && hasOptimizedSubtitle && (
+              <div>
+                {optimizedSubtitle}
+              </div>
+            )}
+            {/* 显示原始字幕（未启用优化或优化失败时） */}
+            {!isOptimizing && !hasOptimizedSubtitle && hasSubtitles && (
               <>
-                {chapterSubtitles.primary}
-
+                {chapterSubtitles!.secondary ? (
+                  // 双语字幕：两种语言换行+空行分隔
+                  <>
+                    {chapterSubtitles!.primary}
 {"\n"}
-{chapterSubtitles.secondary}
+{chapterSubtitles!.secondary}
+                  </>
+                ) : (
+                  // 单语字幕
+                  chapterSubtitles!.primary
+                )}
+                {optimizationFailed && (
+                  <div className="mt-2 text-xs text-orange-500 flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    字幕优化失败，显示原始字幕
+                  </div>
+                )}
               </>
-            ) : (
-              // 单语字幕
-              chapterSubtitles.primary
             )}
           </div>
         </div>
