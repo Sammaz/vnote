@@ -35,7 +35,7 @@ pub fn get_ai_pool_manager() -> &'static AiPoolManager {
 // ============================================================================
 
 /// 请求超时时间（秒）
-const REQUEST_TIMEOUT_SECS: u64 = 180;
+const REQUEST_TIMEOUT_SECS: u64 = 600;
 
 /// HTTP连接池配置
 const POOL_MAX_IDLE_PER_HOST: usize = 20;
