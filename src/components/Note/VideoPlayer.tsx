@@ -361,6 +361,7 @@ export function VideoPlayer({
       const cleanupRef = {
         assHandler: null as (() => void) | null,
         srtHandler: null as (() => void) | null,
+        seekVideoHandler: null as (() => void) | null,
       };
 
       // 监听字幕状态变化（适用于所有字幕类型）
@@ -484,6 +485,19 @@ export function VideoPlayer({
           });
       }
 
+      // 监听章节点击跳转事件
+      const handleSeekVideo = ((event: Event) => {
+        const customEvent = event as CustomEvent<{ time: number }>;
+        const seekTime = customEvent.detail.time;
+        if (player && typeof seekTime === "number") {
+          player.currentTime = seekTime;
+          // 可选：跳转后自动播放
+          // player.play();
+        }
+      }) as () => void;
+      window.addEventListener("seek-video", handleSeekVideo);
+      cleanupRef.seekVideoHandler = handleSeekVideo;
+
       // 返回清理函数
       return () => {
         const currentTime = player.currentTime;
@@ -505,6 +519,10 @@ export function VideoPlayer({
         player.off("timeupdate", handleTimeUpdate);
         player.off("pause", handlePause);
         player.off("ended", handleEnded);
+        // 移除章节跳转事件监听器
+        if (cleanupRef.seekVideoHandler) {
+          window.removeEventListener("seek-video", cleanupRef.seekVideoHandler);
+        }
         if (assRef.current) {
           assRef.current.destroy();
           assRef.current = null;

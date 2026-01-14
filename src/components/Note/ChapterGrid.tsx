@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { Play, Clock, Image as ImageIcon, Loader2 } from "lucide-react";
 import type { Chapter, ChapterData, ChapterGenerationEvent } from "../../types";
 
@@ -208,16 +209,19 @@ function ChapterCard({ chapter, index, onDoubleClick }: ChapterCardProps) {
 
   const [imageError, setImageError] = useState(false);
 
+  // 使用 Tauri 的 convertFileSrc 转换本地文件路径
+  const screenshotUrl = chapter.screenshot_path ? convertFileSrc(chapter.screenshot_path) : null;
+
   return (
     <div
-      onDoubleClick={onDoubleClick}
+      onClick={onDoubleClick}
       className="group flex bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden hover:shadow-md hover:border-blue-400 dark:hover:border-blue-500 transition-all cursor-pointer"
     >
       {/* 左侧截图区域 - 缩略图 */}
       <div className="relative w-48 flex-shrink-0 bg-slate-100 dark:bg-slate-800">
-        {chapter.screenshot_path && !imageError ? (
+        {screenshotUrl && !imageError ? (
           <img
-            src={`asset://localhost/${chapter.screenshot_path}`}
+            src={screenshotUrl}
             alt={chapter.title}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
             onError={() => setImageError(true)}
@@ -249,8 +253,8 @@ function ChapterCard({ chapter, index, onDoubleClick }: ChapterCardProps) {
 
       {/* 右侧内容区域 */}
       <div className="flex-1 p-4 min-w-0">
-        <div className="flex items-start justify-between mb-2">
-          <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-base line-clamp-1 flex-1 pr-4">
+        <div className="flex items-start justify-between mb-2 gap-2">
+          <h3 className="font-semibold text-slate-900 dark:text-slate-100 text-base flex-1">
             {chapter.title}
           </h3>
           <div className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-1 flex-shrink-0">
@@ -258,7 +262,7 @@ function ChapterCard({ chapter, index, onDoubleClick }: ChapterCardProps) {
             {formatTime(chapter.start_time)} - {formatTime(chapter.end_time)}
           </div>
         </div>
-        <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-2">
+        <p className="text-sm text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
           {chapter.content}
         </p>
       </div>

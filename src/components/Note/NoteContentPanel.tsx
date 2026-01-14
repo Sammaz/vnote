@@ -461,7 +461,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const hasNoContent = !note.full_summary && !note.detailed_reading &&
                          !note.highlights && !note.visual_summary && !note.custom_summary;
 
-    if (hasNoContent && note.model_id && !isGenerating) {
+    if (hasNoContent && note.model_id) {
       handleGenerate();
     }
   }, [note.id, note.full_summary, note.model_id]);
@@ -472,7 +472,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     if (!tabType) return false;
     // 如果正在重新生成该标签页，显示加载状态
     if (regeneratingTabs.has(tabType)) return true;
-    // 检查全局生成状态
+    // 只检查当前笔记的全局生成状态，不使用组件内部状态（避免切换笔记时状态混淆）
     const globalState = getNoteGenerationState(note.id);
     if (globalState.isGenerating) {
       const isNotCompleted = !globalState.completedTabs.has(tabType);
@@ -482,11 +482,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         return true;
       }
     }
-    // 降级到组件状态
-    if (!isGenerating) return false;
-    const isNotCompleted = !completedTabs.has(tabType);
-    const isNotFailed = !failedTabs.has(tabType);
-    return isNotCompleted && isNotFailed;
+    return false;
   };
 
   // 检查标签页是否已完成生成

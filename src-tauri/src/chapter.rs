@@ -41,7 +41,6 @@ pub struct ChapterData {
 /// 章节生成请求
 #[derive(Debug, Deserialize)]
 pub struct GenerateChaptersRequest {
-    #[allow(dead_code)]
     pub note_id: i64,
     pub model_id: i64,
     pub video_path: String,
@@ -83,79 +82,254 @@ struct AIChapter {
 }
 
 /// 生成章节分割提示词
-fn build_chapter_prompt(subtitle_text: &str) -> String {
+fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_info: Option<&str>) -> String {
+    let chunk_hint = if is_chunk {
+        format!("\n\n注意：这是视频的一个片段。{}", chunk_info.unwrap_or(""))
+    } else {
+        String::new()
+    };
+
     format!(
         r#"你是一个专业的视频内容分析师。请分析以下视频字幕，将其分割为逻辑清晰的章节。
 
-要求：
-1. 根据内容主题变化分割章节
-2. 每个章节要有明确的主题
-3. 章节数量建议：5-15个（根据视频长度调整）
-4. 为每个章节生成简洁的标题（10字以内）
-5. 为每个章节生成简短的内容概要（50字以内）
+**核心要求**：
 
-输出格式（必须是有效的JSON，不要使用代码块标记）：
+1. **章节定义**：每个章节是视频中的一个完整主题段落，有明确的开始和结束
+2. **start_index 含义**：这是该章节**第一句字幕的索引**，系统将根据此索引获取对应的**视频时间戳**作为章节开始时间
+3. **跳过开场白**：第一个章节不要从索引 0 或 1 开始，应该跳过：
+   - 片头、标题、自我介绍
+   - "大家好"、"欢迎来到"等客套话
+   - 课程概述、 agenda 说明
+   - 从**实质性内容**开始的地方划分第一个章节
+4. **合理间隔**：章节之间要有足够的内容量，建议每章至少 30 秒以上的内容
+5. **不限制数量**：根据视频内容自然划分，不要人为限制章节数量
+
+**示例**（假设字幕前 100 行是开场白）：
 {{
   "chapters": [
     {{
-      "title": "章节标题",
-      "start_index": 0,
-      "end_index": 50,
-      "summary": "本章内容概要"
+      "title": "核心概念介绍",
+      "start_index": 120,    // 跳过前 120 行开场白，从实际内容开始
+      "end_index": 280,      // 该章节包含第 120-280 行字幕
+      "summary": "介绍课程的核心概念和基础知识"
+    }},
+    {{
+      "title": "案例分析",
+      "start_index": 285,    // 与上一章有少量间隔（字幕行）
+      "end_index": 450,
+      "summary": "通过具体案例讲解理论应用"
     }}
   ]
 }}
 
+**输出格式**（必须是有效的JSON，不要使用代码块标记）：
+{{
+  "chapters": [
+    {{
+      "title": "章节标题",
+      "start_index": 数字（章节第一句字幕的索引，不要从0开始）,
+      "end_index": 数字（章节最后一句字幕的索引）,
+      "summary": "本章内容概要"
+    }}
+  ]
+}}
+{}
 视频字幕内容（每行格式为 [索引] 字幕内容）：
 {}"#,
-        subtitle_text
+        chunk_hint, subtitle_text
     )
 }
 
-/// AI 分析字幕生成章节
+/// 字幕分段信息
+struct SubtitleChunk {
+    start_index: usize,  // 该段在原始字幕中的起始索引
+    end_index: usize,    // 该段在原始字幕中的结束索引（不含）
+    text: String,        // 该段的字幕文本（带索引）
+}
+
+/// 将字幕按字符数分段（每段约 10000 字符）
+/// 每段的字幕索引从 0 开始（相对索引），便于 AI 处理和后续合并
+fn split_subtitle_into_chunks(subtitle_entries: &[SubtitleEntry]) -> Vec<SubtitleChunk> {
+    const TARGET_CHUNK_SIZE: usize = 10000;
+
+    let mut chunks = Vec::new();
+    let mut current_chunk_lines: Vec<String> = Vec::new();
+    let mut current_chunk_char_count = 0;
+    let mut current_chunk_start = 0;
+    let mut relative_index = 0;  // 当前段内的相对索引
+
+    for (i, entry) in subtitle_entries.iter().enumerate() {
+        // 使用相对索引（从 0 开始），每段重新计数
+        let line = format!("[{}] {}\n", relative_index, entry.text);
+        let line_len = line.len();
+
+        // 如果当前段加上新行会超过目标大小，且当前段不为空，则保存当前段
+        if current_chunk_char_count + line_len > TARGET_CHUNK_SIZE && !current_chunk_lines.is_empty() {
+            chunks.push(SubtitleChunk {
+                start_index: current_chunk_start,
+                end_index: i,
+                text: current_chunk_lines.join("").trim().to_string(),
+            });
+            current_chunk_lines = Vec::new();
+            current_chunk_char_count = 0;
+            current_chunk_start = i;
+            relative_index = 0;  // 新段重新从 0 开始
+        }
+
+        current_chunk_lines.push(line);
+        current_chunk_char_count += line_len;
+        relative_index += 1;
+    }
+
+    // 添加最后一段
+    if !current_chunk_lines.is_empty() {
+        chunks.push(SubtitleChunk {
+            start_index: current_chunk_start,
+            end_index: subtitle_entries.len(),
+            text: current_chunk_lines.join("").trim().to_string(),
+        });
+    }
+
+    chunks
+}
+
+/// AI 分析字幕生成章节（支持分段并发处理长字幕）
 async fn analyze_subtitle_for_chapters(
     ai_config: &AiConfig,
     subtitle_entries: &[SubtitleEntry],
     abort_flag: &Arc<AtomicBool>,
+    app: &AppHandle,
+    event_name: &str,
 ) -> Result<Vec<AIChapter>, String> {
-    // 合并字幕文本（带索引），每100条字幕为一组
-    let chunk_size = 100;
-    let mut chunks = Vec::new();
+    // 将字幕分段
+    let chunks = split_subtitle_into_chunks(subtitle_entries);
+    let total_chunks = chunks.len();
 
-    for (chunk_idx, entry_chunk) in subtitle_entries.chunks(chunk_size).enumerate() {
-        let chunk_text: String = entry_chunk
-            .iter()
-            .map(|e| format!("[{}] {}", e.index, e.text))
-            .collect::<Vec<_>>()
-            .join("\n");
+    eprintln!("[章节生成] 字幕总条数: {}, 分为 {} 段处理", subtitle_entries.len(), total_chunks);
 
-        chunks.push((chunk_idx, chunk_text));
+    // 如果只有一段，直接处理
+    if total_chunks == 1 {
+        let prompt = build_chapter_prompt(&chunks[0].text, false, None);
+        let req = NonStreamingRequest {
+            config: ai_config.clone(),
+            prompt,
+        };
+        let response = execute_non_streaming_with_abort(req, abort_flag).await?;
+        return parse_chapter_ai_response(&response.content, subtitle_entries.len());
     }
 
-    // 如果字幕较少，直接分析
-    let subtitle_with_index: String = if chunks.len() <= 3 {
-        chunks.iter().map(|(_, text)| text.as_str()).collect::<Vec<_>>().join("\n")
-    } else {
-        // 字幕较多，先采样分析
-        chunks
-            .iter()
-            .step_by(2)
-            .map(|(_, text)| text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
+    // 多段并发处理：使用 tokio::spawn 并发生成章节（并发控制由 AI 线程池统一管理）
+    let mut tasks = Vec::new();
 
-    let prompt = build_chapter_prompt(&subtitle_with_index);
+    for (chunk_idx, chunk) in chunks.into_iter().enumerate() {
+        let ai_config = ai_config.clone();
+        let abort_flag = abort_flag.clone();
+        let app = app.clone();
+        let event_name = event_name.to_string();
 
-    let req = NonStreamingRequest {
-        config: ai_config.clone(),
-        prompt,
-    };
+        let task = tokio::spawn(async move {
+            // 检查中止
+            if abort_flag.load(Ordering::Relaxed) {
+                return Err::<(usize, usize, usize, Vec<AIChapter>), String>("已中止".to_string());
+            }
 
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
+            eprintln!("[章节生成] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+                chunk_idx + 1, total_chunks, chunk.start_index, chunk.end_index);
 
-    // 解析 AI 响应
-    parse_chapter_ai_response(&response.content, subtitle_entries.len())
+            // 发送进度事件
+            let _ = app.emit(&event_name, ChapterGenerationEvent::GeneratingChapters {
+                current: chunk_idx + 1,
+                total: total_chunks,
+                message: format!("AI正在分析第 {}/{} 段字幕...", chunk_idx + 1, total_chunks),
+            });
+
+            let chunk_size = chunk.end_index - chunk.start_index;
+            let chunk_info = format!(
+                "这是第 {}/{} 段，共 {} 条字幕，索引从 0 到 {}。",
+                chunk_idx + 1, total_chunks, chunk_size, chunk_size - 1
+            );
+
+            let prompt = build_chapter_prompt(&chunk.text, true, Some(&chunk_info));
+            let req = NonStreamingRequest {
+                config: ai_config,
+                prompt,
+            };
+
+            match execute_non_streaming_with_abort(req, &abort_flag).await {
+                Ok(response) => {
+                    match parse_chapter_ai_response(&response.content, chunk.end_index - chunk.start_index) {
+                        Ok(chapters) => {
+                            eprintln!("[章节生成] 第 {} 段生成了 {} 个章节", chunk_idx + 1, chapters.len());
+                            Ok((chunk_idx, chunk.start_index, chunk.end_index, chapters))
+                        }
+                        Err(e) => {
+                            eprintln!("[章节生成] 第 {} 段解析失败: {}", chunk_idx + 1, e);
+                            Ok((chunk_idx, chunk.start_index, chunk.end_index, Vec::new()))
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[章节生成] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
+                    Ok((chunk_idx, chunk.start_index, chunk.end_index, Vec::new()))
+                }
+            }
+        });
+
+        tasks.push(task);
+    }
+
+    // 等待所有任务完成并收集结果
+    let mut results: Vec<(usize, usize, usize, Vec<AIChapter>)> = Vec::new();
+
+    for task in tasks {
+        match task.await {
+            Ok(Ok(result)) => {
+                results.push(result);
+            }
+            Ok(Err(e)) => {
+                if e == "已中止" {
+                    return Err(e);
+                }
+                // 其他错误继续处理
+            }
+            Err(e) => {
+                eprintln!("[章节生成] 任务执行出错: {}", e);
+                // 继续处理其他任务
+            }
+        }
+    }
+
+    // 按 chunk_idx 排序结果
+    results.sort_by_key(|(idx, _, _, _)| *idx);
+
+    // 合并所有章节，调整索引偏移
+    // 每个分段内的章节单独排序，然后按分段顺序拼接
+    let mut all_chapters: Vec<AIChapter> = Vec::new();
+
+    for (_chunk_idx, start_index, end_index, mut chapters) in results {
+        // 该分段内的章节按 start_index 排序
+        chapters.sort_by_key(|c| c.start_index);
+
+        for chapter in &mut chapters {
+            // AI 返回的索引是基于当前段的，需要加上该段的起始偏移
+            chapter.start_index += start_index;
+            chapter.end_index += start_index;
+            // 确保不超过该段的范围
+            if chapter.end_index > end_index {
+                chapter.end_index = end_index - 1;
+            }
+        }
+        all_chapters.extend(chapters);
+    }
+
+    if all_chapters.is_empty() {
+        return Err("未能生成任何章节".to_string());
+    }
+
+    // 不再跨分段排序，保留分段顺序便于观察问题
+    eprintln!("[章节生成] 合并后共 {} 个章节（按分段顺序拼接）", all_chapters.len());
+
+    Ok(all_chapters)
 }
 
 /// 解析 AI 响应
@@ -238,30 +412,74 @@ pub fn capture_video_screenshot(
     Ok(())
 }
 
+/// 将特殊字符转换为下划线，生成安全的文件名
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        // 合并连续的下划线
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+/// 格式化时间戳为文件名格式（如 010130 表示 01:01:30）
+fn format_timestamp_for_filename(seconds: f64) -> String {
+    let total_seconds = seconds as u64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let secs = total_seconds % 60;
+
+    format!("{:02}{:02}{:02}", hours, minutes, secs)
+}
+
 /// 为所有章节生成截图
 async fn capture_chapter_screenshots(
     video_path: &str,
     chapters: &mut [Chapter],
     app: &AppHandle,
     abort_flag: &Arc<AtomicBool>,
+    note_id: i64,
 ) -> Result<(), String> {
+    // 按笔记 ID 组织截图目录：app_cache_dir/notes/{note_id}/screenshots/
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let screenshots_dir = cache_dir.join("chapter_screenshots");
+    let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
+
+    // 从视频路径提取文件名（不含扩展名）
+    let video_name = Path::new(video_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let safe_video_name = sanitize_filename(video_name);
+
+    let total = chapters.len();
+    eprintln!("[章节截图] 开始为 {} 个章节生成截图，保存目录: {:?}", total, screenshots_dir);
 
     for (i, chapter) in chapters.iter_mut().enumerate() {
         if abort_flag.load(Ordering::Relaxed) {
             return Err("已中止".to_string());
         }
 
-        let screenshot_path = screenshots_dir.join(format!("chapter_{}.jpg", chapter.id));
+        // 截图命名：{视频名称}_{时间戳}.jpg
+        let timestamp_str = format_timestamp_for_filename(chapter.start_time);
+        let screenshot_filename = format!("{}_{}.jpg", safe_video_name, timestamp_str);
+        let screenshot_path = screenshots_dir.join(&screenshot_filename);
 
-        match capture_video_screenshot(&video_path, chapter.start_time, screenshot_path.to_str().unwrap()) {
+        match capture_video_screenshot(video_path, chapter.start_time, screenshot_path.to_str().unwrap()) {
             Ok(_) => {
                 chapter.screenshot_path = Some(screenshot_path.to_string_lossy().to_string());
+                eprintln!("[章节截图] 第 {}/{} 张截图成功: {}", i + 1, total, screenshot_filename);
             }
             Err(e) => {
-                eprintln!("[章节截图] 第 {} 张截图失败: {}", i + 1, e);
+                eprintln!("[章节截图] 第 {}/{} 张截图失败: {}", i + 1, total, e);
                 // 继续处理下一张，不中断
             }
         }
@@ -321,51 +539,46 @@ pub async fn generate_chapters(
     // 计算总时长
     let total_duration = subtitle_entries.last().unwrap().end_time;
 
-    // AI 分析生成章节
-    let _ = app.emit(&event_name, ChapterGenerationEvent::GeneratingChapters {
-        current: 0,
-        total: 1,
-        message: "AI正在分析视频内容，生成章节...".to_string(),
-    });
+    // AI 分析生成章节（进度事件在函数内部发送）
+    let ai_chapters = analyze_subtitle_for_chapters(&ai_config, &subtitle_entries, &abort_flag, &app, &event_name).await?;
 
-    let ai_chapters = analyze_subtitle_for_chapters(&ai_config, &subtitle_entries, &abort_flag).await?;
+    // 转换为 Chapter 结构，end_time = 下一个章节的 start_time
+    // 章节已按分段顺序拼接，直接按顺序设置结束时间
+    let mut chapters: Vec<Chapter> = Vec::new();
+    let chapter_count = ai_chapters.len();
 
-    // 转换为 Chapter 结构
-    let mut chapters: Vec<Chapter> = ai_chapters
-        .into_iter()
-        .enumerate()
-        .map(|(_i, ai_ch)| {
-            let start_time = if ai_ch.start_index < subtitle_entries.len() {
-                subtitle_entries[ai_ch.start_index].start_time
-            } else {
-                0.0
-            };
+    for i in 0..chapter_count {
+        let ai_ch = &ai_chapters[i];
+        let start_time = if ai_ch.start_index < subtitle_entries.len() {
+            subtitle_entries[ai_ch.start_index].start_time
+        } else {
+            0.0
+        };
 
-            let end_index = if ai_ch.end_index + 1 < subtitle_entries.len() {
-                ai_ch.end_index + 1
-            } else {
-                subtitle_entries.len().saturating_sub(1)
-            };
-
-            let end_time = if end_index < subtitle_entries.len() {
-                subtitle_entries[end_index].end_time
+        // 结束时间 = 下一个章节的开始时间，或视频总时长
+        let end_time = if i + 1 < chapter_count {
+            // 获取下一个章节的开始时间
+            let next_ai_ch = &ai_chapters[i + 1];
+            if next_ai_ch.start_index < subtitle_entries.len() {
+                subtitle_entries[next_ai_ch.start_index].start_time
             } else {
                 total_duration
-            };
-
-            Chapter {
-                id: uuid::Uuid::new_v4().to_string(),
-                title: ai_ch.title,
-                start_time,
-                end_time,
-                content: ai_ch.summary,
-                screenshot_path: None,
             }
-        })
-        .collect();
+        } else {
+            total_duration
+        };
 
-    // 按开始时间排序
-    chapters.sort_by(|a, b| a.start_time.partial_cmp(&b.start_time).unwrap());
+        chapters.push(Chapter {
+            id: uuid::Uuid::new_v4().to_string(),
+            title: ai_ch.title.clone(),
+            start_time,
+            end_time,
+            content: ai_ch.summary.clone(),
+            screenshot_path: None,
+        });
+    }
+
+    // 不再按时间排序，保留分段顺序便于观察问题
 
     // 截图
     if request.capture_screenshots {
@@ -383,7 +596,7 @@ pub async fn generate_chapters(
             });
         }
 
-        capture_chapter_screenshots(&request.video_path, &mut chapters, &app, &abort_flag).await?;
+        capture_chapter_screenshots(&request.video_path, &mut chapters, &app, &abort_flag, request.note_id).await?;
     }
 
     // 构建结果
