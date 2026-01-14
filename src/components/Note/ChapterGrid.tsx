@@ -2,7 +2,7 @@ import { useState, useMemo, forwardRef, useImperativeHandle, useEffect } from "r
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Play, Clock, Image as ImageIcon, Loader2, ChevronDown, ChevronUp, AlertCircle } from "lucide-react";
+import { Play, Clock, Image as ImageIcon, Loader2, ChevronDown, ChevronUp, AlertCircle, RefreshCw } from "lucide-react";
 import type { Chapter, ChapterData, ChapterGenerationEvent, SubtitleEntry } from "../../types";
 import { cn } from "../../utils/cn";
 import { setChapterGenerating } from "../../utils/noteGenerationState";
@@ -24,6 +24,7 @@ interface ChapterGridProps {
   optimizedSubtitles?: Map<string, string>; // 章节ID -> 优化后字幕
   optimizingChapterIds?: Set<string>; // 正在优化的章节ID
   failedChapterIds?: Set<string>; // 优化失败的章节ID
+  onReoptimizeChapter?: (chapterId: string) => void; // 重新优化单个章节的回调
 }
 
 export interface ChapterGridRef {
@@ -48,6 +49,7 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
   optimizedSubtitles,
   optimizingChapterIds,
   failedChapterIds,
+  onReoptimizeChapter,
 }: ChapterGridProps, ref) {
   const [generating, setGenerating] = useState(isGenerating);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string } | null>(null);
@@ -258,6 +260,7 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
             optimizedSubtitle={optimizedSubtitles?.get(chapter.id)}
             isOptimizing={optimizingChapterIds?.has(chapter.id)}
             optimizationFailed={failedChapterIds?.has(chapter.id)}
+            onReoptimize={onReoptimizeChapter ? () => onReoptimizeChapter(chapter.id) : undefined}
           />
         ))}
       </div>
@@ -278,6 +281,7 @@ interface ChapterCardProps {
   optimizedSubtitle?: string; // 优化后的字幕
   isOptimizing?: boolean; // 是否正在优化
   optimizationFailed?: boolean; // 优化是否失败
+  onReoptimize?: () => void; // 重新优化回调
 }
 
 function ChapterCard({
@@ -293,6 +297,7 @@ function ChapterCard({
   optimizedSubtitle,
   isOptimizing = false,
   optimizationFailed = false,
+  onReoptimize,
 }: ChapterCardProps) {
   const [expanded, setExpanded] = useState(false); // 是否展开字幕
 
@@ -358,8 +363,8 @@ function ChapterCard({
   // 是否有优化后的字幕可显示
   const hasOptimizedSubtitle = subtitleOptimizationEnabled && optimizedSubtitle && optimizedSubtitle.length > 0;
 
-  // 是否显示字幕区域（有原始字幕或有优化后字幕）
-  const showSubtitleArea = hasSubtitles || hasOptimizedSubtitle || isOptimizing;
+  // 是否显示字幕区域（有原始字幕或有优化后字幕或正在优化或优化失败）
+  const showSubtitleArea = hasSubtitles || hasOptimizedSubtitle || isOptimizing || optimizationFailed;
 
   return (
     <div
@@ -426,7 +431,9 @@ function ChapterCard({
                 <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />
               )}
               {optimizationFailed && !isOptimizing && (
-                <AlertCircle className="w-4 h-4 text-orange-500" title="字幕优化失败" />
+                <span title="字幕优化失败">
+                  <AlertCircle className="w-4 h-4 text-orange-500" />
+                </span>
               )}
               {/* 展开/收起按钮 */}
               {showSubtitleArea && (
@@ -466,13 +473,11 @@ function ChapterCard({
             )}
             {/* 显示优化后的字幕 */}
             {!isOptimizing && hasOptimizedSubtitle && (
-              <div>
-                {optimizedSubtitle}
-              </div>
+              <div>{optimizedSubtitle}</div>
             )}
             {/* 显示原始字幕（未启用优化或优化失败时） */}
             {!isOptimizing && !hasOptimizedSubtitle && hasSubtitles && (
-              <>
+              <div>
                 {chapterSubtitles!.secondary ? (
                   // 双语字幕：两种语言换行+空行分隔
                   <>
@@ -484,13 +489,35 @@ function ChapterCard({
                   // 单语字幕
                   chapterSubtitles!.primary
                 )}
-                {optimizationFailed && (
-                  <div className="mt-2 text-xs text-orange-500 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" />
-                    字幕优化失败，显示原始字幕
-                  </div>
-                )}
-              </>
+              </div>
+            )}
+            {/* 优化失败提示 */}
+            {!isOptimizing && optimizationFailed && !hasOptimizedSubtitle && (
+              <div className="mt-2 text-xs text-orange-500 flex items-center gap-1">
+                <AlertCircle className="w-3 h-3" />
+                字幕优化失败{hasSubtitles ? "，显示原始字幕" : ""}
+              </div>
+            )}
+            {/* 重新优化按钮 - 只要字幕优化开关开启且不在优化中就显示 */}
+            {!isOptimizing && subtitleOptimizationEnabled && onReoptimize && (
+              <div className="mt-3 flex justify-end">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReoptimize();
+                  }}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors cursor-pointer",
+                    optimizationFailed && !hasOptimizedSubtitle
+                      ? "text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20"
+                      : "text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                  )}
+                  title="重新优化此章节字幕"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  {optimizationFailed && !hasOptimizedSubtitle ? "重试" : "重新优化"}
+                </button>
+              </div>
             )}
           </div>
         </div>

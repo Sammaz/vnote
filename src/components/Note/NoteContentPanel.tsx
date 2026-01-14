@@ -24,7 +24,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
@@ -1042,45 +1042,159 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId]);
 
-  // 获取章节的字幕文本（用于优化）
-  const getChapterSubtitleText = useCallback((chapter: { start_time: number; end_time: number }) => {
-    if (subtitleEntries.length === 0) return "";
-    
-    // 过滤出当前章节时间范围内的字幕
-    const filtered = subtitleEntries.filter(
+  // 单章节重新优化字幕
+  const handleReoptimizeChapter = useCallback(async (chapterId: string) => {
+    // 检查是否有正在进行的优化
+    if (optimizingChapterIds.has(chapterId)) {
+      return;
+    }
+
+    // 获取当前选择的模型
+    const effectiveModelId = currentModelId || note.model_id;
+    if (!effectiveModelId) {
+      message.warning("请先选择 AI 模型");
+      return;
+    }
+
+    // 获取章节数据
+    const chapter = chapterData?.chapters.find(c => c.id === chapterId);
+    if (!chapter) {
+      message.error("找不到章节数据");
+      return;
+    }
+
+    // 确保字幕数据已加载
+    let currentSubtitleEntries = subtitleEntries;
+    if (currentSubtitleEntries.length === 0 && note.subtitle_path) {
+      try {
+        currentSubtitleEntries = await invoke<SubtitleEntry[]>("parse_subtitle_file", {
+          path: note.subtitle_path,
+        });
+        setSubtitleEntries(currentSubtitleEntries);
+      } catch (error) {
+        console.error("[ReoptimizeChapter] 加载字幕失败:", error);
+        message.error("加载字幕数据失败");
+        return;
+      }
+    }
+
+    // 获取章节字幕文本
+    const filtered = currentSubtitleEntries.filter(
       sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
     );
     
-    if (filtered.length === 0) return "";
-    
-    // 检查是否有双语字幕
+    if (filtered.length === 0) {
+      message.warning("该章节没有字幕内容");
+      return;
+    }
+
     const hasBilingual = filtered.some(sub => sub.second_language_text);
-    
+    let subtitleText: string;
     if (hasBilingual) {
-      // 双语字幕：合并两种语言
       const primaryText = filtered.map(sub => sub.text).join(" ");
       const secondaryText = filtered
         .filter(sub => sub.second_language_text)
         .map(sub => sub.second_language_text!)
         .join(" ");
-      return `${primaryText}\n\n${secondaryText}`;
+      subtitleText = `${primaryText}\n\n${secondaryText}`;
     } else {
-      // 单语字幕：直接拼接
-      return filtered.map(sub => sub.text).join(" ");
+      subtitleText = filtered.map(sub => sub.text).join(" ");
     }
-  }, [subtitleEntries]);
 
-  // 检查章节是否有双语字幕
-  const hasChapterBilingualSubtitle = useCallback((chapter: { start_time: number; end_time: number }) => {
-    if (subtitleEntries.length === 0) return false;
-    
-    // 过滤出当前章节时间范围内的字幕
-    const filtered = subtitleEntries.filter(
-      sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
-    );
-    
-    return filtered.some(sub => sub.second_language_text);
-  }, [subtitleEntries]);
+    if (!subtitleText.trim()) {
+      message.warning("该章节没有字幕内容");
+      return;
+    }
+
+    const generationId = crypto.randomUUID();
+
+    // 标记章节为正在优化
+    setOptimizingChapterIds(prev => {
+      const newSet = new Set(prev);
+      newSet.add(chapterId);
+      return newSet;
+    });
+    // 清除失败状态
+    setFailedChapterIds(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(chapterId);
+      return newSet;
+    });
+
+    // 设置事件监听
+    const eventName = `single-chapter-optimization-${generationId}`;
+    const unlisten = await listen<SingleChapterOptimizationEvent>(eventName, (event) => {
+      const data = event.payload;
+
+      switch (data.status) {
+        case "Started":
+          // 已经在上面标记了
+          break;
+
+        case "Completed":
+          // 更新优化后的字幕
+          setOptimizedSubtitles(prev => {
+            const newMap = new Map(prev);
+            newMap.set(chapterId, data.optimized_text);
+            return newMap;
+          });
+          setOptimizingChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(chapterId);
+            return newSet;
+          });
+          message.success("字幕优化完成");
+          unlisten();
+          break;
+
+        case "Failed":
+          console.error(`[ReoptimizeChapter] 章节 ${chapterId} 优化失败:`, data.error);
+          setOptimizingChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(chapterId);
+            return newSet;
+          });
+          setFailedChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.add(chapterId);
+            return newSet;
+          });
+          message.error(`字幕优化失败: ${data.error}`);
+          unlisten();
+          break;
+
+        case "Aborted":
+          setOptimizingChapterIds(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(chapterId);
+            return newSet;
+          });
+          unlisten();
+          break;
+      }
+    });
+
+    // 调用后端
+    try {
+      await invoke("optimize_single_chapter_subtitle", {
+        generationId,
+        noteId: note.id,
+        modelId: effectiveModelId,
+        chapterId,
+        subtitleText,
+        hasBilingual,
+      });
+    } catch (error) {
+      console.error("[ReoptimizeChapter] 调用失败:", error);
+      message.error(`字幕优化失败: ${error}`);
+      setOptimizingChapterIds(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(chapterId);
+        return newSet;
+      });
+      unlisten();
+    }
+  }, [chapterData, currentModelId, note.model_id, note.id, note.subtitle_path, subtitleEntries, optimizingChapterIds]);
 
   // 根据配置生成动态提示词（Markdown 格式）
   const generateDynamicPrompt = useCallback((): string => {
@@ -1567,6 +1681,7 @@ Video subtitles content:`;
               optimizedSubtitles={optimizedSubtitles}
               optimizingChapterIds={optimizingChapterIds}
               failedChapterIds={failedChapterIds}
+              onReoptimizeChapter={handleReoptimizeChapter}
             />
           );
         })()}

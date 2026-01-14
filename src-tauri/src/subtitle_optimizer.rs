@@ -365,3 +365,86 @@ pub async fn abort_subtitle_optimization(generation_id: String, note_id: i64) ->
     
     Ok(())
 }
+
+/// 单个章节字幕优化事件
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "status")]
+pub enum SingleChapterOptimizationEvent {
+    Started,
+    Completed { optimized_text: String },
+    Failed { error: String },
+    Aborted,
+}
+
+/// 优化单个章节的字幕（用于重新优化）
+#[tauri::command]
+pub async fn optimize_single_chapter_subtitle(
+    app: AppHandle,
+    generation_id: String,
+    note_id: i64,
+    model_id: i64,
+    chapter_id: String,
+    subtitle_text: String,
+    has_bilingual: bool,
+) -> Result<(), String> {
+    // 获取 AI 配置
+    let config = get_db()
+        .get_ai_config_by_id(model_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "AI配置不存在".to_string())?;
+
+    if subtitle_text.trim().is_empty() {
+        return Err("字幕内容为空".to_string());
+    }
+
+    // 在后台执行优化
+    tokio::spawn(async move {
+        let pool = get_ai_pool_manager();
+        let abort_flag = pool.register_abort_flag(generation_id.clone()).await;
+        let event_name = format!("single-chapter-optimization-{}", generation_id);
+
+        // 发送开始事件
+        let _ = app.emit(&event_name, SingleChapterOptimizationEvent::Started);
+
+        let chapter = ChapterSubtitleInput {
+            chapter_id: chapter_id.clone(),
+            subtitle_text,
+            has_bilingual,
+        };
+
+        // 执行优化
+        let result = optimize_single_chapter(&config, &chapter, &abort_flag).await;
+
+        // 检查是否被中止
+        if abort_flag.load(std::sync::atomic::Ordering::Relaxed) {
+            let _ = app.emit(&event_name, SingleChapterOptimizationEvent::Aborted);
+            pool.cleanup_abort_flag(&generation_id).await;
+            return;
+        }
+
+        // 发送结果事件
+        match result {
+            Ok(optimized_text) => {
+                // 保存到数据库
+                if let Err(e) = get_db().save_optimized_subtitle(note_id, &chapter_id, &optimized_text) {
+                    eprintln!("[optimize_single_chapter_subtitle] 保存到数据库失败: {}", e);
+                }
+                let _ = app.emit(
+                    &event_name,
+                    SingleChapterOptimizationEvent::Completed { optimized_text },
+                );
+            }
+            Err(error) => {
+                let _ = app.emit(
+                    &event_name,
+                    SingleChapterOptimizationEvent::Failed { error },
+                );
+            }
+        }
+
+        // 清理
+        pool.cleanup_abort_flag(&generation_id).await;
+    });
+
+    Ok(())
+}

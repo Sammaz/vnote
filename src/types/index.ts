@@ -217,6 +217,13 @@ export type SubtitleOptimizationEvent =
   | { status: "AllCompleted"; succeeded: number; failed: number }
   | { status: "Aborted" };
 
+// 单章节优化事件类型
+export type SingleChapterOptimizationEvent =
+  | { status: "Started" }
+  | { status: "Completed"; optimized_text: string }
+  | { status: "Failed"; error: string }
+  | { status: "Aborted" };
+
 export interface SubtitleOptimizationState {
   enabled: boolean;                              // 优化开关状态
   optimizing: boolean;                           // 是否正在优化

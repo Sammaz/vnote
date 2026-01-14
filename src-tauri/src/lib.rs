@@ -857,6 +857,7 @@ pub fn run() {
             subtitle_optimizer::optimize_chapter_subtitles,
             subtitle_optimizer::abort_subtitle_optimization,
             subtitle_optimizer::get_subtitle_optimization_task_state,
+            subtitle_optimizer::optimize_single_chapter_subtitle,
             get_optimized_subtitles,
             save_optimized_subtitle,
             delete_optimized_subtitles,
