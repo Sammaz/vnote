@@ -1448,6 +1448,12 @@ Video subtitles content:`;
               } catch (err) {
                 console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
               }
+              // 清除之前生成的截图
+              try {
+                await invoke("clear_chapter_screenshots", { noteId: note.id });
+              } catch (err) {
+                console.error("[NoteContentPanel] 清除截图缓存失败:", err);
+              }
               // 重新生成章节
               chapterGridRef.current?.generateChapters();
             }}

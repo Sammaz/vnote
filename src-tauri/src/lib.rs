@@ -317,6 +317,19 @@ fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
     Ok(total_size)
 }
 
+/// Clear chapter screenshots for a specific note
+#[tauri::command]
+fn clear_chapter_screenshots(app: AppHandle, note_id: i64) -> Result<(), String> {
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
+
+    if screenshots_dir.exists() {
+        std::fs::remove_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 /// Clear video cache (delete MP4 files only, keep screenshots)
 #[tauri::command]
 fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
@@ -802,6 +815,7 @@ pub fn run() {
             check_ffmpeg,
             get_video_cache_size,
             clear_video_cache,
+            clear_chapter_screenshots,
             get_notes,
             get_note,
             create_note,
