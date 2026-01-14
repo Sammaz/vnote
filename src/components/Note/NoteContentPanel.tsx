@@ -14,6 +14,8 @@ import {
   X,
   ChevronDown,
   Check,
+  List,
+  Clock,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
@@ -21,7 +23,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
-import { ChapterGrid } from "./ChapterGrid";
+import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { message } from "../../utils/message";
 import {
   getNoteGenerationState,
@@ -72,9 +74,23 @@ interface NoteContentPanelProps {
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>("summary");
 
+  // ChapterGrid 组件的 ref
+  const chapterGridRef = useRef<ChapterGridRef>(null);
+
   // 章节相关状态
   const [chapterData, setChapterData] = useState<ChapterData | null>(null);
   const [isChapterMode, setIsChapterMode] = useState(false);
+
+  // 章节下拉框状态
+  const [showChapterDropdown, setShowChapterDropdown] = useState(false);
+  const chapterDropdownRef = useRef<HTMLDivElement>(null);
+
+  // 字幕滚动状态
+  const [autoScroll, setAutoScroll] = useState(true);
+  // 当前播放的章节ID
+  const [currentChapterId, setCurrentChapterId] = useState<string | null>(null);
+  // 用户点击章节的时间戳（用于忽略视频时间更新）
+  const userClickTimeRef = useRef<number>(0);
 
   // 解析 detailed_reading 是否为章节数据
   useEffect(() => {
@@ -347,10 +363,69 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       if (promptDropdownRef.current && !promptDropdownRef.current.contains(event.target as Node)) {
         setShowPromptDropdown(false);
       }
+      if (chapterDropdownRef.current && !chapterDropdownRef.current.contains(event.target as Node)) {
+        setShowChapterDropdown(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // 监听视频播放时间变化，更新当前章节（不管是否开启字幕滚动）
+  useEffect(() => {
+    if (activeTab !== "original" || !chapterData) return;
+
+    const handleVideoTimeUpdate = (e: Event) => {
+      // 如果用户刚刚点击过章节（500ms内），忽略视频时间更新
+      if (Date.now() - userClickTimeRef.current < 500) {
+        return;
+      }
+
+      const event = e as CustomEvent<{ time: number }>;
+      const currentTime = event.detail.time;
+
+      // 找到当前时间对应的章节
+      const currentChapter = chapterData.chapters.find(
+        (chapter) => currentTime >= chapter.start_time && currentTime <= chapter.end_time
+      );
+
+      if (currentChapter) {
+        console.log('[video-time-update] 自动更新章节:', currentChapter.id, currentChapter.title);
+        setCurrentChapterId(currentChapter.id);
+      } else {
+        setCurrentChapterId(null);
+      }
+    };
+
+    window.addEventListener("video-time-update", handleVideoTimeUpdate);
+    return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
+  }, [activeTab, chapterData]);
+
+  // 字幕滚动自动跳转卡片
+  useEffect(() => {
+    if (!autoScroll || activeTab !== "original" || !chapterData) return;
+
+    const handleVideoTimeUpdate = (e: Event) => {
+      const event = e as CustomEvent<{ time: number }>;
+      const currentTime = event.detail.time;
+
+      // 找到当前时间对应的章节
+      const currentChapter = chapterData.chapters.find(
+        (chapter) => currentTime >= chapter.start_time && currentTime <= chapter.end_time
+      );
+
+      if (currentChapter) {
+        // 滚动到对应的章节卡片
+        const chapterElement = document.getElementById(`chapter-${currentChapter.id}`);
+        if (chapterElement) {
+          chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    };
+
+    window.addEventListener("video-time-update", handleVideoTimeUpdate);
+    return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
+  }, [autoScroll, activeTab, chapterData]);
 
   // 开始生成笔记（一键生成全文总结，使用默认配置）
   const handleGenerate = async () => {
@@ -758,52 +833,167 @@ Video subtitles content:`;
         </div>
       </div>
 
-      {/* 次级工具栏 */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setIsEditMode(!isEditMode)}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-              isEditMode
-                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-            )}
-          >
-            <Edit3 className="w-4 h-4" />
-            {isEditMode ? "预览" : "编辑"}
-          </button>
-          <span className="text-slate-300 dark:text-slate-600">|</span>
-          <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
-            思维导图
-          </button>
+      {/* 次级工具栏 - 根据标签页显示不同内容 */}
+      {activeTab === "summary" ? (
+        // 全文总结标签页的工具栏
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                isEditMode
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <Edit3 className="w-4 h-4" />
+              {isEditMode ? "预览" : "编辑"}
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
+              思维导图
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Copy className="w-4 h-4" />
+              复制
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              下载
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={openPromptDialog}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+              重新总结
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
+      ) : activeTab === "original" && isChapterMode ? (
+        // 原文细读标签页（章节模式）的工具栏
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-3">
+            {/* 章节下拉框 */}
+            <div className="relative" ref={chapterDropdownRef}>
+              <button
+                onClick={() => setShowChapterDropdown(!showChapterDropdown)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+              >
+                <List className="w-4 h-4" />
+                共 {chapterData?.chapters.length || 0} 个章节
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
+              </button>
+              {showChapterDropdown && chapterData && (
+                <div className="absolute top-full left-0 mt-1 w-96 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-auto">
+                  {/* 下拉框头部 */}
+                  <div className="sticky top-0 bg-white dark:bg-slate-800 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                    <List className="w-4 h-4 text-slate-500" />
+                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
+                  </div>
+                  {/* 章节列表 */}
+                  <div className="py-1">
+                    {chapterData.chapters.map((chapter, index) => {
+                      const formatTime = (seconds: number): string => {
+                        const hours = Math.floor(seconds / 3600);
+                        const minutes = Math.floor((seconds % 3600) / 60);
+                        const secs = Math.floor(seconds % 60);
+                        if (hours > 0) {
+                          return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+                        }
+                        return `${minutes}:${secs.toString().padStart(2, "0")}`;
+                      };
+                      return (
+                        <button
+                          key={chapter.id}
+                          onClick={() => {
+                            // 记录用户点击时间，防止视频时间更新干扰
+                            userClickTimeRef.current = Date.now();
+                            // 设置当前选中的章节
+                            setCurrentChapterId(chapter.id);
+                            // 跳转到视频时间
+                            window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
+                            // 滚动到对应章节卡片
+                            const chapterElement = document.getElementById(`chapter-${chapter.id}`);
+                            if (chapterElement) {
+                              chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
+                            }
+                            setShowChapterDropdown(false);
+                          }}
+                          className="w-full px-4 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer text-left"
+                        >
+                          <span className="text-xs text-blue-400 dark:text-blue-400 font-mono w-12 flex-shrink-0">
+                            {formatTime(chapter.start_time)}
+                          </span>
+                          <span className="text-xs w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
+                            {index + 1}
+                          </span>
+                          <span className="text-sm text-slate-700 dark:text-slate-200 truncate">
+                            {chapter.title}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+            {/* 字幕滚动开关 */}
+            <button
+              onClick={() => setAutoScroll(!autoScroll)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                autoScroll
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <Clock className="w-4 h-4" />
+              字幕滚动
+            </button>
+          </div>
+          {/* 重新生成按钮 - 样式与"重新总结"一致 */}
           <button
-            onClick={handleCopy}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-          >
-            <Copy className="w-4 h-4" />
-            复制
-          </button>
-          <span className="text-slate-300 dark:text-slate-600">|</span>
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-          >
-            <Download className="w-4 h-4" />
-            下载
-          </button>
-          <span className="text-slate-300 dark:text-slate-600">|</span>
-          <button
-            onClick={openPromptDialog}
+            onClick={() => chapterGridRef.current?.generateChapters()}
             className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
           >
             <RefreshCw className="w-4 h-4" />
-            重新总结
+            重新生成
           </button>
         </div>
-      </div>
+      ) : (
+        // 其他标签页的简化工具栏
+        <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Copy className="w-4 h-4" />
+              复制
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              下载
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 内容区域 */}
       <div className={cn(
@@ -831,7 +1021,7 @@ Video subtitles content:`;
             <EditableMarkdown
               noteId={note.id}
               tabType="detailed_reading"
-              content={note.detailed_reading}
+              content={note.detailed_reading as string | null}
               isGenerating={isTabGenerating("original")}
               emptyMessage="原文细读内容将在AI分析后生成"
               isEditMode={isEditMode}
@@ -840,17 +1030,26 @@ Video subtitles content:`;
           ) : (
             // 否则显示 ChapterGrid（包含空状态和有数据的状态）
             <ChapterGrid
+              ref={chapterGridRef}
               noteId={note.id}
               videoPath={note.video_path}
               subtitlePath={note.subtitle_path}
               chapterData={chapterData}
               isGenerating={isTabGenerating("original")}
-              onChapterClick={(startTime) => {
+              onChapterClick={(chapter) => {
+                // 设置当前选中的章节
+                console.log('[NoteContentPanel] 点击章节前 currentChapterId:', currentChapterId);
+                console.log('[NoteContentPanel] 点击章节:', chapter.id, chapter.title);
+                // 记录用户点击时间，防止视频时间更新干扰
+                userClickTimeRef.current = Date.now();
+                setCurrentChapterId(chapter.id);
                 // 发送事件跳转视频时间
-                window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: startTime } }));
+                window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
               }}
               onGenerationComplete={onGenerationComplete}
               modelId={note.model_id}
+              showToolbar={false}
+              currentChapterId={currentChapterId}
             />
           );
         })()}

@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, forwardRef, useImperativeHandle } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Play, Clock, Image as ImageIcon, Loader2 } from "lucide-react";
 import type { Chapter, ChapterData, ChapterGenerationEvent } from "../../types";
+import { cn } from "../../utils/cn";
 
 interface ChapterGridProps {
   noteId: number;
@@ -11,12 +12,19 @@ interface ChapterGridProps {
   subtitlePath: string | null;
   chapterData: ChapterData | null;
   isGenerating: boolean;
-  onChapterClick?: (startTime: number) => void;
+  onChapterClick?: (chapter: Chapter) => void;
   onGenerationComplete?: () => void;
   modelId: number | null;
+  showToolbar?: boolean; // 是否显示内置工具栏
+  currentChapterId?: string | null; // 当前播放的章节ID
 }
 
-export function ChapterGrid({
+export interface ChapterGridRef {
+  generateChapters: () => void;
+  isGenerating: boolean;
+}
+
+export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function ChapterGrid({
   noteId,
   videoPath,
   subtitlePath,
@@ -25,9 +33,17 @@ export function ChapterGrid({
   onChapterClick,
   onGenerationComplete,
   modelId,
-}: ChapterGridProps) {
+  showToolbar = true, // 默认显示内置工具栏
+  currentChapterId,
+}: ChapterGridProps, ref) {
   const [generating, setGenerating] = useState(isGenerating);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string } | null>(null);
+
+  // 暴露方法给父组件
+  useImperativeHandle(ref, () => ({
+    generateChapters: handleGenerateChapters,
+    get isGenerating() { return generating; },
+  }));
 
   // 如果 propChapterData 为 null，尝试从 note.detailed_reading 解析（用于初始加载）
   const effectiveChapterData = useMemo(() => {
@@ -108,8 +124,13 @@ export function ChapterGrid({
 
   // 处理章节点击
   const handleChapterClick = (chapter: Chapter) => {
-    onChapterClick?.(chapter.start_time);
+    console.log('[ChapterGrid] 点击章节:', chapter.id, chapter.title);
+    console.log('[ChapterGrid] 点击时 currentChapterId prop:', currentChapterId);
+    onChapterClick?.(chapter);
   };
+
+  // 渲染时日志
+  console.log('[ChapterGrid] 渲染 currentChapterId prop:', currentChapterId);
 
   // 如果正在生成，显示进度
   if (generating) {
@@ -144,7 +165,7 @@ export function ChapterGrid({
         <ImageIcon className="w-16 h-16 mb-4 opacity-50" />
         <p className="text-lg mb-2">暂无章节内容</p>
         <p className="text-sm mb-6">AI 可以根据视频字幕自动生成章节并截图</p>
-        {canGenerate ? (
+        {showToolbar && canGenerate ? (
           <button
             onClick={handleGenerateChapters}
             className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-2"
@@ -152,51 +173,65 @@ export function ChapterGrid({
             <Play className="w-4 h-4" />
             生成章节
           </button>
-        ) : (
+        ) : showToolbar ? (
           <p className="text-sm text-orange-400">
             {!modelId ? "请先配置 AI 模型" : "请先上传字幕文件"}
           </p>
-        )}
+        ) : null}
       </div>
     );
   }
 
   // 渲染章节卡片列表（垂直布局，一行一个）
   return (
-    <div className="p-4 overflow-y-auto">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
-          共 {effectiveChapterData.chapters.length} 个章节
-        </h2>
-        <button
-          onClick={handleGenerateChapters}
-          className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-2"
-        >
-          <Play className="w-4 h-4" />
-          重新生成
-        </button>
-      </div>
+    <div className="p-2 overflow-y-auto">
+      {showToolbar && (
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
+            共 {effectiveChapterData.chapters.length} 个章节
+          </h2>
+          <button
+            onClick={handleGenerateChapters}
+            className="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-2"
+          >
+            <Play className="w-4 h-4" />
+            重新生成
+          </button>
+        </div>
+      )}
       <div className="space-y-3">
         {effectiveChapterData.chapters.map((chapter, index) => (
           <ChapterCard
             key={chapter.id}
+            id={`chapter-${chapter.id}`}
             chapter={chapter}
             index={index}
             onDoubleClick={() => handleChapterClick(chapter)}
+            isCurrent={currentChapterId === chapter.id}
           />
         ))}
+        {/* 调试信息 */}
+        {process.env.NODE_ENV === 'development' && (
+          <div className="text-xs text-slate-400 mt-4 p-2 bg-slate-100 dark:bg-slate-800 rounded">
+            <div>currentChapterId: {currentChapterId || 'null'}</div>
+            <div>first chapter.id: {effectiveChapterData.chapters[0]?.id || 'null'}</div>
+            <div>second chapter.id: {effectiveChapterData.chapters[1]?.id || 'null'}</div>
+          </div>
+        )}
       </div>
     </div>
   );
-}
+});
 
 interface ChapterCardProps {
   chapter: Chapter;
   index: number;
   onDoubleClick: () => void;
+  id?: string;
+  isCurrent?: boolean; // 是否是当前播放的章节
 }
 
-function ChapterCard({ chapter, index, onDoubleClick }: ChapterCardProps) {
+function ChapterCard({ chapter, index, onDoubleClick, id, isCurrent = false }: ChapterCardProps) {
   const formatTime = (seconds: number): string => {
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
@@ -214,8 +249,14 @@ function ChapterCard({ chapter, index, onDoubleClick }: ChapterCardProps) {
 
   return (
     <div
+      id={id}
       onClick={onDoubleClick}
-      className="group flex bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden hover:shadow-md hover:border-blue-400 dark:hover:border-blue-500 transition-all cursor-pointer"
+      className={cn(
+        "group flex bg-white dark:bg-vnote-card rounded-lg border overflow-hidden hover:shadow-md transition-all cursor-pointer",
+        isCurrent
+          ? "border-blue-500 dark:border-blue-400 ring-2 ring-blue-500/50 shadow-md"
+          : "border-slate-200 dark:border-vnote-border hover:border-blue-400 dark:hover:border-blue-500"
+      )}
     >
       {/* 左侧截图区域 - 缩略图 */}
       <div className="relative w-48 flex-shrink-0 bg-slate-100 dark:bg-slate-800">

@@ -332,6 +332,11 @@ export function VideoPlayer({
         if (showResumePromptRef.current && lastPos && currentTime > lastPos) {
           setShowResumePrompt(false);
         }
+
+        // 发送视频时间更新事件，供其他组件使用
+        window.dispatchEvent(new CustomEvent("video-time-update", {
+          detail: { time: currentTime }
+        }));
       };
 
       // 暂停时立即保存
@@ -496,6 +501,10 @@ export function VideoPlayer({
         const seekTime = customEvent.detail.time;
         if (player && typeof seekTime === "number") {
           player.currentTime = seekTime;
+          // 立即发送时间更新事件，确保章节卡片状态同步
+          window.dispatchEvent(new CustomEvent("video-time-update", {
+            detail: { time: seekTime }
+          }));
           // 可选：跳转后自动播放
           // player.play();
         }
