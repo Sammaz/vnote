@@ -8,6 +8,7 @@ interface NoteGenerationState {
   progress: { current: number; total: number; message: string };
   completedTabs: Set<string>;
   failedTabs: Map<string, string>;
+  isGeneratingChapters: boolean; // 是否正在生成章节（原文细读）
 }
 
 // 全局存储每个笔记的生成状态
@@ -26,6 +27,7 @@ export function getNoteGenerationState(noteId: number): NoteGenerationState {
       progress: { current: 0, total: 0, message: "" },
       completedTabs: new Set(),
       failedTabs: new Map(),
+      isGeneratingChapters: false,
     });
   }
   return noteGenerationStates.get(noteId)!;
@@ -58,3 +60,13 @@ export function isNoteGenerating(noteId: number): boolean {
 
 // 全局追踪已尝试自动生成的笔记ID（避免重复触发）
 export const attemptedAutoGenerateNoteIds = new Set<number>();
+
+// 设置章节生成状态
+export function setChapterGenerating(noteId: number, isGenerating: boolean) {
+  setNoteGenerationState(noteId, { isGeneratingChapters: isGenerating });
+}
+
+// 获取章节生成状态
+export function isChapterGenerating(noteId: number): boolean {
+  return getNoteGenerationState(noteId).isGeneratingChapters;
+}

@@ -80,41 +80,6 @@ pub enum GenerationStrategy {
     Rag,
 }
 
-/// 全文总结结构化数据（JSON格式）
-#[derive(Debug, Serialize, Deserialize)]
-pub struct FullSummaryData {
-    #[serde(rename = "abstract")]
-    pub abstract_field: String,
-    pub highlights: Vec<HighlightItem>,
-    pub tags: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub qa_pairs: Option<Vec<QaPair>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thoughts: Option<Vec<String>>,
-    pub glossary: Vec<GlossaryItem>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct HighlightItem {
-    pub emoji: String,
-    pub title: String,
-    pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub timestamp: Option<String>, // 视频时间戳，格式如 00:01:23
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct QaPair {
-    pub question: String,
-    pub answer: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct GlossaryItem {
-    pub term: String,
-    pub explanation: String,
-}
-
 /// 生成进度事件
 #[derive(Debug, Serialize, Clone)]
 #[serde(tag = "status")]
@@ -728,23 +693,8 @@ async fn generate_full_summary_layered(
     eprintln!("[笔记生成] 最终总结完成 (生成 {} 字符)", final_content.len());
     eprintln!("[笔记生成] ========================================");
 
-    // 验证JSON格式（仅默认模式需要验证JSON）
-    if custom_prompt.is_none() {
-        let cleaned_content = clean_json_output(&final_content);
-        eprintln!("[笔记生成] 验证 JSON 格式...");
-        match serde_json::from_str::<FullSummaryData>(&cleaned_content) {
-            Ok(_) => {
-                eprintln!("[笔记生成] JSON 格式验证通过");
-                Ok(cleaned_content)
-            }
-            Err(e) => {
-                eprintln!("[笔记生成] JSON 格式验证失败: {}", e);
-                Err(format!("JSON格式错误: {}", e))
-            }
-        }
-    } else {
-        Ok(final_content)
-    }
+    // 直接返回 Markdown 内容（不再验证 JSON 格式）
+    Ok(final_content)
 }
 
 // ============================================================================
@@ -1036,25 +986,6 @@ fn post_process_content(tab_type: &TabType, content: &str) -> Result<String, Str
         }
         _ => Ok(content.trim().to_string()),
     }
-}
-
-/// 清理JSON输出（移除可能的markdown代码块标记）
-fn clean_json_output(content: &str) -> String {
-    let mut cleaned = content.trim();
-
-    // 移除开头的 ```json
-    if cleaned.starts_with("```json") {
-        cleaned = cleaned["```json".len()..].trim();
-    } else if cleaned.starts_with("```") {
-        cleaned = cleaned["```".len()..].trim();
-    }
-
-    // 移除结尾的 ```
-    if cleaned.ends_with("```") {
-        cleaned = &cleaned[..cleaned.len() - 3];
-    }
-
-    cleaned.trim().to_string()
 }
 
 /// 更新笔记的标签页内容到数据库

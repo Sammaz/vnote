@@ -30,6 +30,7 @@ import {
   setNoteGenerationState,
   attemptedAutoGenerateNoteIds,
   activeListeners,
+  isChapterGenerating,
 } from "../../utils/noteGenerationState";
 
 type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom";
@@ -160,6 +161,27 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [note.id]);
 
+  // 监听标签页切换，如果切换到原文细读且未生成，则触发生成
+  useEffect(() => {
+    // 只在切换到原文细读标签页时检查
+    if (activeTab !== "original") return;
+
+    // 检查全文总结是否已完成，原文细读是否未生成
+    const globalState = getNoteGenerationState(note.id);
+    const hasFullSummary = note.full_summary || globalState.completedTabs.has("full_summary") || globalState.completedTabs.has("FullSummary");
+    const hasNoDetailedReading = !note.detailed_reading;
+
+    if (hasFullSummary && hasNoDetailedReading && chapterGridRef.current) {
+      console.log("[NoteContentPanel] 切换到原文细读，检测到需要生成章节");
+      // 延迟一点确保 ChapterGrid 完全渲染
+      setTimeout(() => {
+        if (chapterGridRef.current) {
+          chapterGridRef.current.generateChapters();
+        }
+      }, 300);
+    }
+  }, [activeTab, note.id]);
+
   // 监听笔记内容变化，确保生成完成后更新显示
   useEffect(() => {
     // 当笔记内容更新时，触发重新渲染
@@ -168,9 +190,13 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 设置生成事件监听器
   const setupGenerationListener = useCallback((noteId: number, genId: string) => {
-    // 如果已经监听过这个generationId，跳过
+    // 如果已经监听过这个generationId，先清理旧的监听器
     if (activeListeners.has(genId)) {
-      return;
+      const oldUnlisten = activeListeners.get(genId);
+      if (oldUnlisten) {
+        oldUnlisten();
+      }
+      activeListeners.delete(genId);
     }
 
     const unlistenPromise = listen<GenerationEvent>(`note-generation-${genId}`, (event) => {
@@ -225,12 +251,21 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           break;
 
         case "AllCompleted":
+          const newCompletedTabs = new Set([...state.completedTabs]);
+          console.log("[NoteContentPanel] AllCompleted 事件:", {
+            noteId,
+            completedTabs: Array.from(newCompletedTabs),
+            hasFullSummary: newCompletedTabs.has("full_summary"),
+            hasAttempted: attemptedAutoGenerateNoteIds.has(noteId),
+            hasChapterGridRef: !!chapterGridRef.current,
+          });
+
           setNoteGenerationState(noteId, {
             isGenerating: false,
             generationId: null,
             regeneratingTabs: new Set(),
             progress: { current: data.total, total: data.total, message: "生成完成!" },
-            completedTabs: new Set([...state.completedTabs]),
+            completedTabs: newCompletedTabs,
           });
           // 清理事件监听器
           const unlisten = activeListeners.get(genId);
@@ -238,6 +273,35 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             unlisten();
             activeListeners.delete(genId);
           }
+
+          // 如果是初始化生成（全文总结完成），且是自动生成流程，则触发原文细读生成
+          // 注意：后端返回的是 "FullSummary"（驼峰），前端使用的是 "full_summary"（下划线）
+          const hasFullSummaryCompleted = newCompletedTabs.has("full_summary") || newCompletedTabs.has("FullSummary");
+
+          if (hasFullSummaryCompleted && attemptedAutoGenerateNoteIds.has(noteId)) {
+            console.log("[NoteContentPanel] 全文总结完成，准备生成原文细读");
+
+            // 切换到原文细读标签页，确保 ChapterGrid 被渲染
+            setTimeout(() => {
+              setActiveTab("original");
+
+              // 等待 ChapterGrid 渲染完成后再触发生成
+              setTimeout(() => {
+                if (chapterGridRef.current) {
+                  console.log("[NoteContentPanel] 开始生成原文细读");
+                  chapterGridRef.current.generateChapters();
+                } else {
+                  console.error("[NoteContentPanel] ChapterGrid ref 仍然为 null");
+                }
+              }, 500);
+            }, 500);
+          } else {
+            console.log("[NoteContentPanel] 不触发原文细读生成:", {
+              hasFullSummary: hasFullSummaryCompleted,
+              hasAttempted: attemptedAutoGenerateNoteIds.has(noteId),
+            });
+          }
+
           // 延迟刷新笔记数据，避免与事件处理冲突
           setTimeout(() => {
             onGenerationComplete?.();
@@ -428,34 +492,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     try {
       const id = crypto.randomUUID();
 
-      // 生成默认提示词（中文、emoji、无时间戳、5个亮点、30字句子）
-      const finalPrompt = `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
-
-输出要求：
-1. 使用 Markdown 格式输出（不要使用代码块标记）
-2. 必须使用中文输出所有内容
-3. 严格按照以下格式输出：
-
-# 摘要
-摘要段落，概括视频核心内容，每句话不超过30字
-
-# 核心亮点
-提取最重要的5个知识点/亮点，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）
-
-## 🔥亮点标题1
-详细描述该亮点的内容
-
-## 💡亮点标题2
-详细描述该亮点的内容
-
-（继续提取5个亮点）
-
-# 关键术语
-- **术语1**：解释
-- **术语2**：解释
-
-视频字幕内容：`;
-
       // 更新全局状态
       setNoteGenerationState(note.id, {
         isGenerating: true,
@@ -480,15 +516,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       // 等待状态更新和事件监听器设置完成
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // 调用后端生成接口（只生成全文总结）
+      // 调用后端生成接口（只生成全文总结，使用后端默认提示词）
       await invoke("generate_note_content", {
         generationId: id,
         noteId: note.id,
         modelId: note.model_id,
-        concurrent: false,  // 不并发，只生成一个
-        regenerate: true,   // 使用重新生成模式
+        concurrent: false,
+        regenerate: true,
         tabsToGenerate: ["full_summary"],
-        customPrompt: finalPrompt,
       });
     } catch (error) {
       console.error(`[handleGenerate] 生成失败:`, error);
@@ -506,15 +541,27 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   };
 
   // 自动生成：当组件挂载且没有全文总结时，自动开始生成（仅触发一次）
+  // 同步执行顺序：1. 全文总结 -> 2. 原文细读（在 AllCompleted 事件中触发）
   useEffect(() => {
+    console.log("[NoteContentPanel] 自动生成检查:", {
+      noteId: note.id,
+      hasAttempted: attemptedAutoGenerateNoteIds.has(note.id),
+      isGenerating: getNoteGenerationState(note.id).isGenerating,
+      hasFullSummary: !!note.full_summary,
+      hasDetailedReading: !!note.detailed_reading,
+      hasModelId: !!note.model_id,
+    });
+
     // 如果已经尝试过自动生成，跳过
     if (attemptedAutoGenerateNoteIds.has(note.id)) {
+      console.log("[NoteContentPanel] 已尝试过自动生成，跳过");
       return;
     }
 
     // 如果正在生成中，跳过
     const currentState = getNoteGenerationState(note.id);
     if (currentState.isGenerating) {
+      console.log("[NoteContentPanel] 正在生成中，跳过");
       return;
     }
 
@@ -522,26 +569,29 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
                          !note.highlights && !note.visual_summary && !note.custom_summary;
 
     if (hasNoContent && note.model_id) {
+      console.log("[NoteContentPanel] 开始自动生成");
+      // 标记已尝试自动生成
+      attemptedAutoGenerateNoteIds.add(note.id);
+      // 开始生成全文总结（完成后会在 AllCompleted 事件中自动触发原文细读）
       handleGenerate();
+    } else {
+      console.log("[NoteContentPanel] 不满足自动生成条件:", { hasNoContent, hasModelId: !!note.model_id });
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id, note.full_summary, note.model_id]);
 
   // 检查标签页是否正在生成
   const isTabGenerating = (tabId: TabId): boolean => {
     const tabType = TAB_TYPE_MAPPING[tabId];
     if (!tabType) return false;
-    // 如果正在重新生成该标签页，显示加载状态
-    if (regeneratingTabs.has(tabType)) return true;
-    // 只检查当前笔记的全局生成状态，不使用组件内部状态（避免切换笔记时状态混淆）
+
+    // 检查全局状态中是否正在生成该标签页
     const globalState = getNoteGenerationState(note.id);
-    if (globalState.isGenerating) {
-      const isNotCompleted = !globalState.completedTabs.has(tabType);
-      const isNotFailed = !globalState.failedTabs.has(tabType);
-      // 正在生成中，且该标签页未完成未失败，就显示加载状态
-      if (isNotCompleted && isNotFailed) {
-        return true;
-      }
-    }
+    if (globalState.regeneratingTabs.has(tabType)) return true;
+
+    // 原文细读（detailed_reading）使用单独的章节生成状态
+    if (tabType === "detailed_reading" && isChapterGenerating(note.id)) return true;
+
     return false;
   };
 

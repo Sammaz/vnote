@@ -1,10 +1,11 @@
-import { useState, useMemo, forwardRef, useImperativeHandle } from "react";
+import { useState, useMemo, forwardRef, useImperativeHandle, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Play, Clock, Image as ImageIcon, Loader2 } from "lucide-react";
 import type { Chapter, ChapterData, ChapterGenerationEvent } from "../../types";
 import { cn } from "../../utils/cn";
+import { setChapterGenerating } from "../../utils/noteGenerationState";
 
 interface ChapterGridProps {
   noteId: number;
@@ -39,6 +40,11 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
   const [generating, setGenerating] = useState(isGenerating);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string } | null>(null);
 
+  // 同步父组件的 isGenerating 状态到内部状态
+  useEffect(() => {
+    setGenerating(isGenerating);
+  }, [isGenerating]);
+
   // 暴露方法给父组件
   useImperativeHandle(ref, () => ({
     generateChapters: handleGenerateChapters,
@@ -60,6 +66,8 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
 
     try {
       setGenerating(true);
+      setChapterGenerating(noteId, true); // 设置全局状态
+
       const generationId = crypto.randomUUID();
 
       // 设置事件监听
@@ -88,17 +96,20 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
               }).then(() => {
                 onGenerationComplete?.();
                 setGenerating(false);
+                setChapterGenerating(noteId, false); // 清除全局状态
                 setProgress(null);
               });
               unlisten();
               break;
             case "Error":
               setGenerating(false);
+              setChapterGenerating(noteId, false); // 清除全局状态
               setProgress(null);
               unlisten();
               break;
             case "Aborted":
               setGenerating(false);
+              setChapterGenerating(noteId, false); // 清除全局状态
               setProgress(null);
               unlisten();
               break;
@@ -118,6 +129,7 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
     } catch (error) {
       console.error("[handleGenerateChapters] 生成失败:", error);
       setGenerating(false);
+      setChapterGenerating(noteId, false); // 清除全局状态
       setProgress(null);
     }
   };

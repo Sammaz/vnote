@@ -46,15 +46,14 @@ export function GenerateButton() {
       setUploadedVideo(null);
       setUploadedSubtitle(null);
 
-      // 跳转到笔记页面
+      // 先跳转到笔记页面
       setSelectedNoteId(newNote.id);
       setCurrentView("note");
 
-      // 异步生成建议问题（导航后执行，不阻塞用户）
+      // 异步生成建议问题（不阻塞跳转）
       if (uploadedSubtitle && selectedModelId) {
         invoke<string[]>("generate_questions_for_note", { noteId: newNote.id })
           .then(questions => {
-            // 更新 Context 中的笔记数据，触发 ChatWindow 重新渲染
             updateNoteSuggestedQuestions(newNote.id, questions);
           })
           .catch(err => console.error("生成问题失败:", err));
