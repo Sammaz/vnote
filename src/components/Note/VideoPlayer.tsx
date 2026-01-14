@@ -425,43 +425,6 @@ export function VideoPlayer({
           .then(([assModule, assContent]) => {
             if (!isMounted || !assContent || !containerRef.current) return;
 
-            // 修复双语字幕堆叠问题：为每个对话添加 \pos 标签实现精确定位
-            // assjs 的碰撞检测在 resize 后可能失效，使用显式定位更可靠
-            let fixedAssContent = assContent;
-
-            // 解析 PlayResY 获取脚本分辨率高度
-            const playResYMatch = assContent.match(/PlayResY:\s*(\d+)/i);
-            const playResY = playResYMatch ? parseInt(playResYMatch[1], 10) : 720;
-            const playResXMatch = assContent.match(/PlayResX:\s*(\d+)/i);
-            const playResX = playResXMatch ? parseInt(playResXMatch[1], 10) : 1280;
-
-            // 计算字幕位置（基于脚本分辨率）
-            // 原始顺序：中文在上，英文在下
-            // Secondary (英文): 底部稍高位置，y = playResY - 28
-            // Default (中文): 英文上方，间隔约32px -> y = playResY - 60
-            const secondaryY = playResY - 28; // 英文在底部，但稍微高一点
-            const defaultY = playResY - 60;   // 中文在上方，与英文间隔32px
-            const centerX = playResX / 2;
-
-            // 为所有 Dialogue 行添加 \pos 标签
-            fixedAssContent = fixedAssContent.replace(
-              /^(Dialogue:\s*\d+,[^,]+,[^,]+,)(Default)(,.*?,,)(.*)$/gm,
-              (match, prefix, style, middle, text) => {
-                // 如果已经有 \pos 标签，不修改
-                if (text.includes("\\pos(")) return match;
-                return `${prefix}${style}${middle}{\\pos(${centerX},${defaultY})}${text}`;
-              }
-            );
-
-            fixedAssContent = fixedAssContent.replace(
-              /^(Dialogue:\s*\d+,[^,]+,[^,]+,)(Secondary)(,.*?,,)(.*)$/gm,
-              (match, prefix, style, middle, text) => {
-                // 如果已经有 \pos 标签，不修改
-                if (text.includes("\\pos(")) return match;
-                return `${prefix}${style}${middle}{\\pos(${centerX},${secondaryY})}${text}`;
-              }
-            );
-
             const plyrContainer = containerRef.current.querySelector(".plyr");
             const videoWrapper = containerRef.current.querySelector(".plyr__video-wrapper") || plyrContainer;
             if (!videoWrapper) return;
@@ -475,16 +438,29 @@ export function VideoPlayer({
               assRef.current = null;
             }
 
-            // 创建 ASS 实例 - assjs 内部有 ResizeObserver，会自动处理尺寸变化
-            // 由于使用了 \pos 固定定位，assjs 的内置 resize 处理足够了
+            // 创建 ASS 实例
             const ASS = assModule.default;
-            assRef.current = new ASS(fixedAssContent, videoEl, {
+            assRef.current = new ASS(assContent, videoEl, {
               container: videoWrapper as HTMLElement,
-              resampling: "video_height",
             });
 
+            // 监听容器尺寸变化，手动触发 assjs resize
+            // assjs 的 ResizeObserver 监听的是 video 元素，但 video 的 clientWidth
+            // 可能不会随容器变化而立即更新，导致字幕位置计算错误
+            const resizeObserver = new ResizeObserver(() => {
+              if (assRef.current) {
+                // 通过切换 resampling 属性来触发内部 resize
+                const current = assRef.current.resampling;
+                assRef.current.resampling = current === "video_height" ? "video_width" : "video_height";
+                assRef.current.resampling = current;
+              }
+            });
+            resizeObserver.observe(containerRef.current);
+
+            // 保存 observer 引用以便清理
+            (cleanupRef as any).assResizeObserver = resizeObserver;
+
             // 根据保存的字幕状态设置初始显示/隐藏
-            // ASS-box 是由 assjs 库动态创建的，需要等待创建完成
             setTimeout(() => {
               const assBox = videoWrapper.querySelector(".ASS-box") as HTMLElement;
               if (assBox) {
@@ -539,6 +515,10 @@ export function VideoPlayer({
         // 移除章节跳转事件监听器
         if (cleanupRef.seekVideoHandler) {
           window.removeEventListener("seek-video", cleanupRef.seekVideoHandler);
+        }
+        // 清理 ASS 字幕相关资源
+        if ((cleanupRef as any).assResizeObserver) {
+          (cleanupRef as any).assResizeObserver.disconnect();
         }
         if (assRef.current) {
           assRef.current.destroy();
