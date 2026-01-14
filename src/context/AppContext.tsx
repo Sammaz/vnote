@@ -1,5 +1,4 @@
-/* @refresh skip */
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, PromptConfig } from "../types";
 
@@ -272,7 +271,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSidebar((prev) => ({ ...prev, selectedFolderId: folderId }));
     // 选择文件夹时，清除笔记选中状态
     setSelectedNoteId(null);
-  }, [setSelectedNoteId]);
+  }, []);
 
   const toggleFolderExpand = useCallback((folderId: string) => {
     setSidebar((prev) => {
@@ -286,7 +285,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const value: AppContextType = {
+  const value: AppContextType = useMemo(() => ({
     sidebar,
     toggleSidebar,
     setSelectedFolder,
@@ -322,7 +321,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLayoutSwapped,
     setLayoutPanelWidth,
     setCaptionsEnabled,
-  };
+  }), [
+    sidebar,
+    toggleSidebar,
+    setSelectedFolder,
+    toggleFolderExpand,
+    folders,
+    notes,
+    stats,
+    aiConfigs,
+    promptConfigs,
+    refreshAiConfigs,
+    refreshPromptConfigs,
+    refreshNotes,
+    createNote,
+    deleteNote,
+    updateNoteSuggestedQuestions,
+    uploadedVideo,
+    uploadedSubtitle,
+    setUploadedVideo,
+    setUploadedSubtitle,
+    selectedModelId,
+    setSelectedModelId,
+    isGenerating,
+    setIsGenerating,
+    searchQuery,
+    setSearchQuery,
+    currentView,
+    setCurrentView,
+    selectedNoteId,
+    setSelectedNoteId,
+    toolbarSettings,
+    setVideoVisible,
+    setAutoPlay,
+    setLayoutSwapped,
+    setLayoutPanelWidth,
+    setCaptionsEnabled,
+  ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
