@@ -80,7 +80,7 @@ export interface VideoToolbarSettings {
   videoVisible: boolean;
   autoPlay: boolean;
   layoutSwapped: boolean;
-  layoutPanelWidth: number; // 左侧面板宽度百分比 (20-80)，默认 40
+  layoutPanelWidth: number; // 左侧面板宽度百分比 (30-70)，默认 40
   captionsEnabled: boolean; // 字幕开关状态，默认 true
 }
 

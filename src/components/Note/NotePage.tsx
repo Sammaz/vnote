@@ -90,7 +90,7 @@ export function NotePage() {
   const { videoVisible, autoPlay, layoutSwapped, layoutPanelWidth } = toolbarSettings;
 
   // 计算实际的宽度百分比
-  // layoutPanelWidth: 左侧面板的宽度百分比 (20-80)
+  // layoutPanelWidth: 左侧面板的宽度百分比 (30-70)
   // layoutSwapped: 是否交换左右位置
   const getWidths = () => {
     const leftWidth = layoutPanelWidth;

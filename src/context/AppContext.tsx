@@ -129,7 +129,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         videoVisible: videoVisible !== "false",
         autoPlay: autoPlay === "true",
         layoutSwapped: layoutSwapped === "true",
-        layoutPanelWidth: layoutPanelWidth ? Math.max(20, Math.min(80, parseInt(layoutPanelWidth, 10))) : 40,
+        layoutPanelWidth: layoutPanelWidth ? Math.max(30, Math.min(70, parseInt(layoutPanelWidth, 10))) : 40,
         captionsEnabled: captionsEnabled !== "false", // 默认开启
       });
     } catch (error) {
@@ -166,7 +166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // 设置布局面板宽度
   const setLayoutPanelWidth = useCallback((width: number) => {
-    const clampedWidth = Math.max(20, Math.min(80, width));
+    const clampedWidth = Math.max(30, Math.min(70, width));
     setToolbarSettings(prev => ({ ...prev, layoutPanelWidth: clampedWidth }));
     saveSetting("toolbar_layout_panel_width", clampedWidth.toString());
   }, [saveSetting]);
