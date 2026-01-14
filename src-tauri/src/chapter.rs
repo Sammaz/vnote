@@ -81,7 +81,7 @@ struct AIChapter {
 }
 
 /// 生成章节分割提示词
-fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_info: Option<&str>) -> String {
+fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_size: usize, chunk_info: Option<&str>) -> String {
     let chunk_hint = if is_chunk {
         format!("\n\n注意：这是视频的一个片段。{}", chunk_info.unwrap_or(""))
     } else {
@@ -94,7 +94,11 @@ fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_info: Option<
 **核心要求**：
 
 1. **章节定义**：每个章节是视频中的一个完整主题段落
-2. **start_index 含义**：这是该章节**第一句字幕的索引**，系统将根据此索引获取对应的**视频时间戳**作为章节开始时间
+2. **start_index 含义与限制**：
+   - start_index 是该章节第一句字幕的索引（基于 0 开始）
+   - **有效值范围**：必须严格在当前分段范围内，即 0 到 {} - 1
+   - **绝对禁止**：start_index 不能等于或超过当前分段的字幕总数 {}
+   - 例如：如果当前段有 {} 条字幕，有效的 start_index 是 0-{}，{} 是无效的
 3. **章节结束**：每个章节的结束时间由**下一章节的开始时间**决定，最后一个章节到视频结束
 4. **跳过开场白**：第一个章节不要从索引 0 或 1 开始，应该跳过：
    - 片头、标题、自我介绍
@@ -125,7 +129,7 @@ fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_info: Option<
   "chapters": [
     {{
       "title": "章节标题",
-      "start_index": 数字（章节第一句字幕的索引，不要从0开始）,
+      "start_index": 数字，必须满足：0 ≤ start_index < {},
       "summary": "本章内容概要"
     }}
   ]
@@ -133,7 +137,8 @@ fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_info: Option<
 {}
 视频字幕内容（每行格式为 [索引] 字幕内容）：
 {}"#,
-        chunk_hint, subtitle_text
+        chunk_size, chunk_size, chunk_size, chunk_size - 1, chunk_size,
+        chunk_size, chunk_hint, subtitle_text
     )
 }
 
@@ -206,7 +211,8 @@ async fn analyze_subtitle_for_chapters(
 
     // 如果只有一段，直接处理
     if total_chunks == 1 {
-        let prompt = build_chapter_prompt(&chunks[0].text, false, None);
+        let chunk_size = chunks[0].end_index - chunks[0].start_index;
+        let prompt = build_chapter_prompt(&chunks[0].text, false, chunk_size, None);
         let req = NonStreamingRequest {
             config: ai_config.clone(),
             prompt,
@@ -246,7 +252,7 @@ async fn analyze_subtitle_for_chapters(
                 chunk_idx + 1, total_chunks, chunk_size, chunk_size - 1
             );
 
-            let prompt = build_chapter_prompt(&chunk.text, true, Some(&chunk_info));
+            let prompt = build_chapter_prompt(&chunk.text, true, chunk_size, Some(&chunk_info));
             let req = NonStreamingRequest {
                 config: ai_config,
                 prompt,
