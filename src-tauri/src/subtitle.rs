@@ -41,6 +41,9 @@ pub fn parse_subtitle_file(path: &str) -> Result<Vec<SubtitleEntry>, String> {
 
     let content = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
 
+    // 统一换行符：将 Windows 风格的 \r\n 转换为 Unix 风格的 \n
+    let content = content.replace("\r\n", "\n").replace('\r', "\n");
+
     match format {
         SubtitleFormat::SRT => parse_srt(&content),
         SubtitleFormat::VTT => parse_vtt(&content),
