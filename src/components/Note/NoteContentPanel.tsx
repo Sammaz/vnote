@@ -294,7 +294,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         const taskState = await invoke<SubtitleOptimizationTaskState | null>("get_subtitle_optimization_task_state", { noteId: note.id });
         if (taskState && taskState.is_running) {
           // 恢复进行中的任务状态
-          console.log("[NoteContentPanel] 恢复进行中的字幕优化任务:", taskState);
           subtitleOptimizationIdRef.current = taskState.generation_id;
           setSubtitleOptimizing(true);
           setSubtitleOptimizationEnabled(true);
@@ -419,7 +418,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const hasNoDetailedReading = !note.detailed_reading;
 
     if (hasFullSummary && hasNoDetailedReading && chapterGridRef.current) {
-      console.log("[NoteContentPanel] 切换到原文细读，检测到需要生成章节");
       // 延迟一点确保 ChapterGrid 完全渲染
       setTimeout(() => {
         if (chapterGridRef.current) {
@@ -499,13 +497,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
         case "AllCompleted":
           const newCompletedTabs = new Set([...state.completedTabs]);
-          console.log("[NoteContentPanel] AllCompleted 事件:", {
-            noteId,
-            completedTabs: Array.from(newCompletedTabs),
-            hasFullSummary: newCompletedTabs.has("full_summary"),
-            hasAttempted: attemptedAutoGenerateNoteIds.has(noteId),
-            hasChapterGridRef: !!chapterGridRef.current,
-          });
 
           setNoteGenerationState(noteId, {
             isGenerating: false,
@@ -526,8 +517,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           const hasFullSummaryCompleted = newCompletedTabs.has("full_summary") || newCompletedTabs.has("FullSummary");
 
           if (hasFullSummaryCompleted && isInitialAutoGeneration(noteId)) {
-            console.log("[NoteContentPanel] 全文总结完成，准备生成原文细读");
-
             // 切换到原文细读标签页，确保 ChapterGrid 被渲染
             setTimeout(() => {
               setActiveTab("original");
@@ -535,18 +524,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               // 等待 ChapterGrid 渲染完成后再触发生成
               setTimeout(() => {
                 if (chapterGridRef.current) {
-                  console.log("[NoteContentPanel] 开始生成原文细读");
                   chapterGridRef.current.generateChapters();
                 } else {
                   console.error("[NoteContentPanel] ChapterGrid ref 仍然为 null");
                 }
               }, 500);
             }, 500);
-          } else {
-            console.log("[NoteContentPanel] 不触发原文细读生成:", {
-              hasFullSummary: hasFullSummaryCompleted,
-              isInitialAutoGeneration: isInitialAutoGeneration(noteId),
-            });
           }
 
           // 延迟刷新笔记数据，避免与事件处理冲突
@@ -793,25 +776,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 自动生成：当组件挂载且没有全文总结时，自动开始生成（仅触发一次）
   // 同步执行顺序：1. 全文总结 -> 2. 原文细读（在 AllCompleted 事件中触发）
   useEffect(() => {
-    console.log("[NoteContentPanel] 自动生成检查:", {
-      noteId: note.id,
-      hasAttempted: attemptedAutoGenerateNoteIds.has(note.id),
-      isGenerating: getNoteGenerationState(note.id).isGenerating,
-      hasFullSummary: !!note.full_summary,
-      hasDetailedReading: !!note.detailed_reading,
-      hasModelId: !!note.model_id,
-    });
-
     // 如果已经尝试过自动生成，跳过
     if (attemptedAutoGenerateNoteIds.has(note.id)) {
-      console.log("[NoteContentPanel] 已尝试过自动生成，跳过");
       return;
     }
 
     // 如果正在生成中，跳过
     const currentState = getNoteGenerationState(note.id);
     if (currentState.isGenerating) {
-      console.log("[NoteContentPanel] 正在生成中，跳过");
       return;
     }
 
@@ -819,15 +791,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
                          !note.highlights && !note.visual_summary && !note.custom_summary;
 
     if (hasNoContent && note.model_id) {
-      console.log("[NoteContentPanel] 开始自动生成");
       // 标记已尝试自动生成
       attemptedAutoGenerateNoteIds.add(note.id);
       // 标记为首次自动生成流程
       setInitialAutoGeneration(note.id, true);
       // 开始生成全文总结（完成后会在 AllCompleted 事件中自动触发原文细读）
       handleGenerate();
-    } else {
-      console.log("[NoteContentPanel] 不满足自动生成条件:", { hasNoContent, hasModelId: !!note.model_id });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id, note.full_summary, note.model_id]);
@@ -1120,8 +1089,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     // 如果是自动生成流程，继续生成高光笔记
     if (isInitialAutoGeneration(note.id) && !note.highlights) {
-      console.log("[NoteContentPanel] 原文细读完成，准备生成高光笔记");
-
       // 切换到高光笔记标签页，确保 HighlightGrid 被渲染
       setTimeout(() => {
         setActiveTab("highlights");
@@ -1129,7 +1096,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         // 等待 HighlightGrid 渲染完成后再触发生成
         setTimeout(() => {
           if (highlightGridRef.current) {
-            console.log("[NoteContentPanel] 开始生成高光笔记");
             highlightGridRef.current.generateHighlights();
           } else {
             console.error("[NoteContentPanel] HighlightGrid ref 仍然为 null");
