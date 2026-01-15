@@ -24,10 +24,11 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
+import { HighlightGrid } from "./Highlight";
 import { message } from "../../utils/message";
 import {
   getNoteGenerationState,
@@ -76,6 +77,16 @@ interface NoteContentPanelProps {
   promptConfigs?: PromptConfig[]; // 提示词配置列表
 }
 
+// 解析高光数据
+function parseHighlightData(highlightsJson: string | null): HighlightData | null {
+  if (!highlightsJson) return null;
+  try {
+    return JSON.parse(highlightsJson) as HighlightData;
+  } catch {
+    return null;
+  }
+}
+
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>("summary");
 
@@ -108,6 +119,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const subtitleOptimizationIdRef = useRef<string | null>(null);
   // 字幕数据（用于优化）
   const [subtitleEntries, setSubtitleEntries] = useState<Array<{ index: number; start_time: number; end_time: number; text: string; second_language_text?: string | null }>>([]);
+
+  // 高光笔记相关状态
+  const [highlightIsGenerating, setHighlightIsGenerating] = useState(false);
 
   // 解析 detailed_reading 是否为章节数据
   useEffect(() => {
@@ -1042,6 +1056,43 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId]);
 
+  // 高光笔记重新生成处理
+  const handleHighlightRegenerate = useCallback(async () => {
+    if (!note.subtitle_path || !note.model_id) {
+      message.warning("缺少字幕文件或 AI 模型配置");
+      return;
+    }
+
+    setHighlightIsGenerating(true);
+    try {
+      const generationId = await invoke<string>("generate_highlights", {
+        noteId: note.id,
+        modelId: currentModelId || note.model_id,
+        subtitlePath: note.subtitle_path,
+        highlightType: "default",
+        totalDuration: chapterData?.total_duration || 0,
+      });
+
+      // 等待生成完成
+      const eventName = `highlight-generation-${generationId}`;
+      const unlisten = await listen<any>(eventName, (event) => {
+        const data = event.payload;
+        if (data.status === "AllCompleted") {
+          setHighlightIsGenerating(false);
+          onGenerationComplete?.();
+          unlisten();
+        } else if (data.status === "Aborted") {
+          setHighlightIsGenerating(false);
+          unlisten();
+        }
+      });
+    } catch (error) {
+      console.error("[NoteContentPanel] 高光笔记生成失败:", error);
+      message.error(`生成失败: ${error}`);
+      setHighlightIsGenerating(false);
+    }
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete]);
+
   // 单章节重新优化字幕
   const handleReoptimizeChapter = useCallback(async (chapterId: string) => {
     // 检查是否有正在进行的优化
@@ -1600,6 +1651,28 @@ Video subtitles content:`;
           {/* 右侧留空，不显示复制和下载按钮 */}
           <div />
         </div>
+      ) : activeTab === "highlights" ? (
+        // 高光笔记标签页的专用工具栏
+        <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          {/* 重新生成按钮 */}
+          <button
+            onClick={handleHighlightRegenerate}
+            disabled={highlightIsGenerating}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {highlightIsGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                生成中...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-4 h-4" />
+                重新生成
+              </>
+            )}
+          </button>
+        </div>
       ) : (
         // 其他标签页的简化工具栏
         <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
@@ -1686,14 +1759,15 @@ Video subtitles content:`;
           );
         })()}
         {activeTab === "highlights" && (
-          <EditableMarkdown
+          <HighlightGrid
             noteId={note.id}
-            tabType="highlights"
-            content={note.highlights}
-            isGenerating={isTabGenerating("highlights")}
-            emptyMessage="暂无高光笔记"
-            isEditMode={isEditMode}
-            onContentUpdate={onGenerationComplete}
+            subtitlePath={note.subtitle_path}
+            modelId={currentModelId || note.model_id}
+            totalDuration={chapterData?.total_duration || 0}
+            initialHighlightData={parseHighlightData(note.highlights)}
+            onGenerationComplete={onGenerationComplete}
+            isGenerating={highlightIsGenerating}
+            onRegenerate={handleHighlightRegenerate}
           />
         )}
         {activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} autoScroll={autoScroll} />}

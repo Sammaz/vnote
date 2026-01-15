@@ -263,3 +263,52 @@ export interface SubtitleOptimizationTaskState {
   optimizing_chapter_ids: string[];
   is_running: boolean;
 }
+
+// ============================================================================
+// 高光笔记相关类型 (Highlight Notes Types)
+// ============================================================================
+
+// 高光类型
+export type HighlightType = "default" | "emotional" | "viral";
+
+// 高光片段
+export interface HighlightSegment {
+  id: string;                    // UUID
+  start_time: number;            // 开始时间（秒）
+  end_time: number;              // 结束时间（秒）
+  content: string;               // 高光内容摘要
+  score: number;                 // 评分 (0-100)
+  highlight_type: HighlightType; // 高光类型
+  topic_tags: string[];          // 主题标签
+}
+
+// 高光数据
+export interface HighlightData {
+  highlights: HighlightSegment[];
+  topic_tags: string[];          // AI 提炼的所有主题标签
+  total_duration: number;        // 视频总时长（秒）
+  generated_at: string;          // 生成时间（ISO 格式）
+}
+
+// 高光生成事件
+export type HighlightGenerationEvent =
+  | { status: "Starting"; total_segments: number }
+  | { status: "SegmentStarted"; segment_index: number }
+  | { status: "SegmentCompleted"; segment_index: number; highlights: HighlightSegment[] }
+  | { status: "SegmentFailed"; segment_index: number; error: string }
+  | { status: "AllCompleted"; total_highlights: number; topic_tags: string[] }
+  | { status: "Aborted" };
+
+// 高光类型描述
+export const HIGHLIGHT_TYPE_DESCRIPTIONS: Record<HighlightType, string> = {
+  default: "基于完整叙事与信息密度生成全片高光，覆盖开头/中段/结尾的关键观点。",
+  emotional: "额外抓取情绪爆点：语义冲突、摩擦、破防/真情流露或评论引爆的高潜片段。",
+  viral: "挑选最有传播潜力的切片并打分：钩子强度、情绪张力、反转/金句、可复用性。",
+};
+
+// 高光类型标签
+export const HIGHLIGHT_TYPE_LABELS: Record<HighlightType, string> = {
+  default: "默认高光",
+  emotional: "情绪高点",
+  viral: "爆款片段",
+};

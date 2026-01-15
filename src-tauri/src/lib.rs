@@ -2,6 +2,7 @@ mod ai_pool;
 mod chat;
 mod chapter;
 mod db;
+mod highlight_generation;
 mod note_generation;
 mod prompts;
 mod rag;
@@ -752,6 +753,86 @@ fn save_note_ui_state(note_id: i64, show_subtitles: bool, subtitle_optimization_
     get_db().save_note_ui_state(note_id, show_subtitles, subtitle_optimization_enabled).map_err(|e| e.to_string())
 }
 
+// Highlight generation commands
+#[tauri::command]
+async fn generate_highlights(
+    app: AppHandle,
+    generation_id: Option<String>,
+    note_id: i64,
+    model_id: i64,
+    subtitle_path: String,
+    highlight_type: String,
+    total_duration: f64,
+) -> Result<String, String> {
+    use highlight_generation::{GenerateHighlightsRequest, HighlightType};
+
+    let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let return_id = generation_id.clone();
+
+    // 转换高光类型
+    let highlight_type = match highlight_type.as_str() {
+        "default" => HighlightType::Default,
+        "emotional" => HighlightType::Emotional,
+        "viral" => HighlightType::Viral,
+        _ => HighlightType::Default,
+    };
+
+    let request = GenerateHighlightsRequest {
+        _note_id: note_id,
+        model_id,
+        subtitle_path,
+        highlight_type,
+        total_duration,
+    };
+
+    // 在后台任务中执行
+    tokio::spawn(async move {
+        match highlight_generation::generate_highlights(app.clone(), get_db(), generation_id.clone(), request).await {
+            Ok(highlight_data) => {
+                // 保存到数据库
+                if let Err(e) = save_highlights_to_note_internal(note_id, &highlight_data) {
+                    eprintln!("[generate_highlights] 保存高光数据失败: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("[generate_highlights] 生成失败: {}", e);
+            }
+        }
+    });
+
+    Ok(return_id)
+}
+
+#[tauri::command]
+async fn abort_highlight_generation(generation_id: String) -> Result<(), String> {
+    highlight_generation::abort_highlight_generation(generation_id).await
+}
+
+#[tauri::command]
+fn save_highlights_to_note(note_id: i64, highlight_data: serde_json::Value) -> Result<(), String> {
+    let mut note = get_db()
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到")?;
+
+    let highlight_json = serde_json::to_string(&highlight_data).map_err(|e| e.to_string())?;
+    note.highlights = Some(highlight_json);
+
+    get_db().update_note(&note).map_err(|e| e.to_string())
+}
+
+fn save_highlights_to_note_internal(note_id: i64, highlight_data: &highlight_generation::HighlightData) -> Result<(), String> {
+    let mut note = get_db()
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到")?;
+
+    let highlight_json = serde_json::to_string(highlight_data).map_err(|e| e.to_string())?;
+    note.highlights = Some(highlight_json);
+
+    get_db().update_note(&note).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -863,6 +944,9 @@ pub fn run() {
             delete_optimized_subtitles,
             get_note_ui_state,
             save_note_ui_state,
+            generate_highlights,
+            abort_highlight_generation,
+            save_highlights_to_note,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
