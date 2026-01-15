@@ -212,8 +212,8 @@ export type ChapterGenerationEvent =
 export type SubtitleOptimizationEvent =
   | { status: "Starting"; total: number }
   | { status: "ChapterStarted"; chapter_id: string }
-  | { status: "ChapterCompleted"; chapter_id: string; optimized_text: string }
-  | { status: "ChapterFailed"; chapter_id: string; error: string }
+  | { status: "ChapterCompleted"; chapter_id: string; optimized_text: string; completed: number; total: number }
+  | { status: "ChapterFailed"; chapter_id: string; error: string; completed: number; failed: number; total: number }
   | { status: "AllCompleted"; succeeded: number; failed: number }
   | { status: "Aborted" };
 

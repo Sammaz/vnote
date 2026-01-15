@@ -29,6 +29,7 @@ import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
+import { VisualSummaryContent } from "./VisualSummaryContent";
 import { message } from "../../utils/message";
 import {
   getNoteGenerationState,
@@ -36,9 +37,11 @@ import {
   attemptedAutoGenerateNoteIds,
   activeListeners,
   isChapterGenerating,
+  setChapterGenerating,
   setInitialAutoGeneration,
   isInitialAutoGeneration,
 } from "../../utils/noteGenerationState";
+import type { ChapterGenerationEvent } from "../../types";
 
 type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom";
 
@@ -122,11 +125,21 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [optimizingChapterIds, setOptimizingChapterIds] = useState<Set<string>>(new Set());
   const [failedChapterIds, setFailedChapterIds] = useState<Set<string>>(new Set());
   const subtitleOptimizationIdRef = useRef<string | null>(null);
+  // 使用 ref 来存储 subtitleOptimizing 的最新值，避免闭包问题
+  const subtitleOptimizingRef = useRef(subtitleOptimizing);
   // 字幕数据（用于优化）
   const [subtitleEntries, setSubtitleEntries] = useState<Array<{ index: number; start_time: number; end_time: number; text: string; second_language_text?: string | null }>>([]);
 
+  // 同步 subtitleOptimizing 到 ref
+  useEffect(() => {
+    subtitleOptimizingRef.current = subtitleOptimizing;
+  }, [subtitleOptimizing]);
+
   // 高光笔记相关状态
   const [highlightIsGenerating, setHighlightIsGenerating] = useState(false);
+
+  // 章节生成状态（用于显示闪烁小点）
+  const [chapterIsGenerating, setChapterIsGenerating] = useState(false);
 
   // 解析 detailed_reading 是否为章节数据
   useEffect(() => {
@@ -211,10 +224,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             newSet.delete(data.chapter_id);
             return newSet;
           });
-          setSubtitleOptimizationProgress(prev => prev ? {
-            ...prev,
-            current: prev.current + 1,
-          } : null);
+          // 使用后端返回的计数，避免并发导致的顺序问题
+          setSubtitleOptimizationProgress({
+            current: data.completed,
+            total: data.total,
+          });
           // 保存优化后的字幕到数据库
           invoke("save_optimized_subtitle", {
             noteId: note.id,
@@ -237,10 +251,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             newSet.add(data.chapter_id);
             return newSet;
           });
-          setSubtitleOptimizationProgress(prev => prev ? {
-            ...prev,
-            current: prev.current + 1,
-          } : null);
+          // 使用后端返回的计数，避免并发导致的顺序问题
+          setSubtitleOptimizationProgress({
+            current: data.completed + data.failed,
+            total: data.total,
+          });
           break;
 
         case "AllCompleted":
@@ -427,6 +442,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [activeTab, note.id]);
 
+  // 视觉化总结页面直接复用原文细读的字幕优化结果
+  // 不再自动触发字幕优化，用户需要先在原文细读页面开启"字幕优化"
+
   // 监听笔记内容变化，确保生成完成后更新显示
   useEffect(() => {
     // 当笔记内容更新时，触发重新渲染
@@ -517,18 +535,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           const hasFullSummaryCompleted = newCompletedTabs.has("full_summary") || newCompletedTabs.has("FullSummary");
 
           if (hasFullSummaryCompleted && isInitialAutoGeneration(noteId)) {
-            // 切换到原文细读标签页，确保 ChapterGrid 被渲染
+            // 直接调用后端 API 生成章节，不切换标签页
             setTimeout(() => {
-              setActiveTab("original");
-
-              // 等待 ChapterGrid 渲染完成后再触发生成
-              setTimeout(() => {
-                if (chapterGridRef.current) {
-                  chapterGridRef.current.generateChapters();
-                } else {
-                  console.error("[NoteContentPanel] ChapterGrid ref 仍然为 null");
-                }
-              }, 500);
+              generateChaptersDirectly();
             }, 500);
           }
 
@@ -579,18 +588,20 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       // 只有当状态真正变化时才更新
       if (globalState.isGenerating !== isGenerating ||
           globalState.generationId !== generationId ||
-          globalState.progress.message !== progress.message) {
+          globalState.progress.message !== progress.message ||
+          globalState.isGeneratingChapters !== chapterIsGenerating) {
         setIsGenerating(globalState.isGenerating);
         setGenerationId(globalState.generationId);
         setProgress({ ...globalState.progress });
         setCompletedTabs(new Set(globalState.completedTabs) as Set<TabType>);
         setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
         setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
+        setChapterIsGenerating(globalState.isGeneratingChapters);
       }
     }, 200); // 每200ms同步一次
 
     return () => clearInterval(interval);
-  }, [note.id, isGenerating, generationId, progress.message]);
+  }, [note.id, isGenerating, generationId, progress.message, chapterIsGenerating]);
 
   // 自定义提示词弹窗状态
   const [showPromptDialog, setShowPromptDialog] = useState(false);
@@ -810,11 +821,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const globalState = getNoteGenerationState(note.id);
     if (globalState.regeneratingTabs.has(tabType)) return true;
 
-    // 原文细读（detailed_reading）使用单独的章节生成状态
-    if (tabType === "detailed_reading" && isChapterGenerating(note.id)) return true;
+    // 原文细读（detailed_reading）使用组件 state 跟踪章节生成状态
+    if (tabType === "detailed_reading" && chapterIsGenerating) return true;
 
     // 高光笔记使用单独的生成状态
     if (tabType === "highlights" && highlightIsGenerating) return true;
+
+    // 视觉化总结使用字幕优化状态
+    if (tabType === "visual_summary" && subtitleOptimizing) return true;
 
     return false;
   };
@@ -914,8 +928,224 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   };
 
+  // 直接调用后端 API 生成章节（用于自动生成流程，不需要切换标签页）
+  const generateChaptersDirectly = useCallback(async () => {
+    const effectiveModelId = currentModelId || note.model_id;
+    if (!effectiveModelId || !note.subtitle_path) {
+      console.error("[generateChaptersDirectly] 缺少必要参数");
+      return;
+    }
+
+    try {
+      setChapterGenerating(note.id, true);
+      const generationId = crypto.randomUUID();
+
+      // 设置事件监听
+      const unlisten = await listen<ChapterGenerationEvent>(
+        `chapter-generation-${generationId}`,
+        (event) => {
+          const data = event.payload;
+          switch (data.status) {
+            case "Completed":
+              // 保存到数据库
+              invoke("save_chapters_to_note", {
+                noteId: note.id,
+                chapterData: data.chapter_data,
+              }).then(() => {
+                setChapterGenerating(note.id, false);
+                onGenerationComplete?.();
+                // 如果是自动生成流程，继续生成高光笔记
+                if (isInitialAutoGeneration(note.id)) {
+                  generateHighlightsDirectlyRef.current?.();
+                }
+              });
+              unlisten();
+              break;
+            case "Error":
+            case "Aborted":
+              setChapterGenerating(note.id, false);
+              unlisten();
+              break;
+          }
+        }
+      );
+
+      // 开始生成
+      await invoke("generate_chapters", {
+        generationId,
+        noteId: note.id,
+        modelId: effectiveModelId,
+        videoPath: note.video_path,
+        subtitlePath: note.subtitle_path,
+        captureScreenshots: true,
+      });
+    } catch (error) {
+      console.error("[generateChaptersDirectly] 生成失败:", error);
+      setChapterGenerating(note.id, false);
+    }
+  }, [note.id, note.video_path, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete]);
+
+  // 用于存储 generateHighlightsDirectly 的 ref，避免循环依赖
+  const generateHighlightsDirectlyRef = useRef<(() => Promise<void>) | undefined>(undefined);
+
+  // 直接调用后端 API 生成高光笔记（用于自动生成流程，不需要切换标签页）
+  const generateHighlightsDirectly = useCallback(async () => {
+    const effectiveModelId = currentModelId || note.model_id;
+    if (!effectiveModelId || !note.subtitle_path) {
+      console.error("[generateHighlightsDirectly] 缺少必要参数");
+      return;
+    }
+
+    setHighlightIsGenerating(true);
+    try {
+      const generationId = await invoke<string>("generate_highlights", {
+        noteId: note.id,
+        modelId: effectiveModelId,
+        subtitlePath: note.subtitle_path,
+        highlightType: "default",
+        totalDuration: chapterData?.total_duration || 0,
+      });
+
+      // 等待生成完成
+      const eventName = `highlight-generation-${generationId}`;
+      const unlisten = await listen<any>(eventName, (event) => {
+        const data = event.payload;
+        if (data.status === "AllCompleted") {
+          setHighlightIsGenerating(false);
+          onGenerationComplete?.();
+          // 如果是自动生成流程，继续触发视觉化笔记
+          if (isInitialAutoGeneration(note.id)) {
+            triggerVisualSummaryOptimizationSilentRef.current?.();
+          }
+          unlisten();
+        } else if (data.status === "Aborted") {
+          setHighlightIsGenerating(false);
+          unlisten();
+        }
+      });
+    } catch (error) {
+      console.error("[generateHighlightsDirectly] 生成失败:", error);
+      setHighlightIsGenerating(false);
+    }
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete]);
+
+  // 用于存储 triggerVisualSummaryOptimizationSilent 的 ref，避免循环依赖
+  const triggerVisualSummaryOptimizationSilentRef = useRef<(() => Promise<void>) | undefined>(undefined);
+
+  // 更新 ref 以避免循环依赖
+  useEffect(() => {
+    generateHighlightsDirectlyRef.current = generateHighlightsDirectly;
+  }, [generateHighlightsDirectly]);
+
+  // 触发视觉化总结的字幕优化（静默执行，不切换标签页）
+  const triggerVisualSummaryOptimizationSilent = useCallback(async () => {
+    // 结束首次自动生成流程
+    setInitialAutoGeneration(note.id, false);
+
+    // 如果已有缓存或正在优化，则不重复触发
+    if (optimizedSubtitles.size > 0 || subtitleOptimizing) {
+      return;
+    }
+
+    // 检查必要条件
+    if (!chapterData || !note.subtitle_path || !note.model_id) {
+      return;
+    }
+
+    // 静默执行字幕优化
+    const effectiveModelId = currentModelId || note.model_id;
+    if (!effectiveModelId) return;
+
+    let currentSubtitleEntries = subtitleEntries;
+    if (currentSubtitleEntries.length === 0) {
+      try {
+        currentSubtitleEntries = await invoke<Array<{ index: number; start_time: number; end_time: number; text: string; second_language_text?: string | null }>>("parse_subtitle_file", {
+          path: note.subtitle_path,
+        });
+        setSubtitleEntries(currentSubtitleEntries);
+      } catch (error) {
+        console.error("[triggerVisualSummaryOptimizationSilent] 加载字幕失败:", error);
+        return;
+      }
+    }
+
+    if (currentSubtitleEntries.length === 0) return;
+
+    const generationId = crypto.randomUUID();
+    subtitleOptimizationIdRef.current = generationId;
+
+    const chaptersToOptimize = chapterData.chapters
+      .filter(chapter => chapter.id)
+      .map(chapter => {
+        const filtered = currentSubtitleEntries.filter(
+          sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
+        );
+        
+        if (filtered.length === 0) {
+          return { chapter_id: chapter.id, subtitle_text: "", has_bilingual: false };
+        }
+        
+        const hasBilingual = filtered.some(sub => sub.second_language_text);
+        
+        let subtitleText: string;
+        if (hasBilingual) {
+          const primaryText = filtered.map(sub => sub.text).join(" ");
+          const secondaryText = filtered
+            .filter(sub => sub.second_language_text)
+            .map(sub => sub.second_language_text!)
+            .join(" ");
+          subtitleText = `${primaryText}\n\n${secondaryText}`;
+        } else {
+          subtitleText = filtered.map(sub => sub.text).join(" ");
+        }
+        
+        return {
+          chapter_id: chapter.id,
+          subtitle_text: subtitleText,
+          has_bilingual: hasBilingual,
+        };
+      })
+      .filter(c => c.subtitle_text.trim().length > 0);
+
+    if (chaptersToOptimize.length === 0) return;
+
+    setSubtitleOptimizing(true);
+    setSubtitleOptimizationProgress({ current: 0, total: chaptersToOptimize.length });
+    setOptimizingChapterIds(new Set(chaptersToOptimize.map(c => c.chapter_id)));
+    setFailedChapterIds(new Set());
+
+    await setupSubtitleOptimizationListener(generationId);
+
+    try {
+      await invoke("optimize_chapter_subtitles", {
+        generationId,
+        noteId: note.id,
+        modelId: effectiveModelId,
+        chapters: chaptersToOptimize,
+      });
+    } catch (error) {
+      console.error("[triggerVisualSummaryOptimizationSilent] 字幕优化失败:", error);
+      setSubtitleOptimizing(false);
+      setSubtitleOptimizationProgress(null);
+      setOptimizingChapterIds(new Set());
+    }
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData, subtitleEntries, optimizedSubtitles.size, subtitleOptimizing, setupSubtitleOptimizationListener]);
+
+  // 更新 triggerVisualSummaryOptimizationSilent ref
+  useEffect(() => {
+    triggerVisualSummaryOptimizationSilentRef.current = triggerVisualSummaryOptimizationSilent;
+  }, [triggerVisualSummaryOptimizationSilent]);
+
   // 字幕优化开关处理
   const handleSubtitleOptimizationToggle = useCallback(async () => {
+    // 如果正在优化中且开关是关闭的，说明是视觉化总结触发的优化
+    // 此时用户点击开关，应该启用显示，同步显示优化进度
+    if (subtitleOptimizing && !subtitleOptimizationEnabled) {
+      setSubtitleOptimizationEnabled(true);
+      return;
+    }
+
+    // 如果正在优化中且开关已开启，不做任何操作
     if (subtitleOptimizing) return;
 
     if (subtitleOptimizationEnabled) {
@@ -1045,6 +1275,120 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId]);
 
+  // 视觉化总结标签页自动触发字幕优化（静默执行，不改变原文细读的开关状态）
+  useEffect(() => {
+    // 只在切换到视觉化总结标签页时触发
+    if (activeTab !== "visual") return;
+    
+    // 检查必要条件
+    if (!chapterData) return;
+    if (!note.subtitle_path) return;
+    if (!note.model_id) return;
+    
+    // 如果正在优化中，或者已有缓存，则不重复触发
+    if (subtitleOptimizing) return;
+    if (optimizedSubtitles.size > 0) return;
+    
+    // 静默执行字幕优化（不改变 subtitleOptimizationEnabled 状态）
+    const startSilentOptimization = async () => {
+      // 优先使用视频播放器右上角选择的模型
+      const effectiveModelId = currentModelId || note.model_id;
+      if (!chapterData || !effectiveModelId || !note.subtitle_path) {
+        return;
+      }
+
+      // 确保字幕数据已加载
+      let currentSubtitleEntries = subtitleEntries;
+      if (currentSubtitleEntries.length === 0) {
+        try {
+          currentSubtitleEntries = await invoke<Array<{ index: number; start_time: number; end_time: number; text: string; second_language_text?: string | null }>>("parse_subtitle_file", {
+            path: note.subtitle_path,
+          });
+          setSubtitleEntries(currentSubtitleEntries);
+        } catch (error) {
+          console.error("[VisualSummary] 加载字幕失败:", error);
+          return;
+        }
+      }
+
+      if (currentSubtitleEntries.length === 0) {
+        return;
+      }
+
+      const generationId = crypto.randomUUID();
+      subtitleOptimizationIdRef.current = generationId;
+
+      // 准备章节字幕数据
+      const chaptersToOptimize = chapterData.chapters
+        .filter(chapter => chapter.id)
+        .map(chapter => {
+          const filtered = currentSubtitleEntries.filter(
+            sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
+          );
+          
+          if (filtered.length === 0) {
+            return { chapter_id: chapter.id, subtitle_text: "", has_bilingual: false };
+          }
+          
+          const hasBilingual = filtered.some(sub => sub.second_language_text);
+          
+          let subtitleText: string;
+          if (hasBilingual) {
+            const primaryText = filtered.map(sub => sub.text).join(" ");
+            const secondaryText = filtered
+              .filter(sub => sub.second_language_text)
+              .map(sub => sub.second_language_text!)
+              .join(" ");
+            subtitleText = `${primaryText}\n\n${secondaryText}`;
+          } else {
+            subtitleText = filtered.map(sub => sub.text).join(" ");
+          }
+          
+          return {
+            chapter_id: chapter.id,
+            subtitle_text: subtitleText,
+            has_bilingual: hasBilingual,
+          };
+        })
+        .filter(c => c.subtitle_text.trim().length > 0);
+
+      if (chaptersToOptimize.length === 0) {
+        return;
+      }
+
+      // 注意：这里不设置 subtitleOptimizationEnabled，保持原文细读开关状态不变
+      setSubtitleOptimizing(true);
+      setSubtitleOptimizationProgress({ current: 0, total: chaptersToOptimize.length });
+      setOptimizingChapterIds(new Set(chaptersToOptimize.map(c => c.chapter_id)));
+      setFailedChapterIds(new Set());
+
+      await setupSubtitleOptimizationListener(generationId);
+
+      try {
+        await invoke("optimize_chapter_subtitles", {
+          generationId,
+          noteId: note.id,
+          modelId: effectiveModelId,
+          chapters: chaptersToOptimize,
+        });
+      } catch (error) {
+        console.error("[VisualSummary] 字幕优化失败:", error);
+        setSubtitleOptimizing(false);
+        setSubtitleOptimizationProgress(null);
+        setOptimizingChapterIds(new Set());
+      }
+    };
+
+    startSilentOptimization();
+  }, [activeTab, chapterData, note.subtitle_path, note.model_id, note.id, subtitleOptimizing, optimizedSubtitles.size, subtitleEntries, currentModelId, setupSubtitleOptimizationListener]);
+
+  // 触发视觉化笔记（自动生成流程）
+  // 视觉化总结直接复用原文细读的字幕优化结果，不再单独触发优化
+  const triggerVisualSummaryOptimization = useCallback(() => {
+    // 不再切换标签页，直接触发字幕优化
+    triggerVisualSummaryOptimizationSilent();
+  }, [triggerVisualSummaryOptimizationSilent]);
+
   // 高光笔记重新生成处理
   const handleHighlightRegenerate = useCallback(async () => {
     if (!note.subtitle_path || !note.model_id) {
@@ -1068,7 +1412,13 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         const data = event.payload;
         if (data.status === "AllCompleted") {
           setHighlightIsGenerating(false);
-          onGenerationComplete?.();
+          // 如果是自动生成流程，继续触发视觉化笔记
+          if (isInitialAutoGeneration(note.id)) {
+            onGenerationComplete?.();
+            triggerVisualSummaryOptimization();
+          } else {
+            onGenerationComplete?.();
+          }
           unlisten();
         } else if (data.status === "Aborted") {
           setHighlightIsGenerating(false);
@@ -1080,32 +1430,20 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       message.error(`生成失败: ${error}`);
       setHighlightIsGenerating(false);
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, triggerVisualSummaryOptimization]);
 
   // 章节生成完成后的回调 - 触发高光笔记生成（自动生成流程）
   const handleChapterGenerationComplete = useCallback(() => {
     // 先刷新笔记数据
     onGenerationComplete?.();
 
-    // 如果是自动生成流程，继续生成高光笔记
+    // 如果是自动生成流程，继续生成高光笔记（不切换标签页）
     if (isInitialAutoGeneration(note.id) && !note.highlights) {
-      // 切换到高光笔记标签页，确保 HighlightGrid 被渲染
       setTimeout(() => {
-        setActiveTab("highlights");
-
-        // 等待 HighlightGrid 渲染完成后再触发生成
-        setTimeout(() => {
-          if (highlightGridRef.current) {
-            highlightGridRef.current.generateHighlights();
-          } else {
-            console.error("[NoteContentPanel] HighlightGrid ref 仍然为 null");
-          }
-          // 高光笔记生成完成后，结束首次自动生成流程
-          setInitialAutoGeneration(note.id, false);
-        }, 500);
+        generateHighlightsDirectly();
       }, 500);
     }
-  }, [note.id, note.highlights, onGenerationComplete]);
+  }, [note.id, note.highlights, onGenerationComplete, generateHighlightsDirectly]);
 
   // 单章节重新优化字幕
   const handleReoptimizeChapter = useCallback(async (chapterId: string) => {
@@ -1902,21 +2240,27 @@ Video subtitles content:`;
             modelId={currentModelId || note.model_id}
             totalDuration={chapterData?.total_duration || 0}
             initialHighlightData={parseHighlightData(note.highlights)}
-            onGenerationComplete={onGenerationComplete}
+            onGenerationComplete={() => {
+              // 如果是自动生成流程，继续触发视觉化笔记
+              if (isInitialAutoGeneration(note.id)) {
+                onGenerationComplete?.();
+                triggerVisualSummaryOptimization();
+              } else {
+                onGenerationComplete?.();
+              }
+            }}
             isGenerating={highlightIsGenerating}
             onRegenerate={handleHighlightRegenerate}
           />
         )}
         {activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} autoScroll={autoScroll} />}
         {activeTab === "visual" && (
-          <EditableMarkdown
-            noteId={note.id}
-            tabType="visual_summary"
-            content={note.visual_summary}
-            isGenerating={isTabGenerating("visual")}
-            emptyMessage="视觉化总结 (Beta) - 即将推出"
-            isEditMode={isEditMode}
-            onContentUpdate={onGenerationComplete}
+          <VisualSummaryContent
+            chapterData={chapterData}
+            optimizedSubtitles={optimizedSubtitles}
+            originalSubtitles={subtitleEntries}
+            subtitleOptimizing={subtitleOptimizing}
+            subtitleOptimizationProgress={subtitleOptimizationProgress}
           />
         )}
         {activeTab === "custom" && (

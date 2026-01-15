@@ -57,19 +57,25 @@ impl TaskStateManager {
         });
     }
 
-    async fn chapter_completed(&self, note_id: i64, chapter_id: &str) {
+    async fn chapter_completed(&self, note_id: i64, chapter_id: &str) -> (usize, usize, usize) {
         let mut tasks = self.tasks.write().await;
         if let Some(state) = tasks.get_mut(&note_id) {
             state.completed += 1;
             state.optimizing_chapter_ids.retain(|id| id != chapter_id);
+            (state.completed, state.failed, state.total)
+        } else {
+            (0, 0, 0)
         }
     }
 
-    async fn chapter_failed(&self, note_id: i64, chapter_id: &str) {
+    async fn chapter_failed(&self, note_id: i64, chapter_id: &str) -> (usize, usize, usize) {
         let mut tasks = self.tasks.write().await;
         if let Some(state) = tasks.get_mut(&note_id) {
             state.failed += 1;
             state.optimizing_chapter_ids.retain(|id| id != chapter_id);
+            (state.completed, state.failed, state.total)
+        } else {
+            (0, 0, 0)
         }
     }
 
@@ -123,10 +129,15 @@ pub enum SubtitleOptimizationEvent {
     ChapterCompleted {
         chapter_id: String,
         optimized_text: String,
+        completed: usize,
+        total: usize,
     },
     ChapterFailed {
         chapter_id: String,
         error: String,
+        completed: usize,
+        failed: usize,
+        total: usize,
     },
     AllCompleted {
         succeeded: usize,
@@ -223,6 +234,7 @@ pub async fn optimize_chapters(
             let abort_flag = abort_flag.clone();
             let app = app.clone();
             let event_name = event_name.clone();
+            let note_id = note_id;
 
             async move {
                 // 检查是否已中止
@@ -241,23 +253,30 @@ pub async fn optimize_chapters(
                 // 执行优化
                 let result = optimize_single_chapter(&config, &chapter, &abort_flag).await;
 
-                // 发送结果事件
+                // 发送结果事件并更新任务状态
                 match &result {
                     Ok(optimized_text) => {
+                        let (completed, _failed, total) = get_task_state_manager().chapter_completed(note_id, &chapter.chapter_id).await;
                         let _ = app.emit(
                             &event_name,
                             SubtitleOptimizationEvent::ChapterCompleted {
                                 chapter_id: chapter.chapter_id.clone(),
                                 optimized_text: optimized_text.clone(),
+                                completed,
+                                total,
                             },
                         );
                     }
                     Err(error) => {
+                        let (completed, failed, total) = get_task_state_manager().chapter_failed(note_id, &chapter.chapter_id).await;
                         let _ = app.emit(
                             &event_name,
                             SubtitleOptimizationEvent::ChapterFailed {
                                 chapter_id: chapter.chapter_id.clone(),
                                 error: error.clone(),
+                                completed,
+                                failed,
+                                total,
                             },
                         );
                     }
@@ -271,16 +290,14 @@ pub async fn optimize_chapters(
     // 并发执行所有任务
     let results = futures::future::join_all(tasks).await;
 
-    // 统计结果并更新任务状态
-    for (chapter_id, result) in results {
+    // 统计结果
+    for (_chapter_id, result) in results {
         match result {
             Ok(_) => {
                 succeeded += 1;
-                task_manager.chapter_completed(note_id, &chapter_id).await;
             }
             Err(_) => {
                 failed += 1;
-                task_manager.chapter_failed(note_id, &chapter_id).await;
             }
         }
     }
