@@ -149,10 +149,33 @@ struct SubtitleChunk {
     text: String,        // 该段的字幕文本（带索引）
 }
 
-/// 将字幕按字符数分段（每段约 10000 字符）
+/// 将字幕按字符数分段
+/// 分段策略：先计算段数 = 总字数 / SEGMENT_SIZE + 1，再用总字数 / 段数得到每段目标大小
 /// 每段的字幕索引从 0 开始（相对索引），便于 AI 处理和后续合并
 fn split_subtitle_into_chunks(subtitle_entries: &[SubtitleEntry]) -> Vec<SubtitleChunk> {
-    const TARGET_CHUNK_SIZE: usize = 10000;
+    const SEGMENT_SIZE: usize = 10000;
+
+    // 先计算总字符数
+    let total_chars: usize = subtitle_entries.iter().map(|e| e.text.len() + 10).sum(); // +10 for "[idx] \n"
+
+    // 如果总字符数小于 SEGMENT_SIZE，不分段
+    if total_chars < SEGMENT_SIZE {
+        let text: String = subtitle_entries
+            .iter()
+            .enumerate()
+            .map(|(i, e)| format!("[{}] {}\n", i, e.text))
+            .collect();
+        return vec![SubtitleChunk {
+            start_index: 0,
+            end_index: subtitle_entries.len(),
+            text: text.trim().to_string(),
+        }];
+    }
+
+    // 计算段数：总字数 / SEGMENT_SIZE + 1
+    let num_chunks = total_chars / SEGMENT_SIZE + 1;
+    // 计算每段目标大小：总字数 / 段数（确保各段大小均匀）
+    let target_chunk_size = total_chars / num_chunks;
 
     let mut chunks = Vec::new();
     let mut current_chunk_lines: Vec<String> = Vec::new();
@@ -166,7 +189,7 @@ fn split_subtitle_into_chunks(subtitle_entries: &[SubtitleEntry]) -> Vec<Subtitl
         let line_len = line.len();
 
         // 如果当前段加上新行会超过目标大小，且当前段不为空，则保存当前段
-        if current_chunk_char_count + line_len > TARGET_CHUNK_SIZE && !current_chunk_lines.is_empty() {
+        if current_chunk_char_count + line_len > target_chunk_size && !current_chunk_lines.is_empty() {
             chunks.push(SubtitleChunk {
                 start_index: current_chunk_start,
                 end_index: i,

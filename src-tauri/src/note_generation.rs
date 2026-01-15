@@ -425,18 +425,22 @@ fn ceil_char_boundary(s: &str, index: usize) -> usize {
 }
 
 /// 语义分段（按字幕时间戳和语义边界）
-/// 分段策略：每段约 10000 字符
-fn split_subtitle_by_semantic(subtitle: &str, _num_chunks: usize) -> Vec<String> {
-    if subtitle.len() < 10000 {
-        // 内容少于10000字，不需要分段
+/// 分段策略：先计算段数 = 字数 / SEGMENT_SIZE + 1，再用字数 / 段数得到每段目标大小
+const SEGMENT_SIZE: usize = 10000;
+
+fn split_subtitle_by_semantic(subtitle: &str) -> Vec<String> {
+    if subtitle.len() < SEGMENT_SIZE {
+        // 内容少于 SEGMENT_SIZE，不需要分段
         return vec![subtitle.to_string()];
     }
 
+    // 计算段数：字数 / SEGMENT_SIZE + 1
+    let num_chunks = subtitle.len() / SEGMENT_SIZE + 1;
+    // 计算每段目标大小：字数 / 段数（确保各段大小均匀）
+    let target_chunk_size = subtitle.len() / num_chunks;
+
     let mut chunks = Vec::new();
     let mut last_split = 0;
-
-    // 目标每段约 10000 字符
-    let target_chunk_size = 10000;
 
     while last_split + target_chunk_size < subtitle.len() {
         // 计算目标分割位置
@@ -449,7 +453,7 @@ fn split_subtitle_by_semantic(subtitle: &str, _num_chunks: usize) -> Vec<String>
         // 确保 split_pos 在字符边界上
         let split_pos = ceil_char_boundary(subtitle, split_pos);
 
-        // 确保分段有效且有合理长度
+        // 确保分段有效且有合理长度（至少 1000 字符）
         if split_pos > last_split && split_pos > last_split + 1000 {
             chunks.push(subtitle[last_split..split_pos].to_string());
             last_split = split_pos;
@@ -556,8 +560,8 @@ async fn generate_full_summary_layered(
     eprintln!("[笔记生成] 字幕总长度: {} 字符", full_subtitle.len());
     eprintln!("[笔记生成] 使用模型: {}", ai_config.model);
 
-    // 第一层：动态分段生成摘要框架（按字数/10000+1计算段数）
-    let chunks = split_subtitle_by_semantic(full_subtitle, 0);
+    // 第一层：动态分段生成摘要框架（按字数/SEGMENT_SIZE+1计算段数，再均分）
+    let chunks = split_subtitle_by_semantic(full_subtitle);
     let total_chunks = chunks.len();
 
     eprintln!("[笔记生成] 分段策略: 字数/10000+1 = {} 段", total_chunks);

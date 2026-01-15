@@ -2,7 +2,7 @@
  * 高光笔记主组件 - 整合所有子组件
  */
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, forwardRef, useImperativeHandle } from "react";
 import { Loader2, Sparkles, AlertCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -29,7 +29,12 @@ interface HighlightGridProps {
   onRegenerate?: () => void;
 }
 
-export function HighlightGrid({
+export interface HighlightGridRef {
+  generateHighlights: () => void;
+  isGenerating: boolean;
+}
+
+export const HighlightGrid = forwardRef<HighlightGridRef, HighlightGridProps>(function HighlightGrid({
   noteId,
   subtitlePath,
   modelId,
@@ -39,7 +44,7 @@ export function HighlightGrid({
   onGenerationComplete,
   isGenerating: externalIsGenerating = false,
   onRegenerate,
-}: HighlightGridProps) {
+}, ref) {
   // 状态
   const [highlightData, setHighlightData] = useState<HighlightData | null>(initialHighlightData || null);
   const [selectedTags, setSelectedTags] = useState<Set<string>>(new Set());
@@ -157,6 +162,12 @@ export function HighlightGrid({
     }
   }, [noteId, subtitlePath, modelId, totalDuration, setupEventListener, onRegenerate]);
 
+  // 暴露方法给父组件
+  useImperativeHandle(ref, () => ({
+    generateHighlights: handleGenerate,
+    get isGenerating() { return isGenerating; },
+  }), [handleGenerate, isGenerating]);
+
   // 中止生成
   const handleAbort = useCallback(async () => {
     if (generationIdRef.current) {
@@ -212,7 +223,7 @@ export function HighlightGrid({
   // 渲染空状态
   if (!highlightData && !isGenerating) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-4">
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px] px-4">
         <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
           <Sparkles className="w-8 h-8 text-slate-400 dark:text-slate-500" />
         </div>
@@ -255,7 +266,7 @@ export function HighlightGrid({
   // 渲染生成中状态
   if (isGenerating) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 px-4">
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px] px-4">
         <Loader2 className="w-12 h-12 text-blue-500 animate-spin mb-4" />
         <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
           正在生成高光笔记...
@@ -326,4 +337,4 @@ export function HighlightGrid({
       )}
     </div>
   );
-}
+});

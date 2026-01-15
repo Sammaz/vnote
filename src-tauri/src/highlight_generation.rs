@@ -116,14 +116,14 @@ struct HighlightPrompts;
 impl HighlightPrompts {
     fn default_highlights(subtitle_content: &str, total_duration: f64) -> String {
         format!(
-            r#"你是一个专业的视频内容分析师。请分析以下视频字幕，提取最重要的高光片段。
+            r#"你是一个专业的视频内容分析师。请分析以下视频字幕片段，提取值得高光的精彩内容。
 
 视频总时长：{:.0} 秒
 
 要求：
-1. 提取 5-10 个最重要的高光片段
-2. 每个片段应该是一个完整的知识点或观点
-3. 覆盖视频的开头、中段和结尾
+1. 根据内容质量提取高光片段，数量不限（可以是0个、1个或多个）
+2. 如果内容信息量不足或没有值得高光的内容，返回空数组 []
+3. 每个片段应该是一个完整的知识点或观点
 4. 评分标准：信息密度、观点独特性、实用价值
 
 输出格式（JSON数组）：
@@ -139,7 +139,7 @@ impl HighlightPrompts {
 ]
 ```
 
-只输出JSON数组，不要其他内容。
+只输出JSON数组，不要其他内容。如果没有值得高光的内容，直接输出 []
 
 视频字幕：
 {}"#,
@@ -149,7 +149,7 @@ impl HighlightPrompts {
 
     fn emotional_highlights(subtitle_content: &str, total_duration: f64) -> String {
         format!(
-            r#"你是一个专业的视频内容分析师，擅长捕捉情绪高点。请分析以下视频字幕，提取情绪爆点片段。
+            r#"你是一个专业的视频内容分析师，擅长捕捉情绪高点。请分析以下视频字幕片段，提取情绪爆点内容。
 
 视频总时长：{:.0} 秒
 
@@ -160,8 +160,9 @@ impl HighlightPrompts {
 4. 争议性观点、引发讨论的内容
 
 要求：
-1. 提取 5-10 个情绪高点片段
-2. 评分标准：情绪强度、共鸣度、讨论潜力
+1. 根据内容质量提取情绪高点片段，数量不限（可以是0个、1个或多个）
+2. 如果内容没有明显的情绪高点，返回空数组 []
+3. 评分标准：情绪强度、共鸣度、讨论潜力
 
 输出格式（JSON数组）：
 ```json
@@ -176,7 +177,7 @@ impl HighlightPrompts {
 ]
 ```
 
-只输出JSON数组，不要其他内容。
+只输出JSON数组，不要其他内容。如果没有情绪高点，直接输出 []
 
 视频字幕：
 {}"#,
@@ -186,7 +187,7 @@ impl HighlightPrompts {
 
     fn viral_highlights(subtitle_content: &str, total_duration: f64) -> String {
         format!(
-            r#"你是一个专业的短视频运营专家。请分析以下视频字幕，挑选最有传播潜力的切片。
+            r#"你是一个专业的短视频运营专家。请分析以下视频字幕片段，挑选有传播潜力的切片。
 
 视频总时长：{:.0} 秒
 
@@ -197,9 +198,10 @@ impl HighlightPrompts {
 4. 可复用性：是否适合二次创作
 
 要求：
-1. 提取 5-10 个最具传播潜力的片段
-2. 每个片段时长建议 15-60 秒
-3. 评分标准：传播潜力、完整性、独立性
+1. 根据内容质量提取有传播潜力的片段，数量不限（可以是0个、1个或多个）
+2. 如果内容没有传播潜力，返回空数组 []
+3. 每个片段时长建议 15-60 秒
+4. 评分标准：传播潜力、完整性、独立性
 
 输出格式（JSON数组）：
 ```json
@@ -214,7 +216,7 @@ impl HighlightPrompts {
 ]
 ```
 
-只输出JSON数组，不要其他内容。
+只输出JSON数组，不要其他内容。如果没有传播潜力的内容，直接输出 []
 
 视频字幕：
 {}"#,
@@ -283,17 +285,23 @@ fn find_semantic_boundary_near(text: &str, around: usize, max_distance: usize) -
 }
 
 /// 语义分段（按字幕时间戳和语义边界）
+/// 分段策略：先计算段数 = 字数 / SEGMENT_SIZE + 1，再用字数 / 段数得到每段目标大小
 pub fn split_subtitle_by_semantic(subtitle: &str) -> Vec<String> {
     if subtitle.len() < SEGMENT_SIZE {
         return vec![subtitle.to_string()];
     }
 
+    // 计算段数：字数 / SEGMENT_SIZE + 1
+    let num_chunks = subtitle.len() / SEGMENT_SIZE + 1;
+    // 计算每段目标大小：字数 / 段数（确保各段大小均匀）
+    let target_chunk_size = subtitle.len() / num_chunks;
+
     let mut chunks = Vec::new();
     let mut last_split = 0;
 
-    while last_split + SEGMENT_SIZE < subtitle.len() {
-        let target_pos = last_split + SEGMENT_SIZE;
-        let split_pos = find_semantic_boundary_near(subtitle, target_pos, SEGMENT_SIZE / 10)
+    while last_split + target_chunk_size < subtitle.len() {
+        let target_pos = last_split + target_chunk_size;
+        let split_pos = find_semantic_boundary_near(subtitle, target_pos, target_chunk_size / 10)
             .unwrap_or(target_pos);
         let split_pos = ceil_char_boundary(subtitle, split_pos);
 

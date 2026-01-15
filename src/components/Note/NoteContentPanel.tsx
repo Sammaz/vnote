@@ -28,7 +28,7 @@ import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterDat
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
-import { HighlightGrid } from "./Highlight";
+import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { message } from "../../utils/message";
 import {
   getNoteGenerationState,
@@ -92,6 +92,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // ChapterGrid 组件的 ref
   const chapterGridRef = useRef<ChapterGridRef>(null);
+
+  // HighlightGrid 组件的 ref
+  const highlightGridRef = useRef<HighlightGridRef>(null);
 
   // 章节相关状态
   const [chapterData, setChapterData] = useState<ChapterData | null>(null);
@@ -834,6 +837,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 原文细读（detailed_reading）使用单独的章节生成状态
     if (tabType === "detailed_reading" && isChapterGenerating(note.id)) return true;
 
+    // 高光笔记使用单独的生成状态
+    if (tabType === "highlights" && highlightIsGenerating) return true;
+
     return false;
   };
 
@@ -1092,6 +1098,32 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setHighlightIsGenerating(false);
     }
   }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete]);
+
+  // 章节生成完成后的回调 - 触发高光笔记生成（自动生成流程）
+  const handleChapterGenerationComplete = useCallback(() => {
+    // 先刷新笔记数据
+    onGenerationComplete?.();
+
+    // 如果是自动生成流程，继续生成高光笔记
+    if (attemptedAutoGenerateNoteIds.has(note.id) && !note.highlights) {
+      console.log("[NoteContentPanel] 原文细读完成，准备生成高光笔记");
+
+      // 切换到高光笔记标签页，确保 HighlightGrid 被渲染
+      setTimeout(() => {
+        setActiveTab("highlights");
+
+        // 等待 HighlightGrid 渲染完成后再触发生成
+        setTimeout(() => {
+          if (highlightGridRef.current) {
+            console.log("[NoteContentPanel] 开始生成高光笔记");
+            highlightGridRef.current.generateHighlights();
+          } else {
+            console.error("[NoteContentPanel] HighlightGrid ref 仍然为 null");
+          }
+        }, 500);
+      }, 500);
+    }
+  }, [note.id, note.highlights, onGenerationComplete]);
 
   // 单章节重新优化字幕
   const handleReoptimizeChapter = useCallback(async (chapterId: string) => {
@@ -1744,7 +1776,7 @@ Video subtitles content:`;
                 // 发送事件跳转视频时间
                 window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
               }}
-              onGenerationComplete={onGenerationComplete}
+              onGenerationComplete={handleChapterGenerationComplete}
               modelId={currentModelId || note.model_id}
               showToolbar={false}
               currentChapterId={currentChapterId}
@@ -1760,6 +1792,7 @@ Video subtitles content:`;
         })()}
         {activeTab === "highlights" && (
           <HighlightGrid
+            ref={highlightGridRef}
             noteId={note.id}
             subtitlePath={note.subtitle_path}
             modelId={currentModelId || note.model_id}
