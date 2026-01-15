@@ -36,6 +36,8 @@ import {
   attemptedAutoGenerateNoteIds,
   activeListeners,
   isChapterGenerating,
+  setInitialAutoGeneration,
+  isInitialAutoGeneration,
 } from "../../utils/noteGenerationState";
 
 type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom";
@@ -523,7 +525,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           // 注意：后端返回的是 "FullSummary"（驼峰），前端使用的是 "full_summary"（下划线）
           const hasFullSummaryCompleted = newCompletedTabs.has("full_summary") || newCompletedTabs.has("FullSummary");
 
-          if (hasFullSummaryCompleted && attemptedAutoGenerateNoteIds.has(noteId)) {
+          if (hasFullSummaryCompleted && isInitialAutoGeneration(noteId)) {
             console.log("[NoteContentPanel] 全文总结完成，准备生成原文细读");
 
             // 切换到原文细读标签页，确保 ChapterGrid 被渲染
@@ -543,7 +545,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           } else {
             console.log("[NoteContentPanel] 不触发原文细读生成:", {
               hasFullSummary: hasFullSummaryCompleted,
-              hasAttempted: attemptedAutoGenerateNoteIds.has(noteId),
+              isInitialAutoGeneration: isInitialAutoGeneration(noteId),
             });
           }
 
@@ -820,6 +822,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       console.log("[NoteContentPanel] 开始自动生成");
       // 标记已尝试自动生成
       attemptedAutoGenerateNoteIds.add(note.id);
+      // 标记为首次自动生成流程
+      setInitialAutoGeneration(note.id, true);
       // 开始生成全文总结（完成后会在 AllCompleted 事件中自动触发原文细读）
       handleGenerate();
     } else {
@@ -1115,7 +1119,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     onGenerationComplete?.();
 
     // 如果是自动生成流程，继续生成高光笔记
-    if (attemptedAutoGenerateNoteIds.has(note.id) && !note.highlights) {
+    if (isInitialAutoGeneration(note.id) && !note.highlights) {
       console.log("[NoteContentPanel] 原文细读完成，准备生成高光笔记");
 
       // 切换到高光笔记标签页，确保 HighlightGrid 被渲染
@@ -1130,6 +1134,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           } else {
             console.error("[NoteContentPanel] HighlightGrid ref 仍然为 null");
           }
+          // 高光笔记生成完成后，结束首次自动生成流程
+          setInitialAutoGeneration(note.id, false);
         }, 500);
       }, 500);
     }

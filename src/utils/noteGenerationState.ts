@@ -9,6 +9,7 @@ interface NoteGenerationState {
   completedTabs: Set<string>;
   failedTabs: Map<string, string>;
   isGeneratingChapters: boolean; // 是否正在生成章节（原文细读）
+  isInitialAutoGeneration: boolean; // 是否正在进行首次自动生成流程
 }
 
 // 全局存储每个笔记的生成状态
@@ -28,6 +29,7 @@ export function getNoteGenerationState(noteId: number): NoteGenerationState {
       completedTabs: new Set(),
       failedTabs: new Map(),
       isGeneratingChapters: false,
+      isInitialAutoGeneration: false,
     });
   }
   return noteGenerationStates.get(noteId)!;
@@ -69,4 +71,14 @@ export function setChapterGenerating(noteId: number, isGenerating: boolean) {
 // 获取章节生成状态
 export function isChapterGenerating(noteId: number): boolean {
   return getNoteGenerationState(noteId).isGeneratingChapters;
+}
+
+// 设置首次自动生成流程状态
+export function setInitialAutoGeneration(noteId: number, isInitial: boolean) {
+  setNoteGenerationState(noteId, { isInitialAutoGeneration: isInitial });
+}
+
+// 获取首次自动生成流程状态
+export function isInitialAutoGeneration(noteId: number): boolean {
+  return getNoteGenerationState(noteId).isInitialAutoGeneration;
 }
