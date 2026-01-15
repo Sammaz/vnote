@@ -31,6 +31,7 @@ import { SubtitleRow } from "./SubtitleRow";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { VisualSummaryContent } from "./VisualSummaryContent";
 import { message } from "../../utils/message";
+import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 import {
   getNoteGenerationState,
   setNoteGenerationState,
@@ -383,6 +384,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 编辑模式状态
   const [isEditMode, setIsEditMode] = useState(false);
+  const [isVisualEditMode, setIsVisualEditMode] = useState(false);
+  const [visualEditContent, setVisualEditContent] = useState<string>("");
 
   // 从全局状态同步组件state
   const syncStateFromGlobal = useCallback(() => {
@@ -926,6 +929,63 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       console.error("下载失败:", error);
       message.error(`下载失败: ${error}`);
     }
+  };
+
+  // 获取视觉化总结的 Markdown 内容
+  const getVisualSummaryContent = useCallback((): string => {
+    if (!chapterData || chapterData.chapters.length === 0) {
+      return "";
+    }
+    return assembleChapterMarkdown({
+      chapters: chapterData.chapters,
+      optimizedSubtitles,
+      originalSubtitles: subtitleEntries,
+    });
+  }, [chapterData, optimizedSubtitles, subtitleEntries]);
+
+  // 视觉化总结复制
+  const handleVisualCopy = async () => {
+    const content = isVisualEditMode ? visualEditContent : getVisualSummaryContent();
+    if (!content) {
+      message.warning("暂无内容可复制");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      message.success("已复制到剪贴板");
+    } catch {
+      message.error("复制失败");
+    }
+  };
+
+  // 视觉化总结下载
+  const handleVisualDownload = async () => {
+    const content = isVisualEditMode ? visualEditContent : getVisualSummaryContent();
+    if (!content) {
+      message.warning("暂无内容可下载");
+      return;
+    }
+    try {
+      const filePath = await save({
+        defaultPath: `${note.title}-视觉化总结`,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+      if (!filePath) return;
+      await invoke("save_file_content", { path: filePath, content });
+      message.success("下载成功");
+    } catch (error) {
+      console.error("下载失败:", error);
+      message.error(`下载失败: ${error}`);
+    }
+  };
+
+  // 进入视觉化总结编辑模式时初始化内容
+  const handleVisualEditToggle = () => {
+    if (!isVisualEditMode) {
+      // 进入编辑模式，初始化内容
+      setVisualEditContent(getVisualSummaryContent());
+    }
+    setIsVisualEditMode(!isVisualEditMode);
   };
 
   // 直接调用后端 API 生成章节（用于自动生成流程，不需要切换标签页）
@@ -2097,6 +2157,41 @@ Video subtitles content:`;
             )}
           </button>
         </div>
+      ) : activeTab === "visual" ? (
+        // 视觉化总结标签页的专用工具栏
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleVisualEditToggle}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                isVisualEditMode
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <Edit3 className="w-4 h-4" />
+              {isVisualEditMode ? "预览" : "编辑"}
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleVisualCopy}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Copy className="w-4 h-4" />
+              复制
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={handleVisualDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              下载
+            </button>
+          </div>
+        </div>
       ) : activeTab === "custom" && note.custom_summary ? (
         // 自定义总结标签页的工具栏（有内容时显示完整工具栏）
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
@@ -2259,8 +2354,9 @@ Video subtitles content:`;
             chapterData={chapterData}
             optimizedSubtitles={optimizedSubtitles}
             originalSubtitles={subtitleEntries}
-            subtitleOptimizing={subtitleOptimizing}
-            subtitleOptimizationProgress={subtitleOptimizationProgress}
+            isEditMode={isVisualEditMode}
+            editContent={visualEditContent}
+            onEditContentChange={setVisualEditContent}
           />
         )}
         {activeTab === "custom" && (
