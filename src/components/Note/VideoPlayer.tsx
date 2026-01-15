@@ -386,12 +386,18 @@ export function VideoPlayer({
           setCaptionsEnabled(isCaptionsActive);
           assVisibleRef.current = isCaptionsActive;
 
-          // 如果是 ASS 字幕，同步更新 ASS-box 显示状态
+          // 如果是 ASS 字幕，同步更新 ASS 显示状态
           if (isAssSubtitle) {
-            const videoWrapper = containerRef.current?.querySelector(".plyr__video-wrapper");
-            const assBox = videoWrapper?.querySelector(".ASS-box") as HTMLElement;
+            if (assRef.current) {
+              if (isCaptionsActive) {
+                assRef.current.show();
+              } else {
+                assRef.current.hide();
+              }
+            }
+            const assBox = containerRef.current?.querySelector(".ASS-box") as HTMLElement;
             if (assBox) {
-              assBox.style.display = isCaptionsActive ? "" : "none";
+              assBox.style.visibility = isCaptionsActive ? "visible" : "hidden";
             }
           }
         }, 50);
@@ -418,6 +424,9 @@ export function VideoPlayer({
       }
 
       if (isAssSubtitle && subtitleUrl) {
+        // 捕获当前的字幕状态，避免闭包问题
+        const shouldShowCaptions = captionsEnabled;
+        
         Promise.all([
           import("assjs"),
           invoke<string>("read_file_content", { path: subtitleUrl }),
@@ -460,14 +469,28 @@ export function VideoPlayer({
             // 保存 observer 引用以便清理
             (cleanupRef as any).assResizeObserver = resizeObserver;
 
-            // 根据保存的字幕状态设置初始显示/隐藏
-            setTimeout(() => {
+            // 根据字幕状态设置显示/隐藏
+            // ASS 实例创建后，DOM 元素可能还没完全渲染，需要多次延迟设置
+            const setAssVisibility = (visible: boolean) => {
+              if (assRef.current) {
+                if (visible) {
+                  assRef.current.show();
+                } else {
+                  assRef.current.hide();
+                }
+              }
               const assBox = videoWrapper.querySelector(".ASS-box") as HTMLElement;
               if (assBox) {
-                assBox.style.display = captionsEnabled ? "" : "none";
+                assBox.style.visibility = visible ? "visible" : "hidden";
               }
-              assVisibleRef.current = captionsEnabled;
-            }, 0);
+            };
+
+            setAssVisibility(shouldShowCaptions);
+            setTimeout(() => setAssVisibility(shouldShowCaptions), 0);
+            setTimeout(() => setAssVisibility(shouldShowCaptions), 50);
+            setTimeout(() => setAssVisibility(shouldShowCaptions), 100);
+            
+            assVisibleRef.current = shouldShowCaptions;
           })
           .catch((err) => {
             console.error("Failed to load ASS subtitle:", err);
@@ -627,9 +650,16 @@ export function VideoPlayer({
     }
 
     // 更新 ASS 字幕状态
+    if (assRef.current) {
+      if (captionsEnabled) {
+        assRef.current.show();
+      } else {
+        assRef.current.hide();
+      }
+    }
     const assBox = containerRef.current?.querySelector(".ASS-box") as HTMLElement;
     if (assBox) {
-      assBox.style.display = captionsEnabled ? "" : "none";
+      assBox.style.visibility = captionsEnabled ? "visible" : "hidden";
     }
     assVisibleRef.current = captionsEnabled;
   }, [captionsEnabled]);
