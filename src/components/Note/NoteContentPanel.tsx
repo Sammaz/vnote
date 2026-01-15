@@ -611,6 +611,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [showPromptDialog, setShowPromptDialog] = useState(false);
   const [dialogTab, setDialogTab] = useState<"default" | "custom">("default");
 
+  // 自定义总结专用弹窗状态（只显示自定义标签页）
+  const [showCustomOnlyDialog, setShowCustomOnlyDialog] = useState(false);
+
   // 获取默认 AI 配置或使用笔记的 model_id
   const getDefaultModelId = useCallback(() => {
     // 优先使用笔记保存的 model_id
@@ -869,6 +872,13 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     setConfigSentenceLength(30);
     setCustomPrompt("");
     setShowPromptDialog(true);
+  };
+
+  // 打开自定义总结专用弹窗（只显示自定义标签页）
+  const openCustomPromptDialog = () => {
+    setSelectedModelId(currentModelId || note.model_id || aiConfigs[0]?.id || 0);
+    setCustomPrompt("");
+    setShowCustomOnlyDialog(true);
   };
 
   // 获取当前标签页的内容
@@ -1426,6 +1436,78 @@ Video subtitles content:`;
     }
   };
 
+  // 自定义总结专用弹框的生成处理
+  const handleCustomOnlyGenerate = async () => {
+    if (!selectedModelId) {
+      message.warning("请选择AI模型");
+      return;
+    }
+
+    if (!customPrompt) {
+      message.warning("请输入自定义提示词");
+      return;
+    }
+
+    // 检查是否已经在生成中
+    const currentState = getNoteGenerationState(note.id);
+    if (currentState.isGenerating) {
+      message.warning("该笔记正在生成中，请稍后再试");
+      return;
+    }
+
+    setShowCustomOnlyDialog(false);
+
+    try {
+      const id = crypto.randomUUID();
+      const newRegeneratingTabs = new Set<TabType>(["custom_summary"]);
+
+      // 更新全局状态
+      setNoteGenerationState(note.id, {
+        isGenerating: true,
+        generationId: id,
+        regeneratingTabs: newRegeneratingTabs,
+        progress: { current: 0, total: 0, message: "准备生成自定义总结..." },
+        completedTabs: new Set<TabType>(),
+        failedTabs: new Map<TabType, string>(),
+      });
+
+      // 更新组件state
+      setGenerationId(id);
+      setIsGenerating(true);
+      setCompletedTabs(new Set());
+      setFailedTabs(new Map());
+      setRegeneratingTabs(newRegeneratingTabs);
+
+      // 设置事件监听器
+      setupGenerationListener(note.id, id);
+
+      // 等待状态更新和事件监听器设置完成
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // 后端会立即返回 generation_id，实际生成在后台进行
+      await invoke("generate_note_content", {
+        generationId: id,
+        noteId: note.id,
+        modelId: selectedModelId,
+        concurrent: true,
+        regenerate: true,
+        tabsToGenerate: ["custom_summary"],
+        customPrompt: customPrompt,
+      });
+    } catch (error) {
+      // 出错时重置状态
+      setNoteGenerationState(note.id, {
+        isGenerating: false,
+        generationId: null,
+        regeneratingTabs: new Set(),
+      });
+      setIsGenerating(false);
+      setGenerationId(null);
+      setRegeneratingTabs(new Set());
+      message.error(`生成失败: ${error}`);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden">
       {/* 标签页头部 */}
@@ -1705,6 +1787,56 @@ Video subtitles content:`;
             )}
           </button>
         </div>
+      ) : activeTab === "custom" && note.custom_summary ? (
+        // 自定义总结标签页的工具栏（有内容时显示完整工具栏）
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsEditMode(!isEditMode)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                isEditMode
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <Edit3 className="w-4 h-4" />
+              {isEditMode ? "预览" : "编辑"}
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">
+              思维导图
+            </button>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleCopy}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Copy className="w-4 h-4" />
+              复制
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              下载
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={openCustomPromptDialog}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-4 h-4" />
+              重新总结
+            </button>
+          </div>
+        </div>
+      ) : activeTab === "custom" && !note.custom_summary ? (
+        // 自定义总结标签页的工具栏（无内容时不显示工具栏）
+        null
       ) : (
         // 其他标签页的简化工具栏
         <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
@@ -1816,15 +1948,46 @@ Video subtitles content:`;
           />
         )}
         {activeTab === "custom" && (
-          <EditableMarkdown
-            noteId={note.id}
-            tabType="custom_summary"
-            content={note.custom_summary}
-            isGenerating={isTabGenerating("custom")}
-            emptyMessage="自定义总结 - 根据您的需求定制总结内容"
-            isEditMode={isEditMode}
-            onContentUpdate={onGenerationComplete}
-          />
+          note.custom_summary ? (
+            <EditableMarkdown
+              noteId={note.id}
+              tabType="custom_summary"
+              content={note.custom_summary}
+              isGenerating={isTabGenerating("custom")}
+              emptyMessage="自定义总结 - 根据您的需求定制总结内容"
+              isEditMode={isEditMode}
+              onContentUpdate={onGenerationComplete}
+            />
+          ) : isTabGenerating("custom") ? (
+            <EditableMarkdown
+              noteId={note.id}
+              tabType="custom_summary"
+              content={null}
+              isGenerating={true}
+              emptyMessage=""
+              isEditMode={false}
+              onContentUpdate={onGenerationComplete}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="text-center">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/30 dark:to-purple-900/30 flex items-center justify-center">
+                  <Sparkles className="w-8 h-8 text-blue-500" />
+                </div>
+                <h3 className="text-lg font-medium text-slate-700 dark:text-slate-200 mb-2">自定义总结</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-xs">
+                  根据您的需求定制总结内容，输入自定义提示词生成个性化笔记
+                </p>
+                <button
+                  onClick={openCustomPromptDialog}
+                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors cursor-pointer"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  开始生成
+                </button>
+              </div>
+            </div>
+          )
         )}
       </div>
 
@@ -2124,6 +2287,135 @@ Video subtitles content:`;
                 onClick={handleCustomGenerate}
                 disabled={dialogTab === "custom" && !customPrompt}
                 className="flex-1 px-4 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Sparkles className="w-4 h-4" />
+                开始生成
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 自定义总结专用弹窗（只显示自定义标签页） */}
+      {showCustomOnlyDialog && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowCustomOnlyDialog(false)}>
+          <div className="bg-white dark:bg-vnote-card rounded-2xl shadow-2xl w-[600px] max-w-[90vw]" onClick={e => e.stopPropagation()}>
+            {/* 标题和关闭按钮 */}
+            <div className="flex items-center justify-between px-8 pt-6 pb-4">
+              <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-blue-500" />
+                自定义总结
+              </h3>
+              <button
+                onClick={() => setShowCustomOnlyDialog(false)}
+                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            {/* 内容区域 */}
+            <div className="px-8 py-6">
+              {/* 大语言模型 */}
+              <div className="flex items-center justify-between mb-5">
+                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">大语言模型</span>
+                <div className="relative" ref={modelDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowModelDropdown(!showModelDropdown)}
+                    className="w-48 px-3 py-2 pr-10 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate"
+                  >
+                    {aiConfigs.find(c => c.id === selectedModelId)?.title || "选择模型"}
+                  </button>
+                  <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${showModelDropdown ? "rotate-180" : ""}`} />
+                  {showModelDropdown && (
+                    <div className="absolute z-50 mt-2 w-56 right-0 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1 max-h-60 overflow-auto">
+                      {aiConfigs.map(config => (
+                        <button
+                          key={config.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedModelId(config.id);
+                            setShowModelDropdown(false);
+                          }}
+                          className={`w-full px-4 py-2.5 text-left text-sm flex items-center justify-between hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer ${
+                            selectedModelId === config.id ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20" : "text-slate-700 dark:text-slate-300"
+                          }`}
+                        >
+                          <span className="truncate">{config.title}</span>
+                          {selectedModelId === config.id && <Check className="w-4 h-4 flex-shrink-0 ml-2" />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* 提示词内容输入 */}
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">提示词内容</label>
+                  {promptConfigs.filter(p => p.category === "summary").length > 0 && (
+                    <div className="relative" ref={promptDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setShowPromptDropdown(!showPromptDropdown)}
+                        className="px-3 py-1.5 pr-8 rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-600 dark:text-slate-300 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
+                      >
+                        选择已配置的提示词
+                      </button>
+                      <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${showPromptDropdown ? "rotate-180" : ""}`} />
+                      {showPromptDropdown && (
+                        <div className="absolute z-50 mt-2 w-64 right-0 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1 max-h-60 overflow-auto">
+                          {promptConfigs.filter(p => p.category === "summary").map(prompt => (
+                            <button
+                              key={prompt.id}
+                              type="button"
+                              onClick={() => {
+                                setCustomPrompt(prompt.content);
+                                setShowPromptDropdown(false);
+                              }}
+                              className="w-full px-4 py-2.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300 cursor-pointer"
+                            >
+                              <div className="font-medium truncate">{prompt.title}</div>
+                              {prompt.description && (
+                                <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{prompt.description}</div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <textarea
+                  value={customPrompt}
+                  onChange={e => setCustomPrompt(e.target.value)}
+                  placeholder={`请输入您的自定义总结提示词，比如：
+将以下视频字幕概括成一段简短的要点，然后用列表的形式提取要点信息，为每个要点信息选择一个适当的表情符号。
+输出应使用以下模板：
+
+## 摘要
+## 亮点
+- [emoji] 要点`}
+                  rows={8}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400"
+                />
+              </div>
+            </div>
+
+            {/* 底部按钮 */}
+            <div className="flex gap-3 px-8 pb-6 pt-2">
+              <button
+                onClick={() => setShowCustomOnlyDialog(false)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-xl transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleCustomOnlyGenerate}
+                disabled={!customPrompt}
+                className="flex-1 px-4 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Sparkles className="w-4 h-4" />
                 开始生成
