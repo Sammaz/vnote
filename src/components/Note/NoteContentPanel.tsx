@@ -386,6 +386,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [isEditMode, setIsEditMode] = useState(false);
   const [isVisualEditMode, setIsVisualEditMode] = useState(false);
   const [visualEditContent, setVisualEditContent] = useState<string>("");
+  const [showVisualTimestamp, setShowVisualTimestamp] = useState(true);
 
   // 从全局状态同步组件state
   const syncStateFromGlobal = useCallback(() => {
@@ -940,8 +941,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       chapters: chapterData.chapters,
       optimizedSubtitles,
       originalSubtitles: subtitleEntries,
+      showTimestamp: showVisualTimestamp,
     });
-  }, [chapterData, optimizedSubtitles, subtitleEntries]);
+  }, [chapterData, optimizedSubtitles, subtitleEntries, showVisualTimestamp]);
 
   // 视觉化总结复制
   const handleVisualCopy = async () => {
@@ -967,7 +969,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
     try {
       const filePath = await save({
-        defaultPath: `${note.title}-视觉化总结`,
+        defaultPath: note.title,
         filters: [{ name: "Markdown", extensions: ["md"] }],
       });
       if (!filePath) return;
@@ -2173,6 +2175,19 @@ Video subtitles content:`;
               <Edit3 className="w-4 h-4" />
               {isVisualEditMode ? "预览" : "编辑"}
             </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                showVisualTimestamp
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <Clock className="w-4 h-4" />
+              时间戳
+            </button>
           </div>
           <div className="flex items-center gap-1">
             <button
@@ -2357,6 +2372,7 @@ Video subtitles content:`;
             isEditMode={isVisualEditMode}
             editContent={visualEditContent}
             onEditContentChange={setVisualEditContent}
+            showTimestamp={showVisualTimestamp}
           />
         )}
         {activeTab === "custom" && (

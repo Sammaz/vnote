@@ -17,6 +17,7 @@ interface VisualSummaryContentProps {
   isEditMode?: boolean;
   editContent?: string;
   onEditContentChange?: (content: string) => void;
+  showTimestamp?: boolean;
 }
 
 export function VisualSummaryContent({
@@ -26,6 +27,7 @@ export function VisualSummaryContent({
   isEditMode = false,
   editContent = "",
   onEditContentChange,
+  showTimestamp = true,
 }: VisualSummaryContentProps) {
   // 组装 Markdown 内容
   const markdownContent = useMemo(() => {
@@ -36,8 +38,9 @@ export function VisualSummaryContent({
       chapters: chapterData.chapters,
       optimizedSubtitles,
       originalSubtitles,
+      showTimestamp,
     });
-  }, [chapterData, optimizedSubtitles, originalSubtitles]);
+  }, [chapterData, optimizedSubtitles, originalSubtitles, showTimestamp]);
 
   // 当进入编辑模式且 editContent 为空时，初始化内容
   useEffect(() => {

@@ -54,19 +54,34 @@ export function getChapterSubtitles(
 }
 
 /**
+ * 组装选项接口
+ */
+export interface AssembleMarkdownOptions {
+  chapters: Chapter[];
+  optimizedSubtitles: Map<string, string>;
+  originalSubtitles: SubtitleEntry[];
+  showTimestamp?: boolean; // 是否显示时间戳，默认 true
+}
+
+/**
  * 组装单个章节的 Markdown 内容
  */
-export function assembleChapterSection(
+function assembleChapterSectionInternal(
   chapter: Chapter,
   _index: number,
   optimizedSubtitle: string | undefined,
-  originalSubtitles: SubtitleEntry[]
+  originalSubtitles: SubtitleEntry[],
+  showTimestamp: boolean
 ): string {
   const lines: string[] = [];
 
-  // 1. 章节标题（带时间戳）
-  const timeRange = `${formatTime(chapter.start_time)} - ${formatTime(chapter.end_time)}`;
-  lines.push(`# ${chapter.title} (${timeRange})`);
+  // 1. 章节标题（可选时间戳）
+  if (showTimestamp) {
+    const timeRange = `${formatTime(chapter.start_time)} - ${formatTime(chapter.end_time)}`;
+    lines.push(`# ${chapter.title} (${timeRange})`);
+  } else {
+    lines.push(`# ${chapter.title}`);
+  }
   lines.push("");
 
   // 2. 截图（如果有）
@@ -94,7 +109,7 @@ export function assembleChapterSection(
     lines.push("");
   }
 
-  // 4. 分隔线（除了最后一个章节）
+  // 4. 分隔线
   lines.push("---");
   lines.push("");
 
@@ -102,19 +117,10 @@ export function assembleChapterSection(
 }
 
 /**
- * 组装选项接口
- */
-export interface AssembleMarkdownOptions {
-  chapters: Chapter[];
-  optimizedSubtitles: Map<string, string>;
-  originalSubtitles: SubtitleEntry[];
-}
-
-/**
  * 将章节数据组装为完整的 Markdown 字符串
  */
 export function assembleChapterMarkdown(options: AssembleMarkdownOptions): string {
-  const { chapters, optimizedSubtitles, originalSubtitles } = options;
+  const { chapters, optimizedSubtitles, originalSubtitles, showTimestamp = true } = options;
 
   if (!chapters || chapters.length === 0) {
     return "";
@@ -122,7 +128,7 @@ export function assembleChapterMarkdown(options: AssembleMarkdownOptions): strin
 
   const sections = chapters.map((chapter, index) => {
     const optimizedSubtitle = optimizedSubtitles.get(chapter.id);
-    return assembleChapterSection(chapter, index, optimizedSubtitle, originalSubtitles);
+    return assembleChapterSectionInternal(chapter, index, optimizedSubtitle, originalSubtitles, showTimestamp);
   });
 
   // 移除最后一个分隔线
