@@ -61,6 +61,8 @@ export interface MindMapViewRef {
   getData: () => any;
   /** 获取 MindMap 实例 */
   getInstance: () => MindMap | null;
+  /** 重新生成思维导图（从章节数据重新生成） */
+  regenerate: () => void;
 }
 
 export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function MindMapView({ chapterData, noteTitle, savedMindMapData }, ref) {
@@ -80,7 +82,16 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
       return null;
     },
     getInstance: () => mindMapRef.current,
-  }), []);
+    regenerate: () => {
+      if (mindMapRef.current && chapterData && chapterData.chapters.length > 0) {
+        // 从章节数据重新生成思维导图
+        const data = convertChapterDataToMindMap(chapterData, noteTitle);
+        mindMapRef.current.setData(data);
+        // 重置视图
+        mindMapRef.current.view.reset();
+      }
+    },
+  }), [chapterData, noteTitle]);
 
   // 监听主题变化
   useEffect(() => {

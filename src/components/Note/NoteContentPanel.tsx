@@ -2418,37 +2418,54 @@ Video subtitles content:`;
           <div className="flex items-center gap-1">
             {/* 思维导图模式下显示保存按钮 */}
             {visualViewMode === "mindmap" && (
-              <button
-                onClick={async () => {
-                  if (mindMapRef.current) {
-                    const data = mindMapRef.current.getData();
-                    if (data) {
-                      try {
-                        // 保存思维导图数据到 visual_summary 字段
-                        const updatedNote = {
-                          ...note,
-                          visual_summary: JSON.stringify(data),
-                        };
-                        await invoke("update_note", { note: updatedNote });
-                        message.success("思维导图已保存");
-                        // 刷新笔记数据
-                        onGenerationComplete?.();
-                      } catch (error) {
-                        console.error("[MindMap] 保存失败:", error);
-                        message.error(`保存失败: ${error}`);
+              <>
+                <button
+                  onClick={() => {
+                    if (mindMapRef.current) {
+                      mindMapRef.current.regenerate();
+                      message.success("思维导图已重新生成");
+                    } else {
+                      message.warning("思维导图未初始化");
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  重新生成
+                </button>
+                <span className="text-slate-300 dark:text-slate-600">|</span>
+                <button
+                  onClick={async () => {
+                    if (mindMapRef.current) {
+                      const data = mindMapRef.current.getData();
+                      if (data) {
+                        try {
+                          // 保存思维导图数据到 visual_summary 字段
+                          const updatedNote = {
+                            ...note,
+                            visual_summary: JSON.stringify(data),
+                          };
+                          await invoke("update_note", { note: updatedNote });
+                          message.success("思维导图已保存");
+                          // 刷新笔记数据
+                          onGenerationComplete?.();
+                        } catch (error) {
+                          console.error("[MindMap] 保存失败:", error);
+                          message.error(`保存失败: ${error}`);
+                        }
+                      } else {
+                        message.warning("无法获取思维导图数据");
                       }
                     } else {
-                      message.warning("无法获取思维导图数据");
+                      message.warning("思维导图未初始化");
                     }
-                  } else {
-                    message.warning("思维导图未初始化");
-                  }
-                }}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-              >
-                <Save className="w-4 h-4" />
-                保存
-              </button>
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                >
+                  <Save className="w-4 h-4" />
+                  保存
+                </button>
+              </>
             )}
             {/* 仅在文档模式下显示导出按钮 */}
             {visualViewMode === "markdown" && (
