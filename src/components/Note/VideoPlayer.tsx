@@ -456,18 +456,36 @@ export function VideoPlayer({
             // 监听容器尺寸变化，手动触发 assjs resize
             // assjs 的 ResizeObserver 监听的是 video 元素，但 video 的 clientWidth
             // 可能不会随容器变化而立即更新，导致字幕位置计算错误
-            const resizeObserver = new ResizeObserver(() => {
+            const resizeState = { timeout: null as ReturnType<typeof setTimeout> | null };
+            const triggerAssResize = () => {
               if (assRef.current) {
                 // 通过切换 resampling 属性来触发内部 resize
                 const current = assRef.current.resampling;
                 assRef.current.resampling = current === "video_height" ? "video_width" : "video_height";
                 assRef.current.resampling = current;
               }
+            };
+            const resizeObserver = new ResizeObserver(() => {
+              // 立即触发一次
+              triggerAssResize();
+              // 清除之前的延迟触发
+              if (resizeState.timeout) {
+                clearTimeout(resizeState.timeout);
+              }
+              // 延迟再触发一次，确保 video 元素尺寸已更新
+              resizeState.timeout = setTimeout(() => {
+                triggerAssResize();
+                // 再延迟一次，处理某些浏览器的异步渲染
+                resizeState.timeout = setTimeout(triggerAssResize, 100);
+              }, 50);
             });
             resizeObserver.observe(containerRef.current);
+            // 同时监听 video 元素，双重保障
+            resizeObserver.observe(videoEl);
 
-            // 保存 observer 引用以便清理
+            // 保存 observer 和 state 引用以便清理
             (cleanupRef as any).assResizeObserver = resizeObserver;
+            (cleanupRef as any).assResizeState = resizeState;
 
             // 根据字幕状态设置显示/隐藏
             // ASS 实例创建后，DOM 元素可能还没完全渲染，需要多次延迟设置
@@ -540,6 +558,9 @@ export function VideoPlayer({
           window.removeEventListener("seek-video", cleanupRef.seekVideoHandler);
         }
         // 清理 ASS 字幕相关资源
+        if ((cleanupRef as any).assResizeState?.timeout) {
+          clearTimeout((cleanupRef as any).assResizeState.timeout);
+        }
         if ((cleanupRef as any).assResizeObserver) {
           (cleanupRef as any).assResizeObserver.disconnect();
         }
