@@ -2071,6 +2071,16 @@ Video subtitles content:`;
         // 原文细读标签页的工具栏（不管有无章节数据都显示相同）
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
           <div className="flex items-center gap-3">
+            {/* 辅助模式提示 - 仅在辅助模式下显示 */}
+            {isAssistModeActive && (
+              <div className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>点击"添加截图"按钮在字幕行上方添加章节分隔点</span>
+                <span className="text-xs text-blue-500 dark:text-blue-500 ml-2">已添加 {assistModeMarkers.length} 个截图标记</span>
+              </div>
+            )}
             {/* 章节下拉框 - 辅助模式下隐藏 */}
             {!isAssistModeActive && (
               <div className="relative" ref={chapterDropdownRef}>
