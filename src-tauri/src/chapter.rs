@@ -28,6 +28,12 @@ pub struct Chapter {
     pub end_time: f64,
     pub content: String,
     pub screenshot_path: Option<String>,
+    /// 层级深度 (1 = 顶级章节, 2 = 子章节, 以此类推)
+    #[serde(default)]
+    pub level: Option<u32>,
+    /// 父章节 ID (用于构建层级关系)
+    #[serde(default)]
+    pub parent_id: Option<String>,
 }
 
 /// 章节数据容器
@@ -602,6 +608,8 @@ pub async fn generate_chapters(
             end_time,
             content: ai_ch.summary.clone(),
             screenshot_path: None,
+            level: None,
+            parent_id: None,
         });
     }
 

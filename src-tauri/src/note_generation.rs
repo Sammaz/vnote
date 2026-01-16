@@ -749,6 +749,186 @@ fn parse_detailed_reading_chapter_response(response: &str) -> Result<(String, St
     Ok((parsed.title, parsed.content))
 }
 
+// ============================================================================
+// 标题优化（层级化）
+// ============================================================================
+
+/// 优化后的章节信息
+#[derive(Debug, Deserialize)]
+struct OptimizedChapter {
+    /// 原始章节索引（从0开始）
+    index: usize,
+    /// 优化后的标题
+    title: String,
+    /// 层级深度 (1 = 顶级, 2 = 子章节)
+    level: u32,
+    /// 父章节索引（如果是子章节）
+    #[serde(default)]
+    parent_index: Option<usize>,
+}
+
+/// AI 标题优化响应
+#[derive(Debug, Deserialize)]
+struct TitleOptimizationResponse {
+    chapters: Vec<OptimizedChapter>,
+}
+
+/// 构建标题优化提示词
+fn build_title_optimization_prompt(chapters: &[Chapter]) -> String {
+    // 构建章节列表 JSON
+    let chapters_json: Vec<serde_json::Value> = chapters
+        .iter()
+        .enumerate()
+        .map(|(idx, ch)| {
+            serde_json::json!({
+                "index": idx,
+                "title": ch.title,
+                "content": ch.content
+            })
+        })
+        .collect();
+
+    let chapters_str = serde_json::to_string_pretty(&chapters_json).unwrap_or_default();
+
+    format!(
+        r#"你是一个专业的内容编辑。请优化以下视频章节的标题，确保标题风格统一、层次分明。
+
+**任务要求**：
+1. **标题统一性**：所有标题应采用一致的命名风格（如都用动宾结构或名词短语）
+2. **层级识别**：识别章节之间的逻辑关系，将相关的细节章节归类到主题章节下
+   - level=1 表示主题章节（顶级）
+   - level=2 表示子章节（属于某个主题）
+3. **标题精炼**：标题应简洁有力，10-20字为宜
+4. **保持原意**：优化标题但不改变原有内容的含义
+
+**输出要求**：
+- 必须输出有效的 JSON 格式（不要使用代码块标记）
+- 每个章节必须包含 index（原始索引）、title（优化后标题）、level（层级）
+- 如果是子章节（level=2），需要提供 parent_index（父章节的索引）
+
+**输出格式**：
+{{
+  "chapters": [
+    {{"index": 0, "title": "优化后的标题", "level": 1}},
+    {{"index": 1, "title": "优化后的子标题", "level": 2, "parent_index": 0}},
+    ...
+  ]
+}}
+
+**章节列表**：
+{}"#,
+        chapters_str
+    )
+}
+
+/// 解析标题优化响应
+fn parse_title_optimization_response(response: &str) -> Result<TitleOptimizationResponse, String> {
+    // 尝试提取 JSON（可能有代码块标记）
+    let json_str = if let Some(start) = response.find("```json") {
+        let start = start + 7;
+        if let Some(end) = response[start..].find("```") {
+            &response[start..start + end]
+        } else {
+            response
+        }
+    } else if let Some(start) = response.find("```") {
+        let start = start + 3;
+        if let Some(end) = response[start..].find("```") {
+            &response[start..start + end]
+        } else {
+            response
+        }
+    } else {
+        response
+    };
+
+    // 尝试找到第一个 { 和最后一个 }
+    let json_start = json_str.find('{').unwrap_or(0);
+    let json_end = json_str.rfind('}').unwrap_or(json_str.len());
+
+    if json_start >= json_end {
+        return Err("未找到有效的JSON响应".to_string());
+    }
+
+    let clean_json = &json_str[json_start..=json_end];
+
+    serde_json::from_str(clean_json)
+        .map_err(|e| format!("JSON解析失败: {}, JSON内容: {}", e, clean_json))
+}
+
+/// 优化章节标题（添加层级信息）
+async fn optimize_chapter_titles(
+    ai_config: &AiConfig,
+    chapters: &mut Vec<Chapter>,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<(), String> {
+    if chapters.is_empty() {
+        return Ok(());
+    }
+
+    eprintln!("[标题优化] 开始优化 {} 个章节的标题", chapters.len());
+
+    // 检查中止
+    if abort_flag.load(Ordering::Relaxed) {
+        return Err("已中止".to_string());
+    }
+
+    // 构建提示词
+    let prompt = build_title_optimization_prompt(chapters);
+
+    // 调用 AI
+    let req = NonStreamingRequest {
+        config: ai_config.clone(),
+        prompt,
+    };
+
+    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
+
+    // 解析响应
+    match parse_title_optimization_response(&response.content) {
+        Ok(optimized) => {
+            // 创建 ID 映射（index -> chapter id）
+            let id_map: Vec<String> = chapters.iter().map(|ch| ch.id.clone()).collect();
+
+            // 应用优化结果
+            for opt_ch in optimized.chapters {
+                if opt_ch.index < chapters.len() {
+                    let chapter = &mut chapters[opt_ch.index];
+                    chapter.title = opt_ch.title;
+                    chapter.level = Some(opt_ch.level);
+
+                    // 设置父章节 ID
+                    if let Some(parent_idx) = opt_ch.parent_index {
+                        if parent_idx < id_map.len() {
+                            chapter.parent_id = Some(id_map[parent_idx].clone());
+                        }
+                    }
+
+                    eprintln!(
+                        "[标题优化] 章节 {}: \"{}\" (level={}, parent={:?})",
+                        opt_ch.index,
+                        chapter.title,
+                        opt_ch.level,
+                        chapter.parent_id
+                    );
+                }
+            }
+
+            eprintln!("[标题优化] 标题优化完成");
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("[标题优化] 解析失败，保持原标题: {}", e);
+            // 解析失败时，为所有章节设置默认层级
+            for chapter in chapters.iter_mut() {
+                chapter.level = Some(1);
+                chapter.parent_id = None;
+            }
+            Ok(())
+        }
+    }
+}
+
 /// 生成原文细读章节数据（非辅助模式）
 ///
 /// 该函数使用 AI 自动分段字幕，然后为每个分段生成标题和内容摘要，并截图。
@@ -939,10 +1119,29 @@ async fn generate_detailed_reading_chapters(
             end_time,
             content,
             screenshot_path: screenshot_path_str,
+            level: None,
+            parent_id: None,
         });
     }
 
     eprintln!("[原文细读] 成功生成 {} 个章节", chapters.len());
+
+    // 第四步：优化标题（添加层级信息）
+    let _ = app.emit(
+        event_name,
+        GenerationEvent::TabProgress {
+            tab_type: "DetailedReading".to_string(),
+            current: total_chunks + 1,
+            total: total_chunks + 2,
+            message: "AI正在优化章节标题...".to_string(),
+        },
+    );
+
+    if let Err(e) = optimize_chapter_titles(ai_config, &mut chapters, abort_flag).await {
+        eprintln!("[原文细读] 标题优化失败: {}", e);
+        // 标题优化失败不影响整体流程，继续返回结果
+    }
+
     eprintln!("[原文细读] ========================================");
 
     Ok(ChapterData {
@@ -1711,6 +1910,8 @@ pub async fn generate_chapters_with_markers(
                 end_time: segment.end_time,
                 content,
                 screenshot_path,
+                level: None,
+                parent_id: None,
             };
 
             Ok((segment_idx, chapter))
@@ -1743,7 +1944,7 @@ pub async fn generate_chapters_with_markers(
 
     // 按分段索引排序
     results.sort_by_key(|(idx, _)| *idx);
-    let chapters: Vec<Chapter> = results.into_iter().map(|(_, chapter)| chapter).collect();
+    let mut chapters: Vec<Chapter> = results.into_iter().map(|(_, chapter)| chapter).collect();
 
     if chapters.is_empty() {
         get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
@@ -1751,6 +1952,18 @@ pub async fn generate_chapters_with_markers(
     }
 
     eprintln!("[辅助模式章节生成] 成功生成 {} 个章节", chapters.len());
+
+    // 优化标题（添加层级信息）
+    let _ = app.emit(&event_name, ChapterGenerationEvent::GeneratingChapters {
+        current: total_segments,
+        total: total_segments + 1,
+        message: "AI正在优化章节标题...".to_string(),
+    });
+
+    if let Err(e) = optimize_chapter_titles(&ai_config, &mut chapters, &abort_flag).await {
+        eprintln!("[辅助模式章节生成] 标题优化失败: {}", e);
+        // 标题优化失败不影响整体流程，继续返回结果
+    }
 
     // 构建结果
     let chapter_data = ChapterData {
