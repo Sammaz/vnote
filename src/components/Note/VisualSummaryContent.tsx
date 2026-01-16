@@ -4,13 +4,13 @@
  * 支持 Markdown 和思维导图两种视图模式
  */
 
-import { useMemo, useEffect } from "react";
+import { useMemo, useEffect, forwardRef } from "react";
 import { BarChart3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChapterData, SubtitleEntry } from "../../types";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
-import { MindMapView } from "./MindMap";
+import { MindMapView, type MindMapViewRef } from "./MindMap";
 
 /** 视觉化总结视图模式 */
 export type VisualViewMode = "markdown" | "mindmap";
@@ -27,9 +27,11 @@ interface VisualSummaryContentProps {
   viewMode?: VisualViewMode;
   /** 笔记标题（用于思维导图根节点） */
   noteTitle?: string;
+  /** 已保存的思维导图数据（JSON 字符串） */
+  savedMindMapData?: string | null;
 }
 
-export function VisualSummaryContent({
+export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryContentProps>(function VisualSummaryContent({
   chapterData,
   optimizedSubtitles,
   originalSubtitles,
@@ -39,7 +41,8 @@ export function VisualSummaryContent({
   showTimestamp = true,
   viewMode = "markdown",
   noteTitle = "思维导图",
-}: VisualSummaryContentProps) {
+  savedMindMapData,
+}, ref) {
   // 组装 Markdown 内容
   const markdownContent = useMemo(() => {
     if (!chapterData || chapterData.chapters.length === 0) {
@@ -76,7 +79,7 @@ export function VisualSummaryContent({
   // 思维导图模式
   if (viewMode === "mindmap") {
     return (
-      <MindMapView chapterData={chapterData} noteTitle={noteTitle} />
+      <MindMapView ref={ref} chapterData={chapterData} noteTitle={noteTitle} savedMindMapData={savedMindMapData} />
     );
   }
 
@@ -120,4 +123,4 @@ export function VisualSummaryContent({
       </div>
     </div>
   );
-}
+});

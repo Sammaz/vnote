@@ -212,6 +212,8 @@ declare module "simple-mind-map" {
     setTransform: (x: number, y: number, scale: number) => void;
     transform: (ox: number, oy: number, scale: number) => void;
     reset: () => void;
+    enlarge: () => void;
+    narrow: () => void;
   }
 
   export default class MindMap {
@@ -219,6 +221,9 @@ declare module "simple-mind-map" {
 
     el: HTMLElement;
     view: MindMapView;
+
+    // Static methods
+    static usePlugin(plugin: unknown): void;
 
     // Methods
     render(callback?: () => void): void;
@@ -246,4 +251,25 @@ declare module "simple-mind-map" {
     initPlugin(plugin: unknown): void;
     destroy(): void;
   }
+}
+
+// Plugin type declarations
+declare module "simple-mind-map/src/plugins/Drag.js" {
+  const Drag: unknown;
+  export default Drag;
+}
+
+declare module "simple-mind-map/src/plugins/KeyboardNavigation.js" {
+  const KeyboardNavigation: unknown;
+  export default KeyboardNavigation;
+}
+
+declare module "simple-mind-map/src/plugins/Select.js" {
+  const Select: unknown;
+  export default Select;
+}
+
+declare module "simple-mind-map/src/plugins/RichText.js" {
+  const RichText: unknown;
+  export default RichText;
 }

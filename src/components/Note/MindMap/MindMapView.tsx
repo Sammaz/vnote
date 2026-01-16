@@ -3,25 +3,84 @@
  * 封装 simple-mind-map 库，实现章节数据的可视化展示
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import { ZoomIn, ZoomOut, Maximize2, BarChart3, Fullscreen, Minimize } from "lucide-react";
 import MindMap from "simple-mind-map";
+// 导入必要的插件
+import Drag from "simple-mind-map/src/plugins/Drag.js";
+import KeyboardNavigation from "simple-mind-map/src/plugins/KeyboardNavigation.js";
+import Select from "simple-mind-map/src/plugins/Select.js";
 import type { ChapterData } from "../../../types";
 import { convertChapterDataToMindMap } from "./chapterToMindMap";
 import { getLightTheme, getDarkTheme } from "./themes";
 
+// 注册插件
+MindMap.usePlugin(Drag);
+MindMap.usePlugin(KeyboardNavigation);
+MindMap.usePlugin(Select);
+
+/**
+ * 清理思维导图节点数据，移除 richText 相关属性和 HTML 标签
+ */
+function cleanMindMapNode(node: any): any {
+  if (!node) return node;
+
+  const cleanedNode = { ...node };
+
+  // 清理 data 属性
+  if (cleanedNode.data) {
+    cleanedNode.data = { ...cleanedNode.data };
+    // 设置 richText 为 false，避免在没有 RichText 插件时出错
+    cleanedNode.data.richText = false;
+    // 清理 HTML 标签
+    if (typeof cleanedNode.data.text === 'string') {
+      cleanedNode.data.text = cleanedNode.data.text
+        .replace(/<[^>]*>/g, '') // 移除所有 HTML 标签
+        .trim();
+    }
+  }
+
+  // 递归清理子节点
+  if (cleanedNode.children && Array.isArray(cleanedNode.children)) {
+    cleanedNode.children = cleanedNode.children.map(cleanMindMapNode);
+  }
+
+  return cleanedNode;
+}
+
 interface MindMapViewProps {
   chapterData: ChapterData | null;
   noteTitle: string;
+  /** 已保存的思维导图数据（JSON 字符串） */
+  savedMindMapData?: string | null;
 }
 
-export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
+/** 暴露给父组件的方法 */
+export interface MindMapViewRef {
+  /** 获取当前思维导图数据 */
+  getData: () => any;
+  /** 获取 MindMap 实例 */
+  getInstance: () => MindMap | null;
+}
+
+export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function MindMapView({ chapterData, noteTitle, savedMindMapData }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindMapRef = useRef<MindMap | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains("dark")
   );
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // 暴露方法给父组件
+  useImperativeHandle(ref, () => ({
+    getData: () => {
+      if (mindMapRef.current) {
+        return mindMapRef.current.getData();
+      }
+      return null;
+    },
+    getInstance: () => mindMapRef.current,
+  }), []);
 
   // 监听主题变化
   useEffect(() => {
@@ -48,13 +107,26 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
       return;
     }
 
-    const data = convertChapterDataToMindMap(chapterData, noteTitle);
+    // 优先使用已保存的思维导图数据，否则从章节数据生成
+    let data;
+    if (savedMindMapData) {
+      try {
+        const parsedData = JSON.parse(savedMindMapData);
+        // 清理 richText 相关属性，避免在没有 RichText 插件时出错
+        data = cleanMindMapNode(parsedData);
+      } catch (e) {
+        data = convertChapterDataToMindMap(chapterData, noteTitle);
+      }
+    } else {
+      data = convertChapterDataToMindMap(chapterData, noteTitle);
+    }
+
     const themeConfig = isDarkMode ? getDarkTheme() : getLightTheme();
 
     const mindMap = new MindMap({
       el: containerRef.current,
       data,
-      readonly: true,
+      readonly: false,
       layout: "logicalStructure",
       themeConfig,
       mousewheelAction: "zoom",
@@ -62,6 +134,10 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
       enableDblclickBackToRootNode: false,
       // 设置根节点初始位置：左侧留出边距，垂直居中
       initRootNodePosition: ["5%", "center"],
+      // 启用全局快捷键（不仅限于鼠标在SVG内时）
+      enableShortcutOnlyWhenMouseInSvg: false,
+      // 拖拽配置
+      autoMoveWhenMouseInEdgeOnDrag: true,
     });
 
     mindMapRef.current = mindMap;
@@ -79,20 +155,6 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
     setSvgTransparent();
     setTimeout(setSvgTransparent, 100);
 
-    // 阻止双击事件冒泡和文本选择
-    const handleDblClick = (e: Event) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    const handleMouseDown = (e: MouseEvent) => {
-      // 阻止双击选择文本
-      if (e.detail > 1) {
-        e.preventDefault();
-      }
-    };
-    containerRef.current.addEventListener("dblclick", handleDblClick, true);
-    containerRef.current.addEventListener("mousedown", handleMouseDown, true);
-
     // 监听容器大小变化，重新调整思维导图
     const resizeObserver = new ResizeObserver(() => {
       if (mindMapRef.current) {
@@ -103,29 +165,12 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
 
     return () => {
       resizeObserver.disconnect();
-      containerRef.current?.removeEventListener("dblclick", handleDblClick, true);
-      containerRef.current?.removeEventListener("mousedown", handleMouseDown, true);
       if (mindMapRef.current) {
         mindMapRef.current.destroy();
         mindMapRef.current = null;
       }
     };
-  }, [chapterData, noteTitle, isDarkMode]);
-
-  // 主题切换时更新配置
-  useEffect(() => {
-    if (mindMapRef.current && containerRef.current) {
-      const themeConfig = isDarkMode ? getDarkTheme() : getLightTheme();
-      mindMapRef.current.setThemeConfig(themeConfig);
-
-      // 设置 SVG 背景透明
-      const svg = containerRef.current.querySelector("svg");
-      if (svg) {
-        svg.style.background = "transparent";
-        svg.style.backgroundColor = "transparent";
-      }
-    }
-  }, [isDarkMode]);
+  }, [chapterData, noteTitle, isDarkMode, savedMindMapData]);
 
   // 缩放控制
   const handleZoomIn = useCallback(() => {
@@ -183,7 +228,7 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
 
   return (
     <div
-      className={`select-none ${
+      className={`${
         isFullscreen
           ? "fixed inset-0 z-50"
           : "relative w-full h-full"
@@ -195,16 +240,6 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
         backgroundSize: "20px 20px",
         backgroundColor: isDarkMode ? "#0d0d0d" : "#f8fafc",
       }}
-      onMouseDown={(e) => {
-        // 阻止双击选择文本
-        if (e.detail > 1) {
-          e.preventDefault();
-        }
-      }}
-      onDoubleClick={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
     >
       {/* 思维导图容器 */}
       <div
@@ -214,7 +249,7 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
       />
 
       {/* 缩放控制工具栏 */}
-      <div className="absolute bottom-4 left-4 flex flex-col items-center gap-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-1 z-10">
+      <div className="absolute bottom-4 right-4 flex flex-col items-center gap-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-1 z-10">
         <button
           onClick={handleZoomOut}
           className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors cursor-pointer"
@@ -250,4 +285,4 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
       </div>
     </div>
   );
-}
+});

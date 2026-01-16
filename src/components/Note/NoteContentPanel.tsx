@@ -22,6 +22,7 @@ import {
   MousePointer2,
   Package,
   GitBranch,
+  Save,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
@@ -33,6 +34,7 @@ import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { VisualSummaryContent, type VisualViewMode } from "./VisualSummaryContent";
+import type { MindMapViewRef } from "./MindMap";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
@@ -104,6 +106,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // HighlightGrid 组件的 ref
   const highlightGridRef = useRef<HighlightGridRef>(null);
+
+  // MindMapView 组件的 ref
+  const mindMapRef = useRef<MindMapViewRef>(null);
 
   // 章节相关状态
   const [chapterData, setChapterData] = useState<ChapterData | null>(null);
@@ -2016,7 +2021,7 @@ Video subtitles content:`;
       activeTab === "visual" && visualViewMode === "mindmap" ? "" : "overflow-hidden"
     )}>
       {/* 标签页头部 */}
-      <div className="border-b border-slate-200 dark:border-vnote-border">
+      <div className="border-b border-slate-200 dark:border-vnote-border select-none">
         <div className="flex flex-wrap">
           {TABS.map((tab) => {
             const generating = isTabGenerating(tab.id);
@@ -2348,7 +2353,7 @@ Video subtitles content:`;
         </div>
       ) : activeTab === "visual" ? (
         // 视觉化总结标签页的专用工具栏
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface select-none">
           <div className="flex items-center gap-2">
             {/* 视图模式切换 */}
             <div className="flex items-center bg-slate-100 dark:bg-vnote-hover rounded-lg p-0.5">
@@ -2409,34 +2414,71 @@ Video subtitles content:`;
               </>
             )}
           </div>
-          {/* 仅在文档模式下显示导出按钮 */}
-          {visualViewMode === "markdown" && (
-            <div className="flex items-center gap-1">
+          {/* 右侧按钮区域 */}
+          <div className="flex items-center gap-1">
+            {/* 思维导图模式下显示保存按钮 */}
+            {visualViewMode === "mindmap" && (
               <button
-                onClick={handleVisualCopy}
+                onClick={async () => {
+                  if (mindMapRef.current) {
+                    const data = mindMapRef.current.getData();
+                    if (data) {
+                      try {
+                        // 保存思维导图数据到 visual_summary 字段
+                        const updatedNote = {
+                          ...note,
+                          visual_summary: JSON.stringify(data),
+                        };
+                        await invoke("update_note", { note: updatedNote });
+                        message.success("思维导图已保存");
+                        // 刷新笔记数据
+                        onGenerationComplete?.();
+                      } catch (error) {
+                        console.error("[MindMap] 保存失败:", error);
+                        message.error(`保存失败: ${error}`);
+                      }
+                    } else {
+                      message.warning("无法获取思维导图数据");
+                    }
+                  } else {
+                    message.warning("思维导图未初始化");
+                  }
+                }}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
               >
-                <Copy className="w-4 h-4" />
-                复制
+                <Save className="w-4 h-4" />
+                保存
               </button>
-              <span className="text-slate-300 dark:text-slate-600">|</span>
-              <button
-                onClick={handleVisualDownload}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-              >
-                <Download className="w-4 h-4" />
-                下载
-              </button>
-              <span className="text-slate-300 dark:text-slate-600">|</span>
-              <button
-                onClick={handleVisualExport}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-              >
-                <Package className="w-4 h-4" />
-                导出
-              </button>
-            </div>
-          )}
+            )}
+            {/* 仅在文档模式下显示导出按钮 */}
+            {visualViewMode === "markdown" && (
+              <>
+                <button
+                  onClick={handleVisualCopy}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                >
+                  <Copy className="w-4 h-4" />
+                  复制
+                </button>
+                <span className="text-slate-300 dark:text-slate-600">|</span>
+                <button
+                  onClick={handleVisualDownload}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  下载
+                </button>
+                <span className="text-slate-300 dark:text-slate-600">|</span>
+                <button
+                  onClick={handleVisualExport}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                >
+                  <Package className="w-4 h-4" />
+                  导出
+                </button>
+              </>
+            )}
+          </div>
         </div>
       ) : activeTab === "custom" && note.custom_summary ? (
         // 自定义总结标签页的工具栏（有内容时显示完整工具栏）
@@ -2616,6 +2658,7 @@ Video subtitles content:`;
         {activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} autoScroll={autoScroll} />}
         {activeTab === "visual" && (
           <VisualSummaryContent
+            ref={mindMapRef}
             chapterData={chapterData}
             optimizedSubtitles={optimizedSubtitles}
             originalSubtitles={subtitleEntries}
@@ -2625,6 +2668,7 @@ Video subtitles content:`;
             showTimestamp={showVisualTimestamp}
             viewMode={visualViewMode}
             noteTitle={note.title}
+            savedMindMapData={note.visual_summary}
           />
         )}
         {activeTab === "custom" && (
