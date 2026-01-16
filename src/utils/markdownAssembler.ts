@@ -75,12 +75,16 @@ function assembleChapterSectionInternal(
 ): string {
   const lines: string[] = [];
 
-  // 1. 章节标题（可选时间戳）
+  // 1. 章节标题（根据层级生成对应级别的标题）
+  // level=1 -> #, level=2 -> ##, 默认为 #
+  const headingLevel = chapter.level ?? 1;
+  const headingPrefix = "#".repeat(Math.min(Math.max(headingLevel, 1), 6)); // 限制在1-6级
+
   if (showTimestamp) {
     const timeRange = `${formatTime(chapter.start_time)} - ${formatTime(chapter.end_time)}`;
-    lines.push(`# ${chapter.title} (${timeRange})`);
+    lines.push(`${headingPrefix} ${chapter.title} (${timeRange})`);
   } else {
-    lines.push(`# ${chapter.title}`);
+    lines.push(`${headingPrefix} ${chapter.title}`);
   }
   lines.push("");
 

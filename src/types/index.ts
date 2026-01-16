@@ -187,6 +187,8 @@ export interface Chapter {
   end_time: number;                // 结束时间（秒）
   content: string;                 // 章节内容概要
   screenshot_path: string | null;  // 截图文件路径
+  level?: number | null;           // 层级深度 (1=顶级, 2=子章节)
+  parent_id?: string | null;       // 父章节ID（用于构建层级关系）
 }
 
 export interface ChapterData {
