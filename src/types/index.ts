@@ -312,3 +312,26 @@ export const HIGHLIGHT_TYPE_LABELS: Record<HighlightType, string> = {
   emotional: "情绪高点",
   viral: "爆款片段",
 };
+
+// ============================================================================
+// 辅助模式相关类型 (Assist Mode Types)
+// ============================================================================
+
+// 截图标记
+export interface ScreenshotMarker {
+  id: string;                    // UUID
+  note_id: number;               // 关联的笔记ID
+  subtitle_index: number;        // 字幕行索引（标记在此行上方）
+  timestamp: number;             // 截图时的视频时间戳
+  screenshot_path: string;       // 截图文件路径
+  created_at: string;            // 创建时间 (ISO格式)
+}
+
+// 辅助模式下的章节分段
+export interface AssistModeChapterSegment {
+  start_index: number;           // 起始字幕索引
+  end_index: number;             // 结束字幕索引（不包含）
+  screenshot_path: string | null; // 用户截图路径，null 表示需要自动截图
+  start_time: number;            // 起始时间
+  end_time: number;              // 结束时间
+}

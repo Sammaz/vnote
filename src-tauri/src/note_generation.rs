@@ -6,16 +6,20 @@
 //! - 高光笔记 (Highlights)
 //! - 视觉化总结 (VisualSummary)
 //! - 自定义总结 (CustomSummary)
+//!
+//! 以及辅助模式章节生成功能
 
 use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
-use crate::db::{AiConfig, Database};
-use crate::subtitle::parse_subtitle_file;
+use crate::chapter::{capture_video_screenshot, Chapter, ChapterData, ChapterGenerationEvent};
+use crate::db::{AiConfig, Database, ScreenshotMarker};
+use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use std::sync::OnceLock;
 
 // ============================================================================
@@ -1050,4 +1054,440 @@ fn get_prompt_for_tab(tab_type: &TabType, subtitle_text: &str) -> String {
         TabType::VisualSummary => PromptTemplates::visual_summary(subtitle_text),
         TabType::CustomSummary => PromptTemplates::custom_summary(subtitle_text),
     }
+}
+
+
+// ============================================================================
+// 辅助模式章节生成
+// ============================================================================
+
+/// 辅助模式章节分段
+#[derive(Debug, Clone)]
+struct AssistModeSegment {
+    start_index: usize,           // 起始字幕索引
+    end_index: usize,             // 结束字幕索引（不包含）
+    screenshot_path: Option<String>, // 用户截图路径，None 表示需要自动截图
+    start_time: f64,              // 起始时间
+    end_time: f64,                // 结束时间
+}
+
+/// 根据截图标记计算章节分段
+/// 
+/// 分段算法：
+/// 1. 如果 markers 为空，返回单个分段包含所有字幕
+/// 2. 按 subtitle_index 排序 markers
+/// 3. 每个 marker 位置作为新章节的起点
+/// 4. 第一段无标记时需要自动截图
+/// 5. 有标记的分段使用该标记的截图
+fn calculate_segments_from_markers(
+    subtitle_entries: &[SubtitleEntry],
+    markers: &[ScreenshotMarker],
+) -> Vec<AssistModeSegment> {
+    if subtitle_entries.is_empty() {
+        return vec![];
+    }
+
+    let total_subtitles = subtitle_entries.len();
+    let total_duration = subtitle_entries.last().unwrap().end_time;
+
+    // 如果没有标记，返回单个分段包含所有字幕
+    if markers.is_empty() {
+        return vec![AssistModeSegment {
+            start_index: 0,
+            end_index: total_subtitles,
+            screenshot_path: None, // 需要自动截图
+            start_time: subtitle_entries[0].start_time,
+            end_time: total_duration,
+        }];
+    }
+
+    // 按 subtitle_index 排序标记
+    let mut sorted_markers = markers.to_vec();
+    sorted_markers.sort_by_key(|m| m.subtitle_index);
+
+    let mut segments = Vec::new();
+    let mut current_start = 0;
+
+    for marker in &sorted_markers {
+        let marker_index = marker.subtitle_index as usize;
+
+        // 如果标记位置大于当前起始位置，创建一个分段
+        if marker_index > current_start {
+            // 这是标记之前的分段
+            let start_time = subtitle_entries[current_start].start_time;
+            let end_time = if marker_index < total_subtitles {
+                subtitle_entries[marker_index].start_time
+            } else {
+                total_duration
+            };
+
+            // 第一段（current_start == 0）且没有前置标记时，screenshot_path 为 None
+            let screenshot_path = if current_start == 0 {
+                None // 第一段需要自动截图
+            } else {
+                // 查找前一个标记的截图
+                sorted_markers
+                    .iter()
+                    .filter(|m| (m.subtitle_index as usize) == current_start)
+                    .next()
+                    .map(|m| m.screenshot_path.clone())
+            };
+
+            segments.push(AssistModeSegment {
+                start_index: current_start,
+                end_index: marker_index,
+                screenshot_path,
+                start_time,
+                end_time,
+            });
+        }
+
+        current_start = marker_index;
+    }
+
+    // 添加最后一个分段（从最后一个标记到字幕结尾）
+    if current_start < total_subtitles {
+        let start_time = subtitle_entries[current_start].start_time;
+        let end_time = total_duration;
+
+        // 最后一个分段使用最后一个标记的截图
+        let screenshot_path = sorted_markers
+            .iter()
+            .filter(|m| (m.subtitle_index as usize) == current_start)
+            .next()
+            .map(|m| m.screenshot_path.clone());
+
+        segments.push(AssistModeSegment {
+            start_index: current_start,
+            end_index: total_subtitles,
+            screenshot_path,
+            start_time,
+            end_time,
+        });
+    }
+
+    segments
+}
+
+/// 生成章节内容的提示词
+fn build_chapter_content_prompt(subtitle_text: &str) -> String {
+    format!(
+        r#"你是一个专业的视频内容分析师。请为以下视频字幕片段生成章节标题和内容摘要。
+
+**输出要求**：
+1. 必须输出有效的 JSON 格式（不要使用代码块标记）
+2. 标题应简洁明了，概括该段落的核心主题（10-20字）
+3. 内容摘要应详细描述该段落的主要内容（100-300字）
+
+**输出格式**：
+{{
+  "title": "章节标题",
+  "content": "章节内容摘要"
+}}
+
+**视频字幕片段**：
+{}"#,
+        subtitle_text
+    )
+}
+
+/// 解析章节内容 AI 响应
+fn parse_chapter_content_response(response: &str) -> Result<(String, String), String> {
+    // 尝试提取 JSON（可能有代码块标记）
+    let json_str = if let Some(start) = response.find("```json") {
+        let start = start + 7;
+        if let Some(end) = response[start..].find("```") {
+            &response[start..start + end]
+        } else {
+            response
+        }
+    } else if let Some(start) = response.find("```") {
+        let start = start + 3;
+        if let Some(end) = response[start..].find("```") {
+            &response[start..start + end]
+        } else {
+            response
+        }
+    } else {
+        response
+    };
+
+    // 尝试找到第一个 { 和最后一个 }
+    let json_start = json_str.find('{').unwrap_or(0);
+    let json_end = json_str.rfind('}').unwrap_or(json_str.len());
+
+    if json_start >= json_end {
+        return Err("未找到有效的JSON响应".to_string());
+    }
+
+    let clean_json = &json_str[json_start..=json_end];
+
+    #[derive(Deserialize)]
+    struct ChapterContentResponse {
+        title: String,
+        content: String,
+    }
+
+    let parsed: ChapterContentResponse = serde_json::from_str(clean_json)
+        .map_err(|e| format!("JSON解析失败: {}, JSON内容: {}", e, clean_json))?;
+
+    Ok((parsed.title, parsed.content))
+}
+
+/// 将特殊字符转换为下划线，生成安全的文件名
+fn sanitize_filename(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .split('_')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+/// 格式化时间戳为文件名格式（如 010130 表示 01:01:30）
+fn format_timestamp_for_filename(seconds: f64) -> String {
+    let total_seconds = seconds as u64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let secs = total_seconds % 60;
+
+    format!("{:02}{:02}{:02}", hours, minutes, secs)
+}
+
+/// 使用辅助模式标记生成章节
+/// 
+/// 该函数根据用户在辅助模式下添加的截图标记来分段生成章节，
+/// 而不是使用 AI 自动分段。
+pub async fn generate_chapters_with_markers(
+    app: AppHandle,
+    db: &Database,
+    generation_id: String,
+    note_id: i64,
+    model_id: i64,
+    video_path: String,
+    subtitle_path: String,
+    markers: Vec<ScreenshotMarker>,
+) -> Result<ChapterData, String> {
+    let event_name = format!("chapter-generation-{}", generation_id);
+
+    // 注册中止标志
+    let abort_flag = get_ai_pool_manager().register_abort_flag(generation_id.clone()).await;
+
+    // 获取 AI 配置
+    let ai_config = db
+        .get_ai_config_by_id(model_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("AI模型未找到".to_string())?;
+
+    // 发送开始事件
+    let _ = app.emit(&event_name, ChapterGenerationEvent::Starting);
+
+    // 检查视频文件是否存在
+    if !Path::new(&video_path).exists() {
+        get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
+        return Err("视频文件不存在".to_string());
+    }
+
+    // 检查字幕文件是否存在
+    if !Path::new(&subtitle_path).exists() {
+        get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
+        return Err("字幕文件不存在".to_string());
+    }
+
+    // 解析字幕
+    let _ = app.emit(&event_name, ChapterGenerationEvent::AnalyzingSubtitle {
+        message: "正在解析字幕文件...".to_string(),
+    });
+
+    let subtitle_entries = parse_subtitle_file(&subtitle_path)?;
+    if subtitle_entries.is_empty() {
+        get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
+        return Err("字幕内容为空".to_string());
+    }
+
+    // 计算总时长
+    let total_duration = subtitle_entries.last().unwrap().end_time;
+
+    eprintln!("[辅助模式章节生成] 字幕总条数: {}, 标记数: {}", subtitle_entries.len(), markers.len());
+
+    // 根据标记计算分段
+    let segments = calculate_segments_from_markers(&subtitle_entries, &markers);
+    let total_segments = segments.len();
+
+    eprintln!("[辅助模式章节生成] 计算得到 {} 个分段", total_segments);
+
+    // 准备截图目录
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
+    std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
+
+    // 从视频路径提取文件名
+    let video_name = Path::new(&video_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let safe_video_name = sanitize_filename(video_name);
+
+    // 并发生成章节内容
+    let mut tasks = Vec::new();
+
+    for (segment_idx, segment) in segments.iter().enumerate() {
+        let ai_config = ai_config.clone();
+        let abort_flag = abort_flag.clone();
+        let app = app.clone();
+        let event_name = event_name.clone();
+        let subtitle_entries = subtitle_entries.clone();
+        let segment = segment.clone();
+        let video_path = video_path.clone();
+        let screenshots_dir = screenshots_dir.clone();
+        let safe_video_name = safe_video_name.clone();
+
+        let task = tokio::spawn(async move {
+            // 检查中止
+            if abort_flag.load(Ordering::Relaxed) {
+                return Err::<(usize, Chapter), String>("已中止".to_string());
+            }
+
+            eprintln!("[辅助模式章节生成] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+                segment_idx + 1, total_segments, segment.start_index, segment.end_index);
+
+            // 发送进度事件
+            let _ = app.emit(&event_name, ChapterGenerationEvent::GeneratingChapters {
+                current: segment_idx + 1,
+                total: total_segments,
+                message: format!("AI正在生成第 {}/{} 章节内容...", segment_idx + 1, total_segments),
+            });
+
+            // 提取该分段的字幕文本
+            let segment_subtitles: Vec<&SubtitleEntry> = subtitle_entries
+                .iter()
+                .skip(segment.start_index)
+                .take(segment.end_index - segment.start_index)
+                .collect();
+
+            let subtitle_text: String = segment_subtitles
+                .iter()
+                .map(|e| e.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            // 调用 AI 生成章节标题和内容
+            let prompt = build_chapter_content_prompt(&subtitle_text);
+            let req = NonStreamingRequest {
+                config: ai_config,
+                prompt,
+            };
+
+            let (title, content) = match execute_non_streaming_with_abort(req, &abort_flag).await {
+                Ok(response) => {
+                    match parse_chapter_content_response(&response.content) {
+                        Ok((t, c)) => (t, c),
+                        Err(e) => {
+                            eprintln!("[辅助模式章节生成] 第 {} 段解析失败: {}", segment_idx + 1, e);
+                            // 使用默认标题和内容
+                            (format!("章节 {}", segment_idx + 1), subtitle_text.chars().take(200).collect())
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[辅助模式章节生成] 第 {} 段 AI 调用失败: {}", segment_idx + 1, e);
+                    // 使用默认标题和内容
+                    (format!("章节 {}", segment_idx + 1), subtitle_text.chars().take(200).collect())
+                }
+            };
+
+            // 处理截图
+            let screenshot_path = if let Some(path) = &segment.screenshot_path {
+                // 使用用户提供的截图
+                Some(path.clone())
+            } else {
+                // 需要自动截图：使用第一个字幕的时间戳
+                let timestamp = segment.start_time;
+                let timestamp_str = format_timestamp_for_filename(timestamp);
+                let screenshot_filename = format!("{}_{}.jpg", safe_video_name, timestamp_str);
+                let screenshot_path = screenshots_dir.join(&screenshot_filename);
+
+                match capture_video_screenshot(&video_path, timestamp, screenshot_path.to_str().unwrap()) {
+                    Ok(_) => {
+                        eprintln!("[辅助模式章节生成] 第 {} 段自动截图成功: {}", segment_idx + 1, screenshot_filename);
+                        Some(screenshot_path.to_string_lossy().to_string())
+                    }
+                    Err(e) => {
+                        eprintln!("[辅助模式章节生成] 第 {} 段自动截图失败: {}", segment_idx + 1, e);
+                        None
+                    }
+                }
+            };
+
+            let chapter = Chapter {
+                id: uuid::Uuid::new_v4().to_string(),
+                title,
+                start_time: segment.start_time,
+                end_time: segment.end_time,
+                content,
+                screenshot_path,
+            };
+
+            Ok((segment_idx, chapter))
+        });
+
+        tasks.push(task);
+    }
+
+    // 等待所有任务完成并收集结果
+    let mut results: Vec<(usize, Chapter)> = Vec::new();
+
+    for task in tasks {
+        match task.await {
+            Ok(Ok(result)) => {
+                results.push(result);
+            }
+            Ok(Err(e)) => {
+                if e == "已中止" {
+                    get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
+                    return Err(e);
+                }
+                // 其他错误继续处理
+            }
+            Err(e) => {
+                eprintln!("[辅助模式章节生成] 任务执行出错: {}", e);
+                // 继续处理其他任务
+            }
+        }
+    }
+
+    // 按分段索引排序
+    results.sort_by_key(|(idx, _)| *idx);
+    let chapters: Vec<Chapter> = results.into_iter().map(|(_, chapter)| chapter).collect();
+
+    if chapters.is_empty() {
+        get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
+        return Err("未能生成任何章节".to_string());
+    }
+
+    eprintln!("[辅助模式章节生成] 成功生成 {} 个章节", chapters.len());
+
+    // 构建结果
+    let chapter_data = ChapterData {
+        total_duration,
+        generated_at: chrono::Local::now().to_rfc3339(),
+        chapters,
+    };
+
+    // 发送完成事件
+    let _ = app.emit(&event_name, ChapterGenerationEvent::Completed {
+        chapter_data: chapter_data.clone(),
+    });
+
+    // 清理
+    get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
+
+    Ok(chapter_data)
 }

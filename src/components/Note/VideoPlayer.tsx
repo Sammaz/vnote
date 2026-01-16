@@ -410,11 +410,7 @@ export function VideoPlayer({
       // 监听字幕按钮点击
       const captionBtn = (player.elements as any).buttons?.captions;
       if (captionBtn) {
-        const clickHandler = (e: Event) => {
-          e.stopPropagation();
-          // 预测下一个状态
-          const currentState = player.currentTrack !== null;
-          const nextState = !currentState;
+        const clickHandler = () => {
           setTimeout(() => {
             handleCaptionsChange();
           }, 100);

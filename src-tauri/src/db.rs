@@ -114,6 +114,17 @@ pub struct NoteUiState {
     pub subtitle_optimization_enabled: bool,
 }
 
+/// 截图标记（用于辅助模式章节分段）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ScreenshotMarker {
+    pub id: String,
+    pub note_id: i64,
+    pub subtitle_index: i32,
+    pub timestamp: f64,
+    pub screenshot_path: String,
+    pub created_at: String,
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -358,6 +369,27 @@ impl Database {
                 subtitle_optimization_enabled INTEGER NOT NULL DEFAULT 0,
                 FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
             )",
+            [],
+        )?;
+
+        // Screenshot markers table (for assist mode chapter segmentation)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS screenshot_markers (
+                id TEXT PRIMARY KEY,
+                note_id INTEGER NOT NULL,
+                subtitle_index INTEGER NOT NULL,
+                timestamp REAL NOT NULL,
+                screenshot_path TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+                UNIQUE(note_id, subtitle_index)
+            )",
+            [],
+        )?;
+
+        // Create index for screenshot markers
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_screenshot_markers_note_id ON screenshot_markers(note_id)",
             [],
         )?;
 
@@ -1098,5 +1130,1021 @@ impl Database {
             rusqlite::params![note_id, show_subtitles as i32, subtitle_optimization_enabled as i32],
         )?;
         Ok(())
+    }
+
+    // Screenshot Markers CRUD
+    pub fn get_screenshot_markers(&self, note_id: i64) -> SqliteResult<Vec<ScreenshotMarker>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, subtitle_index, timestamp, screenshot_path, created_at
+             FROM screenshot_markers WHERE note_id = ?1 ORDER BY subtitle_index"
+        )?;
+
+        let markers = stmt.query_map([note_id], |row| {
+            Ok(ScreenshotMarker {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                subtitle_index: row.get(2)?,
+                timestamp: row.get(3)?,
+                screenshot_path: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+
+        markers.collect()
+    }
+
+    pub fn save_screenshot_marker(&self, marker: &ScreenshotMarker) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO screenshot_markers (id, note_id, subtitle_index, timestamp, screenshot_path, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                &marker.id,
+                marker.note_id,
+                marker.subtitle_index,
+                marker.timestamp,
+                &marker.screenshot_path,
+                &marker.created_at
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_screenshot_marker(&self, note_id: i64, marker_id: &str) -> SqliteResult<Option<ScreenshotMarker>> {
+        let conn = self.conn.lock().unwrap();
+        
+        // First get the marker to return its data (for file cleanup)
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, subtitle_index, timestamp, screenshot_path, created_at
+             FROM screenshot_markers WHERE note_id = ?1 AND id = ?2"
+        )?;
+
+        let marker = stmt.query_row(rusqlite::params![note_id, marker_id], |row| {
+            Ok(ScreenshotMarker {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                subtitle_index: row.get(2)?,
+                timestamp: row.get(3)?,
+                screenshot_path: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        });
+
+        match marker {
+            Ok(m) => {
+                conn.execute(
+                    "DELETE FROM screenshot_markers WHERE note_id = ?1 AND id = ?2",
+                    rusqlite::params![note_id, marker_id],
+                )?;
+                Ok(Some(m))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn delete_all_screenshot_markers(&self, note_id: i64) -> SqliteResult<Vec<ScreenshotMarker>> {
+        // First get all markers for file cleanup
+        let markers = self.get_screenshot_markers(note_id)?;
+        
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM screenshot_markers WHERE note_id = ?1",
+            [note_id],
+        )?;
+        
+        Ok(markers)
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+    use tempfile::TempDir;
+
+    /// Helper function to create a test database in a temporary directory
+    fn create_test_db() -> (Database, TempDir) {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let db = Database::new(temp_dir.path().to_path_buf()).expect("Failed to create database");
+        (db, temp_dir)
+    }
+
+    /// Helper function to create a test note and return its ID
+    fn create_test_note(db: &Database) -> i64 {
+        let req = CreateNoteRequest {
+            title: "Test Note".to_string(),
+            video_path: "/test/video.mp4".to_string(),
+            subtitle_path: Some("/test/subtitle.srt".to_string()),
+            model_id: None,
+        };
+        let note = db.create_note(&req).expect("Failed to create note");
+        note.id
+    }
+
+    /// Strategy for generating valid subtitle indices (non-negative)
+    fn subtitle_index_strategy() -> impl Strategy<Value = i32> {
+        0..10000i32
+    }
+
+    /// Strategy for generating valid timestamps (non-negative)
+    fn timestamp_strategy() -> impl Strategy<Value = f64> {
+        (0.0..36000.0f64).prop_map(|t| (t * 1000.0).round() / 1000.0) // Round to 3 decimal places
+    }
+
+    /// Strategy for generating valid screenshot paths
+    fn screenshot_path_strategy() -> impl Strategy<Value = String> {
+        "[a-zA-Z0-9_/]{1,50}\\.png".prop_map(|s| format!("/screenshots/{}", s))
+    }
+
+    /// Strategy for generating a valid ScreenshotMarker (without note_id, which is set separately)
+    fn marker_data_strategy() -> impl Strategy<Value = (i32, f64, String)> {
+        (
+            subtitle_index_strategy(),
+            timestamp_strategy(),
+            screenshot_path_strategy(),
+        )
+    }
+
+    // ============================================================================
+    // Property 17: Marker Persistence Round-Trip
+    // **Validates: Requirements 7.1, 7.2, 7.3, 7.4**
+    //
+    // *For any* screenshot marker that is saved to the database, querying the 
+    // database for that note's markers SHALL return a marker with the same 
+    // subtitle_index, timestamp, and screenshot_path. After deletion, the marker 
+    // SHALL no longer be returned.
+    // ============================================================================
+
+    proptest! {
+        /// Property 17.1: Save and retrieve marker - data integrity
+        /// 
+        /// For any valid marker data, saving to the database and then querying
+        /// should return a marker with identical subtitle_index, timestamp, and screenshot_path.
+        #[test]
+        fn prop_marker_save_and_retrieve_preserves_data(
+            (subtitle_index, timestamp, screenshot_path) in marker_data_strategy()
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            let marker_id = uuid::Uuid::new_v4().to_string();
+            let marker = ScreenshotMarker {
+                id: marker_id.clone(),
+                note_id,
+                subtitle_index,
+                timestamp,
+                screenshot_path: screenshot_path.clone(),
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+
+            // Save the marker
+            db.save_screenshot_marker(&marker).expect("Failed to save marker");
+
+            // Retrieve markers for the note
+            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+
+            // Verify exactly one marker exists
+            prop_assert_eq!(markers.len(), 1, "Expected exactly one marker");
+
+            let retrieved = &markers[0];
+            
+            // Verify data integrity
+            prop_assert_eq!(&retrieved.id, &marker_id, "Marker ID mismatch");
+            prop_assert_eq!(retrieved.note_id, note_id, "Note ID mismatch");
+            prop_assert_eq!(retrieved.subtitle_index, subtitle_index, "Subtitle index mismatch");
+            prop_assert!((retrieved.timestamp - timestamp).abs() < 0.001, "Timestamp mismatch");
+            prop_assert_eq!(&retrieved.screenshot_path, &screenshot_path, "Screenshot path mismatch");
+        }
+
+        /// Property 17.2: Delete marker removes it from query results
+        /// 
+        /// For any marker that is saved and then deleted, querying the database
+        /// should no longer return that marker.
+        #[test]
+        fn prop_marker_delete_removes_from_results(
+            (subtitle_index, timestamp, screenshot_path) in marker_data_strategy()
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            let marker_id = uuid::Uuid::new_v4().to_string();
+            let marker = ScreenshotMarker {
+                id: marker_id.clone(),
+                note_id,
+                subtitle_index,
+                timestamp,
+                screenshot_path,
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+
+            // Save the marker
+            db.save_screenshot_marker(&marker).expect("Failed to save marker");
+
+            // Verify marker exists
+            let markers_before = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            prop_assert_eq!(markers_before.len(), 1, "Marker should exist before deletion");
+
+            // Delete the marker
+            let deleted = db.delete_screenshot_marker(note_id, &marker_id)
+                .expect("Failed to delete marker");
+            prop_assert!(deleted.is_some(), "Delete should return the deleted marker");
+
+            // Verify marker no longer exists
+            let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            prop_assert_eq!(markers_after.len(), 0, "Marker should not exist after deletion");
+        }
+
+        /// Property 17.3: Multiple markers with different indices are all persisted
+        /// 
+        /// For any set of markers with distinct subtitle indices, all markers
+        /// should be retrievable after saving.
+        #[test]
+        fn prop_multiple_markers_all_persisted(
+            indices in prop::collection::hash_set(subtitle_index_strategy(), 1..10)
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            let indices_vec: Vec<i32> = indices.into_iter().collect();
+            let expected_count = indices_vec.len();
+
+            // Save markers for each index
+            for &idx in &indices_vec {
+                let marker = ScreenshotMarker {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    note_id,
+                    subtitle_index: idx,
+                    timestamp: idx as f64 * 1.5,
+                    screenshot_path: format!("/screenshots/marker_{}.png", idx),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save marker");
+            }
+
+            // Retrieve all markers
+            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+
+            // Verify count matches
+            prop_assert_eq!(markers.len(), expected_count, "Marker count mismatch");
+
+            // Verify all indices are present
+            let retrieved_indices: std::collections::HashSet<i32> = 
+                markers.iter().map(|m| m.subtitle_index).collect();
+            let expected_indices: std::collections::HashSet<i32> = 
+                indices_vec.into_iter().collect();
+            prop_assert_eq!(retrieved_indices, expected_indices, "Indices mismatch");
+        }
+
+        /// Property 17.4: Markers are ordered by subtitle_index
+        /// 
+        /// When retrieving markers, they should be ordered by subtitle_index ascending.
+        #[test]
+        fn prop_markers_ordered_by_subtitle_index(
+            indices in prop::collection::hash_set(subtitle_index_strategy(), 2..10)
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            // Save markers in random order (hash_set iteration order is arbitrary)
+            for idx in indices {
+                let marker = ScreenshotMarker {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    note_id,
+                    subtitle_index: idx,
+                    timestamp: idx as f64,
+                    screenshot_path: format!("/screenshots/marker_{}.png", idx),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save marker");
+            }
+
+            // Retrieve markers
+            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+
+            // Verify ordering
+            for i in 1..markers.len() {
+                prop_assert!(
+                    markers[i-1].subtitle_index < markers[i].subtitle_index,
+                    "Markers should be ordered by subtitle_index"
+                );
+            }
+        }
+
+        /// Property 17.5: Update marker (same subtitle_index) replaces existing
+        /// 
+        /// When saving a marker with the same note_id and subtitle_index as an existing
+        /// marker, the existing marker should be replaced (due to UNIQUE constraint).
+        #[test]
+        fn prop_marker_update_replaces_existing(
+            subtitle_index in subtitle_index_strategy(),
+            (timestamp1, timestamp2) in (timestamp_strategy(), timestamp_strategy()),
+            (path1, path2) in (screenshot_path_strategy(), screenshot_path_strategy())
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            // Save first marker
+            let marker1 = ScreenshotMarker {
+                id: uuid::Uuid::new_v4().to_string(),
+                note_id,
+                subtitle_index,
+                timestamp: timestamp1,
+                screenshot_path: path1,
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+            db.save_screenshot_marker(&marker1).expect("Failed to save first marker");
+
+            // Save second marker with same subtitle_index but different data
+            let marker2_id = uuid::Uuid::new_v4().to_string();
+            let marker2 = ScreenshotMarker {
+                id: marker2_id.clone(),
+                note_id,
+                subtitle_index,
+                timestamp: timestamp2,
+                screenshot_path: path2.clone(),
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+            db.save_screenshot_marker(&marker2).expect("Failed to save second marker");
+
+            // Retrieve markers
+            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+
+            // Should only have one marker (the second one replaced the first)
+            prop_assert_eq!(markers.len(), 1, "Should have exactly one marker after update");
+            
+            // The marker should have the second marker's data
+            let retrieved = &markers[0];
+            prop_assert_eq!(&retrieved.id, &marker2_id, "Should have second marker's ID");
+            prop_assert!((retrieved.timestamp - timestamp2).abs() < 0.001, "Should have second marker's timestamp");
+            prop_assert_eq!(&retrieved.screenshot_path, &path2, "Should have second marker's path");
+        }
+    }
+
+    // ============================================================================
+    // Additional unit tests for edge cases
+    // ============================================================================
+
+    #[test]
+    fn test_get_markers_empty_note() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert!(markers.is_empty(), "New note should have no markers");
+    }
+
+    #[test]
+    fn test_delete_nonexistent_marker() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        let result = db.delete_screenshot_marker(note_id, "nonexistent-id")
+            .expect("Delete should not fail");
+        assert!(result.is_none(), "Deleting nonexistent marker should return None");
+    }
+
+    #[test]
+    fn test_delete_all_markers() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        // Add multiple markers
+        for i in 0..5 {
+            let marker = ScreenshotMarker {
+                id: uuid::Uuid::new_v4().to_string(),
+                note_id,
+                subtitle_index: i,
+                timestamp: i as f64 * 10.0,
+                screenshot_path: format!("/screenshots/marker_{}.png", i),
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+            db.save_screenshot_marker(&marker).expect("Failed to save marker");
+        }
+
+        // Verify markers exist
+        let markers_before = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert_eq!(markers_before.len(), 5, "Should have 5 markers");
+
+        // Delete all markers
+        let deleted = db.delete_all_screenshot_markers(note_id).expect("Failed to delete all markers");
+        assert_eq!(deleted.len(), 5, "Should return 5 deleted markers");
+
+        // Verify no markers remain
+        let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert!(markers_after.is_empty(), "Should have no markers after delete all");
+    }
+
+    #[test]
+    fn test_markers_isolated_between_notes() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id_1 = create_test_note(&db);
+        let note_id_2 = create_test_note(&db);
+
+        // Add marker to note 1
+        let marker1 = ScreenshotMarker {
+            id: uuid::Uuid::new_v4().to_string(),
+            note_id: note_id_1,
+            subtitle_index: 0,
+            timestamp: 10.0,
+            screenshot_path: "/screenshots/note1_marker.png".to_string(),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        };
+        db.save_screenshot_marker(&marker1).expect("Failed to save marker");
+
+        // Add marker to note 2
+        let marker2 = ScreenshotMarker {
+            id: uuid::Uuid::new_v4().to_string(),
+            note_id: note_id_2,
+            subtitle_index: 0,
+            timestamp: 20.0,
+            screenshot_path: "/screenshots/note2_marker.png".to_string(),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        };
+        db.save_screenshot_marker(&marker2).expect("Failed to save marker");
+
+        // Verify each note only sees its own markers
+        let markers_1 = db.get_screenshot_markers(note_id_1).expect("Failed to get markers");
+        let markers_2 = db.get_screenshot_markers(note_id_2).expect("Failed to get markers");
+
+        assert_eq!(markers_1.len(), 1, "Note 1 should have 1 marker");
+        assert_eq!(markers_2.len(), 1, "Note 2 should have 1 marker");
+        assert_eq!(markers_1[0].screenshot_path, "/screenshots/note1_marker.png");
+        assert_eq!(markers_2[0].screenshot_path, "/screenshots/note2_marker.png");
+    }
+
+    #[test]
+    fn test_cascade_delete_on_note_deletion() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        // Add markers
+        for i in 0..3 {
+            let marker = ScreenshotMarker {
+                id: uuid::Uuid::new_v4().to_string(),
+                note_id,
+                subtitle_index: i,
+                timestamp: i as f64 * 10.0,
+                screenshot_path: format!("/screenshots/marker_{}.png", i),
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+            db.save_screenshot_marker(&marker).expect("Failed to save marker");
+        }
+
+        // Verify markers exist
+        let markers_before = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert_eq!(markers_before.len(), 3, "Should have 3 markers");
+
+        // Delete the note
+        db.delete_note(note_id).expect("Failed to delete note");
+
+        // Verify markers are cascade deleted
+        let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert!(markers_after.is_empty(), "Markers should be cascade deleted with note");
+    }
+
+    // ============================================================================
+    // Property 18: Screenshot File Lifecycle
+    // **Validates: Requirements 8.1, 8.2, 8.4**
+    //
+    // *For any* screenshot capture operation, the screenshot file SHALL exist at 
+    // the specified path after capture. After marker deletion, the screenshot file 
+    // SHALL no longer exist at that path. User-added screenshots SHALL NOT be 
+    // deleted during chapter regeneration.
+    //
+    // Note: Since actual FFmpeg and file system operations are complex, these tests
+    // focus on the database layer's file path management logic:
+    // - File path is correctly recorded when saving a marker (8.1)
+    // - File path is correctly returned when deleting a marker for cleanup (8.2)
+    // - Batch deletion returns all file paths for cleanup (8.2)
+    // - User-added markers are preserved (identifiable) during operations (8.4)
+    // ============================================================================
+
+    proptest! {
+        /// Property 18.1: Screenshot path is correctly recorded after save
+        /// 
+        /// For any screenshot capture operation (simulated by saving a marker),
+        /// the screenshot_path SHALL be correctly stored and retrievable.
+        /// **Validates: Requirement 8.1**
+        #[test]
+        fn prop_screenshot_path_recorded_after_save(
+            screenshot_path in screenshot_path_strategy(),
+            subtitle_index in subtitle_index_strategy(),
+            timestamp in timestamp_strategy()
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            let marker_id = uuid::Uuid::new_v4().to_string();
+            let marker = ScreenshotMarker {
+                id: marker_id.clone(),
+                note_id,
+                subtitle_index,
+                timestamp,
+                screenshot_path: screenshot_path.clone(),
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+
+            // Save the marker (simulates screenshot capture + save)
+            db.save_screenshot_marker(&marker).expect("Failed to save marker");
+
+            // Retrieve and verify the path is correctly recorded
+            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            prop_assert_eq!(markers.len(), 1, "Should have exactly one marker");
+            prop_assert_eq!(
+                &markers[0].screenshot_path, 
+                &screenshot_path, 
+                "Screenshot path should be correctly recorded"
+            );
+        }
+
+        /// Property 18.2: Delete marker returns screenshot path for file cleanup
+        /// 
+        /// After marker deletion, the delete operation SHALL return the marker data
+        /// including the screenshot_path so the file can be cleaned up.
+        /// **Validates: Requirement 8.2**
+        #[test]
+        fn prop_delete_marker_returns_path_for_cleanup(
+            screenshot_path in screenshot_path_strategy(),
+            subtitle_index in subtitle_index_strategy(),
+            timestamp in timestamp_strategy()
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            let marker_id = uuid::Uuid::new_v4().to_string();
+            let marker = ScreenshotMarker {
+                id: marker_id.clone(),
+                note_id,
+                subtitle_index,
+                timestamp,
+                screenshot_path: screenshot_path.clone(),
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+
+            // Save the marker
+            db.save_screenshot_marker(&marker).expect("Failed to save marker");
+
+            // Delete the marker and verify the returned data contains the path
+            let deleted = db.delete_screenshot_marker(note_id, &marker_id)
+                .expect("Failed to delete marker");
+            
+            prop_assert!(deleted.is_some(), "Delete should return the deleted marker");
+            let deleted_marker = deleted.unwrap();
+            prop_assert_eq!(
+                &deleted_marker.screenshot_path, 
+                &screenshot_path, 
+                "Deleted marker should contain the screenshot path for file cleanup"
+            );
+        }
+
+        /// Property 18.3: Batch delete returns all screenshot paths for cleanup
+        /// 
+        /// When deleting all markers for a note, the operation SHALL return all
+        /// marker data including screenshot_paths so all files can be cleaned up.
+        /// **Validates: Requirement 8.2**
+        #[test]
+        fn prop_batch_delete_returns_all_paths_for_cleanup(
+            paths in prop::collection::vec(screenshot_path_strategy(), 1..10)
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            // Save markers with different paths
+            let mut expected_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for (i, path) in paths.iter().enumerate() {
+                let marker = ScreenshotMarker {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    note_id,
+                    subtitle_index: i as i32,
+                    timestamp: i as f64 * 10.0,
+                    screenshot_path: path.clone(),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save marker");
+                expected_paths.insert(path.clone());
+            }
+
+            // Delete all markers and verify all paths are returned
+            let deleted = db.delete_all_screenshot_markers(note_id)
+                .expect("Failed to delete all markers");
+            
+            prop_assert_eq!(
+                deleted.len(), 
+                expected_paths.len(), 
+                "Should return all deleted markers"
+            );
+
+            let returned_paths: std::collections::HashSet<String> = 
+                deleted.iter().map(|m| m.screenshot_path.clone()).collect();
+            prop_assert_eq!(
+                returned_paths, 
+                expected_paths, 
+                "All screenshot paths should be returned for file cleanup"
+            );
+        }
+
+        /// Property 18.4: User-added markers are identifiable and preserved
+        /// 
+        /// User-added screenshot markers SHALL be identifiable by their marker_id
+        /// and can be selectively preserved during operations (e.g., chapter regeneration).
+        /// **Validates: Requirement 8.4**
+        #[test]
+        fn prop_user_markers_identifiable_and_preservable(
+            user_indices in prop::collection::hash_set(0..50i32, 1..5),
+            auto_indices in prop::collection::hash_set(50..100i32, 1..5)
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            // Save user-added markers (simulating manual screenshot additions)
+            let mut user_marker_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for idx in &user_indices {
+                let marker_id = uuid::Uuid::new_v4().to_string();
+                let marker = ScreenshotMarker {
+                    id: marker_id.clone(),
+                    note_id,
+                    subtitle_index: *idx,
+                    timestamp: *idx as f64,
+                    screenshot_path: format!("/screenshots/user_marker_{}.png", idx),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save user marker");
+                user_marker_ids.insert(marker_id);
+            }
+
+            // Save auto-generated markers (simulating system-generated screenshots)
+            let mut auto_marker_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for idx in &auto_indices {
+                let marker_id = uuid::Uuid::new_v4().to_string();
+                let marker = ScreenshotMarker {
+                    id: marker_id.clone(),
+                    note_id,
+                    subtitle_index: *idx,
+                    timestamp: *idx as f64,
+                    screenshot_path: format!("/screenshots/auto_marker_{}.png", idx),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save auto marker");
+                auto_marker_ids.insert(marker_id);
+            }
+
+            // Simulate chapter regeneration: delete only auto-generated markers
+            // (In real implementation, this would be done by tracking which markers are user-added)
+            for auto_id in &auto_marker_ids {
+                db.delete_screenshot_marker(note_id, auto_id)
+                    .expect("Failed to delete auto marker");
+            }
+
+            // Verify user markers are preserved
+            let remaining_markers = db.get_screenshot_markers(note_id)
+                .expect("Failed to get markers");
+            
+            prop_assert_eq!(
+                remaining_markers.len(), 
+                user_marker_ids.len(), 
+                "Only user markers should remain after selective deletion"
+            );
+
+            let remaining_ids: std::collections::HashSet<String> = 
+                remaining_markers.iter().map(|m| m.id.clone()).collect();
+            prop_assert_eq!(
+                remaining_ids, 
+                user_marker_ids, 
+                "User marker IDs should be preserved"
+            );
+
+            // Verify user marker paths are intact
+            for marker in &remaining_markers {
+                prop_assert!(
+                    marker.screenshot_path.contains("user_marker"),
+                    "User marker paths should be preserved"
+                );
+            }
+        }
+    }
+
+    // ============================================================================
+    // Property 18: Additional unit tests for file lifecycle edge cases
+    // ============================================================================
+
+    #[test]
+    fn test_screenshot_path_with_special_characters() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        // Test path with spaces and unicode characters
+        let special_path = "/screenshots/视频截图 2024-01-15 10:30:45.png".to_string();
+        let marker = ScreenshotMarker {
+            id: uuid::Uuid::new_v4().to_string(),
+            note_id,
+            subtitle_index: 0,
+            timestamp: 10.0,
+            screenshot_path: special_path.clone(),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        };
+
+        db.save_screenshot_marker(&marker).expect("Failed to save marker");
+
+        let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].screenshot_path, special_path, "Special characters in path should be preserved");
+    }
+
+    #[test]
+    fn test_screenshot_path_with_long_path() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        // Test very long path
+        let long_path = format!("/screenshots/{}/marker.png", "a".repeat(500));
+        let marker = ScreenshotMarker {
+            id: uuid::Uuid::new_v4().to_string(),
+            note_id,
+            subtitle_index: 0,
+            timestamp: 10.0,
+            screenshot_path: long_path.clone(),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        };
+
+        db.save_screenshot_marker(&marker).expect("Failed to save marker");
+
+        let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].screenshot_path, long_path, "Long path should be preserved");
+    }
+
+    #[test]
+    fn test_delete_returns_correct_path_among_multiple() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        // Add multiple markers with different paths
+        let paths = vec![
+            "/screenshots/first.png",
+            "/screenshots/second.png",
+            "/screenshots/third.png",
+        ];
+        let mut marker_ids = Vec::new();
+
+        for (i, path) in paths.iter().enumerate() {
+            let marker_id = uuid::Uuid::new_v4().to_string();
+            let marker = ScreenshotMarker {
+                id: marker_id.clone(),
+                note_id,
+                subtitle_index: i as i32,
+                timestamp: i as f64 * 10.0,
+                screenshot_path: path.to_string(),
+                created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+            };
+            db.save_screenshot_marker(&marker).expect("Failed to save marker");
+            marker_ids.push(marker_id);
+        }
+
+        // Delete the middle marker and verify correct path is returned
+        let deleted = db.delete_screenshot_marker(note_id, &marker_ids[1])
+            .expect("Failed to delete marker");
+        
+        assert!(deleted.is_some());
+        assert_eq!(
+            deleted.unwrap().screenshot_path, 
+            "/screenshots/second.png",
+            "Should return the correct path for the deleted marker"
+        );
+
+        // Verify other markers still exist with correct paths
+        let remaining = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert_eq!(remaining.len(), 2);
+        assert_eq!(remaining[0].screenshot_path, "/screenshots/first.png");
+        assert_eq!(remaining[1].screenshot_path, "/screenshots/third.png");
+    }
+
+    #[test]
+    fn test_batch_delete_empty_returns_empty() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        // Delete all markers from a note with no markers
+        let deleted = db.delete_all_screenshot_markers(note_id)
+            .expect("Failed to delete all markers");
+        
+        assert!(deleted.is_empty(), "Deleting from empty should return empty vec");
+    }
+
+    #[test]
+    fn test_marker_path_preserved_after_update() {
+        let (db, _temp_dir) = create_test_db();
+        let note_id = create_test_note(&db);
+
+        // Save initial marker
+        let original_path = "/screenshots/original.png".to_string();
+        let marker = ScreenshotMarker {
+            id: uuid::Uuid::new_v4().to_string(),
+            note_id,
+            subtitle_index: 5,
+            timestamp: 50.0,
+            screenshot_path: original_path.clone(),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        };
+        db.save_screenshot_marker(&marker).expect("Failed to save marker");
+
+        // Update with new marker at same index (different path)
+        let new_path = "/screenshots/updated.png".to_string();
+        let updated_marker = ScreenshotMarker {
+            id: uuid::Uuid::new_v4().to_string(),
+            note_id,
+            subtitle_index: 5, // Same index
+            timestamp: 55.0,
+            screenshot_path: new_path.clone(),
+            created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+        };
+        db.save_screenshot_marker(&updated_marker).expect("Failed to save updated marker");
+
+        // Verify only the new path exists
+        let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        assert_eq!(markers.len(), 1);
+        assert_eq!(
+            markers[0].screenshot_path, 
+            new_path,
+            "Updated marker should have new path"
+        );
+        // Note: In real implementation, the old file at original_path should be cleaned up
+        // before saving the new marker. This test verifies the DB correctly stores the new path.
+    }
+
+    // ============================================================================
+    // Property 19: Cleanup on Note Deletion
+    // **Validates: Requirements 8.3**
+    //
+    // *For any* note with associated screenshot markers, after the note is deleted,
+    // all screenshot marker records for that note SHALL be removed from the database.
+    //
+    // Note: File system cleanup is handled by the Tauri command layer (lib.rs),
+    // which deletes the entire note cache directory. These tests verify the database
+    // cascade deletion behavior that supports the cleanup process.
+    // ============================================================================
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(10))]
+
+        /// Property 19.1: All markers are cascade deleted when note is deleted
+        /// 
+        /// For any note with N screenshot markers (N >= 0), after the note is deleted,
+        /// querying for that note's markers SHALL return an empty list.
+        /// **Validates: Requirement 8.3**
+        #[test]
+        fn prop_all_markers_cascade_deleted_on_note_deletion(
+            marker_count in 0..10usize
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            // Add markers to the note
+            for i in 0..marker_count {
+                let marker = ScreenshotMarker {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    note_id,
+                    subtitle_index: i as i32,
+                    timestamp: i as f64 * 10.0,
+                    screenshot_path: format!("/screenshots/marker_{}.png", i),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save marker");
+            }
+
+            // Verify markers exist before deletion
+            let markers_before = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            prop_assert_eq!(
+                markers_before.len(), 
+                marker_count, 
+                "Should have {} markers before deletion", marker_count
+            );
+
+            // Delete the note
+            db.delete_note(note_id).expect("Failed to delete note");
+
+            // Verify all markers are cascade deleted
+            let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            prop_assert!(
+                markers_after.is_empty(), 
+                "All markers should be cascade deleted with note, but found {} markers", 
+                markers_after.len()
+            );
+        }
+
+        /// Property 19.2: Markers from other notes are not affected by deletion
+        /// 
+        /// For any two notes with markers, deleting one note SHALL only remove
+        /// markers associated with that note, leaving other notes' markers intact.
+        /// **Validates: Requirement 8.3**
+        #[test]
+        fn prop_other_notes_markers_preserved_on_deletion(
+            note1_marker_count in 1..5usize,
+            note2_marker_count in 1..5usize
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id_1 = create_test_note(&db);
+            let note_id_2 = create_test_note(&db);
+
+            // Add markers to note 1
+            for i in 0..note1_marker_count {
+                let marker = ScreenshotMarker {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    note_id: note_id_1,
+                    subtitle_index: i as i32,
+                    timestamp: i as f64 * 10.0,
+                    screenshot_path: format!("/screenshots/note1_marker_{}.png", i),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save marker");
+            }
+
+            // Add markers to note 2
+            for i in 0..note2_marker_count {
+                let marker = ScreenshotMarker {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    note_id: note_id_2,
+                    subtitle_index: i as i32,
+                    timestamp: i as f64 * 10.0,
+                    screenshot_path: format!("/screenshots/note2_marker_{}.png", i),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save marker");
+            }
+
+            // Delete note 1
+            db.delete_note(note_id_1).expect("Failed to delete note 1");
+
+            // Verify note 1's markers are deleted
+            let note1_markers = db.get_screenshot_markers(note_id_1).expect("Failed to get markers");
+            prop_assert!(
+                note1_markers.is_empty(), 
+                "Note 1's markers should be deleted"
+            );
+
+            // Verify note 2's markers are preserved
+            let note2_markers = db.get_screenshot_markers(note_id_2).expect("Failed to get markers");
+            prop_assert_eq!(
+                note2_markers.len(), 
+                note2_marker_count, 
+                "Note 2's markers should be preserved"
+            );
+
+            // Verify note 2's marker paths are intact
+            for marker in &note2_markers {
+                prop_assert!(
+                    marker.screenshot_path.contains("note2_marker"),
+                    "Note 2's marker paths should be preserved"
+                );
+            }
+        }
+
+        /// Property 19.3: Marker file paths are retrievable before note deletion
+        /// 
+        /// For any note with markers, before deletion, all marker file paths
+        /// SHALL be retrievable for file system cleanup purposes.
+        /// **Validates: Requirement 8.3**
+        #[test]
+        fn prop_marker_paths_retrievable_before_deletion(
+            paths in prop::collection::vec(screenshot_path_strategy(), 1..5)
+        ) {
+            let (db, _temp_dir) = create_test_db();
+            let note_id = create_test_note(&db);
+
+            // Save markers with different paths
+            let mut expected_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for (i, path) in paths.iter().enumerate() {
+                let marker = ScreenshotMarker {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    note_id,
+                    subtitle_index: i as i32,
+                    timestamp: i as f64 * 10.0,
+                    screenshot_path: path.clone(),
+                    created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                };
+                db.save_screenshot_marker(&marker).expect("Failed to save marker");
+                expected_paths.insert(path.clone());
+            }
+
+            // Retrieve markers before deletion (for file cleanup)
+            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let retrieved_paths: std::collections::HashSet<String> = 
+                markers.iter().map(|m| m.screenshot_path.clone()).collect();
+
+            prop_assert_eq!(
+                retrieved_paths, 
+                expected_paths, 
+                "All marker paths should be retrievable before note deletion for file cleanup"
+            );
+
+            // Now delete the note
+            db.delete_note(note_id).expect("Failed to delete note");
+
+            // Verify markers are gone
+            let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            prop_assert!(markers_after.is_empty(), "Markers should be deleted with note");
+        }
     }
 }

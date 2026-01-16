@@ -10,7 +10,7 @@ mod subtitle;
 mod subtitle_optimizer;
 
 use chat::ChatRequest;
-use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig};
+use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker};
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -753,6 +753,186 @@ fn save_note_ui_state(note_id: i64, show_subtitles: bool, subtitle_optimization_
     get_db().save_note_ui_state(note_id, show_subtitles, subtitle_optimization_enabled).map_err(|e| e.to_string())
 }
 
+// Screenshot marker commands
+#[tauri::command]
+async fn save_screenshot_marker(
+    app: AppHandle,
+    note_id: i64,
+    subtitle_index: i32,
+    timestamp: f64,
+    screenshot_data: Vec<u8>,
+) -> Result<ScreenshotMarker, String> {
+    // Create screenshot directory for this note
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let screenshots_dir = cache_dir
+        .join("notes")
+        .join(note_id.to_string())
+        .join("assist_screenshots");
+    std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
+
+    // Generate unique ID and filename
+    let marker_id = uuid::Uuid::new_v4().to_string();
+    let screenshot_filename = format!("marker_{}_{}.png", subtitle_index, &marker_id[..8]);
+    let screenshot_path = screenshots_dir.join(&screenshot_filename);
+
+    // Save screenshot data to file
+    std::fs::write(&screenshot_path, &screenshot_data)
+        .map_err(|e| format!("Failed to save screenshot: {}", e))?;
+
+    // Create marker record
+    let marker = ScreenshotMarker {
+        id: marker_id,
+        note_id,
+        subtitle_index,
+        timestamp,
+        screenshot_path: screenshot_path.to_string_lossy().to_string(),
+        created_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+    };
+
+    // Save to database
+    get_db()
+        .save_screenshot_marker(&marker)
+        .map_err(|e| e.to_string())?;
+
+    Ok(marker)
+}
+
+#[tauri::command]
+async fn delete_screenshot_marker(
+    note_id: i64,
+    marker_id: String,
+) -> Result<(), String> {
+    // Delete from database and get marker data for file cleanup
+    let marker = get_db()
+        .delete_screenshot_marker(note_id, &marker_id)
+        .map_err(|e| e.to_string())?;
+
+    // Delete screenshot file if marker existed
+    if let Some(m) = marker {
+        let path = std::path::Path::new(&m.screenshot_path);
+        if path.exists() {
+            std::fs::remove_file(path)
+                .map_err(|e| format!("Failed to delete screenshot file: {}", e))?;
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+fn get_screenshot_markers(note_id: i64) -> Result<Vec<ScreenshotMarker>, String> {
+    get_db()
+        .get_screenshot_markers(note_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Generate chapters using assist mode markers
+/// This uses user-defined screenshot markers for chapter segmentation
+/// instead of AI-based automatic segmentation
+#[tauri::command]
+async fn generate_chapters_with_markers(
+    app: AppHandle,
+    generation_id: Option<String>,
+    note_id: i64,
+    model_id: i64,
+    video_path: String,
+    subtitle_path: String,
+    markers: Vec<ScreenshotMarker>,
+) -> Result<String, String> {
+    let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let return_id = generation_id.clone();
+
+    // 在后台任务中执行
+    tokio::spawn(async move {
+        match note_generation::generate_chapters_with_markers(
+            app.clone(),
+            get_db(),
+            generation_id.clone(),
+            note_id,
+            model_id,
+            video_path,
+            subtitle_path,
+            markers,
+        ).await {
+            Ok(chapter_data) => {
+                // 保存章节数据到笔记
+                if let Err(e) = save_chapters_to_note_internal(note_id, &chapter_data) {
+                    eprintln!("[generate_chapters_with_markers] 保存章节数据失败: {}", e);
+                }
+            }
+            Err(e) => {
+                eprintln!("[generate_chapters_with_markers] 生成失败: {}", e);
+            }
+        }
+    });
+
+    Ok(return_id)
+}
+
+/// Internal function to save chapter data to note
+fn save_chapters_to_note_internal(note_id: i64, chapter_data: &chapter::ChapterData) -> Result<(), String> {
+    let mut note = get_db()
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到")?;
+
+    let chapter_json = serde_json::to_string(chapter_data).map_err(|e| e.to_string())?;
+    note.detailed_reading = Some(chapter_json);
+
+    get_db().update_note(&note).map_err(|e| e.to_string())
+}
+
+/// Capture a video frame at a specific timestamp using FFmpeg
+/// Returns the path to the saved screenshot file
+#[tauri::command]
+async fn capture_video_frame(
+    video_path: String,
+    timestamp: f64,
+    output_path: String,
+) -> Result<String, String> {
+    // Verify video file exists
+    let video_path_obj = Path::new(&video_path);
+    if !video_path_obj.exists() {
+        return Err(format!("Video file not found: {}", video_path));
+    }
+
+    // Ensure output directory exists
+    let output_path_obj = Path::new(&output_path);
+    if let Some(parent) = output_path_obj.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    }
+
+    // Run FFmpeg to capture frame at specified timestamp
+    // -ss: seek to timestamp (placed before -i for faster seeking)
+    // -i: input file
+    // -frames:v 1: capture only 1 frame
+    // -q:v 2: high quality JPEG (lower number = higher quality, range 2-31)
+    let output = Command::new("ffmpeg")
+        .args([
+            "-y",                              // Overwrite output file if exists
+            "-ss", &format!("{:.3}", timestamp), // Seek to timestamp (in seconds)
+            "-i", &video_path,                 // Input video file
+            "-frames:v", "1",                  // Capture only 1 frame
+            "-q:v", "2",                       // High quality
+            &output_path,                      // Output file path
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run ffmpeg: {}. Please ensure ffmpeg is installed.", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("FFmpeg frame capture failed: {}", stderr));
+    }
+
+    // Verify output file was created
+    if !output_path_obj.exists() {
+        return Err("Screenshot file was not created".to_string());
+    }
+
+    Ok(output_path)
+}
+
 // Highlight generation commands
 #[tauri::command]
 async fn generate_highlights(
@@ -944,6 +1124,11 @@ pub fn run() {
             delete_optimized_subtitles,
             get_note_ui_state,
             save_note_ui_state,
+            save_screenshot_marker,
+            delete_screenshot_marker,
+            get_screenshot_markers,
+            generate_chapters_with_markers,
+            capture_video_frame,
             generate_highlights,
             abort_highlight_generation,
             save_highlights_to_note,

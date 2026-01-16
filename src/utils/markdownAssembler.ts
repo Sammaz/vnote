@@ -117,6 +117,18 @@ function assembleChapterSectionInternal(
 }
 
 /**
+ * 组装单个章节的 Markdown 内容（公开接口，用于测试）
+ */
+export function assembleChapterSection(
+  chapter: Chapter,
+  index: number,
+  optimizedSubtitle: string | undefined,
+  originalSubtitles: SubtitleEntry[]
+): string {
+  return assembleChapterSectionInternal(chapter, index, optimizedSubtitle, originalSubtitles, true);
+}
+
+/**
  * 将章节数据组装为完整的 Markdown 字符串
  */
 export function assembleChapterMarkdown(options: AssembleMarkdownOptions): string {

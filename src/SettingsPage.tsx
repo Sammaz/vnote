@@ -155,7 +155,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const handleClearVideoCache = async () => {
         setClearingCache(true);
         try {
-            const clearedSize = await invoke<number>("clear_video_cache");
+            await invoke<number>("clear_video_cache");
             setVideoCacheSize(0);
         } catch (error) {
             console.error("Failed to clear video cache:", error);

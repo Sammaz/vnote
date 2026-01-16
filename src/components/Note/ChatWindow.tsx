@@ -319,10 +319,8 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
     // 如果当前生成的消息是空的或很少内容，显示"已取消"提示
     if (messageIdToCheck) {
       setMessages((prev) => {
-        let updated = false;
-        const newMessages = prev.map((msg) => {
+        return prev.map((msg) => {
           if (msg.id === messageIdToCheck) {
-            updated = true;
             // 如果内容为空或很短，显示取消提示；否则保留已有内容
             if (msg.content === "" || msg.content.length < 10) {
               return { ...msg, content: "_已取消_" };
@@ -330,7 +328,6 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
           }
           return msg;
         });
-        return newMessages;
       });
     }
 

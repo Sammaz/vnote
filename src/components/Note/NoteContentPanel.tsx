@@ -19,17 +19,19 @@ import {
   Subtitles as SubtitlesIcon,
   Wand2,
   Loader2,
+  MousePointer2,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { VisualSummaryContent } from "./VisualSummaryContent";
+import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 import {
@@ -37,7 +39,6 @@ import {
   setNoteGenerationState,
   attemptedAutoGenerateNoteIds,
   activeListeners,
-  isChapterGenerating,
   setChapterGenerating,
   setInitialAutoGeneration,
   isInitialAutoGeneration,
@@ -117,6 +118,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const userClickTimeRef = useRef<number>(0);
   // 显示章节字幕开关
   const [showChapterSubtitles, setShowChapterSubtitles] = useState(false);
+
+  // 辅助模式状态
+  const [isAssistModeActive, setIsAssistModeActive] = useState(false);
+  // 辅助模式下的截图标记（从 AssistModeView 同步）
+  const [assistModeMarkers, setAssistModeMarkers] = useState<ScreenshotMarker[]>([]);
+  // 辅助模式生成状态
+  const [assistModeGenerating, setAssistModeGenerating] = useState(false);
+  const [assistModeProgress, setAssistModeProgress] = useState<{ current: number; total: number; message: string } | null>(null);
 
   // 字幕优化相关状态
   const [subtitleOptimizationEnabled, setSubtitleOptimizationEnabled] = useState(false);
@@ -396,7 +405,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 生成状态（从全局状态同步）
   const [isGenerating, setIsGenerating] = useState(() => syncStateFromGlobal().isGenerating);
-  const [regeneratingTabs, setRegeneratingTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().regeneratingTabs) as Set<TabType>);
+  const [, setRegeneratingTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().regeneratingTabs) as Set<TabType>);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string }>(() => ({ ...syncStateFromGlobal().progress }));
   const [completedTabs, setCompletedTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().completedTabs) as Set<TabType>);
   const [failedTabs, setFailedTabs] = useState<Map<TabType, string>>(() => new Map(syncStateFromGlobal().failedTabs) as Map<TabType, string>);
@@ -1044,6 +1053,98 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     } catch (error) {
       console.error("[generateChaptersDirectly] 生成失败:", error);
       setChapterGenerating(note.id, false);
+    }
+  }, [note.id, note.video_path, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete]);
+
+  // 辅助模式下使用截图标记生成章节
+  const generateChaptersWithMarkers = useCallback(async (markers: ScreenshotMarker[]) => {
+    const effectiveModelId = currentModelId || note.model_id;
+    if (!effectiveModelId || !note.subtitle_path) {
+      message.error("缺少必要参数：模型ID或字幕路径");
+      console.error("[generateChaptersWithMarkers] 缺少必要参数");
+      return;
+    }
+
+    if (markers.length === 0) {
+      message.warning("请先添加至少一个截图标记");
+      return;
+    }
+
+    try {
+      setAssistModeGenerating(true);
+      setAssistModeProgress({ current: 0, total: markers.length, message: "准备生成章节..." });
+      const generationId = crypto.randomUUID();
+
+      // 设置事件监听
+      const unlisten = await listen<ChapterGenerationEvent>(
+        `chapter-generation-${generationId}`,
+        (event) => {
+          const data = event.payload;
+          switch (data.status) {
+            case "Starting":
+              setAssistModeProgress({ current: 0, total: markers.length, message: "开始生成章节..." });
+              break;
+            case "AnalyzingSubtitle":
+              setAssistModeProgress(prev => prev ? { ...prev, message: data.message } : null);
+              break;
+            case "GeneratingChapters":
+              setAssistModeProgress({ current: data.current, total: data.total, message: data.message });
+              break;
+            case "CapturingScreenshots":
+              setAssistModeProgress({ current: data.current, total: data.total, message: data.message });
+              break;
+            case "Completed":
+              setAssistModeProgress({ current: markers.length, total: markers.length, message: "生成完成!" });
+              // 刷新笔记数据
+              onGenerationComplete?.();
+              message.success("章节生成完成");
+              setTimeout(() => {
+                setAssistModeGenerating(false);
+                setAssistModeProgress(null);
+                // 自动退出辅助模式
+                setIsAssistModeActive(false);
+              }, 1000);
+              unlisten();
+              break;
+            case "Error":
+              message.error(`生成失败: ${data.error}`);
+              setAssistModeGenerating(false);
+              setAssistModeProgress(null);
+              unlisten();
+              break;
+            case "Aborted":
+              setAssistModeGenerating(false);
+              setAssistModeProgress(null);
+              unlisten();
+              break;
+          }
+        }
+      );
+
+      // 清除字幕优化缓存（内存和数据库）
+      setOptimizedSubtitles(new Map());
+      setSubtitleOptimizationEnabled(false);
+      setFailedChapterIds(new Set());
+      try {
+        await invoke("delete_optimized_subtitles", { noteId: note.id });
+      } catch (err) {
+        console.error("[generateChaptersWithMarkers] 清除数据库字幕缓存失败:", err);
+      }
+
+      // 调用后端生成章节（使用截图标记）
+      await invoke("generate_chapters_with_markers", {
+        generationId,
+        noteId: note.id,
+        modelId: effectiveModelId,
+        videoPath: note.video_path,
+        subtitlePath: note.subtitle_path,
+        markers,
+      });
+    } catch (error) {
+      console.error("[generateChaptersWithMarkers] 生成失败:", error);
+      message.error(`生成失败: ${error}`);
+      setAssistModeGenerating(false);
+      setAssistModeProgress(null);
     }
   }, [note.id, note.video_path, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete]);
 
@@ -1970,85 +2071,89 @@ Video subtitles content:`;
         // 原文细读标签页的工具栏（不管有无章节数据都显示相同）
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
           <div className="flex items-center gap-3">
-            {/* 章节下拉框 */}
-            <div className="relative" ref={chapterDropdownRef}>
+            {/* 章节下拉框 - 辅助模式下隐藏 */}
+            {!isAssistModeActive && (
+              <div className="relative" ref={chapterDropdownRef}>
+                <button
+                  onClick={() => setShowChapterDropdown(!showChapterDropdown)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                >
+                  <List className="w-4 h-4" />
+                  共 {chapterData?.chapters.length || 0} 个章节
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
+                </button>
+                {showChapterDropdown && chapterData && (
+                  <div className="absolute top-full left-0 mt-1 w-96 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-auto">
+                    {/* 下拉框头部 */}
+                    <div className="sticky top-0 bg-white dark:bg-slate-800 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                      <List className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
+                    </div>
+                    {/* 章节列表 */}
+                    <div className="py-1">
+                      {chapterData.chapters.map((chapter, index) => {
+                        const formatTime = (seconds: number): string => {
+                          const hours = Math.floor(seconds / 3600);
+                          const minutes = Math.floor((seconds % 3600) / 60);
+                          const secs = Math.floor(seconds % 60);
+                          if (hours > 0) {
+                            return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+                          }
+                          return `${minutes}:${secs.toString().padStart(2, "0")}`;
+                        };
+                        return (
+                          <button
+                            key={chapter.id}
+                            onClick={() => {
+                              // 记录用户点击时间，防止视频时间更新干扰
+                              userClickTimeRef.current = Date.now();
+                              // 设置当前选中的章节
+                              setCurrentChapterId(chapter.id);
+                              // 跳转到视频时间
+                              window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
+                              // 滚动到对应章节卡片
+                              const chapterElement = document.getElementById(`chapter-${chapter.id}`);
+                              if (chapterElement) {
+                                chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
+                              }
+                              setShowChapterDropdown(false);
+                            }}
+                            className="w-full px-4 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer text-left"
+                          >
+                            <span className="text-xs text-blue-400 dark:text-blue-400 font-mono w-12 flex-shrink-0">
+                              {formatTime(chapter.start_time)}
+                            </span>
+                            <span className="text-xs w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
+                              {index + 1}
+                            </span>
+                            <span className="text-sm text-slate-700 dark:text-slate-200 truncate">
+                              {chapter.title}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+            {/* 字幕滚动开关 - 辅助模式下隐藏 */}
+            {!isAssistModeActive && (
               <button
-                onClick={() => setShowChapterDropdown(!showChapterDropdown)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                onClick={() => setAutoScroll(!autoScroll)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                  autoScroll
+                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                )}
               >
-                <List className="w-4 h-4" />
-                共 {chapterData?.chapters.length || 0} 个章节
-                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
+                <Clock className="w-4 h-4" />
+                字幕滚动
               </button>
-              {showChapterDropdown && chapterData && (
-                <div className="absolute top-full left-0 mt-1 w-96 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-auto">
-                  {/* 下拉框头部 */}
-                  <div className="sticky top-0 bg-white dark:bg-slate-800 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
-                    <List className="w-4 h-4 text-slate-500" />
-                    <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
-                  </div>
-                  {/* 章节列表 */}
-                  <div className="py-1">
-                    {chapterData.chapters.map((chapter, index) => {
-                      const formatTime = (seconds: number): string => {
-                        const hours = Math.floor(seconds / 3600);
-                        const minutes = Math.floor((seconds % 3600) / 60);
-                        const secs = Math.floor(seconds % 60);
-                        if (hours > 0) {
-                          return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-                        }
-                        return `${minutes}:${secs.toString().padStart(2, "0")}`;
-                      };
-                      return (
-                        <button
-                          key={chapter.id}
-                          onClick={() => {
-                            // 记录用户点击时间，防止视频时间更新干扰
-                            userClickTimeRef.current = Date.now();
-                            // 设置当前选中的章节
-                            setCurrentChapterId(chapter.id);
-                            // 跳转到视频时间
-                            window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
-                            // 滚动到对应章节卡片
-                            const chapterElement = document.getElementById(`chapter-${chapter.id}`);
-                            if (chapterElement) {
-                              chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
-                            }
-                            setShowChapterDropdown(false);
-                          }}
-                          className="w-full px-4 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer text-left"
-                        >
-                          <span className="text-xs text-blue-400 dark:text-blue-400 font-mono w-12 flex-shrink-0">
-                            {formatTime(chapter.start_time)}
-                          </span>
-                          <span className="text-xs w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
-                            {index + 1}
-                          </span>
-                          <span className="text-sm text-slate-700 dark:text-slate-200 truncate">
-                            {chapter.title}
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-            {/* 字幕滚动开关 */}
-            <button
-              onClick={() => setAutoScroll(!autoScroll)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                autoScroll
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
-            >
-              <Clock className="w-4 h-4" />
-              字幕滚动
-            </button>
-            {/* 显示字幕开关 */}
-            {note.subtitle_path && (
+            )}
+            {/* 显示字幕开关 - 辅助模式下隐藏 */}
+            {!isAssistModeActive && note.subtitle_path && (
               <button
                 onClick={() => setShowChapterSubtitles(!showChapterSubtitles)}
                 className={cn(
@@ -2062,8 +2167,8 @@ Video subtitles content:`;
                 {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
               </button>
             )}
-            {/* 字幕优化开关 - 仅在显示字幕时可用 */}
-            {note.subtitle_path && showChapterSubtitles && chapterData && (
+            {/* 字幕优化开关 - 仅在显示字幕时可用，辅助模式下隐藏 */}
+            {!isAssistModeActive && note.subtitle_path && showChapterSubtitles && chapterData && (
               <button
                 onClick={handleSubtitleOptimizationToggle}
                 disabled={subtitleOptimizing}
@@ -2089,32 +2194,72 @@ Video subtitles content:`;
               </button>
             )}
           </div>
-          {/* 重新生成按钮 */}
-          <button
-            onClick={async () => {
-              // 清除字幕优化缓存（内存和数据库）
-              setOptimizedSubtitles(new Map());
-              setSubtitleOptimizationEnabled(false);
-              setFailedChapterIds(new Set());
-              try {
-                await invoke("delete_optimized_subtitles", { noteId: note.id });
-              } catch (err) {
-                console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
-              }
-              // 清除之前生成的截图
-              try {
-                await invoke("clear_chapter_screenshots", { noteId: note.id });
-              } catch (err) {
-                console.error("[NoteContentPanel] 清除截图缓存失败:", err);
-              }
-              // 重新生成章节
-              chapterGridRef.current?.generateChapters();
-            }}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-          >
-            <RefreshCw className="w-4 h-4" />
-            重新生成
-          </button>
+          <div className="flex items-center gap-2">
+            {/* 辅助模式切换按钮 */}
+            <button
+              onClick={() => setIsAssistModeActive(!isAssistModeActive)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                isAssistModeActive
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <MousePointer2 className="w-4 h-4" />
+              辅助模式
+            </button>
+            {/* 重新生成按钮 */}
+            <button
+              onClick={async () => {
+                if (isAssistModeActive) {
+                  // 辅助模式下：使用截图标记生成章节
+                  generateChaptersWithMarkers(assistModeMarkers);
+                } else {
+                  // 普通模式下：清除缓存并重新生成
+                  // 清除字幕优化缓存（内存和数据库）
+                  setOptimizedSubtitles(new Map());
+                  setSubtitleOptimizationEnabled(false);
+                  setFailedChapterIds(new Set());
+                  try {
+                    await invoke("delete_optimized_subtitles", { noteId: note.id });
+                  } catch (err) {
+                    console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
+                  }
+                  // 清除之前生成的截图
+                  try {
+                    await invoke("clear_chapter_screenshots", { noteId: note.id });
+                  } catch (err) {
+                    console.error("[NoteContentPanel] 清除截图缓存失败:", err);
+                  }
+                  // 重新生成章节
+                  chapterGridRef.current?.generateChapters();
+                }
+              }}
+              disabled={assistModeGenerating}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover",
+                assistModeGenerating && "opacity-50 cursor-not-allowed"
+              )}
+            >
+              {assistModeGenerating ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  生成中...
+                  {assistModeProgress && (
+                    <span className="text-xs ml-1">
+                      ({assistModeProgress.current}/{assistModeProgress.total})
+                    </span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  重新生成
+                </>
+              )}
+            </button>
+          </div>
         </div>
       ) : activeTab === "script" ? (
         // 字幕脚本标签页的专用工具栏
@@ -2297,6 +2442,23 @@ Video subtitles content:`;
           />
         )}
         {activeTab === "original" && (() => {
+          // 辅助模式下显示 AssistModeView
+          if (isAssistModeActive) {
+            return (
+              <AssistModeView
+                noteId={note.id}
+                subtitlePath={note.subtitle_path}
+                videoPath={note.video_path}
+                onRegenerateChapters={(markers: ScreenshotMarker[]) => {
+                  // 使用截图标记生成章节
+                  generateChaptersWithMarkers(markers);
+                }}
+                onExitAssistMode={() => setIsAssistModeActive(false)}
+                onMarkersChange={setAssistModeMarkers}
+              />
+            );
+          }
+
           // 检查是否是纯文本内容（向后兼容旧数据）
           const isPlainText = typeof note.detailed_reading === "string" &&
             note.detailed_reading.trim() &&
