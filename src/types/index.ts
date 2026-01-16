@@ -200,7 +200,7 @@ export interface ChapterData {
 export type ChapterGenerationEvent =
   | { status: "Starting" }
   | { status: "AnalyzingSubtitle"; message: string }
-  | { status: "GeneratingChapters"; current: number; total: number; message: string }
+  | { status: "ChapterCompleted"; completed: number; total: number; message: string }
   | { status: "CapturingScreenshots"; current: number; total: number; message: string }
   | { status: "Completed"; chapter_data: ChapterData }
   | { status: "Error"; error: string }

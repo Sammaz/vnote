@@ -1815,6 +1815,9 @@ pub async fn generate_chapters_with_markers(
     // 并发生成章节内容
     let mut tasks = Vec::new();
 
+    // 使用原子计数器跟踪已完成的任务数（用于并发场景下的递增进度显示）
+    let completed_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
     for (segment_idx, segment) in segments.iter().enumerate() {
         let ai_config = ai_config.clone();
         let abort_flag = abort_flag.clone();
@@ -1825,6 +1828,7 @@ pub async fn generate_chapters_with_markers(
         let video_path = video_path.clone();
         let screenshots_dir = screenshots_dir.clone();
         let safe_video_name = safe_video_name.clone();
+        let completed_count = completed_count.clone();
 
         let task = tokio::spawn(async move {
             // 检查中止
@@ -1834,13 +1838,6 @@ pub async fn generate_chapters_with_markers(
 
             eprintln!("[辅助模式章节生成] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
                 segment_idx + 1, total_segments, segment.start_index, segment.end_index);
-
-            // 发送进度事件
-            let _ = app.emit(&event_name, ChapterGenerationEvent::GeneratingChapters {
-                current: segment_idx + 1,
-                total: total_segments,
-                message: format!("AI正在生成第 {}/{} 章节内容...", segment_idx + 1, total_segments),
-            });
 
             // 提取该分段的字幕文本
             let segment_subtitles: Vec<&SubtitleEntry> = subtitle_entries
@@ -1914,6 +1911,14 @@ pub async fn generate_chapters_with_markers(
                 parent_id: None,
             };
 
+            // 任务完成后，递增完成计数并发送进度事件
+            let completed = completed_count.fetch_add(1, Ordering::SeqCst) + 1;
+            let _ = app.emit(&event_name, ChapterGenerationEvent::ChapterCompleted {
+                completed,
+                total: total_segments,
+                message: format!("已完成 {}/{} 章节", completed, total_segments),
+            });
+
             Ok((segment_idx, chapter))
         });
 
@@ -1954,9 +1959,7 @@ pub async fn generate_chapters_with_markers(
     eprintln!("[辅助模式章节生成] 成功生成 {} 个章节", chapters.len());
 
     // 优化标题（添加层级信息）
-    let _ = app.emit(&event_name, ChapterGenerationEvent::GeneratingChapters {
-        current: total_segments,
-        total: total_segments + 1,
+    let _ = app.emit(&event_name, ChapterGenerationEvent::AnalyzingSubtitle {
         message: "AI正在优化章节标题...".to_string(),
     });
 

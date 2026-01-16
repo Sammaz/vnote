@@ -21,6 +21,7 @@ import {
   Loader2,
   MousePointer2,
   Package,
+  GitBranch,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
@@ -31,7 +32,7 @@ import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
-import { VisualSummaryContent } from "./VisualSummaryContent";
+import { VisualSummaryContent, type VisualViewMode } from "./VisualSummaryContent";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
@@ -397,6 +398,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [isVisualEditMode, setIsVisualEditMode] = useState(false);
   const [visualEditContent, setVisualEditContent] = useState<string>("");
   const [showVisualTimestamp, setShowVisualTimestamp] = useState(true);
+  const [visualViewMode, setVisualViewMode] = useState<VisualViewMode>("markdown");
 
   // 从全局状态同步组件state
   const syncStateFromGlobal = useCallback(() => {
@@ -1113,8 +1115,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             case "AnalyzingSubtitle":
               setAssistModeProgress(prev => prev ? { ...prev, message: data.message } : null);
               break;
-            case "GeneratingChapters":
-              setAssistModeProgress({ current: data.current, total: data.total, message: data.message });
+            case "ChapterCompleted":
+              // 使用后端返回的 completed 计数（并发场景下递增显示）
+              setAssistModeProgress({ current: data.completed, total: data.total, message: data.message });
               break;
             case "CapturingScreenshots":
               setAssistModeProgress({ current: data.current, total: data.total, message: data.message });
@@ -2344,57 +2347,93 @@ Video subtitles content:`;
         // 视觉化总结标签页的专用工具栏
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
           <div className="flex items-center gap-2">
-            <button
-              onClick={handleVisualEditToggle}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                isVisualEditMode
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
-            >
-              <Edit3 className="w-4 h-4" />
-              {isVisualEditMode ? "预览" : "编辑"}
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                showVisualTimestamp
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
-            >
-              <Clock className="w-4 h-4" />
-              时间戳
-            </button>
+            {/* 视图模式切换 */}
+            <div className="flex items-center bg-slate-100 dark:bg-vnote-hover rounded-lg p-0.5">
+              <button
+                onClick={() => setVisualViewMode("markdown")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer",
+                  visualViewMode === "markdown"
+                    ? "bg-white dark:bg-vnote-card text-blue-600 dark:text-blue-400 shadow-sm"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                )}
+              >
+                <FileText className="w-4 h-4" />
+                文档
+              </button>
+              <button
+                onClick={() => setVisualViewMode("mindmap")}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer",
+                  visualViewMode === "mindmap"
+                    ? "bg-white dark:bg-vnote-card text-blue-600 dark:text-blue-400 shadow-sm"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                )}
+              >
+                <GitBranch className="w-4 h-4" />
+                思维导图
+              </button>
+            </div>
+            {/* 仅在文档模式下显示编辑和时间戳按钮 */}
+            {visualViewMode === "markdown" && (
+              <>
+                <span className="text-slate-300 dark:text-slate-600">|</span>
+                <button
+                  onClick={handleVisualEditToggle}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                    isVisualEditMode
+                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                  )}
+                >
+                  <Edit3 className="w-4 h-4" />
+                  {isVisualEditMode ? "预览" : "编辑"}
+                </button>
+                <span className="text-slate-300 dark:text-slate-600">|</span>
+                <button
+                  onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                    showVisualTimestamp
+                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                  )}
+                >
+                  <Clock className="w-4 h-4" />
+                  时间戳
+                </button>
+              </>
+            )}
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleVisualCopy}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Copy className="w-4 h-4" />
-              复制
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={handleVisualDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              下载
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={handleVisualExport}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Package className="w-4 h-4" />
-              导出
-            </button>
-          </div>
+          {/* 仅在文档模式下显示导出按钮 */}
+          {visualViewMode === "markdown" && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleVisualCopy}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+              >
+                <Copy className="w-4 h-4" />
+                复制
+              </button>
+              <span className="text-slate-300 dark:text-slate-600">|</span>
+              <button
+                onClick={handleVisualDownload}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+              >
+                <Download className="w-4 h-4" />
+                下载
+              </button>
+              <span className="text-slate-300 dark:text-slate-600">|</span>
+              <button
+                onClick={handleVisualExport}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+              >
+                <Package className="w-4 h-4" />
+                导出
+              </button>
+            </div>
+          )}
         </div>
       ) : activeTab === "custom" && note.custom_summary ? (
         // 自定义总结标签页的工具栏（有内容时显示完整工具栏）
@@ -2579,6 +2618,8 @@ Video subtitles content:`;
             editContent={visualEditContent}
             onEditContentChange={setVisualEditContent}
             showTimestamp={showVisualTimestamp}
+            viewMode={visualViewMode}
+            noteTitle={note.title}
           />
         )}
         {activeTab === "custom" && (

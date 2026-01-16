@@ -120,8 +120,9 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
             case "AnalyzingSubtitle":
               setProgress({ current: 0, total: 0, message: data.message });
               break;
-            case "GeneratingChapters":
-              setProgress({ current: data.current, total: data.total, message: data.message });
+            case "ChapterCompleted":
+              // 使用后端返回的 completed 计数（并发场景下递增显示）
+              setProgress({ current: data.completed, total: data.total, message: data.message });
               break;
             case "CapturingScreenshots":
               setProgress({ current: data.current, total: data.total, message: data.message });

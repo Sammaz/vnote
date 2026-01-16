@@ -60,7 +60,11 @@ pub struct GenerateChaptersRequest {
 pub enum ChapterGenerationEvent {
     Starting,
     AnalyzingSubtitle { message: String },
-    GeneratingChapters { current: usize, total: usize, message: String },
+    /// 章节生成进度事件
+    /// - completed: 已完成的章节数（用于并发场景，递增显示）
+    /// - total: 总章节数
+    /// - message: 进度消息
+    ChapterCompleted { completed: usize, total: usize, message: String },
     CapturingScreenshots { current: usize, total: usize, message: String },
     Completed { chapter_data: ChapterData },
     #[allow(dead_code)]
@@ -253,11 +257,15 @@ async fn analyze_subtitle_for_chapters(
     // 多段并发处理：使用 tokio::spawn 并发生成章节（并发控制由 AI 线程池统一管理）
     let mut tasks = Vec::new();
 
+    // 使用原子计数器跟踪已完成的任务数（用于并发场景下的递增进度显示）
+    let completed_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
     for (chunk_idx, chunk) in chunks.into_iter().enumerate() {
         let ai_config = ai_config.clone();
         let abort_flag = abort_flag.clone();
         let app = app.clone();
         let event_name = event_name.to_string();
+        let completed_count = completed_count.clone();
 
         let task = tokio::spawn(async move {
             // 检查中止
@@ -267,13 +275,6 @@ async fn analyze_subtitle_for_chapters(
 
             eprintln!("[章节生成] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
                 chunk_idx + 1, total_chunks, chunk.start_index, chunk.end_index);
-
-            // 发送进度事件
-            let _ = app.emit(&event_name, ChapterGenerationEvent::GeneratingChapters {
-                current: chunk_idx + 1,
-                total: total_chunks,
-                message: format!("AI正在分析第 {}/{} 段字幕...", chunk_idx + 1, total_chunks),
-            });
 
             let chunk_size = chunk.end_index - chunk.start_index;
             let chunk_info = format!(
@@ -287,7 +288,7 @@ async fn analyze_subtitle_for_chapters(
                 prompt,
             };
 
-            match execute_non_streaming_with_abort(req, &abort_flag).await {
+            let result = match execute_non_streaming_with_abort(req, &abort_flag).await {
                 Ok(response) => {
                     match parse_chapter_ai_response(&response.content, chunk.end_index - chunk.start_index) {
                         Ok(chapters) => {
@@ -304,7 +305,17 @@ async fn analyze_subtitle_for_chapters(
                     eprintln!("[章节生成] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
                     Ok((chunk_idx, chunk.start_index, chunk.end_index, Vec::new()))
                 }
-            }
+            };
+
+            // 任务完成后，递增完成计数并发送进度事件
+            let completed = completed_count.fetch_add(1, Ordering::SeqCst) + 1;
+            let _ = app.emit(&event_name, ChapterGenerationEvent::ChapterCompleted {
+                completed,
+                total: total_chunks,
+                message: format!("已完成 {}/{} 段字幕分析", completed, total_chunks),
+            });
+
+            result
         });
 
         tasks.push(task);
