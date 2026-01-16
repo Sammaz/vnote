@@ -20,6 +20,7 @@ import {
   Wand2,
   Loader2,
   MousePointer2,
+  Package,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
@@ -987,6 +988,31 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     } catch (error) {
       console.error("下载失败:", error);
       message.error(`下载失败: ${error}`);
+    }
+  };
+
+  // 视觉化总结导出（打包 Markdown 和图片为 zip）
+  const handleVisualExport = async () => {
+    const content = isVisualEditMode ? visualEditContent : getVisualSummaryContent();
+    if (!content) {
+      message.warning("暂无内容可导出");
+      return;
+    }
+    try {
+      const filePath = await save({
+        defaultPath: `${note.title}.zip`,
+        filters: [{ name: "ZIP Archive", extensions: ["zip"] }],
+      });
+      if (!filePath) return;
+      await invoke("export_visual_summary", {
+        content,
+        savePath: filePath,
+        noteTitle: note.title,
+      });
+      message.success("导出成功");
+    } catch (error) {
+      console.error("导出失败:", error);
+      message.error(`导出失败: ${error}`);
     }
   };
 
@@ -2359,6 +2385,14 @@ Video subtitles content:`;
             >
               <Download className="w-4 h-4" />
               下载
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={handleVisualExport}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Package className="w-4 h-4" />
+              导出
             </button>
           </div>
         </div>

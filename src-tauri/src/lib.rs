@@ -11,7 +11,8 @@ mod subtitle_optimizer;
 
 use chat::ChatRequest;
 use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker};
-use std::path::Path;
+use regex::Regex;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
@@ -27,6 +28,212 @@ pub static DATABASE: OnceLock<Database> = OnceLock::new();
 
 fn get_db() -> &'static Database {
     DATABASE.get().expect("Database not initialized")
+}
+
+/// Parse asset URLs from Markdown content
+/// 
+/// Extracts all `http://asset.localhost/...` format image links from Markdown content,
+/// decodes URL-encoded paths, and returns a list of (asset_url, local_path, filename) tuples.
+/// 
+/// # Arguments
+/// * `content` - Markdown content string to parse
+/// 
+/// # Returns
+/// * `Vec<(String, PathBuf, String)>` - List of (asset_url, local_file_path, filename)
+/// 
+/// # Requirements
+/// * 2.1: Identify all `http://asset.localhost/...` format image links
+/// * 2.2: Correctly decode URL-encoded file paths (e.g., `%5C` to `\`)
+/// * 2.3: Return mapping list of image links and local file paths
+fn parse_asset_urls(content: &str) -> Vec<(String, PathBuf, String)> {
+    let mut results = Vec::new();
+    
+    // Regex pattern to match Markdown image syntax with asset.localhost URLs
+    // Pattern: ![alt text](http://asset.localhost/encoded_path)
+    let re = Regex::new(r"!\[.*?\]\((http://asset\.localhost/[^)]+)\)").unwrap();
+    
+    for cap in re.captures_iter(content) {
+        if let Some(url_match) = cap.get(1) {
+            let asset_url = url_match.as_str().to_string();
+            
+            // Extract the encoded path from the URL (everything after "http://asset.localhost/")
+            let encoded_path = asset_url
+                .strip_prefix("http://asset.localhost/")
+                .unwrap_or("");
+            
+            // Decode URL-encoded path (e.g., %5C -> \, %3A -> :)
+            if let Ok(decoded_path) = urlencoding::decode(encoded_path) {
+                let local_path = PathBuf::from(decoded_path.as_ref());
+                
+                // Extract filename from the path
+                let filename = local_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("image")
+                    .to_string();
+                
+                results.push((asset_url, local_path, filename));
+            }
+        }
+    }
+    
+    results
+}
+
+/// Transform Markdown content by replacing asset URLs with relative paths
+/// 
+/// Replaces all `http://asset.localhost/...` format image links in Markdown content
+/// with `./attachments/{filename}` format for portable export.
+/// 
+/// # Arguments
+/// * `content` - Markdown content string to transform
+/// * `url_mappings` - List of (asset_url, local_path, filename) tuples from parse_asset_urls
+/// 
+/// # Returns
+/// * `String` - Transformed Markdown content with relative paths
+/// 
+/// # Example
+/// Input: `![title](http://asset.localhost/C%3A%5C...%5C1.jpg)`
+/// Output: `![title](./attachments/1.jpg)`
+/// 
+/// # Requirements
+/// * 3.3: Replace `http://asset.localhost/...` format with `./attachments/xxx.jpg` format
+fn transform_markdown_paths(
+    content: &str,
+    url_mappings: &[(String, PathBuf, String)], // (asset_url, local_path, filename)
+) -> String {
+    let mut result = content.to_string();
+    
+    for (asset_url, _local_path, filename) in url_mappings {
+        // Replace the asset URL with the relative attachments path
+        let relative_path = format!("./attachments/{}", filename);
+        result = result.replace(asset_url, &relative_path);
+    }
+    
+    result
+}
+
+/// Export visual summary as a zip file containing Markdown and images
+/// 
+/// This command creates a portable export package with:
+/// - A Markdown file with transformed image paths
+/// - An attachments directory containing all referenced images
+/// 
+/// # Arguments
+/// * `content` - Markdown content string to export
+/// * `save_path` - User-selected path for the zip file
+/// * `note_title` - Note title, used for the Markdown filename inside zip
+/// 
+/// # Returns
+/// * `Ok(())` - Export successful
+/// * `Err(String)` - Error message
+/// 
+/// # Requirements
+/// * 3.1: Create `attachments` subdirectory in temp directory
+/// * 3.2: Copy all parsed images to `attachments` directory
+/// * 3.4: Skip non-existent source image files and continue processing
+/// * 4.1: Generate zip archive containing Markdown file
+/// * 4.2: Include `attachments` directory and its contents in zip
+/// * 4.3: Maintain `attachments/xxx.jpg` directory structure
+#[tauri::command]
+async fn export_visual_summary(
+    content: String,
+    save_path: String,
+    note_title: String,
+) -> Result<(), String> {
+    use std::fs::{self, File};
+    use std::io::{Read, Write};
+    use zip::write::FileOptions;
+    use zip::ZipWriter;
+
+    // Create temporary directory for processing
+    let temp_dir = std::env::temp_dir().join(format!("vnote_export_{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("创建临时目录失败: {}", e))?;
+
+    // Create attachments subdirectory (Requirement 3.1)
+    let attachments_dir = temp_dir.join("attachments");
+    fs::create_dir_all(&attachments_dir)
+        .map_err(|e| format!("创建 attachments 目录失败: {}", e))?;
+
+    // Parse asset URLs from content
+    let url_mappings = parse_asset_urls(&content);
+
+    // Copy images to attachments directory (Requirement 3.2, 3.4)
+    let mut successful_mappings: Vec<(String, PathBuf, String)> = Vec::new();
+    for (asset_url, local_path, filename) in &url_mappings {
+        // Skip non-existent files (Requirement 3.4)
+        if !local_path.exists() {
+            eprintln!("[export_visual_summary] 跳过不存在的文件: {:?}", local_path);
+            continue;
+        }
+
+        let dest_path = attachments_dir.join(filename);
+        if let Err(e) = fs::copy(local_path, &dest_path) {
+            eprintln!("[export_visual_summary] 复制文件失败 {:?}: {}", local_path, e);
+            continue;
+        }
+
+        successful_mappings.push((asset_url.clone(), local_path.clone(), filename.clone()));
+    }
+
+    // Transform Markdown paths for successfully copied images
+    let transformed_content = transform_markdown_paths(&content, &successful_mappings);
+
+    // Create zip file (Requirement 4.1, 4.2, 4.3)
+    let zip_file = File::create(&save_path)
+        .map_err(|e| format!("创建 zip 文件失败: {}", e))?;
+    let mut zip = ZipWriter::new(zip_file);
+
+    let options = FileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+
+    // Sanitize note title for filename (remove invalid characters)
+    let safe_title: String = note_title
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' || c == ' ' || c > '\u{007F}' { c } else { '_' })
+        .collect();
+    let md_filename = format!("{}.md", safe_title);
+
+    // Write Markdown file to zip (Requirement 4.1)
+    zip.start_file(&md_filename, options)
+        .map_err(|e| format!("写入 Markdown 文件失败: {}", e))?;
+    zip.write_all(transformed_content.as_bytes())
+        .map_err(|e| format!("写入 Markdown 内容失败: {}", e))?;
+
+    // Write attachments directory and files to zip (Requirement 4.2, 4.3)
+    for (_, _, filename) in &successful_mappings {
+        let attachment_path = attachments_dir.join(filename);
+        if attachment_path.exists() {
+            let zip_path = format!("attachments/{}", filename);
+            
+            // Read file content
+            let mut file = File::open(&attachment_path)
+                .map_err(|e| format!("打开附件文件失败: {}", e))?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)
+                .map_err(|e| format!("读取附件文件失败: {}", e))?;
+
+            // Write to zip
+            zip.start_file(&zip_path, options)
+                .map_err(|e| format!("写入附件到 zip 失败: {}", e))?;
+            zip.write_all(&buffer)
+                .map_err(|e| format!("写入附件内容失败: {}", e))?;
+        }
+    }
+
+    // Finish zip file
+    zip.finish()
+        .map_err(|e| format!("完成 zip 文件失败: {}", e))?;
+
+    // Clean up temporary directory
+    if let Err(e) = fs::remove_dir_all(&temp_dir) {
+        eprintln!("[export_visual_summary] 清理临时目录失败: {}", e);
+        // Don't fail the export if cleanup fails
+    }
+
+    Ok(())
 }
 
 fn create_tray(app: &AppHandle) -> Result<(), String> {
@@ -1132,6 +1339,7 @@ pub fn run() {
             generate_highlights,
             abort_highlight_generation,
             save_highlights_to_note,
+            export_visual_summary,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

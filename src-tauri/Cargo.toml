@@ -35,6 +35,10 @@ uuid = { version = "1", features = ["v4"] }
 regex = "1"
 chrono = "0.4"
 
+# Export functionality
+zip = "0.6"
+urlencoding = "2"
+
 [dev-dependencies]
 proptest = "1.4"
 tempfile = "3"
