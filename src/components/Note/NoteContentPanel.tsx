@@ -2011,7 +2011,10 @@ Video subtitles content:`;
   };
 
   return (
-    <div className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden">
+    <div className={cn(
+      "flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border",
+      activeTab === "visual" && visualViewMode === "mindmap" ? "" : "overflow-hidden"
+    )}>
       {/* 标签页头部 */}
       <div className="border-b border-slate-200 dark:border-vnote-border">
         <div className="flex flex-wrap">
@@ -2510,8 +2513,10 @@ Video subtitles content:`;
 
       {/* 内容区域 */}
       <div className={cn(
-        "flex-1 overflow-y-auto",
-        isEditMode ? "p-0" : "p-6"
+        "flex-1",
+        activeTab === "visual" && visualViewMode === "mindmap"
+          ? "p-0 overflow-visible"
+          : isEditMode ? "p-0 overflow-y-auto" : "p-6 overflow-y-auto"
       )}>
         {activeTab === "summary" && (
           <EditableMarkdown

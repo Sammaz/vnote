@@ -1,6 +1,7 @@
 /**
  * 视频视觉总结内容组件
  * 将原文细读的章节数据组装为 Markdown 格式并使用 ReactMarkdown 渲染展示
+ * 支持 Markdown 和思维导图两种视图模式
  */
 
 import { useMemo, useEffect } from "react";
@@ -9,6 +10,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChapterData, SubtitleEntry } from "../../types";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
+import { MindMapView } from "./MindMap";
+
+/** 视觉化总结视图模式 */
+export type VisualViewMode = "markdown" | "mindmap";
 
 interface VisualSummaryContentProps {
   chapterData: ChapterData | null;
@@ -18,6 +23,10 @@ interface VisualSummaryContentProps {
   editContent?: string;
   onEditContentChange?: (content: string) => void;
   showTimestamp?: boolean;
+  /** 视图模式：markdown 或 mindmap */
+  viewMode?: VisualViewMode;
+  /** 笔记标题（用于思维导图根节点） */
+  noteTitle?: string;
 }
 
 export function VisualSummaryContent({
@@ -28,6 +37,8 @@ export function VisualSummaryContent({
   editContent = "",
   onEditContentChange,
   showTimestamp = true,
+  viewMode = "markdown",
+  noteTitle = "思维导图",
 }: VisualSummaryContentProps) {
   // 组装 Markdown 内容
   const markdownContent = useMemo(() => {
@@ -62,7 +73,14 @@ export function VisualSummaryContent({
     );
   }
 
-  // 编辑模式
+  // 思维导图模式
+  if (viewMode === "mindmap") {
+    return (
+      <MindMapView chapterData={chapterData} noteTitle={noteTitle} />
+    );
+  }
+
+  // 编辑模式（仅 Markdown 模式支持）
   if (isEditMode) {
     return (
       <div className="flex flex-col h-full">
@@ -76,7 +94,7 @@ export function VisualSummaryContent({
     );
   }
 
-  // 预览模式
+  // Markdown 预览模式
   return (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto px-2 py-2">
