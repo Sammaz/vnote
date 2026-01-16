@@ -10,7 +10,10 @@
 //! 以及辅助模式章节生成功能
 
 use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
-use crate::chapter::{capture_video_screenshot, Chapter, ChapterData, ChapterGenerationEvent};
+use crate::chapter::{
+    capture_video_screenshot, split_subtitle_into_chunks, sanitize_filename,
+    format_timestamp_for_filename, Chapter, ChapterData, ChapterGenerationEvent,
+};
 use crate::db::{AiConfig, Database, ScreenshotMarker};
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
 use serde::{Deserialize, Serialize};
@@ -204,34 +207,6 @@ impl PromptTemplates {
 - **术语2**：解释
 
 ---
-
-视频字幕内容：
-{}"#,
-            subtitle_content
-        )
-    }
-
-    /// 原文细读提示词
-    fn detailed_reading(subtitle_content: &str) -> String {
-        format!(
-            r#"你是一个专业的学习助手。请对以下视频字幕进行详细的细读分析。
-
-输出要求：
-1. 按视频内容的时间逻辑组织内容
-2. 提取每个知识点的详细说明
-3. 保留关键信息和示例
-4. 使用Markdown格式输出
-
-格式示例：
-## 开场介绍
-
-视频开场介绍了...
-- 要点1
-- 要点2
-
-## 核心概念
-
-详细讲解了...
 
 视频字幕内容：
 {}"#,
@@ -706,6 +681,278 @@ async fn generate_full_summary_layered(
 }
 
 // ============================================================================
+// 原文细读章节生成（非辅助模式）
+// ============================================================================
+
+/// 生成章节内容的提示词（用于原文细读）
+fn build_detailed_reading_chapter_prompt(subtitle_text: &str) -> String {
+    format!(
+        r#"你是一个专业的视频内容分析师。请为以下视频字幕片段生成章节标题和内容摘要。
+
+**输出要求**：
+1. 必须输出有效的 JSON 格式（不要使用代码块标记）
+2. 标题应简洁明了，概括该段落的核心主题（10-20字）
+3. 内容摘要应简明扼要地描述该段落的主要内容（50-100字）
+
+**输出格式**：
+{{
+  "title": "章节标题",
+  "content": "章节内容摘要"
+}}
+
+**视频字幕片段**：
+{}"#,
+        subtitle_text
+    )
+}
+
+/// 解析章节内容 AI 响应（用于原文细读）
+fn parse_detailed_reading_chapter_response(response: &str) -> Result<(String, String), String> {
+    // 尝试提取 JSON（可能有代码块标记）
+    let json_str = if let Some(start) = response.find("```json") {
+        let start = start + 7;
+        if let Some(end) = response[start..].find("```") {
+            &response[start..start + end]
+        } else {
+            response
+        }
+    } else if let Some(start) = response.find("```") {
+        let start = start + 3;
+        if let Some(end) = response[start..].find("```") {
+            &response[start..start + end]
+        } else {
+            response
+        }
+    } else {
+        response
+    };
+
+    // 尝试找到第一个 { 和最后一个 }
+    let json_start = json_str.find('{').unwrap_or(0);
+    let json_end = json_str.rfind('}').unwrap_or(json_str.len());
+
+    if json_start >= json_end {
+        return Err("未找到有效的JSON响应".to_string());
+    }
+
+    let clean_json = &json_str[json_start..=json_end];
+
+    #[derive(Deserialize)]
+    struct ChapterContentResponse {
+        title: String,
+        content: String,
+    }
+
+    let parsed: ChapterContentResponse = serde_json::from_str(clean_json)
+        .map_err(|e| format!("JSON解析失败: {}, JSON内容: {}", e, clean_json))?;
+
+    Ok((parsed.title, parsed.content))
+}
+
+/// 生成原文细读章节数据（非辅助模式）
+///
+/// 该函数使用 AI 自动分段字幕，然后为每个分段生成标题和内容摘要，并截图。
+/// 输出格式与辅助模式一致，都是 ChapterData。
+async fn generate_detailed_reading_chapters(
+    app: &AppHandle,
+    event_name: &str,
+    ai_config: &AiConfig,
+    subtitle_entries: &[SubtitleEntry],
+    video_path: &str,
+    note_id: i64,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<ChapterData, String> {
+    eprintln!("[原文细读] ========================================");
+    eprintln!("[原文细读] 开始生成章节数据");
+    eprintln!("[原文细读] 字幕总条数: {}", subtitle_entries.len());
+    eprintln!("[原文细读] 使用模型: {}", ai_config.model);
+
+    // 计算总时长
+    let total_duration = subtitle_entries.last().map(|e| e.end_time).unwrap_or(0.0);
+
+    // 第一步：使用 AI 分段字幕
+    let _ = app.emit(
+        event_name,
+        GenerationEvent::TabProgress {
+            tab_type: "DetailedReading".to_string(),
+            current: 1,
+            total: 3,
+            message: "AI正在分析字幕结构...".to_string(),
+        },
+    );
+
+    let chunks = split_subtitle_into_chunks(subtitle_entries);
+    let total_chunks = chunks.len();
+    eprintln!("[原文细读] 分段数: {}", total_chunks);
+
+    // 第二步：并发生成每个分段的章节内容
+    let mut tasks = Vec::new();
+
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        let ai_config = ai_config.clone();
+        let abort_flag = abort_flag.clone();
+        let app = app.clone();
+        let event_name = event_name.to_string();
+        let subtitle_entries = subtitle_entries.to_vec();
+        let chunk_start = chunk.start_index;
+        let chunk_end = chunk.end_index;
+
+        // 提取该分段的字幕文本（用于生成内容）
+        let segment_subtitles: Vec<&SubtitleEntry> = subtitle_entries
+            .iter()
+            .skip(chunk_start)
+            .take(chunk_end - chunk_start)
+            .collect();
+
+        let subtitle_text: String = segment_subtitles
+            .iter()
+            .map(|e| e.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        // 计算时间范围
+        let start_time = subtitle_entries.get(chunk_start).map(|e| e.start_time).unwrap_or(0.0);
+        let end_time = subtitle_entries.get(chunk_end.saturating_sub(1)).map(|e| e.end_time).unwrap_or(total_duration);
+
+        let task = tokio::spawn(async move {
+            // 检查中止
+            if abort_flag.load(Ordering::Relaxed) {
+                return Err::<(usize, String, String, f64, f64), String>("已中止".to_string());
+            }
+
+            eprintln!("[原文细读] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+                chunk_idx + 1, total_chunks, chunk_start, chunk_end);
+
+            // 发送进度事件
+            let _ = app.emit(&event_name, GenerationEvent::TabProgress {
+                tab_type: "DetailedReading".to_string(),
+                current: chunk_idx + 1,
+                total: total_chunks + 1,
+                message: format!("AI正在生成第 {}/{} 章节内容...", chunk_idx + 1, total_chunks),
+            });
+
+            // 调用 AI 生成章节标题和内容
+            let prompt = build_detailed_reading_chapter_prompt(&subtitle_text);
+            let req = NonStreamingRequest {
+                config: ai_config,
+                prompt,
+            };
+
+            let (title, content) = match execute_non_streaming_with_abort(req, &abort_flag).await {
+                Ok(response) => {
+                    match parse_detailed_reading_chapter_response(&response.content) {
+                        Ok((t, c)) => (t, c),
+                        Err(e) => {
+                            eprintln!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
+                            // 使用默认标题和内容
+                            (format!("章节 {}", chunk_idx + 1), subtitle_text.chars().take(200).collect())
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[原文细读] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
+                    // 使用默认标题和内容
+                    (format!("章节 {}", chunk_idx + 1), subtitle_text.chars().take(200).collect())
+                }
+            };
+
+            Ok((chunk_idx, title, content, start_time, end_time))
+        });
+
+        tasks.push(task);
+    }
+
+    // 等待所有任务完成并收集结果
+    let mut results: Vec<(usize, String, String, f64, f64)> = Vec::new();
+
+    for task in tasks {
+        match task.await {
+            Ok(Ok(result)) => {
+                results.push(result);
+            }
+            Ok(Err(e)) => {
+                if e == "已中止" {
+                    return Err(e);
+                }
+            }
+            Err(e) => {
+                eprintln!("[原文细读] 任务执行出错: {}", e);
+            }
+        }
+    }
+
+    // 按分段索引排序
+    results.sort_by_key(|(idx, _, _, _, _)| *idx);
+
+    if results.is_empty() {
+        return Err("未能生成任何章节".to_string());
+    }
+
+    // 第三步：为每个章节截图
+    let _ = app.emit(
+        event_name,
+        GenerationEvent::TabProgress {
+            tab_type: "DetailedReading".to_string(),
+            current: total_chunks,
+            total: total_chunks + 1,
+            message: "正在截取章节画面...".to_string(),
+        },
+    );
+
+    // 准备截图目录
+    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
+    let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
+    std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
+
+    // 从视频路径提取文件名
+    let video_name = Path::new(video_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let safe_video_name = sanitize_filename(video_name);
+
+    // 构建章节列表
+    let mut chapters: Vec<Chapter> = Vec::new();
+
+    for (idx, title, content, start_time, end_time) in results {
+        // 截图
+        let timestamp_str = format_timestamp_for_filename(start_time);
+        let screenshot_filename = format!("{}_{}.jpg", safe_video_name, timestamp_str);
+        let screenshot_path = screenshots_dir.join(&screenshot_filename);
+
+        let screenshot_result = capture_video_screenshot(video_path, start_time, screenshot_path.to_str().unwrap());
+        let screenshot_path_str = match screenshot_result {
+            Ok(_) => {
+                eprintln!("[原文细读] 第 {} 章截图成功: {}", idx + 1, screenshot_filename);
+                Some(screenshot_path.to_string_lossy().to_string())
+            }
+            Err(e) => {
+                eprintln!("[原文细读] 第 {} 章截图失败: {}", idx + 1, e);
+                None
+            }
+        };
+
+        chapters.push(Chapter {
+            id: uuid::Uuid::new_v4().to_string(),
+            title,
+            start_time,
+            end_time,
+            content,
+            screenshot_path: screenshot_path_str,
+        });
+    }
+
+    eprintln!("[原文细读] 成功生成 {} 个章节", chapters.len());
+    eprintln!("[原文细读] ========================================");
+
+    Ok(ChapterData {
+        chapters,
+        total_duration,
+        generated_at: chrono::Local::now().to_rfc3339(),
+    })
+}
+
+// ============================================================================
 // 主生成函数
 // ============================================================================
 
@@ -808,54 +1055,112 @@ pub async fn generate_note(
     // 获取模型上下文大小
     let model_context_size = get_model_context_size(&ai_config.model);
 
-    // 并发生成（使用配置的并发数）
-    let semaphore = Arc::new(Semaphore::new(request.options.concurrent_limit));
-    let mut tasks = Vec::new();
+    // 分离 DetailedReading 和其他标签页（DetailedReading 需要特殊处理）
+    let has_detailed_reading = tabs_to_generate.contains(&TabType::DetailedReading);
+    let other_tabs: Vec<TabType> = tabs_to_generate
+        .iter()
+        .filter(|t| **t != TabType::DetailedReading)
+        .copied()
+        .collect();
 
-    for tab_type in tabs_to_generate {
-        let semaphore = semaphore.clone();
-        let app = app.clone();
-        let event_name = event_name.clone();
-        let ai_config = ai_config.clone();
-        let subtitle_text = subtitle_text.clone();
-        let abort_flag = abort_flag.clone();
-        let tab_name = get_tab_name(&tab_type);
-        let custom_prompt = request.options.custom_prompt.clone();
-
-        let task = tokio::spawn(async move {
-            // 获取信号量许可（控制标签页级别的并发）
-            let _permit = semaphore.acquire().await.unwrap();
-
-            // 执行生成
-            generate_single_tab(
-                &app,
-                &event_name,
-                &tab_type,
-                &ai_config,
-                &subtitle_text,
-                &abort_flag,
-                model_context_size,
-                tab_name,
-                custom_prompt.as_deref(),
-            ).await
-        });
-
-        tasks.push(task);
-    }
-
-    // 等待所有任务完成
     let mut generated_count = 0;
     let mut failed_count = 0;
 
-    for task in tasks {
-        let result = task.await.unwrap();
+    // 处理 DetailedReading（生成章节数据）
+    if has_detailed_reading {
+        let _ = app.emit(
+            &event_name,
+            GenerationEvent::TabStarted {
+                tab_type: "DetailedReading".to_string(),
+                tab_name: "原文细读".to_string(),
+            },
+        );
 
-        if result.success {
-            generated_count += 1;
-            // 更新数据库
-            update_note_tab(db, request.note_id, &result.tab_type, &result.content, request.model_id)?;
-        } else {
-            failed_count += 1;
+        match generate_detailed_reading_chapters(
+            &app,
+            &event_name,
+            &ai_config,
+            &entries,
+            &note.video_path,
+            request.note_id,
+            &abort_flag,
+        ).await {
+            Ok(chapter_data) => {
+                // 序列化为 JSON 存储
+                let content = serde_json::to_string(&chapter_data)
+                    .map_err(|e| format!("序列化章节数据失败: {}", e))?;
+
+                update_note_tab(db, request.note_id, &TabType::DetailedReading, &content, request.model_id)?;
+
+                let _ = app.emit(
+                    &event_name,
+                    GenerationEvent::TabCompleted {
+                        tab_type: "DetailedReading".to_string(),
+                        content,
+                    },
+                );
+                generated_count += 1;
+            }
+            Err(e) => {
+                let _ = app.emit(
+                    &event_name,
+                    GenerationEvent::TabError {
+                        tab_type: "DetailedReading".to_string(),
+                        error: e,
+                    },
+                );
+                failed_count += 1;
+            }
+        }
+    }
+
+    // 并发生成其他标签页（使用配置的并发数）
+    if !other_tabs.is_empty() {
+        let semaphore = Arc::new(Semaphore::new(request.options.concurrent_limit));
+        let mut tasks = Vec::new();
+
+        for tab_type in other_tabs {
+            let semaphore = semaphore.clone();
+            let app = app.clone();
+            let event_name = event_name.clone();
+            let ai_config = ai_config.clone();
+            let subtitle_text = subtitle_text.clone();
+            let abort_flag = abort_flag.clone();
+            let tab_name = get_tab_name(&tab_type);
+            let custom_prompt = request.options.custom_prompt.clone();
+
+            let task = tokio::spawn(async move {
+                // 获取信号量许可（控制标签页级别的并发）
+                let _permit = semaphore.acquire().await.unwrap();
+
+                // 执行生成
+                generate_single_tab(
+                    &app,
+                    &event_name,
+                    &tab_type,
+                    &ai_config,
+                    &subtitle_text,
+                    &abort_flag,
+                    model_context_size,
+                    tab_name,
+                    custom_prompt.as_deref(),
+                ).await
+            });
+
+            tasks.push(task);
+        }
+
+        // 等待所有任务完成
+        for task in tasks {
+            let result = task.await.unwrap();
+
+            if result.success {
+                generated_count += 1;
+                // 更新数据库
+                update_note_tab(db, request.note_id, &result.tab_type, &result.content, request.model_id)?;
+            } else {
+                failed_count += 1;
+            }
         }
     }
 
@@ -1049,7 +1354,7 @@ fn get_tab_name(tab_type: &TabType) -> String {
 fn get_prompt_for_tab(tab_type: &TabType, subtitle_text: &str) -> String {
     match tab_type {
         TabType::FullSummary => PromptTemplates::full_summary(subtitle_text),
-        TabType::DetailedReading => PromptTemplates::detailed_reading(subtitle_text),
+        TabType::DetailedReading => unreachable!("DetailedReading 已在 generate_note 中单独处理"),
         TabType::Highlights => PromptTemplates::highlights(subtitle_text),
         TabType::VisualSummary => PromptTemplates::visual_summary(subtitle_text),
         TabType::CustomSummary => PromptTemplates::custom_summary(subtitle_text),
@@ -1177,7 +1482,7 @@ fn build_chapter_content_prompt(subtitle_text: &str) -> String {
 **输出要求**：
 1. 必须输出有效的 JSON 格式（不要使用代码块标记）
 2. 标题应简洁明了，概括该段落的核心主题（10-20字）
-3. 内容摘要应详细描述该段落的主要内容（100-300字）
+3. 内容摘要应简明扼要地描述该段落的主要内容（50-100字）
 
 **输出格式**：
 {{
@@ -1232,33 +1537,6 @@ fn parse_chapter_content_response(response: &str) -> Result<(String, String), St
         .map_err(|e| format!("JSON解析失败: {}, JSON内容: {}", e, clean_json))?;
 
     Ok((parsed.title, parsed.content))
-}
-
-/// 将特殊字符转换为下划线，生成安全的文件名
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .split('_')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("_")
-}
-
-/// 格式化时间戳为文件名格式（如 010130 表示 01:01:30）
-fn format_timestamp_for_filename(seconds: f64) -> String {
-    let total_seconds = seconds as u64;
-    let hours = total_seconds / 3600;
-    let minutes = (total_seconds % 3600) / 60;
-    let secs = total_seconds % 60;
-
-    format!("{:02}{:02}{:02}", hours, minutes, secs)
 }
 
 /// 使用辅助模式标记生成章节

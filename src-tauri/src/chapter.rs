@@ -69,19 +69,19 @@ pub enum ChapterGenerationEvent {
 
 /// AI 章节分析响应结构
 #[derive(Debug, Deserialize)]
-struct AIChapterResponse {
-    chapters: Vec<AIChapter>,
+pub struct AIChapterResponse {
+    pub chapters: Vec<AIChapter>,
 }
 
 #[derive(Debug, Deserialize)]
-struct AIChapter {
-    title: String,
-    start_index: usize,
-    summary: String,
+pub struct AIChapter {
+    pub title: String,
+    pub start_index: usize,
+    pub summary: String,
 }
 
 /// 生成章节分割提示词
-fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_size: usize, chunk_info: Option<&str>) -> String {
+pub fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_size: usize, chunk_info: Option<&str>) -> String {
     let chunk_hint = if is_chunk {
         format!("\n\n注意：这是视频的一个片段。{}", chunk_info.unwrap_or(""))
     } else {
@@ -143,16 +143,16 @@ fn build_chapter_prompt(subtitle_text: &str, is_chunk: bool, chunk_size: usize, 
 }
 
 /// 字幕分段信息
-struct SubtitleChunk {
-    start_index: usize,  // 该段在原始字幕中的起始索引
-    end_index: usize,    // 该段在原始字幕中的结束索引（不含）
-    text: String,        // 该段的字幕文本（带索引）
+pub struct SubtitleChunk {
+    pub start_index: usize,  // 该段在原始字幕中的起始索引
+    pub end_index: usize,    // 该段在原始字幕中的结束索引（不含）
+    pub text: String,        // 该段的字幕文本（带索引）
 }
 
 /// 将字幕按字符数分段
 /// 分段策略：先计算段数 = 总字数 / SEGMENT_SIZE + 1，再用总字数 / 段数得到每段目标大小
 /// 每段的字幕索引从 0 开始（相对索引），便于 AI 处理和后续合并
-fn split_subtitle_into_chunks(subtitle_entries: &[SubtitleEntry]) -> Vec<SubtitleChunk> {
+pub fn split_subtitle_into_chunks(subtitle_entries: &[SubtitleEntry]) -> Vec<SubtitleChunk> {
     const SEGMENT_SIZE: usize = 10000;
 
     // 先计算总字符数
@@ -354,7 +354,7 @@ async fn analyze_subtitle_for_chapters(
 }
 
 /// 解析 AI 响应
-fn parse_chapter_ai_response(
+pub fn parse_chapter_ai_response(
     response: &str,
     _total_entries: usize,
 ) -> Result<Vec<AIChapter>, String> {
@@ -434,7 +434,7 @@ pub fn capture_video_screenshot(
 }
 
 /// 将特殊字符转换为下划线，生成安全的文件名
-fn sanitize_filename(name: &str) -> String {
+pub fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| {
             if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
@@ -452,7 +452,7 @@ fn sanitize_filename(name: &str) -> String {
 }
 
 /// 格式化时间戳为文件名格式（如 010130 表示 01:01:30）
-fn format_timestamp_for_filename(seconds: f64) -> String {
+pub fn format_timestamp_for_filename(seconds: f64) -> String {
     let total_seconds = seconds as u64;
     let hours = total_seconds / 3600;
     let minutes = (total_seconds % 3600) / 60;
