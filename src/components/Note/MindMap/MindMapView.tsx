@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { ZoomIn, ZoomOut, Maximize2, BarChart3 } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, BarChart3, Fullscreen, Minimize } from "lucide-react";
 import MindMap from "simple-mind-map";
 import type { ChapterData } from "../../../types";
 import { convertChapterDataToMindMap } from "./chapterToMindMap";
@@ -21,6 +21,7 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains("dark")
   );
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // 监听主题变化
   useEffect(() => {
@@ -145,6 +146,28 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
     }
   }, []);
 
+  // 全屏控制（画布全屏，覆盖整个应用窗口）
+  const handleFullscreen = useCallback(() => {
+    setIsFullscreen((prev) => !prev);
+  }, []);
+
+  // 全屏时按 ESC 退出
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+
+    if (isFullscreen) {
+      document.addEventListener("keydown", handleKeyDown);
+    }
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isFullscreen]);
+
   // 空状态
   if (!chapterData || chapterData.chapters.length === 0) {
     return (
@@ -160,7 +183,11 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
 
   return (
     <div
-      className="relative w-full h-full select-none"
+      className={`select-none ${
+        isFullscreen
+          ? "fixed inset-0 z-50"
+          : "relative w-full h-full"
+      }`}
       style={{
         backgroundImage: isDarkMode
           ? "radial-gradient(circle, #333333 1px, transparent 1px)"
@@ -187,7 +214,7 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
       />
 
       {/* 缩放控制工具栏 */}
-      <div className="absolute bottom-4 right-4 flex items-center gap-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-1 z-10">
+      <div className="absolute bottom-4 left-4 flex flex-col items-center gap-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-1 z-10">
         <button
           onClick={handleZoomOut}
           className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors cursor-pointer"
@@ -208,6 +235,17 @@ export function MindMapView({ chapterData, noteTitle }: MindMapViewProps) {
           title="放大"
         >
           <ZoomIn className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+        </button>
+        <button
+          onClick={handleFullscreen}
+          className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors cursor-pointer"
+          title={isFullscreen ? "退出全屏" : "全屏"}
+        >
+          {isFullscreen ? (
+            <Minimize className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+          ) : (
+            <Fullscreen className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+          )}
         </button>
       </div>
     </div>
