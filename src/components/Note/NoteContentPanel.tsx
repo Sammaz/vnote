@@ -24,6 +24,7 @@ import {
   GitBranch,
   Save,
   Zap,
+  StickyNote,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
@@ -36,6 +37,7 @@ import { SubtitleRow } from "./SubtitleRow";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { VisualSummaryContent, type VisualViewMode } from "./VisualSummaryContent";
 import { FlashcardContent } from "./FlashcardContent";
+import { QuickNotesContent } from "./QuickNotesContent";
 import type { MindMapViewRef } from "./MindMap";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
@@ -51,7 +53,7 @@ import {
 } from "../../utils/noteGenerationState";
 import type { ChapterGenerationEvent } from "../../types";
 
-type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "flashcard";
+type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "flashcard" | "quicknotes";
 
 interface Tab {
   id: TabId;
@@ -67,6 +69,7 @@ const TABS: Tab[] = [
   { id: "visual", label: "视觉化总结", icon: <BarChart3 className="w-4 h-4" /> },
   { id: "custom", label: "自定义总结", icon: <Sparkles className="w-4 h-4" /> },
   { id: "flashcard", label: "闪记卡", icon: <Zap className="w-4 h-4" /> },
+  { id: "quicknotes", label: "随手笔记", icon: <StickyNote className="w-4 h-4" /> },
 ];
 
 // 标签页类型映射
@@ -2716,6 +2719,9 @@ Video subtitles content:`;
             </button>
           </div>
         </div>
+      ) : activeTab === "quicknotes" ? (
+        // 随手笔记标签页不需要次级工具栏（组件内部已有工具栏）
+        null
       ) : (
         // 其他标签页的简化工具栏
         <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
@@ -2744,6 +2750,8 @@ Video subtitles content:`;
         "flex-1",
         activeTab === "visual" && visualViewMode === "mindmap"
           ? "p-0 overflow-visible"
+          : activeTab === "quicknotes"
+          ? "p-0 overflow-hidden"
           : isEditMode ? "p-0 overflow-y-auto" : "p-6 overflow-y-auto"
       )}>
         {activeTab === "summary" && (
@@ -2908,6 +2916,13 @@ Video subtitles content:`;
             flashcardData={parseFlashcardData(note.flashcards)}
             isGenerating={isTabGenerating("flashcard")}
             onGenerationComplete={onGenerationComplete}
+          />
+        )}
+        {activeTab === "quicknotes" && (
+          <QuickNotesContent
+            noteId={note.id}
+            initialContent={note.quick_notes}
+            onContentChange={onGenerationComplete}
           />
         )}
       </div>

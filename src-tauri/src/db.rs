@@ -35,6 +35,7 @@ pub struct Note {
     pub visual_summary: Option<String>,
     pub custom_summary: Option<String>,
     pub flashcards: Option<String>, // JSON string of flashcard data
+    pub quick_notes: Option<String>, // User's quick notes (markdown)
     pub suggested_questions: Option<String>, // JSON array of questions
     pub last_playback_position: Option<f64>, // Last playback position in seconds
     pub created_at: String,
@@ -287,6 +288,20 @@ impl Database {
             )?;
         }
 
+        // Migration: Add quick_notes column if not exists
+        let has_quick_notes: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='quick_notes'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_quick_notes {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN quick_notes TEXT",
+                [],
+            )?;
+        }
+
         // Subtitle chunks table for RAG
         conn.execute(
             "CREATE TABLE IF NOT EXISTS subtitle_chunks (
@@ -511,7 +526,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, flashcards, suggested_questions, last_playback_position,
+                    highlights, visual_summary, custom_summary, flashcards, quick_notes, suggested_questions, last_playback_position,
                     created_at, updated_at
              FROM notes ORDER BY created_at DESC"
         )?;
@@ -529,10 +544,11 @@ impl Database {
                 visual_summary: row.get(8)?,
                 custom_summary: row.get(9)?,
                 flashcards: row.get(10)?,
-                suggested_questions: row.get(11)?,
-                last_playback_position: row.get(12)?,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                quick_notes: row.get(11)?,
+                suggested_questions: row.get(12)?,
+                last_playback_position: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })?;
 
@@ -543,7 +559,7 @@ impl Database {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, flashcards, suggested_questions, last_playback_position,
+                    highlights, visual_summary, custom_summary, flashcards, quick_notes, suggested_questions, last_playback_position,
                     created_at, updated_at
              FROM notes WHERE id = ?1"
         )?;
@@ -561,10 +577,11 @@ impl Database {
                 visual_summary: row.get(8)?,
                 custom_summary: row.get(9)?,
                 flashcards: row.get(10)?,
-                suggested_questions: row.get(11)?,
-                last_playback_position: row.get(12)?,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                quick_notes: row.get(11)?,
+                suggested_questions: row.get(12)?,
+                last_playback_position: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         });
 
@@ -586,7 +603,7 @@ impl Database {
         // Return the created note
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, flashcards, suggested_questions, last_playback_position,
+                    highlights, visual_summary, custom_summary, flashcards, quick_notes, suggested_questions, last_playback_position,
                     created_at, updated_at
              FROM notes WHERE id = ?1"
         )?;
@@ -604,10 +621,11 @@ impl Database {
                 visual_summary: row.get(8)?,
                 custom_summary: row.get(9)?,
                 flashcards: row.get(10)?,
-                suggested_questions: row.get(11)?,
-                last_playback_position: row.get(12)?,
-                created_at: row.get(13)?,
-                updated_at: row.get(14)?,
+                quick_notes: row.get(11)?,
+                suggested_questions: row.get(12)?,
+                last_playback_position: row.get(13)?,
+                created_at: row.get(14)?,
+                updated_at: row.get(15)?,
             })
         })
     }
@@ -618,14 +636,14 @@ impl Database {
             "UPDATE notes SET
                 title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4,
                 full_summary = ?5, detailed_reading = ?6, highlights = ?7,
-                visual_summary = ?8, custom_summary = ?9, flashcards = ?10, suggested_questions = ?11,
-                last_playback_position = ?12,
+                visual_summary = ?8, custom_summary = ?9, flashcards = ?10, quick_notes = ?11, suggested_questions = ?12,
+                last_playback_position = ?13,
                 updated_at = datetime('now', 'localtime')
-             WHERE id = ?13",
+             WHERE id = ?14",
             (
                 &note.title, &note.video_path, &note.subtitle_path, &note.model_id,
                 &note.full_summary, &note.detailed_reading, &note.highlights,
-                &note.visual_summary, &note.custom_summary, &note.flashcards, &note.suggested_questions,
+                &note.visual_summary, &note.custom_summary, &note.flashcards, &note.quick_notes, &note.suggested_questions,
                 &note.last_playback_position,
                 note.id,
             ),
