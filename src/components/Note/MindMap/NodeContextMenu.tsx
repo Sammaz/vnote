@@ -15,6 +15,7 @@ import {
   Copy,
   Scissors,
   Clipboard,
+  Image,
 } from "lucide-react";
 
 export interface NodeContextMenuProps {
@@ -113,6 +114,11 @@ export function NodeContextMenu({
       action: "edit",
       shortcut: "F2",
     },
+    {
+      label: "插入图片",
+      icon: Image,
+      action: "insertImage",
+    },
     { type: "divider" },
     {
       label: "复制",
@@ -191,7 +197,7 @@ export function NodeContextMenu({
         return (
           <button
             key={item.action}
-            onClick={() => !isDisabled && handleAction(item.action)}
+            onClick={() => !isDisabled && item.action && handleAction(item.action)}
             disabled={isDisabled}
             className={`
               w-full px-3 py-2 flex items-center justify-between gap-3 text-left text-sm

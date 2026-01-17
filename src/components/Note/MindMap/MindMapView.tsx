@@ -75,6 +75,7 @@ export interface MindMapViewRef {
 export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function MindMapView({ chapterData, noteTitle, savedMindMapData, optimizedSubtitles, originalSubtitles }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindMapRef = useRef<MindMap | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains("dark")
   );
@@ -82,6 +83,9 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
 
   // 图片预览状态
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+
+  // 待插入图片的节点
+  const pendingImageNodeRef = useRef<any>(null);
 
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{
@@ -195,7 +199,7 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
     mindMapRef.current = mindMap;
 
     // 监听节点右键菜单事件
-    const handleNodeContextMenu = (e: MouseEvent, node: any) => {
+    const handleNodeContextMenu = (e: any, node: any) => {
       e.preventDefault();
       setContextMenu({
         visible: true,
@@ -207,13 +211,17 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
 
     mindMap.on("node_contextmenu", handleNodeContextMenu);
 
-    // 监听节点图片点击事件
-    const handleNodeImgClick = (_node: any, e: MouseEvent, _imgNode: any, src: string) => {
+    // 监听节点图片双击事件（用于放大预览）
+    const handleNodeImgDblClick = (_node: any, e: any, imgNode: any) => {
       e.stopPropagation();
-      setPreviewImage(src);
+      // 从 imgNode 获取图片 src（SVG image 元素）
+      const src = imgNode?.node?.href?.baseVal || imgNode?.attr?.('href') || '';
+      if (src) {
+        setPreviewImage(src);
+      }
     };
 
-    mindMap.on("node_img_click", handleNodeImgClick);
+    mindMap.on("node_img_dblclick", handleNodeImgDblClick);
 
     // 设置 SVG 背景透明，让容器的点状背景显示
     const setSvgTransparent = () => {
@@ -240,7 +248,7 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
       resizeObserver.disconnect();
       if (mindMapRef.current) {
         mindMapRef.current.off("node_contextmenu", handleNodeContextMenu);
-        mindMapRef.current.off("node_img_click", handleNodeImgClick);
+        mindMapRef.current.off("node_img_dblclick", handleNodeImgDblClick);
         mindMapRef.current.destroy();
         mindMapRef.current = null;
       }
@@ -293,10 +301,63 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
       case "delete":
         mindMap.execCommand("REMOVE_NODE");
         break;
+      case "insertImage":
+        // 保存当前节点引用，触发文件选择
+        pendingImageNodeRef.current = contextMenu.node;
+        fileInputRef.current?.click();
+        break;
       default:
         break;
     }
   }, [contextMenu.node]);
+
+  // 处理图片选择
+  const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !mindMapRef.current || !pendingImageNodeRef.current) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (!dataUrl) return;
+
+      // 创建图片对象获取尺寸
+      const img = new window.Image();
+      img.onload = () => {
+        // 限制最大尺寸
+        const maxWidth = 300;
+        const maxHeight = 200;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+        if (height > maxHeight) {
+          width = (width * maxHeight) / height;
+          height = maxHeight;
+        }
+
+        // 使用 SET_NODE_IMAGE 命令插入图片
+        mindMapRef.current?.execCommand("SET_NODE_IMAGE", pendingImageNodeRef.current, {
+          url: dataUrl,
+          title: file.name,
+          width: Math.round(width),
+          height: Math.round(height),
+        });
+
+        pendingImageNodeRef.current = null;
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+
+    // 清空 input 值，允许重复选择同一文件
+    e.target.value = "";
+  }, []);
 
   // 缩放控制
   const handleZoomIn = useCallback(() => {
@@ -409,6 +470,15 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
           )}
         </button>
       </div>
+
+      {/* 隐藏的图片选择输入框 */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={handleImageSelect}
+      />
 
       {/* 节点右键菜单 */}
       <NodeContextMenu
