@@ -25,6 +25,8 @@ export interface Note {
   custom_summary: string | null;
   flashcards: string | null; // JSON string of FlashcardData
   quick_notes: string | null; // User's quick notes (markdown)
+  quick_notes_mindmap: string | null; // User's mindmap data (JSON)
+  quick_notes_canvas: string | null; // User's canvas data (JSON)
   suggested_questions: string | null; // JSON array of questions
   last_playback_position: number | null; // Last playback position in seconds
   created_at: string;

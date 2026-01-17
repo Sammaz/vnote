@@ -596,7 +596,7 @@ export function QuickNotesContent({
       const html = editor.getHTML();
       handleContentChange(html);
     },
-  });
+  }, [initialContent]);
 
   // Auto-save with debounce
   const saveContent = useCallback(async (newContent: string) => {

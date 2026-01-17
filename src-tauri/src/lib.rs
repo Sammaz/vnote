@@ -929,6 +929,8 @@ fn update_note_content(
         "visual_summary" => note.visual_summary = Some(content),
         "custom_summary" => note.custom_summary = Some(content),
         "quick_notes" => note.quick_notes = Some(content),
+        "quick_notes_mindmap" => note.quick_notes_mindmap = Some(content),
+        "quick_notes_canvas" => note.quick_notes_canvas = Some(content),
         _ => return Err("无效的标签页类型".to_string()),
     }
 

@@ -37,7 +37,7 @@ import { SubtitleRow } from "./SubtitleRow";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { VisualSummaryContent, type VisualViewMode } from "./VisualSummaryContent";
 import { FlashcardContent } from "./FlashcardContent";
-import { QuickNotesContent } from "./QuickNotesContent";
+import { QuickNotesContainer } from "./QuickNotesContainer";
 import type { MindMapViewRef } from "./MindMap";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
@@ -2919,9 +2919,12 @@ Video subtitles content:`;
           />
         )}
         {activeTab === "quicknotes" && (
-          <QuickNotesContent
+          <QuickNotesContainer
             noteId={note.id}
+            noteTitle={note.title}
             initialContent={note.quick_notes}
+            initialMindMapData={note.quick_notes_mindmap}
+            initialCanvasData={note.quick_notes_canvas}
             onContentChange={onGenerationComplete}
           />
         )}

@@ -16,6 +16,7 @@ import {
   Scissors,
   Clipboard,
   Image,
+  Camera,
 } from "lucide-react";
 
 export interface NodeContextMenuProps {
@@ -118,6 +119,11 @@ export function NodeContextMenu({
       label: "插入图片",
       icon: Image,
       action: "insertImage",
+    },
+    {
+      label: "插入当前截图",
+      icon: Camera,
+      action: "insertCurrentScreenshot",
     },
     { type: "divider" },
     {
