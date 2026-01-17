@@ -13,6 +13,7 @@ import {
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
 import { message } from "../../utils/message";
 import type { FlashcardData, FlashcardGenerationEvent, TabType } from "../../types";
 import { FLASHCARD_DIFFICULTY_LABELS } from "../../types";
@@ -23,6 +24,7 @@ import {
 
 interface FlashcardContentProps {
   noteId: number;
+  noteName: string;
   subtitlePath: string | null;
   modelId: number | null;
   flashcardData: FlashcardData | null;
@@ -32,6 +34,7 @@ interface FlashcardContentProps {
 
 export function FlashcardContent({
   noteId,
+  noteName,
   subtitlePath,
   modelId,
   flashcardData,
@@ -89,28 +92,49 @@ export function FlashcardContent({
   }, [currentCard]);
 
   const handleDownloadCSV = useCallback(async () => {
-    if (!cards.length) return;
+    if (!cards.length) {
+      message.warning("暂无闪记卡数据");
+      return;
+    }
 
-    const csvContent = [
-      ["问题", "答案", "难度", "标签"].join(","),
-      ...cards.map(card => [
-        `"${card.question.replace(/"/g, '""')}"`,
-        `"${card.answer.replace(/"/g, '""')}"`,
-        FLASHCARD_DIFFICULTY_LABELS[card.difficulty],
-        `"${card.tags.join("; ")}"`,
-      ].join(",")),
-    ].join("\n");
+    try {
+      // 弹出保存文件对话框
+      const filePath = await save({
+        defaultPath: `${noteName}.csv`,
+        filters: [
+          {
+            name: "CSV",
+            extensions: ["csv"],
+          },
+        ],
+      });
 
-    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `flashcards_${noteId}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    message.success("CSV文件已下载");
+      if (!filePath) {
+        // 用户取消了选择
+        return;
+      }
+
+      // 构建 CSV 内容
+      const csvContent = [
+        ["问题", "答案", "难度", "标签"].join(","),
+        ...cards.map(card => [
+          `"${card.question.replace(/"/g, '""')}"`,
+          `"${card.answer.replace(/"/g, '""')}"`,
+          FLASHCARD_DIFFICULTY_LABELS[card.difficulty],
+          `"${card.tags.join("; ")}"`,
+        ].join(",")),
+      ].join("\n");
+
+      // 添加 BOM 以支持中文
+      const contentWithBOM = "\uFEFF" + csvContent;
+
+      // 调用 Rust 端保存文件
+      await invoke("save_file_content", { path: filePath, content: contentWithBOM });
+      message.success("CSV文件已保存");
+    } catch (error) {
+      console.error("保存CSV失败:", error);
+      message.error(`保存失败: ${error}`);
+    }
   }, [cards, noteId]);
 
   const handleGenerate = useCallback(async () => {

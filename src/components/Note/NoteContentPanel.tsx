@@ -29,7 +29,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData, FlashcardGenerationEvent } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
@@ -172,6 +172,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 章节生成状态（用于显示闪烁小点）
   const [chapterIsGenerating, setChapterIsGenerating] = useState(false);
 
+  // 闪记卡生成状态（用于显示闪烁小点）
+  const [flashcardIsGenerating, setFlashcardIsGenerating] = useState(false);
+
   // 解析 detailed_reading 是否为章节数据
   useEffect(() => {
     if (note.detailed_reading) {
@@ -297,6 +300,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           if (data.succeeded === 0 && data.failed > 0) {
             message.error("所有章节字幕优化失败");
             setSubtitleOptimizationEnabled(false);
+          }
+          // 如果是自动生成流程，继续生成闪记卡
+          if (isInitialAutoGeneration(note.id)) {
+            setTimeout(() => {
+              generateFlashcardsDirectlyRef.current?.();
+            }, 500);
           }
           break;
 
@@ -865,6 +874,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 视觉化总结使用字幕优化状态
     if (tabType === "visual_summary" && subtitleOptimizing) return true;
 
+    // 闪记卡使用单独的生成状态
+    if (tabType === "flashcards" && flashcardIsGenerating) return true;
+
     return false;
   };
 
@@ -1243,6 +1255,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 用于存储 triggerVisualSummaryOptimizationSilent 的 ref，避免循环依赖
   const triggerVisualSummaryOptimizationSilentRef = useRef<(() => Promise<void>) | undefined>(undefined);
 
+  // 用于存储 generateFlashcardsDirectly 的 ref，避免循环依赖
+  const generateFlashcardsDirectlyRef = useRef<(() => Promise<void>) | undefined>(undefined);
+
   // 更新 ref 以避免循环依赖
   useEffect(() => {
     generateHighlightsDirectlyRef.current = generateHighlightsDirectly;
@@ -1250,22 +1265,41 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 触发视觉化总结的字幕优化（静默执行，不切换标签页）
   const triggerVisualSummaryOptimizationSilent = useCallback(async () => {
-    // 结束首次自动生成流程
-    setInitialAutoGeneration(note.id, false);
+    // 注意：不在此处结束自动生成流程，而是在闪记卡生成完成后结束
 
-    // 如果已有缓存或正在优化，则不重复触发
+    // 如果已有缓存或正在优化，则不重复触发，但仍需继续自动生成流程
     if (optimizedSubtitles.size > 0 || subtitleOptimizing) {
+      // 如果是自动生成流程，直接触发闪记卡生成
+      if (isInitialAutoGeneration(note.id)) {
+        setTimeout(() => {
+          generateFlashcardsDirectlyRef.current?.();
+        }, 500);
+      }
       return;
     }
 
     // 检查必要条件
     if (!chapterData || !note.subtitle_path || !note.model_id) {
+      // 如果是自动生成流程，仍需触发闪记卡生成
+      if (isInitialAutoGeneration(note.id)) {
+        setTimeout(() => {
+          generateFlashcardsDirectlyRef.current?.();
+        }, 500);
+      }
       return;
     }
 
     // 静默执行字幕优化
     const effectiveModelId = currentModelId || note.model_id;
-    if (!effectiveModelId) return;
+    if (!effectiveModelId) {
+      // 如果是自动生成流程，仍需触发闪记卡生成
+      if (isInitialAutoGeneration(note.id)) {
+        setTimeout(() => {
+          generateFlashcardsDirectlyRef.current?.();
+        }, 500);
+      }
+      return;
+    }
 
     let currentSubtitleEntries = subtitleEntries;
     if (currentSubtitleEntries.length === 0) {
@@ -1276,11 +1310,25 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         setSubtitleEntries(currentSubtitleEntries);
       } catch (error) {
         console.error("[triggerVisualSummaryOptimizationSilent] 加载字幕失败:", error);
+        // 如果是自动生成流程，仍需触发闪记卡生成
+        if (isInitialAutoGeneration(note.id)) {
+          setTimeout(() => {
+            generateFlashcardsDirectlyRef.current?.();
+          }, 500);
+        }
         return;
       }
     }
 
-    if (currentSubtitleEntries.length === 0) return;
+    if (currentSubtitleEntries.length === 0) {
+      // 如果是自动生成流程，仍需触发闪记卡生成
+      if (isInitialAutoGeneration(note.id)) {
+        setTimeout(() => {
+          generateFlashcardsDirectlyRef.current?.();
+        }, 500);
+      }
+      return;
+    }
 
     const generationId = crypto.randomUUID();
     subtitleOptimizationIdRef.current = generationId;
@@ -1318,7 +1366,15 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       })
       .filter(c => c.subtitle_text.trim().length > 0);
 
-    if (chaptersToOptimize.length === 0) return;
+    if (chaptersToOptimize.length === 0) {
+      // 如果是自动生成流程，仍需触发闪记卡生成
+      if (isInitialAutoGeneration(note.id)) {
+        setTimeout(() => {
+          generateFlashcardsDirectlyRef.current?.();
+        }, 500);
+      }
+      return;
+    }
 
     setSubtitleOptimizing(true);
     setSubtitleOptimizationProgress({ current: 0, total: chaptersToOptimize.length });
@@ -1339,6 +1395,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setSubtitleOptimizing(false);
       setSubtitleOptimizationProgress(null);
       setOptimizingChapterIds(new Set());
+      // 如果是自动生成流程，仍需触发闪记卡生成
+      if (isInitialAutoGeneration(note.id)) {
+        setTimeout(() => {
+          generateFlashcardsDirectlyRef.current?.();
+        }, 500);
+      }
     }
   }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData, subtitleEntries, optimizedSubtitles.size, subtitleOptimizing, setupSubtitleOptimizationListener]);
 
@@ -1346,6 +1408,68 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   useEffect(() => {
     triggerVisualSummaryOptimizationSilentRef.current = triggerVisualSummaryOptimizationSilent;
   }, [triggerVisualSummaryOptimizationSilent]);
+
+  // 直接调用后端 API 生成闪记卡（用于自动生成流程，不需要切换标签页）
+  const generateFlashcardsDirectly = useCallback(async () => {
+    const effectiveModelId = currentModelId || note.model_id;
+    if (!effectiveModelId || !note.subtitle_path) {
+      console.error("[generateFlashcardsDirectly] 缺少必要参数");
+      // 结束自动生成流程
+      setInitialAutoGeneration(note.id, false);
+      return;
+    }
+
+    try {
+      const generationId = crypto.randomUUID();
+
+      // 设置生成状态（让标签页显示闪烁动画）
+      setFlashcardIsGenerating(true);
+
+      // 设置事件监听
+      const unlisten = await listen<FlashcardGenerationEvent>(
+        `flashcard-generation-${generationId}`,
+        (event) => {
+          const data = event.payload;
+          switch (data.status) {
+            case "Completed":
+              onGenerationComplete?.();
+              // 清除生成状态
+              setFlashcardIsGenerating(false);
+              // 结束自动生成流程
+              setInitialAutoGeneration(note.id, false);
+              unlisten();
+              break;
+            case "Error":
+            case "Aborted":
+              // 清除生成状态
+              setFlashcardIsGenerating(false);
+              // 结束自动生成流程
+              setInitialAutoGeneration(note.id, false);
+              unlisten();
+              break;
+          }
+        }
+      );
+
+      // 开始生成
+      await invoke("generate_flashcards", {
+        generationId,
+        noteId: note.id,
+        modelId: effectiveModelId,
+      });
+    } catch (error) {
+      console.error("[generateFlashcardsDirectly] 生成失败:", error);
+      // 清除生成状态
+      setFlashcardIsGenerating(false);
+      // 结束自动生成流程
+      setInitialAutoGeneration(note.id, false);
+    }
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete]);
+
+  // 更新 generateFlashcardsDirectly ref
+  useEffect(() => {
+    generateFlashcardsDirectlyRef.current = generateFlashcardsDirectly;
+  }, [generateFlashcardsDirectly]);
 
   // 字幕优化开关处理
   const handleSubtitleOptimizationToggle = useCallback(async () => {
@@ -2778,6 +2902,7 @@ Video subtitles content:`;
         {activeTab === "flashcard" && (
           <FlashcardContent
             noteId={note.id}
+            noteName={note.title}
             subtitlePath={note.subtitle_path}
             modelId={currentModelId || note.model_id}
             flashcardData={parseFlashcardData(note.flashcards)}
