@@ -20,44 +20,44 @@ export function getLightTheme(): MindMapThemeConfig {
 
     // 根节点
     root: {
-      shape: "roundedRectangle",
+      shape: "rectangle",
       fillColor: "#3b82f6",
       color: "#ffffff",
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: "bold",
       borderColor: "#2563eb",
       borderWidth: 2,
-      borderRadius: 8,
-      paddingX: 20,
-      paddingY: 12,
+      borderRadius: 0,
+      paddingX: 16,
+      paddingY: 10,
     },
 
     // 二级节点
     second: {
-      shape: "roundedRectangle",
+      shape: "rectangle",
       fillColor: "#eff6ff",
       color: "#1e40af",
       fontSize: 14,
       fontWeight: "500",
       borderColor: "#93c5fd",
       borderWidth: 1,
-      borderRadius: 6,
-      paddingX: 14,
-      paddingY: 8,
+      borderRadius: 0,
+      paddingX: 16,
+      paddingY: 10,
     },
 
     // 三级及以下节点
     node: {
-      shape: "roundedRectangle",
+      shape: "rectangle",
       fillColor: "#f8fafc",
       color: "#334155",
       fontSize: 13,
       fontWeight: "normal",
       borderColor: "#cbd5e1",
       borderWidth: 1,
-      borderRadius: 4,
-      paddingX: 12,
-      paddingY: 6,
+      borderRadius: 0,
+      paddingX: 16,
+      paddingY: 10,
     },
 
     // 概要节点
@@ -95,44 +95,44 @@ export function getDarkTheme(): MindMapThemeConfig {
 
     // 根节点
     root: {
-      shape: "roundedRectangle",
+      shape: "rectangle",
       fillColor: "#3b82f6",
       color: "#ffffff",
-      fontSize: 18,
+      fontSize: 16,
       fontWeight: "bold",
       borderColor: "#60a5fa",
       borderWidth: 2,
-      borderRadius: 8,
-      paddingX: 20,
-      paddingY: 12,
+      borderRadius: 0,
+      paddingX: 16,
+      paddingY: 10,
     },
 
     // 二级节点
     second: {
-      shape: "roundedRectangle",
+      shape: "rectangle",
       fillColor: "#1e3a5f",
       color: "#93c5fd",
       fontSize: 14,
       fontWeight: "500",
       borderColor: "#3b82f6",
       borderWidth: 1,
-      borderRadius: 6,
-      paddingX: 14,
-      paddingY: 8,
+      borderRadius: 0,
+      paddingX: 16,
+      paddingY: 10,
     },
 
     // 三级及以下节点
     node: {
-      shape: "roundedRectangle",
+      shape: "rectangle",
       fillColor: "#1e293b",
       color: "#cbd5e1",
       fontSize: 13,
       fontWeight: "normal",
       borderColor: "#475569",
       borderWidth: 1,
-      borderRadius: 4,
-      paddingX: 12,
-      paddingY: 6,
+      borderRadius: 0,
+      paddingX: 16,
+      paddingY: 10,
     },
 
     // 概要节点

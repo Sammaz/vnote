@@ -13,6 +13,7 @@ import Select from "simple-mind-map/src/plugins/Select.js";
 import type { ChapterData } from "../../../types";
 import { convertChapterDataToMindMap } from "./chapterToMindMap";
 import { getLightTheme, getDarkTheme } from "./themes";
+import { NodeContextMenu } from "./NodeContextMenu";
 
 // 注册插件
 MindMap.usePlugin(Drag);
@@ -72,6 +73,19 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
     document.documentElement.classList.contains("dark")
   );
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // 右键菜单状态
+  const [contextMenu, setContextMenu] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    node: any;
+  }>({
+    visible: false,
+    x: 0,
+    y: 0,
+    node: null,
+  });
 
   // 暴露方法给父组件
   useImperativeHandle(ref, () => ({
@@ -149,9 +163,28 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
       enableShortcutOnlyWhenMouseInSvg: false,
       // 拖拽配置
       autoMoveWhenMouseInEdgeOnDrag: true,
+      // 超长文本自动换行配置（单位：像素）
+      textAutoWrapWidth: 300,
+      // 文本与图片的间距
+      imgTextMargin: 10,
+      // 文本内容的间距
+      textContentMargin: 10,
     });
 
     mindMapRef.current = mindMap;
+
+    // 监听节点右键菜单事件
+    const handleNodeContextMenu = (e: MouseEvent, node: any) => {
+      e.preventDefault();
+      setContextMenu({
+        visible: true,
+        x: e.clientX,
+        y: e.clientY,
+        node,
+      });
+    };
+
+    mindMap.on("node_contextmenu", handleNodeContextMenu);
 
     // 设置 SVG 背景透明，让容器的点状背景显示
     const setSvgTransparent = () => {
@@ -177,11 +210,63 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
     return () => {
       resizeObserver.disconnect();
       if (mindMapRef.current) {
+        mindMapRef.current.off("node_contextmenu", handleNodeContextMenu);
         mindMapRef.current.destroy();
         mindMapRef.current = null;
       }
     };
   }, [chapterData, noteTitle, isDarkMode, savedMindMapData]);
+
+  // 处理右键菜单操作
+  const handleMenuAction = useCallback((action: string) => {
+    if (!mindMapRef.current || !contextMenu.node) return;
+
+    const mindMap = mindMapRef.current;
+
+    switch (action) {
+      case "insertSibling":
+        mindMap.execCommand("INSERT_NODE");
+        break;
+      case "insertChild":
+        mindMap.execCommand("INSERT_CHILD_NODE");
+        break;
+      case "insertParent":
+        mindMap.execCommand("INSERT_PARENT_NODE");
+        break;
+      case "edit":
+        // 激活节点并进入编辑模式
+        contextMenu.node.active();
+        setTimeout(() => {
+          mindMap.execCommand("SET_NODE_TEXT", contextMenu.node, contextMenu.node.getData("text"));
+        }, 50);
+        break;
+      case "copy":
+        mindMap.execCommand("COPY_NODE");
+        break;
+      case "cut":
+        mindMap.execCommand("CUT_NODE");
+        break;
+      case "paste":
+        mindMap.execCommand("PASTE_NODE");
+        break;
+      case "toggleExpand":
+        if (contextMenu.node.nodeData.children && contextMenu.node.nodeData.children.length > 0) {
+          mindMap.execCommand("TOGGLE_NODE_EXPAND", contextMenu.node);
+        }
+        break;
+      case "moveUp":
+        mindMap.execCommand("UP_NODE");
+        break;
+      case "moveDown":
+        mindMap.execCommand("DOWN_NODE");
+        break;
+      case "delete":
+        mindMap.execCommand("REMOVE_NODE");
+        break;
+      default:
+        break;
+    }
+  }, [contextMenu.node]);
 
   // 缩放控制
   const handleZoomIn = useCallback(() => {
@@ -294,6 +379,20 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
           )}
         </button>
       </div>
+
+      {/* 节点右键菜单 */}
+      <NodeContextMenu
+        visible={contextMenu.visible}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        onClose={() => setContextMenu({ ...contextMenu, visible: false })}
+        onAction={handleMenuAction}
+        hasChildren={
+          contextMenu.node?.nodeData?.children &&
+          contextMenu.node.nodeData.children.length > 0
+        }
+        isExpanded={contextMenu.node?.nodeData?.data?.expand !== false}
+      />
     </div>
   );
 });
