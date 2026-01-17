@@ -2382,37 +2382,6 @@ Video subtitles content:`;
                 思维导图
               </button>
             </div>
-            {/* 仅在文档模式下显示编辑和时间戳按钮 */}
-            {visualViewMode === "markdown" && (
-              <>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
-                <button
-                  onClick={handleVisualEditToggle}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                    isVisualEditMode
-                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-                  )}
-                >
-                  <Edit3 className="w-4 h-4" />
-                  {isVisualEditMode ? "预览" : "编辑"}
-                </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
-                <button
-                  onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                    showVisualTimestamp
-                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-                  )}
-                >
-                  <Clock className="w-4 h-4" />
-                  时间戳
-                </button>
-              </>
-            )}
           </div>
           {/* 右侧按钮区域 */}
           <div className="flex items-center gap-1">
@@ -2467,9 +2436,35 @@ Video subtitles content:`;
                 </button>
               </>
             )}
-            {/* 仅在文档模式下显示导出按钮 */}
+            {/* 仅在文档模式下显示时间戳、编辑和导出按钮 */}
             {visualViewMode === "markdown" && (
               <>
+                <button
+                  onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                    showVisualTimestamp
+                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                  )}
+                >
+                  <Clock className="w-4 h-4" />
+                  时间戳
+                </button>
+                <span className="text-slate-300 dark:text-slate-600">|</span>
+                <button
+                  onClick={handleVisualEditToggle}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                    isVisualEditMode
+                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                  )}
+                >
+                  <Edit3 className="w-4 h-4" />
+                  {isVisualEditMode ? "预览" : "编辑"}
+                </button>
+                <span className="text-slate-300 dark:text-slate-600">|</span>
                 <button
                   onClick={handleVisualCopy}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
