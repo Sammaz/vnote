@@ -4,13 +4,13 @@
  */
 
 import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
-import { ZoomIn, ZoomOut, Maximize2, BarChart3, Fullscreen, Minimize } from "lucide-react";
+import { ZoomIn, ZoomOut, Maximize2, BarChart3, Fullscreen, Minimize, X } from "lucide-react";
 import MindMap from "simple-mind-map";
 // 导入必要的插件
 import Drag from "simple-mind-map/src/plugins/Drag.js";
 import KeyboardNavigation from "simple-mind-map/src/plugins/KeyboardNavigation.js";
 import Select from "simple-mind-map/src/plugins/Select.js";
-import type { ChapterData } from "../../../types";
+import type { ChapterData, SubtitleEntry } from "../../../types";
 import { convertChapterDataToMindMap } from "./chapterToMindMap";
 import { getLightTheme, getDarkTheme } from "./themes";
 import { NodeContextMenu } from "./NodeContextMenu";
@@ -54,6 +54,10 @@ interface MindMapViewProps {
   noteTitle: string;
   /** 已保存的思维导图数据（JSON 字符串） */
   savedMindMapData?: string | null;
+  /** 优化后的字幕 Map<chapterId, optimizedText> */
+  optimizedSubtitles?: Map<string, string>;
+  /** 原始字幕数据 */
+  originalSubtitles?: SubtitleEntry[];
 }
 
 /** 暴露给父组件的方法 */
@@ -66,13 +70,16 @@ export interface MindMapViewRef {
   regenerate: () => void;
 }
 
-export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function MindMapView({ chapterData, noteTitle, savedMindMapData }, ref) {
+export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function MindMapView({ chapterData, noteTitle, savedMindMapData, optimizedSubtitles, originalSubtitles }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindMapRef = useRef<MindMap | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains("dark")
   );
   const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // 图片预览状态
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
 
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{
@@ -98,14 +105,18 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
     getInstance: () => mindMapRef.current,
     regenerate: () => {
       if (mindMapRef.current && chapterData && chapterData.chapters.length > 0) {
-        // 从章节数据重新生成思维导图
-        const data = convertChapterDataToMindMap(chapterData, noteTitle);
+        // 从章节数据重新生成思维导图（始终显示图片）
+        const data = convertChapterDataToMindMap(chapterData, noteTitle, {
+          optimizedSubtitles,
+          originalSubtitles,
+          showImages: true,
+        });
         mindMapRef.current.setData(data);
         // 重置视图
         mindMapRef.current.view.reset();
       }
     },
-  }), [chapterData, noteTitle]);
+  }), [chapterData, noteTitle, optimizedSubtitles, originalSubtitles]);
 
   // 监听主题变化
   useEffect(() => {
@@ -140,10 +151,18 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
         // 清理 richText 相关属性，避免在没有 RichText 插件时出错
         data = cleanMindMapNode(parsedData);
       } catch (e) {
-        data = convertChapterDataToMindMap(chapterData, noteTitle);
+        data = convertChapterDataToMindMap(chapterData, noteTitle, {
+          optimizedSubtitles,
+          originalSubtitles,
+          showImages: true,
+        });
       }
     } else {
-      data = convertChapterDataToMindMap(chapterData, noteTitle);
+      data = convertChapterDataToMindMap(chapterData, noteTitle, {
+        optimizedSubtitles,
+        originalSubtitles,
+        showImages: true,
+      });
     }
 
     const themeConfig = isDarkMode ? getDarkTheme() : getLightTheme();
@@ -186,6 +205,14 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
 
     mindMap.on("node_contextmenu", handleNodeContextMenu);
 
+    // 监听节点图片点击事件
+    const handleNodeImgClick = (_node: any, e: MouseEvent, _imgNode: any, src: string) => {
+      e.stopPropagation();
+      setPreviewImage(src);
+    };
+
+    mindMap.on("node_img_click", handleNodeImgClick);
+
     // 设置 SVG 背景透明，让容器的点状背景显示
     const setSvgTransparent = () => {
       const svg = containerRef.current?.querySelector("svg");
@@ -211,6 +238,7 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
       resizeObserver.disconnect();
       if (mindMapRef.current) {
         mindMapRef.current.off("node_contextmenu", handleNodeContextMenu);
+        mindMapRef.current.off("node_img_click", handleNodeImgClick);
         mindMapRef.current.destroy();
         mindMapRef.current = null;
       }
@@ -393,6 +421,30 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
         }
         isExpanded={contextMenu.node?.nodeData?.data?.expand !== false}
       />
+
+      {/* 图片预览模态框 */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80"
+          onClick={() => setPreviewImage(null)}
+        >
+          {/* 关闭按钮 */}
+          <button
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors cursor-pointer"
+            onClick={() => setPreviewImage(null)}
+            title="关闭预览"
+          >
+            <X className="w-6 h-6 text-white" />
+          </button>
+          {/* 图片 */}
+          <img
+            src={previewImage}
+            alt="预览图片"
+            className="max-w-[90vw] max-h-[90vh] object-contain rounded-lg shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 });

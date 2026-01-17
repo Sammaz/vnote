@@ -79,7 +79,14 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
   // 思维导图模式
   if (viewMode === "mindmap") {
     return (
-      <MindMapView ref={ref} chapterData={chapterData} noteTitle={noteTitle} savedMindMapData={savedMindMapData} />
+      <MindMapView
+        ref={ref}
+        chapterData={chapterData}
+        noteTitle={noteTitle}
+        savedMindMapData={savedMindMapData}
+        optimizedSubtitles={optimizedSubtitles}
+        originalSubtitles={originalSubtitles}
+      />
     );
   }
 
