@@ -54,9 +54,6 @@ function buildMindMapNode(
   const node: MindMapNode = {
     data: {
       text: chapter.title,
-      note: chapter.content
-        ? `[${timestamp}] ${chapter.content}`
-        : `[${timestamp}]`,
       uid: chapter.id,
     },
     children: children.map((child) => buildMindMapNode(child, tree)),
@@ -105,13 +102,9 @@ export function convertChapterDataToMindMap(
   } else {
     // 无层级信息：所有章节作为根节点的直接子节点
     childNodes = chapters.map((chapter) => {
-      const timestamp = formatTimestamp(chapter.start_time);
       return {
         data: {
           text: chapter.title,
-          note: chapter.content
-            ? `[${timestamp}] ${chapter.content}`
-            : `[${timestamp}]`,
           uid: chapter.id,
         },
         children: [],
