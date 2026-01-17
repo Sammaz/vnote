@@ -23,17 +23,19 @@ import {
   Package,
   GitBranch,
   Save,
+  Zap,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData } from "../../types";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { VisualSummaryContent, type VisualViewMode } from "./VisualSummaryContent";
+import { FlashcardContent } from "./FlashcardContent";
 import type { MindMapViewRef } from "./MindMap";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
@@ -49,7 +51,7 @@ import {
 } from "../../utils/noteGenerationState";
 import type { ChapterGenerationEvent } from "../../types";
 
-type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom";
+type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "flashcard";
 
 interface Tab {
   id: TabId;
@@ -64,6 +66,7 @@ const TABS: Tab[] = [
   { id: "script", label: "字幕脚本", icon: <Captions className="w-4 h-4" /> },
   { id: "visual", label: "视觉化总结", icon: <BarChart3 className="w-4 h-4" /> },
   { id: "custom", label: "自定义总结", icon: <Sparkles className="w-4 h-4" /> },
+  { id: "flashcard", label: "闪记卡", icon: <Zap className="w-4 h-4" /> },
 ];
 
 // 标签页类型映射
@@ -73,6 +76,7 @@ const TAB_TYPE_MAPPING: Record<string, TabType> = {
   highlights: "highlights",
   visual: "visual_summary",
   custom: "custom_summary",
+  flashcard: "flashcards",
 };
 
 // ============================================================================
@@ -93,6 +97,16 @@ function parseHighlightData(highlightsJson: string | null): HighlightData | null
   if (!highlightsJson) return null;
   try {
     return JSON.parse(highlightsJson) as HighlightData;
+  } catch {
+    return null;
+  }
+}
+
+// 解析闪记卡数据
+function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null {
+  if (!flashcardsJson) return null;
+  try {
+    return JSON.parse(flashcardsJson) as FlashcardData;
   } catch {
     return null;
   }
@@ -2542,6 +2556,42 @@ Video subtitles content:`;
       ) : activeTab === "custom" && !note.custom_summary ? (
         // 自定义总结标签页的工具栏（无内容时不显示工具栏）
         null
+      ) : activeTab === "flashcard" ? (
+        // 闪记卡标签页的专用工具栏
+        <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('flashcard-regenerate', { detail: { noteId: note.id } }));
+              }}
+              disabled={isTabGenerating("flashcard")}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isTabGenerating("flashcard") ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  生成中...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="w-4 h-4" />
+                  重新生成
+                </>
+              )}
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent('flashcard-download-csv', { detail: { noteId: note.id } }));
+              }}
+              disabled={!note.flashcards}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="w-4 h-4" />
+              下载CSV
+            </button>
+          </div>
+        </div>
       ) : (
         // 其他标签页的简化工具栏
         <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
@@ -2724,6 +2774,16 @@ Video subtitles content:`;
               </div>
             </div>
           )
+        )}
+        {activeTab === "flashcard" && (
+          <FlashcardContent
+            noteId={note.id}
+            subtitlePath={note.subtitle_path}
+            modelId={currentModelId || note.model_id}
+            flashcardData={parseFlashcardData(note.flashcards)}
+            isGenerating={isTabGenerating("flashcard")}
+            onGenerationComplete={onGenerationComplete}
+          />
         )}
       </div>
 

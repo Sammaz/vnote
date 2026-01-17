@@ -2,6 +2,7 @@ mod ai_pool;
 mod chat;
 mod chapter;
 mod db;
+mod flashcard_generation;
 mod highlight_generation;
 mod note_generation;
 mod prompts;
@@ -1340,6 +1341,8 @@ pub fn run() {
             abort_highlight_generation,
             save_highlights_to_note,
             export_visual_summary,
+            flashcard_generation::generate_flashcards,
+            flashcard_generation::abort_flashcard_generation,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

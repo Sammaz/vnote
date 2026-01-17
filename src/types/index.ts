@@ -23,6 +23,7 @@ export interface Note {
   highlights: string | null;
   visual_summary: string | null;
   custom_summary: string | null;
+  flashcards: string | null; // JSON string of FlashcardData
   suggested_questions: string | null; // JSON array of questions
   last_playback_position: number | null; // Last playback position in seconds
   created_at: string;
@@ -116,7 +117,8 @@ export type TabType =
   | "detailed_reading"
   | "highlights"
   | "visual_summary"
-  | "custom_summary";
+  | "custom_summary"
+  | "flashcards";
 
 // 全文总结结构化数据
 export interface FullSummaryData {
@@ -337,3 +339,41 @@ export interface AssistModeChapterSegment {
   start_time: number;            // 起始时间
   end_time: number;              // 结束时间
 }
+
+// ============================================================================
+// 闪记卡相关类型 (Flashcard Types)
+// ============================================================================
+
+// 闪记卡难度等级
+export type FlashcardDifficulty = "easy" | "medium" | "hard";
+
+// 单张闪记卡
+export interface FlashcardItem {
+  id: string;                    // UUID
+  question: string;              // 问题
+  answer: string;                // 答案
+  difficulty: FlashcardDifficulty; // 难度等级
+  tags: string[];                // 标签（如"概念理解"、"实践应用"等）
+}
+
+// 闪记卡数据
+export interface FlashcardData {
+  cards: FlashcardItem[];        // 闪记卡列表
+  total_count: number;           // 总数
+  generated_at: string;          // 生成时间（ISO格式）
+}
+
+// 闪记卡难度标签
+export const FLASHCARD_DIFFICULTY_LABELS: Record<FlashcardDifficulty, string> = {
+  easy: "简单",
+  medium: "中等",
+  hard: "困难",
+};
+
+// 闪记卡生成事件
+export type FlashcardGenerationEvent =
+  | { status: "Starting" }
+  | { status: "Progress"; current: number; total: number; message: string }
+  | { status: "Completed"; flashcard_data: FlashcardData }
+  | { status: "Error"; error: string }
+  | { status: "Aborted" };
