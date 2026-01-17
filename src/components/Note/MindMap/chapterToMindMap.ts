@@ -91,7 +91,8 @@ function createChapterNode(
       nodeData.image = imageUrl;
       nodeData.imageTitle = chapter.title;
       // 图片宽度设置为 300px，占满卡片顶部，高度按 16:9 比例自动计算
-      nodeData.imageSize = { width: 300, height: 169 };
+      // custom: true 使图片尺寸不受主题控制，允许用户通过 NodeImgAdjust 插件调整大小
+      nodeData.imageSize = { width: 300, height: 169, custom: true } as { width: number; height: number };
     } catch (error) {
       console.error(`[createChapterNode] 转换截图路径失败:`, error);
     }

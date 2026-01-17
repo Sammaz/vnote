@@ -10,6 +10,7 @@ import MindMap from "simple-mind-map";
 import Drag from "simple-mind-map/src/plugins/Drag.js";
 import KeyboardNavigation from "simple-mind-map/src/plugins/KeyboardNavigation.js";
 import Select from "simple-mind-map/src/plugins/Select.js";
+import NodeImgAdjust from "simple-mind-map/src/plugins/NodeImgAdjust.js";
 import type { ChapterData, SubtitleEntry } from "../../../types";
 import { convertChapterDataToMindMap } from "./chapterToMindMap";
 import { getLightTheme, getDarkTheme } from "./themes";
@@ -19,6 +20,7 @@ import { NodeContextMenu } from "./NodeContextMenu";
 MindMap.usePlugin(Drag);
 MindMap.usePlugin(KeyboardNavigation);
 MindMap.usePlugin(Select);
+MindMap.usePlugin(NodeImgAdjust);
 
 /**
  * 清理思维导图节点数据，移除 richText 相关属性和 HTML 标签
