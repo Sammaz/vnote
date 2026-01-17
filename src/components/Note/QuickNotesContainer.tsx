@@ -53,6 +53,7 @@ export function QuickNotesContainer({
         {activeSubTab === "canvas" && (
           <InfiniteCanvas
             noteId={noteId}
+            noteTitle={noteTitle}
             initialData={initialCanvasData}
             onContentChange={onContentChange}
           />

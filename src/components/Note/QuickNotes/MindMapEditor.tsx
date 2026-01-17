@@ -640,7 +640,13 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         <div
           ref={containerRef}
           className="absolute inset-0"
-          style={{ overflow: "visible" }}
+          style={{
+            overflow: "visible",
+            userSelect: 'none',
+            WebkitUserSelect: 'none',
+            MozUserSelect: 'none',
+            msUserSelect: 'none'
+          }}
         />
 
         {/* 缩放控制工具栏 */}
