@@ -594,6 +594,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const reactFlowInstanceRef = useRef<any>(null);
+  const pendingImageNodeIdRef = useRef<string | null>(null);
 
   // 加载初始数据
   useEffect(() => {
@@ -791,6 +792,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle
       const node = nodes.find((n) => n.id === contextMenu.nodeId);
       if (node) setClipboard([node]);
     } else if (action === 'insertImage' && contextMenu.nodeId) {
+      pendingImageNodeIdRef.current = contextMenu.nodeId;
       // 触发文件选择
       fileInputRef.current?.click();
     } else if (action === 'insertCurrentScreenshot' && contextMenu.nodeId) {
@@ -814,7 +816,8 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle
   // 处理图片选择
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !contextMenu?.nodeId) {
+    const targetNodeId = pendingImageNodeIdRef.current || contextMenu?.nodeId;
+    if (!file || !targetNodeId) {
       return;
     }
 
@@ -844,7 +847,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle
         // 更新节点数据
         setNodes((nds) =>
           nds.map((n) =>
-            n.id === contextMenu.nodeId
+            n.id === targetNodeId
               ? { ...n, data: { ...n.data, url: dataUrl, width: Math.round(width), height: Math.round(height) } }
               : n
           )
@@ -856,6 +859,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle
 
     // 清空 input 值，允许重复选择同一文件
     e.target.value = "";
+    pendingImageNodeIdRef.current = null;
   }, [contextMenu, setNodes]);
 
   // 插入当前视频截图
