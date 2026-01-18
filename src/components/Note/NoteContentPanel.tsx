@@ -2977,6 +2977,8 @@ Video subtitles content:`;
             viewMode={visualViewMode}
             noteTitle={note.title}
             savedMindMapData={note.visual_summary}
+            noteId={note.id}
+            onDataChange={onGenerationComplete}
           />
         )}
         {activeTab === "custom" && (

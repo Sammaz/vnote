@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import { ZoomIn, ZoomOut, Maximize2, BarChart3, Fullscreen, Minimize, X } from "lucide-react";
 import MindMap from "simple-mind-map";
+import { invoke } from "@tauri-apps/api/core";
 // 导入必要的插件
 import Drag from "simple-mind-map/src/plugins/Drag.js";
 import KeyboardNavigation from "simple-mind-map/src/plugins/KeyboardNavigation.js";
@@ -64,6 +65,10 @@ interface MindMapViewProps {
   optimizedSubtitles?: Map<string, string>;
   /** 原始字幕数据 */
   originalSubtitles?: SubtitleEntry[];
+  /** 笔记 ID（用于自动保存） */
+  noteId?: number;
+  /** 数据变更回调（保存成功后调用，用于刷新笔记状态） */
+  onDataChange?: () => void;
 }
 
 /** 暴露给父组件的方法 */
@@ -76,10 +81,11 @@ export interface MindMapViewRef {
   regenerate: () => void;
 }
 
-export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function MindMapView({ chapterData, noteTitle, savedMindMapData, optimizedSubtitles, originalSubtitles }, ref) {
+export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function MindMapView({ chapterData, noteTitle, savedMindMapData, optimizedSubtitles, originalSubtitles, noteId, onDataChange }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindMapRef = useRef<MindMap | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains("dark")
   );
@@ -127,6 +133,35 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
       }
     },
   }), [chapterData, noteTitle, optimizedSubtitles, originalSubtitles]);
+
+  // 自动保存思维导图数据
+  const saveContent = useCallback(async (data: any) => {
+    if (!noteId) return;
+    try {
+      // 清理数据后保存
+      const cleanedData = cleanMindMapNode(data);
+      const jsonString = JSON.stringify(cleanedData);
+      await invoke("update_note_content", {
+        noteId,
+        tabType: "visual_summary",
+        content: jsonString,
+      });
+      // 通知父组件刷新笔记状态
+      onDataChange?.();
+    } catch (error) {
+      console.error("Failed to save visual summary mindmap:", error);
+    }
+  }, [noteId, onDataChange]);
+
+  // 防抖保存
+  const handleContentChange = useCallback((data: any) => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    saveTimeoutRef.current = setTimeout(() => {
+      saveContent(data);
+    }, 1000);
+  }, [saveContent]);
 
   // 监听主题变化
   useEffect(() => {
@@ -215,6 +250,14 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
 
     mindMap.on("node_contextmenu", handleNodeContextMenu);
 
+    // 监听数据变化，自动保存
+    const handleDataChange = () => {
+      const data = mindMap.getData();
+      handleContentChange(data);
+    };
+
+    mindMap.on("data_change", handleDataChange);
+
     // 监听节点图片双击事件（用于放大预览）
     const handleNodeImgDblClick = (_node: any, e: any, imgNode: any) => {
       e.stopPropagation();
@@ -250,14 +293,18 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
 
     return () => {
       resizeObserver.disconnect();
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
       if (mindMapRef.current) {
         mindMapRef.current.off("node_contextmenu", handleNodeContextMenu);
+        mindMapRef.current.off("data_change", handleDataChange);
         mindMapRef.current.off("node_img_dblclick", handleNodeImgDblClick);
         mindMapRef.current.destroy();
         mindMapRef.current = null;
       }
     };
-  }, [chapterData, noteTitle, isDarkMode, savedMindMapData]);
+  }, [chapterData, noteTitle, isDarkMode, savedMindMapData, handleContentChange]);
 
   // 处理右键菜单操作
   const handleMenuAction = useCallback((action: string) => {

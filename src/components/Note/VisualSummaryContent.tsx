@@ -29,6 +29,10 @@ interface VisualSummaryContentProps {
   noteTitle?: string;
   /** 已保存的思维导图数据（JSON 字符串） */
   savedMindMapData?: string | null;
+  /** 笔记 ID（用于思维导图自动保存） */
+  noteId?: number;
+  /** 数据变更回调（保存成功后调用，用于刷新笔记状态） */
+  onDataChange?: () => void;
 }
 
 export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryContentProps>(function VisualSummaryContent({
@@ -42,6 +46,8 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
   viewMode = "markdown",
   noteTitle = "思维导图",
   savedMindMapData,
+  noteId,
+  onDataChange,
 }, ref) {
   // 组装 Markdown 内容
   const markdownContent = useMemo(() => {
@@ -86,6 +92,8 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
         savedMindMapData={savedMindMapData}
         optimizedSubtitles={optimizedSubtitles}
         originalSubtitles={originalSubtitles}
+        noteId={noteId}
+        onDataChange={onDataChange}
       />
     );
   }
