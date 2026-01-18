@@ -1,19 +1,17 @@
 import { useState, useRef, useEffect } from "react";
 import {
   Sparkles,
-  FolderClosed,
-  FolderOpen,
   Search,
   PanelLeftClose,
   PanelLeft,
-  ChevronDown,
   Video,
   MoreHorizontal,
   Trash2,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
-import type { Folder, Note } from "../../types";
+import { CollectionSection } from "../Collection";
+import type { Note } from "../../types";
 import logoImg from "../../assets/logo.png";
 
 interface NavItemProps {
@@ -39,77 +37,6 @@ function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
       <span className="flex-shrink-0">{icon}</span>
       {!collapsed && <span className="text-sm font-medium truncate">{label}</span>}
     </button>
-  );
-}
-
-interface FolderItemProps {
-  folder: Folder;
-  level: number;
-  childFolders: Folder[];
-  allFolders: Folder[];
-}
-
-function FolderItem({
-  folder,
-  level,
-  childFolders,
-  allFolders,
-}: FolderItemProps) {
-  const { sidebar, toggleFolderExpand, setSelectedFolder } =
-    useApp();
-  const isExpanded = sidebar.expandedFolders.has(folder.id);
-  const isSelected = sidebar.selectedFolderId === folder.id;
-  const hasChildren = childFolders.length > 0;
-
-  return (
-    <div className="animate-fade-in">
-      <button
-        onClick={() => {
-          setSelectedFolder(folder.id);
-          if (hasChildren) {
-            toggleFolderExpand(folder.id);
-          }
-        }}
-        className={cn(
-          "w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all duration-150 cursor-pointer",
-          "hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 text-sm hover:scale-[1.01]",
-          isSelected ? "bg-slate-100/90 dark:bg-vnote-hover/90 text-slate-700 dark:text-slate-200 shadow-sm" : "text-slate-500 dark:text-slate-400"
-        )}
-        style={{ paddingLeft: `${8 + level * 12}px` }}
-      >
-        {hasChildren ? (
-          <ChevronDown
-            className={cn(
-              "w-3.5 h-3.5 transition-transform duration-200 flex-shrink-0",
-              !isExpanded && "-rotate-90"
-            )}
-          />
-        ) : (
-          <span className="w-3.5" />
-        )}
-        {isExpanded ? (
-          <FolderOpen className="w-4 h-4 text-blue-400 flex-shrink-0" />
-        ) : (
-          <FolderClosed className="w-4 h-4 text-slate-500 flex-shrink-0" />
-        )}
-        <span className="truncate">{folder.name}</span>
-      </button>
-
-      {isExpanded && hasChildren && (
-        <div className="mt-0.5">
-          {/* 子文件夹 */}
-          {childFolders.map((child) => (
-            <FolderItem
-              key={child.id}
-              folder={child}
-              level={level + 1}
-              childFolders={allFolders.filter((f) => f.parentId === child.id)}
-              allFolders={allFolders}
-            />
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -212,12 +139,9 @@ function NoteItem({ note }: NoteItemProps) {
 }
 
 export function Sidebar() {
-  const { sidebar, toggleSidebar, folders, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId } = useApp();
+  const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId } = useApp();
   const { collapsed } = sidebar;
   const [isHovered, setIsHovered] = useState(false);
-
-  // 获取根文件夹
-  const rootFolders = folders.filter((f) => f.parentId === null);
 
   // 点击折叠
   const handleCollapse = () => {
@@ -315,24 +239,8 @@ export function Sidebar() {
       {/* 文件夹树 - 仅在展开时显示 */}
       {!collapsed && (
         <div className="flex-1 overflow-y-auto px-2 pb-4 animate-fade-in">
-          {/* 资源库 */}
-          <div className="flex items-center justify-between px-2 mb-2">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
-              资源库
-            </span>
-          </div>
-
-          <div className="space-y-0.5">
-            {rootFolders.map((folder) => (
-              <FolderItem
-                key={folder.id}
-                folder={folder}
-                level={0}
-                childFolders={folders.filter((f) => f.parentId === folder.id)}
-                allFolders={folders}
-              />
-            ))}
-          </div>
+          {/* 合集区域 */}
+          <CollectionSection />
 
           {/* 分隔线 */}
           <div className="mx-1 my-3 border-t border-slate-200 dark:border-vnote-border" />

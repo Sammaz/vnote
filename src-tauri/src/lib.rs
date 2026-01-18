@@ -11,7 +11,7 @@ mod subtitle;
 mod subtitle_optimizer;
 
 use chat::ChatRequest;
-use db::{AiConfig, AppSettings, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker};
+use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker};
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -1224,6 +1224,57 @@ fn save_highlights_to_note_internal(note_id: i64, highlight_data: &highlight_gen
     get_db().update_note(&note).map_err(|e| e.to_string())
 }
 
+// Collection commands (合集/资源库)
+#[tauri::command]
+fn get_collections() -> Result<Vec<Collection>, String> {
+    get_db().get_all_collections().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_collection(id: i64) -> Result<Option<Collection>, String> {
+    get_db().get_collection_by_id(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_collection(req: CreateCollectionRequest) -> Result<Collection, String> {
+    get_db().create_collection(&req).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_collection(collection: Collection) -> Result<(), String> {
+    get_db().update_collection(&collection).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_collection(id: i64) -> Result<(), String> {
+    get_db().delete_collection(id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_note_to_collection(collection_id: i64, note_id: i64) -> Result<(), String> {
+    get_db().add_note_to_collection(collection_id, note_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_note_from_collection(collection_id: i64, note_id: i64) -> Result<(), String> {
+    get_db().remove_note_from_collection(collection_id, note_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_collection_items(collection_id: i64) -> Result<Vec<CollectionItem>, String> {
+    get_db().get_collection_items(collection_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_collection_items_order(collection_id: i64, note_ids: Vec<i64>) -> Result<(), String> {
+    get_db().update_collection_items_order(collection_id, &note_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_collections_for_note(note_id: i64) -> Result<Vec<Collection>, String> {
+    get_db().get_collections_for_note(note_id).map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1346,6 +1397,17 @@ pub fn run() {
             export_visual_summary,
             flashcard_generation::generate_flashcards,
             flashcard_generation::abort_flashcard_generation,
+            // Collection commands
+            get_collections,
+            get_collection,
+            create_collection,
+            update_collection,
+            delete_collection,
+            add_note_to_collection,
+            remove_note_from_collection,
+            get_collection_items,
+            update_collection_items_order,
+            get_collections_for_note,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

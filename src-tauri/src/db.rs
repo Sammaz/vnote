@@ -129,6 +129,37 @@ pub struct ScreenshotMarker {
     pub created_at: String,
 }
 
+/// 合集（资源库）
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Collection {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub parent_id: Option<i64>,
+    pub sort_order: i32,
+    pub item_count: i32,  // 查询时计算
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// 创建合集请求
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CreateCollectionRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub parent_id: Option<i64>,
+}
+
+/// 合集内容关联
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CollectionItem {
+    pub id: i64,
+    pub collection_id: i64,
+    pub note_id: i64,
+    pub sort_order: i32,
+    pub created_at: String,
+}
+
 pub struct Database {
     conn: Mutex<Connection>,
 }
@@ -450,6 +481,46 @@ impl Database {
         // Create index for screenshot markers
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_screenshot_markers_note_id ON screenshot_markers(note_id)",
+            [],
+        )?;
+
+        // Collections table (合集/资源库)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS collections (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT,
+                parent_id INTEGER,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (parent_id) REFERENCES collections(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        // Collection items table (合集内容关联)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS collection_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                collection_id INTEGER NOT NULL,
+                note_id INTEGER NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+                UNIQUE(collection_id, note_id)
+            )",
+            [],
+        )?;
+
+        // Create indexes for collection_items
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_collection_items_collection ON collection_items(collection_id)",
+            [],
+        )?;
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_collection_items_note ON collection_items(note_id)",
             [],
         )?;
 
@@ -1283,14 +1354,207 @@ impl Database {
     pub fn delete_all_screenshot_markers(&self, note_id: i64) -> SqliteResult<Vec<ScreenshotMarker>> {
         // First get all markers for file cleanup
         let markers = self.get_screenshot_markers(note_id)?;
-        
+
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "DELETE FROM screenshot_markers WHERE note_id = ?1",
             [note_id],
         )?;
-        
+
         Ok(markers)
+    }
+
+    // Collection CRUD (合集/资源库)
+    pub fn get_all_collections(&self) -> SqliteResult<Vec<Collection>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
+             FROM collections c
+             ORDER BY c.sort_order, c.created_at"
+        )?;
+
+        let collections = stmt.query_map([], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                parent_id: row.get(3)?,
+                sort_order: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                item_count: row.get(7)?,
+            })
+        })?;
+
+        collections.collect()
+    }
+
+    pub fn get_collection_by_id(&self, id: i64) -> SqliteResult<Option<Collection>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
+             FROM collections c
+             WHERE c.id = ?1"
+        )?;
+
+        let result = stmt.query_row([id], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                parent_id: row.get(3)?,
+                sort_order: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                item_count: row.get(7)?,
+            })
+        });
+
+        match result {
+            Ok(collection) => Ok(Some(collection)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn create_collection(&self, req: &CreateCollectionRequest) -> SqliteResult<Collection> {
+        let conn = self.conn.lock().unwrap();
+
+        // Get the max sort_order for proper ordering
+        let max_sort: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM collections WHERE parent_id IS ?1",
+                [req.parent_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(-1);
+
+        conn.execute(
+            "INSERT INTO collections (name, description, parent_id, sort_order) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![req.name, req.description, req.parent_id, max_sort + 1],
+        )?;
+
+        let id = conn.last_insert_rowid();
+
+        // Return the created collection
+        drop(conn);
+        self.get_collection_by_id(id).map(|opt| opt.unwrap())
+    }
+
+    pub fn update_collection(&self, collection: &Collection) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE collections SET name = ?1, description = ?2, parent_id = ?3, sort_order = ?4,
+             updated_at = datetime('now', 'localtime') WHERE id = ?5",
+            rusqlite::params![
+                collection.name,
+                collection.description,
+                collection.parent_id,
+                collection.sort_order,
+                collection.id
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_collection(&self, id: i64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        // CASCADE will handle child collections and collection_items
+        conn.execute("DELETE FROM collections WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // Collection Items CRUD (合集内容关联)
+    pub fn add_note_to_collection(&self, collection_id: i64, note_id: i64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+
+        // Get the max sort_order for proper ordering
+        let max_sort: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM collection_items WHERE collection_id = ?1",
+                [collection_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(-1);
+
+        conn.execute(
+            "INSERT OR IGNORE INTO collection_items (collection_id, note_id, sort_order) VALUES (?1, ?2, ?3)",
+            rusqlite::params![collection_id, note_id, max_sort + 1],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_note_from_collection(&self, collection_id: i64, note_id: i64) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM collection_items WHERE collection_id = ?1 AND note_id = ?2",
+            rusqlite::params![collection_id, note_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_collection_items(&self, collection_id: i64) -> SqliteResult<Vec<CollectionItem>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, collection_id, note_id, sort_order, created_at
+             FROM collection_items
+             WHERE collection_id = ?1
+             ORDER BY sort_order"
+        )?;
+
+        let items = stmt.query_map([collection_id], |row| {
+            Ok(CollectionItem {
+                id: row.get(0)?,
+                collection_id: row.get(1)?,
+                note_id: row.get(2)?,
+                sort_order: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })?;
+
+        items.collect()
+    }
+
+    pub fn update_collection_items_order(&self, collection_id: i64, note_ids: &[i64]) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+
+        for (index, note_id) in note_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE collection_items SET sort_order = ?1 WHERE collection_id = ?2 AND note_id = ?3",
+                rusqlite::params![index as i32, collection_id, note_id],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn get_collections_for_note(&self, note_id: i64) -> SqliteResult<Vec<Collection>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
+             FROM collections c
+             INNER JOIN collection_items ci ON c.id = ci.collection_id
+             WHERE ci.note_id = ?1
+             ORDER BY c.sort_order, c.created_at"
+        )?;
+
+        let collections = stmt.query_map([note_id], |row| {
+            Ok(Collection {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                parent_id: row.get(3)?,
+                sort_order: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+                item_count: row.get(7)?,
+            })
+        })?;
+
+        collections.collect()
     }
 }
 

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, PromptConfig } from "../types";
+import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, PromptConfig, Collection, CreateCollectionRequest, ViewType } from "../types";
 
 // Mock 数据 - 文件夹暂时保留
 const mockFolders: Folder[] = [
@@ -37,6 +37,19 @@ interface AppContextType {
   deleteNote: (id: number) => Promise<void>;
   updateNoteSuggestedQuestions: (noteId: number, questions: string[]) => void;
 
+  // 合集（资源库）
+  collections: Collection[];
+  selectedCollectionId: number | null;
+  expandedCollections: Set<number>;
+  refreshCollections: () => Promise<void>;
+  createCollection: (req: CreateCollectionRequest) => Promise<Collection>;
+  updateCollection: (collection: Collection) => Promise<void>;
+  deleteCollection: (id: number) => Promise<void>;
+  setSelectedCollection: (id: number | null) => void;
+  toggleCollectionExpand: (id: number) => void;
+  addNoteToCollection: (collectionId: number, noteId: number) => Promise<void>;
+  removeNoteFromCollection: (collectionId: number, noteId: number) => Promise<void>;
+
   // 上传状态
   uploadedVideo: UploadedFile | null;
   uploadedSubtitle: UploadedFile | null;
@@ -56,8 +69,8 @@ interface AppContextType {
   setSearchQuery: (query: string) => void;
 
   // 当前视图
-  currentView: "home" | "settings" | "note";
-  setCurrentView: (view: "home" | "settings" | "note") => void;
+  currentView: ViewType;
+  setCurrentView: (view: ViewType) => void;
   selectedNoteId: number | null;
   setSelectedNoteId: (id: number | null) => void;
 
@@ -87,6 +100,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [aiConfigs, setAiConfigs] = useState<AiConfig[]>([]);
   const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
 
+  // 合集（资源库）状态
+  const [collections, setCollections] = useState<Collection[]>([]);
+  const [selectedCollectionId, setSelectedCollectionId] = useState<number | null>(null);
+  const [expandedCollections, setExpandedCollections] = useState<Set<number>>(new Set());
+
   // 上传状态
   const [uploadedVideo, setUploadedVideo] = useState<UploadedFile | null>(null);
   const [uploadedSubtitle, setUploadedSubtitle] = useState<UploadedFile | null>(null);
@@ -101,7 +119,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [searchQuery, setSearchQuery] = useState("");
 
   // 视图
-  const [currentView, setCurrentView] = useState<"home" | "settings" | "note">("home");
+  const [currentView, setCurrentView] = useState<ViewType>("home");
   const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
 
   // 视频工具栏设置（全局）
@@ -254,11 +272,79 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // 加载合集列表
+  const refreshCollections = useCallback(async () => {
+    try {
+      const collectionsList = await invoke<Collection[]>("get_collections");
+      setCollections(collectionsList);
+    } catch (error) {
+      console.error("Failed to load collections:", error);
+    }
+  }, []);
+
+  // 创建合集
+  const createCollectionFn = useCallback(async (req: CreateCollectionRequest): Promise<Collection> => {
+    const newCollection = await invoke<Collection>("create_collection", { req });
+    await refreshCollections();
+    return newCollection;
+  }, [refreshCollections]);
+
+  // 更新合集
+  const updateCollectionFn = useCallback(async (collection: Collection): Promise<void> => {
+    await invoke("update_collection", { collection });
+    await refreshCollections();
+  }, [refreshCollections]);
+
+  // 删除合集
+  const deleteCollectionFn = useCallback(async (id: number): Promise<void> => {
+    await invoke("delete_collection", { id });
+    await refreshCollections();
+    // 如果删除的是当前选中的合集，清除选中状态并返回首页
+    if (selectedCollectionId === id) {
+      setSelectedCollectionId(null);
+      setCurrentView("home");
+    }
+  }, [refreshCollections, selectedCollectionId]);
+
+  // 设置选中的合集
+  const setSelectedCollection = useCallback((id: number | null) => {
+    setSelectedCollectionId(id);
+    // 选择合集时，清除文件夹和笔记选中状态
+    setSidebar((prev) => ({ ...prev, selectedFolderId: null }));
+    setSelectedNoteId(null);
+  }, []);
+
+  // 切换合集展开状态
+  const toggleCollectionExpand = useCallback((id: number) => {
+    setExpandedCollections((prev) => {
+      const newExpanded = new Set(prev);
+      if (newExpanded.has(id)) {
+        newExpanded.delete(id);
+      } else {
+        newExpanded.add(id);
+      }
+      return newExpanded;
+    });
+  }, []);
+
+  // 添加笔记到合集
+  const addNoteToCollectionFn = useCallback(async (collectionId: number, noteId: number): Promise<void> => {
+    await invoke("add_note_to_collection", { collectionId, noteId });
+    await refreshCollections();
+  }, [refreshCollections]);
+
+  // 从合集移除笔记
+  const removeNoteFromCollectionFn = useCallback(async (collectionId: number, noteId: number): Promise<void> => {
+    await invoke("remove_note_from_collection", { collectionId, noteId });
+    await refreshCollections();
+  }, [refreshCollections]);
+
   // 初始加载
   useEffect(() => {
     refreshAiConfigs();
     refreshPromptConfigs();
     refreshNotes();
+    refreshCollections();
     loadToolbarSettings();
   }, []);
 
@@ -301,6 +387,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     createNote,
     deleteNote,
     updateNoteSuggestedQuestions,
+    // 合集（资源库）
+    collections,
+    selectedCollectionId,
+    expandedCollections,
+    refreshCollections,
+    createCollection: createCollectionFn,
+    updateCollection: updateCollectionFn,
+    deleteCollection: deleteCollectionFn,
+    setSelectedCollection,
+    toggleCollectionExpand,
+    addNoteToCollection: addNoteToCollectionFn,
+    removeNoteFromCollection: removeNoteFromCollectionFn,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,
@@ -337,6 +435,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
     createNote,
     deleteNote,
     updateNoteSuggestedQuestions,
+    // 合集（资源库）
+    collections,
+    selectedCollectionId,
+    expandedCollections,
+    refreshCollections,
+    createCollectionFn,
+    updateCollectionFn,
+    deleteCollectionFn,
+    setSelectedCollection,
+    toggleCollectionExpand,
+    addNoteToCollectionFn,
+    removeNoteFromCollectionFn,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,

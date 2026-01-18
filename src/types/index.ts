@@ -77,7 +77,36 @@ export interface SidebarState {
 }
 
 // 视图类型
-export type ViewType = "home" | "settings" | "note";
+export type ViewType = "home" | "settings" | "note" | "collection";
+
+// 合集（资源库）
+export interface Collection {
+  id: number;
+  name: string;
+  description: string | null;
+  parent_id: number | null;
+  sort_order: number;
+  item_count: number;  // 查询时计算
+  created_at: string;
+  updated_at: string;
+}
+
+// 创建合集请求
+export interface CreateCollectionRequest {
+  name: string;
+  description?: string;
+  parent_id?: number;
+}
+
+// 合集内容关联
+export interface CollectionItem {
+  id: number;
+  collection_id: number;
+  note_id: number;
+  sort_order: number;
+  created_at: string;
+  note?: Note;  // 联表查询时填充
+}
 
 // 视频工具栏设置（全局设置，跨笔记通用）
 export interface VideoToolbarSettings {
