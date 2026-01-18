@@ -80,7 +80,7 @@ function AppContent() {
     } catch {}
   };
 
-  const toggleTheme = () => {
+  const toggleTheme = async () => {
     const newTheme = theme === "dark" ? "light" : "dark";
     if (newTheme === "dark") {
       document.documentElement.classList.add("dark");
@@ -88,6 +88,11 @@ function AppContent() {
       document.documentElement.classList.remove("dark");
     }
     setTheme(newTheme);
+    try {
+      await invoke("set_theme", { theme: newTheme });
+    } catch (error) {
+      console.error("Failed to save theme:", error);
+    }
   };
 
   const handleThemeChange = (newTheme: "light" | "dark") => {
