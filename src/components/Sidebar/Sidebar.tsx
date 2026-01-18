@@ -322,9 +322,10 @@ export function Sidebar() {
         <NavItem
           icon={<Search className="w-5 h-5" />}
           label="全局搜索"
+          active={currentView === "search"}
           collapsed={collapsed}
           onClick={() => {
-            setCurrentView("home");
+            setCurrentView("search");
             setSelectedFolder(null);
             setSelectedNoteId(null);
           }}
