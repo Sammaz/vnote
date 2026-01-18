@@ -82,6 +82,9 @@ interface AppContextType {
   setLayoutSwapped: (swapped: boolean) => void;
   setLayoutPanelWidth: (width: number) => void;
   setCaptionsEnabled: (enabled: boolean) => void;
+
+  // 累计观看时长
+  addWatchTime: (seconds: number) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -196,17 +199,66 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveSetting("toolbar_captions_enabled", enabled.toString());
   }, [saveSetting]);
 
+  // 加载累计观看时长
+  const loadTotalWatchTime = useCallback(async () => {
+    try {
+      const value = await invoke<string | null>("get_setting", { key: "total_watch_time" });
+      if (value) {
+        const totalWatchTime = parseInt(value, 10) || 0;
+        setStats(prev => ({ ...prev, totalWatchTime }));
+      }
+    } catch (error) {
+      console.error("Failed to load total watch time:", error);
+    }
+  }, []);
+
+  // 增加观看时长
+  const addWatchTime = useCallback((seconds: number) => {
+    if (seconds <= 0) return;
+    setStats(prev => {
+      const newTotal = prev.totalWatchTime + Math.floor(seconds);
+      // 异步保存到数据库
+      invoke("set_setting", { key: "total_watch_time", value: newTotal.toString() }).catch(err => {
+        console.error("Failed to save watch time:", err);
+      });
+      return { ...prev, totalWatchTime: newTotal };
+    });
+  }, []);
+
   // 加载笔记列表
   const refreshNotes = useCallback(async () => {
     try {
       const notesList = await invoke<Note[]>("get_notes");
       setNotes(notesList);
 
+      // 计算本周新增笔记数
+      const now = new Date();
+      const startOfWeek = new Date(now);
+      startOfWeek.setDate(now.getDate() - now.getDay()); // 本周日
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      const notesThisWeek = notesList.filter(note => {
+        const createdAt = new Date(note.created_at);
+        return createdAt >= startOfWeek;
+      }).length;
+
+      // 计算最近活跃时间（最新的 updated_at）
+      let lastActivityDate: Date | null = null;
+      if (notesList.length > 0) {
+        const latestNote = notesList.reduce((latest, note) => {
+          const noteDate = new Date(note.updated_at);
+          const latestDate = new Date(latest.updated_at);
+          return noteDate > latestDate ? note : latest;
+        });
+        lastActivityDate = new Date(latestNote.updated_at);
+      }
+
       // 更新统计
       setStats(prev => ({
         ...prev,
         totalNotes: notesList.length,
-        lastActivityDate: new Date(),
+        notesThisWeek,
+        lastActivityDate,
       }));
     } catch (error) {
       console.error("Failed to load notes:", error);
@@ -361,6 +413,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshCollections();
     refreshNotesInCollections();
     loadToolbarSettings();
+    loadTotalWatchTime();
   }, []);
 
   // 侧边栏操作
@@ -435,6 +488,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLayoutSwapped,
     setLayoutPanelWidth,
     setCaptionsEnabled,
+    addWatchTime,
   }), [
     sidebar,
     toggleSidebar,
@@ -484,6 +538,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLayoutSwapped,
     setLayoutPanelWidth,
     setCaptionsEnabled,
+    addWatchTime,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

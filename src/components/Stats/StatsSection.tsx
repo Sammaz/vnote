@@ -12,6 +12,20 @@ function formatWatchTime(seconds: number): string {
   return `${minutes} 分钟`;
 }
 
+function formatLastActivity(date: Date | null): string {
+  if (!date) return "-";
+
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return "今天";
+  if (diffDays === 1) return "昨天";
+  if (diffDays < 7) return `${diffDays} 天前`;
+  if (diffDays < 30) return `${Math.floor(diffDays / 7)} 周前`;
+  return `${Math.floor(diffDays / 30)} 月前`;
+}
+
 export function StatsSection() {
   const { stats } = useApp();
 
@@ -47,7 +61,7 @@ export function StatsSection() {
         <StatCard
           icon={<Activity className="w-6 h-6" />}
           label="最近活跃"
-          value={stats.lastActivityDate ? "今天" : "-"}
+          value={formatLastActivity(stats.lastActivityDate)}
           subValue="上次学习"
           color="orange"
         />

@@ -384,7 +384,7 @@ export function Sidebar() {
       <div className="p-2 mt-auto">
         {!collapsed && (
           <div className="text-xs text-slate-500 dark:text-slate-600 text-center animate-fade-in">
-            {filteredNotes.length} 条笔记
+            {notes.length} 条笔记
           </div>
         )}
       </div>

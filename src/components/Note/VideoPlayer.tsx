@@ -6,6 +6,9 @@ import "plyr/dist/plyr.css";
 import { PlaybackResume } from "./PlaybackResume";
 import { useApp } from "../../context/AppContext";
 
+// 观看时长追踪间隔（秒）
+const WATCH_TIME_INTERVAL = 10;
+
 // 检查是否是 TS 格式
 function isTsFormat(filePath: string): boolean {
   return filePath.toLowerCase().endsWith(".ts");
@@ -74,7 +77,7 @@ export function VideoPlayer({
   noteId,
   lastPlaybackPosition: initialLastPlaybackPosition,
 }: VideoPlayerProps) {
-  const { toolbarSettings, setCaptionsEnabled } = useApp();
+  const { toolbarSettings, setCaptionsEnabled, addWatchTime } = useApp();
   const { captionsEnabled } = toolbarSettings;
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Plyr | null>(null);
@@ -96,6 +99,13 @@ export function VideoPlayer({
   const noteIdRef = useRef<number | undefined>(noteId);
   const showResumePromptRef = useRef<boolean>(false);
   const lastPlaybackPositionRef = useRef<number | null>(lastPlaybackPosition);
+  const watchTimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const addWatchTimeRef = useRef(addWatchTime);
+
+  // 保持 addWatchTime ref 同步
+  useEffect(() => {
+    addWatchTimeRef.current = addWatchTime;
+  }, [addWatchTime]);
 
   // 从数据库获取最新的播放位置
   useEffect(() => {
@@ -321,6 +331,28 @@ export function VideoPlayer({
         }
       };
 
+      // 观看时长追踪
+      const startWatchTimeTracking = () => {
+        if (watchTimeIntervalRef.current) return;
+        watchTimeIntervalRef.current = setInterval(() => {
+          if (player.playing) {
+            addWatchTimeRef.current(WATCH_TIME_INTERVAL);
+          }
+        }, WATCH_TIME_INTERVAL * 1000);
+      };
+
+      const stopWatchTimeTracking = () => {
+        if (watchTimeIntervalRef.current) {
+          clearInterval(watchTimeIntervalRef.current);
+          watchTimeIntervalRef.current = null;
+        }
+      };
+
+      // 播放时开始追踪
+      const handlePlay = () => {
+        startWatchTimeTracking();
+      };
+
       // 时间更新事件（防抖保存）
       const handleTimeUpdate = () => {
         const currentTime = player.currentTime;
@@ -342,16 +374,18 @@ export function VideoPlayer({
         }));
       };
 
-      // 暂停时立即保存
+      // 暂停时立即保存并停止追踪
       const handlePause = () => {
+        stopWatchTimeTracking();
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current);
         }
         savePlaybackPosition(player.currentTime);
       };
 
-      // 视频结束时清除播放位置
+      // 视频结束时清除播放位置并停止追踪
       const handleEnded = async () => {
+        stopWatchTimeTracking();
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current);
         }
@@ -366,6 +400,7 @@ export function VideoPlayer({
         }
       };
 
+      player.on("play", handlePlay);
       player.on("timeupdate", handleTimeUpdate);
       player.on("pause", handlePause);
       player.on("ended", handleEnded);
@@ -530,6 +565,8 @@ export function VideoPlayer({
 
       // 返回清理函数
       return () => {
+        // 停止观看时长追踪
+        stopWatchTimeTracking();
         const currentTime = player.currentTime;
         const currentNoteId = noteIdRef.current;
         if (currentNoteId && currentTime > 1) {
@@ -546,6 +583,7 @@ export function VideoPlayer({
         if (captionBtn && cleanupRef.srtHandler) {
           captionBtn.removeEventListener("click", cleanupRef.srtHandler);
         }
+        player.off("play", handlePlay);
         player.off("timeupdate", handleTimeUpdate);
         player.off("pause", handlePause);
         player.off("ended", handleEnded);
