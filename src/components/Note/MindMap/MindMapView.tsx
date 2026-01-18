@@ -11,6 +11,8 @@ import Drag from "simple-mind-map/src/plugins/Drag.js";
 import KeyboardNavigation from "simple-mind-map/src/plugins/KeyboardNavigation.js";
 import Select from "simple-mind-map/src/plugins/Select.js";
 import NodeImgAdjust from "simple-mind-map/src/plugins/NodeImgAdjust.js";
+import Export from "simple-mind-map/src/plugins/Export.js";
+import ExportPDF from "simple-mind-map/src/plugins/ExportPDF.js";
 import type { ChapterData, SubtitleEntry } from "../../../types";
 import { convertChapterDataToMindMap } from "./chapterToMindMap";
 import { getLightTheme, getDarkTheme } from "./themes";
@@ -21,6 +23,8 @@ MindMap.usePlugin(Drag);
 MindMap.usePlugin(KeyboardNavigation);
 MindMap.usePlugin(Select);
 MindMap.usePlugin(NodeImgAdjust);
+MindMap.usePlugin(Export);
+MindMap.usePlugin(ExportPDF);
 
 /**
  * 清理思维导图节点数据，移除 richText 相关属性和 HTML 标签

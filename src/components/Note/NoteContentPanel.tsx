@@ -22,7 +22,6 @@ import {
   MousePointer2,
   Package,
   GitBranch,
-  Save,
   Zap,
   StickyNote,
   GraduationCap,
@@ -458,6 +457,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [visualEditContent, setVisualEditContent] = useState<string>("");
   const [showVisualTimestamp, setShowVisualTimestamp] = useState(true);
   const [visualViewMode, setVisualViewMode] = useState<VisualViewMode>("markdown");
+  const [showMindMapExportMenu, setShowMindMapExportMenu] = useState(false);
+  const mindMapExportMenuRef = useRef<HTMLDivElement>(null);
 
   // 从全局状态同步组件state
   const syncStateFromGlobal = useCallback(() => {
@@ -1089,6 +1090,66 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       message.error(`导出失败: ${error}`);
     }
   };
+
+  // 思维导图导出为不同格式
+  const handleMindMapExport = useCallback(async (format: 'png' | 'svg' | 'pdf') => {
+    if (mindMapRef.current) {
+      const mindMapInstance = mindMapRef.current.getInstance();
+      if (!mindMapInstance) {
+        message.warning("思维导图未初始化");
+        return;
+      }
+      try {
+        // 让用户选择保存位置
+        const filePath = await save({
+          defaultPath: `${note.title}.${format}`,
+          filters: [{
+            name: format.toUpperCase(),
+            extensions: [format]
+          }]
+        });
+
+        if (!filePath) {
+          // 用户取消了保存
+          return;
+        }
+
+        // 导出思维导图数据
+        const dataUrl = await mindMapInstance.export(format, true, note.title);
+
+        // 将 data URL 转换为 Blob
+        const response = await fetch(dataUrl as string);
+        const blob = await response.blob();
+        const arrayBuffer = await blob.arrayBuffer();
+        const uint8Array = new Uint8Array(arrayBuffer);
+
+        // 写入文件
+        const { writeFile } = await import("@tauri-apps/plugin-fs");
+        await writeFile(filePath, uint8Array);
+
+        message.success(`导出${format.toUpperCase()}成功`);
+        setShowMindMapExportMenu(false);
+      } catch (error) {
+        console.error("Export failed:", error);
+        message.error(`导出${format.toUpperCase()}失败: ${error}`);
+      }
+    } else {
+      message.warning("思维导图未初始化");
+    }
+  }, [note.title]);
+
+  // 点击外部关闭思维导图导出菜单
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (mindMapExportMenuRef.current && !mindMapExportMenuRef.current.contains(e.target as Node)) {
+        setShowMindMapExportMenu(false);
+      }
+    };
+    if (showMindMapExportMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showMindMapExportMenu]);
 
   // 进入视觉化总结编辑模式时初始化内容
   const handleVisualEditToggle = () => {
@@ -2583,7 +2644,7 @@ Video subtitles content:`;
           </div>
           {/* 右侧按钮区域 */}
           <div className="flex items-center gap-1">
-            {/* 思维导图模式下显示保存按钮 */}
+            {/* 思维导图模式下显示重新生成和导出按钮 */}
             {visualViewMode === "mindmap" && (
               <>
                 <button
@@ -2601,37 +2662,37 @@ Video subtitles content:`;
                   重新生成
                 </button>
                 <span className="text-slate-300 dark:text-slate-600">|</span>
-                <button
-                  onClick={async () => {
-                    if (mindMapRef.current) {
-                      const data = mindMapRef.current.getData();
-                      if (data) {
-                        try {
-                          // 保存思维导图数据到 visual_summary 字段
-                          const updatedNote = {
-                            ...note,
-                            visual_summary: JSON.stringify(data),
-                          };
-                          await invoke("update_note", { note: updatedNote });
-                          message.success("思维导图已保存");
-                          // 刷新笔记数据
-                          onGenerationComplete?.();
-                        } catch (error) {
-                          console.error("[MindMap] 保存失败:", error);
-                          message.error(`保存失败: ${error}`);
-                        }
-                      } else {
-                        message.warning("无法获取思维导图数据");
-                      }
-                    } else {
-                      message.warning("思维导图未初始化");
-                    }
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-                >
-                  <Save className="w-4 h-4" />
-                  保存
-                </button>
+                <div className="relative" ref={mindMapExportMenuRef}>
+                  <button
+                    onClick={() => setShowMindMapExportMenu(!showMindMapExportMenu)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    导出
+                  </button>
+                  {showMindMapExportMenu && (
+                    <div className="absolute top-full right-0 mt-2 w-40 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1">
+                      <button
+                        onClick={() => handleMindMapExport('png')}
+                        className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                      >
+                        导出为 PNG
+                      </button>
+                      <button
+                        onClick={() => handleMindMapExport('svg')}
+                        className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                      >
+                        导出为 SVG
+                      </button>
+                      <button
+                        onClick={() => handleMindMapExport('pdf')}
+                        className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                      >
+                        导出为 PDF
+                      </button>
+                    </div>
+                  )}
+                </div>
               </>
             )}
             {/* 仅在文档模式下显示时间戳、编辑和导出按钮 */}

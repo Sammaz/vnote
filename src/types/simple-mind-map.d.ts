@@ -273,3 +273,18 @@ declare module "simple-mind-map/src/plugins/RichText.js" {
   const RichText: unknown;
   export default RichText;
 }
+
+declare module "simple-mind-map/src/plugins/NodeImgAdjust.js" {
+  const NodeImgAdjust: unknown;
+  export default NodeImgAdjust;
+}
+
+declare module "simple-mind-map/src/plugins/Export.js" {
+  const Export: unknown;
+  export default Export;
+}
+
+declare module "simple-mind-map/src/plugins/ExportPDF.js" {
+  const ExportPDF: unknown;
+  export default ExportPDF;
+}
