@@ -25,6 +25,9 @@ import {
   Save,
   Zap,
   StickyNote,
+  GraduationCap,
+  Network,
+  Palette,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
@@ -53,7 +56,8 @@ import {
 } from "../../utils/noteGenerationState";
 import type { ChapterGenerationEvent } from "../../types";
 
-type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "flashcard" | "quicknotes";
+type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "flashcard" | "quicknotes" | "mindmap" | "canvas";
+type TabGroupId = "summary" | "study";
 
 interface Tab {
   id: TabId;
@@ -61,15 +65,38 @@ interface Tab {
   icon: React.ReactNode;
 }
 
-const TABS: Tab[] = [
-  { id: "summary", label: "全文总结", icon: <FileText className="w-4 h-4" /> },
-  { id: "original", label: "原文细读", icon: <BookOpen className="w-4 h-4" /> },
-  { id: "highlights", label: "高光笔记", icon: <Highlighter className="w-4 h-4" /> },
-  { id: "script", label: "字幕脚本", icon: <Captions className="w-4 h-4" /> },
-  { id: "visual", label: "视觉化总结", icon: <BarChart3 className="w-4 h-4" /> },
-  { id: "custom", label: "自定义总结", icon: <Sparkles className="w-4 h-4" /> },
-  { id: "flashcard", label: "闪记卡", icon: <Zap className="w-4 h-4" /> },
-  { id: "quicknotes", label: "随手笔记", icon: <StickyNote className="w-4 h-4" /> },
+interface TabGroup {
+  id: TabGroupId;
+  label: string;
+  icon: React.ReactNode;
+  tabs: Tab[];
+}
+
+const TAB_GROUPS: TabGroup[] = [
+  {
+    id: "summary",
+    label: "总结",
+    icon: <FileText className="w-4 h-4" />,
+    tabs: [
+      { id: "summary", label: "全文总结", icon: <FileText className="w-4 h-4" /> },
+      { id: "original", label: "原文细读", icon: <BookOpen className="w-4 h-4" /> },
+      { id: "highlights", label: "高光笔记", icon: <Highlighter className="w-4 h-4" /> },
+      { id: "script", label: "字幕脚本", icon: <Captions className="w-4 h-4" /> },
+      { id: "visual", label: "视觉化总结", icon: <BarChart3 className="w-4 h-4" /> },
+      { id: "custom", label: "自定义总结", icon: <Sparkles className="w-4 h-4" /> },
+    ]
+  },
+  {
+    id: "study",
+    label: "学习",
+    icon: <GraduationCap className="w-4 h-4" />,
+    tabs: [
+      { id: "quicknotes", label: "随手笔记", icon: <StickyNote className="w-4 h-4" /> },
+      { id: "mindmap", label: "思维导图", icon: <Network className="w-4 h-4" /> },
+      { id: "canvas", label: "无限画布", icon: <Palette className="w-4 h-4" /> },
+      { id: "flashcard", label: "闪记卡", icon: <Zap className="w-4 h-4" /> },
+    ]
+  }
 ];
 
 // 标签页类型映射
@@ -117,6 +144,7 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
 
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   const [activeTab, setActiveTab] = useState<TabId>("summary");
+  const [activeGroup, setActiveGroup] = useState<TabGroupId>("summary");
 
   // ChapterGrid 组件的 ref
   const chapterGridRef = useRef<ChapterGridRef>(null);
@@ -975,6 +1003,16 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     } catch (error) {
       console.error("下载失败:", error);
       message.error(`下载失败: ${error}`);
+    }
+  };
+
+  // 切换标签分组
+  const handleGroupChange = (groupId: TabGroupId) => {
+    setActiveGroup(groupId);
+    // 切换到新组的第一个标签
+    const group = TAB_GROUPS.find(g => g.id === groupId);
+    if (group && group.tabs.length > 0) {
+      setActiveTab(group.tabs[0].id);
     }
   };
 
@@ -2157,17 +2195,16 @@ Video subtitles content:`;
   };
 
   return (
-    <div className={cn(
-      "flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border",
-      activeTab === "visual" && visualViewMode === "mindmap" ? "" : "overflow-hidden"
-    )}>
+    <div className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden">
       {/* 标签页头部 */}
       <div className="border-b border-slate-200 dark:border-vnote-border select-none">
-        <div className="flex flex-wrap">
-          {TABS.map((tab) => {
-            const generating = isTabGenerating(tab.id);
-            const completed = isTabCompleted(tab.id);
-            const error = getTabError(tab.id);
+        <div className="flex items-center">
+          {/* 当前分组的标签 */}
+          <div className="flex flex-wrap flex-1">
+            {TAB_GROUPS.find(g => g.id === activeGroup)?.tabs.map((tab) => {
+              const generating = isTabGenerating(tab.id);
+              const completed = isTabCompleted(tab.id);
+              const error = getTabError(tab.id);
 
             return (
               <button
@@ -2194,6 +2231,26 @@ Video subtitles content:`;
               </button>
             );
           })}
+          </div>
+
+          {/* 分组切换器 */}
+          <div className="flex items-center gap-0.5 p-1 mr-2 bg-slate-100 dark:bg-vnote-surface rounded-lg">
+            {TAB_GROUPS.map((group) => (
+              <button
+                key={group.id}
+                onClick={() => handleGroupChange(group.id)}
+                className={cn(
+                  "flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer",
+                  activeGroup === group.id
+                    ? "bg-white dark:bg-vnote-card text-blue-600 dark:text-blue-400 shadow-sm"
+                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                )}
+              >
+                {group.icon}
+                {group.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -2719,8 +2776,8 @@ Video subtitles content:`;
             </button>
           </div>
         </div>
-      ) : activeTab === "quicknotes" ? (
-        // 随手笔记标签页不需要次级工具栏（组件内部已有工具栏）
+      ) : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas" ? (
+        // 随手笔记、思维导图、无限画布标签页不需要次级工具栏（组件内部已有工具栏）
         null
       ) : (
         // 其他标签页的简化工具栏
@@ -2750,7 +2807,7 @@ Video subtitles content:`;
         "flex-1",
         activeTab === "visual" && visualViewMode === "mindmap"
           ? "p-0 overflow-visible"
-          : activeTab === "quicknotes"
+          : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas"
           ? "p-0 overflow-hidden"
           : isEditMode ? "p-0 overflow-y-auto" : "p-6 overflow-y-auto"
       )}>
@@ -2926,6 +2983,29 @@ Video subtitles content:`;
             initialMindMapData={note.quick_notes_mindmap}
             initialCanvasData={note.quick_notes_canvas}
             onContentChange={onGenerationComplete}
+            forceTab="richtext"
+          />
+        )}
+        {activeTab === "mindmap" && (
+          <QuickNotesContainer
+            noteId={note.id}
+            noteTitle={note.title}
+            initialContent={note.quick_notes}
+            initialMindMapData={note.quick_notes_mindmap}
+            initialCanvasData={note.quick_notes_canvas}
+            onContentChange={onGenerationComplete}
+            forceTab="mindmap"
+          />
+        )}
+        {activeTab === "canvas" && (
+          <QuickNotesContainer
+            noteId={note.id}
+            noteTitle={note.title}
+            initialContent={note.quick_notes}
+            initialMindMapData={note.quick_notes_mindmap}
+            initialCanvasData={note.quick_notes_canvas}
+            onContentChange={onGenerationComplete}
+            forceTab="canvas"
           />
         )}
       </div>

@@ -975,7 +975,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle
         }}
       >
         {/* 浮动工具栏 */}
-        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-2 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md shadow-lg border border-slate-200/50 dark:border-slate-700/50">
+        <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-2 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md shadow-lg border border-slate-200/50 dark:border-slate-700/50">
           <button
             onClick={() => addNode("textNode")}
             title="文本"

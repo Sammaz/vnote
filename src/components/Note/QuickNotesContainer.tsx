@@ -3,8 +3,7 @@
  * 管理子标签页切换（富文本编辑、思维导图、无限画布）
  */
 
-import { useState } from "react";
-import { SubTabBar, type QuickNotesSubTab } from "./QuickNotes/SubTabBar";
+import { type QuickNotesSubTab } from "./QuickNotes/SubTabBar";
 import { QuickNotesContent } from "./QuickNotesContent";
 import { MindMapEditor } from "./QuickNotes/MindMapEditor";
 import { InfiniteCanvas } from "./QuickNotes/InfiniteCanvas";
@@ -16,6 +15,8 @@ interface QuickNotesContainerProps {
   initialMindMapData: string | null;
   initialCanvasData: string | null;
   onContentChange?: () => void;
+  /** 强制显示指定的子标签，不显示子标签栏 */
+  forceTab?: QuickNotesSubTab;
 }
 
 export function QuickNotesContainer({
@@ -25,24 +26,23 @@ export function QuickNotesContainer({
   initialMindMapData,
   initialCanvasData,
   onContentChange,
+  forceTab,
 }: QuickNotesContainerProps) {
-  const [activeSubTab, setActiveSubTab] = useState<QuickNotesSubTab>("richtext");
+  // 如果指定了 forceTab，使用它；否则默认显示 richtext
+  const currentTab = forceTab || "richtext";
 
   return (
     <div className="flex flex-col h-full">
-      {/* 子标签页切换栏 */}
-      <SubTabBar activeTab={activeSubTab} onTabChange={setActiveSubTab} />
-
       {/* 内容区域 */}
       <div className="flex-1 overflow-hidden">
-        {activeSubTab === "richtext" && (
+        {currentTab === "richtext" && (
           <QuickNotesContent
             noteId={noteId}
             initialContent={initialContent}
             onContentChange={onContentChange}
           />
         )}
-        {activeSubTab === "mindmap" && (
+        {currentTab === "mindmap" && (
           <MindMapEditor
             noteId={noteId}
             noteTitle={noteTitle}
@@ -50,7 +50,7 @@ export function QuickNotesContainer({
             onContentChange={onContentChange}
           />
         )}
-        {activeSubTab === "canvas" && (
+        {currentTab === "canvas" && (
           <InfiniteCanvas
             noteId={noteId}
             noteTitle={noteTitle}
