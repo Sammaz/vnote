@@ -957,89 +957,6 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle
         ? "fixed inset-0 z-50 bg-white dark:bg-slate-900"
         : "h-full"
     }`}>
-      {/* 工具栏 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-green-500 to-teal-500 flex items-center justify-center">
-            <Palette className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <h3 className="text-base font-medium text-slate-800 dark:text-slate-100">无限画布</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              自由组织你的想法和笔记
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => addNode("textNode")}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer",
-              selectedTool === "textNode"
-                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                : "text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600"
-            )}
-          >
-            <Type className="w-4 h-4" />
-            文本
-          </button>
-          <button
-            onClick={() => addNode("stickyNote")}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer",
-              selectedTool === "stickyNote"
-                ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                : "text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600"
-            )}
-          >
-            <StickyNoteIcon className="w-4 h-4" />
-            便签
-          </button>
-          <button
-            onClick={() => addNode("imageNode")}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
-          >
-            <ImageIcon className="w-4 h-4" />
-            图片
-          </button>
-          <button
-            onClick={() => addNode("markdownNode")}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
-          >
-            <FileText className="w-4 h-4" />
-            Markdown
-          </button>
-          <button
-            onClick={() => addNode("codeNode")}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
-          >
-            <Code className="w-4 h-4" />
-            代码
-          </button>
-          <button
-            onClick={() => addNode("shapeNode", "rectangle")}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
-          >
-            <Square className="w-4 h-4" />
-            矩形
-          </button>
-          <button
-            onClick={() => addNode("shapeNode", "circle")}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
-          >
-            <Circle className="w-4 h-4" />
-            圆形
-          </button>
-          <button
-            onClick={() => addNode("shapeNode", "diamond")}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
-          >
-            <Diamond className="w-4 h-4" />
-            菱形
-          </button>
-        </div>
-      </div>
-
       {/* React Flow 画布 */}
       <div
         ref={reactFlowWrapper}
@@ -1053,6 +970,79 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle
           height: '100%'
         }}
       >
+        {/* 浮动工具栏 */}
+        <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-2 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md shadow-lg border border-slate-200/50 dark:border-slate-700/50">
+          <button
+            onClick={() => addNode("textNode")}
+            title="文本"
+            className={cn(
+              "p-2 rounded-lg transition-all cursor-pointer hover:scale-110",
+              selectedTool === "textNode"
+                ? "bg-blue-500 text-white shadow-md"
+                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+            )}
+          >
+            <Type className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => addNode("stickyNote")}
+            title="便签"
+            className={cn(
+              "p-2 rounded-lg transition-all cursor-pointer hover:scale-110",
+              selectedTool === "stickyNote"
+                ? "bg-blue-500 text-white shadow-md"
+                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+            )}
+          >
+            <StickyNoteIcon className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => addNode("imageNode")}
+            title="图片"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <ImageIcon className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => addNode("markdownNode")}
+            title="Markdown"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <FileText className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => addNode("codeNode")}
+            title="代码"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <Code className="w-5 h-5" />
+          </button>
+
+          {/* 分隔线 */}
+          <div className="w-px h-6 bg-slate-300 dark:bg-slate-600 mx-1" />
+
+          <button
+            onClick={() => addNode("shapeNode", "rectangle")}
+            title="矩形"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <Square className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => addNode("shapeNode", "circle")}
+            title="圆形"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <Circle className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => addNode("shapeNode", "diamond")}
+            title="菱形"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+          >
+            <Diamond className="w-5 h-5" />
+          </button>
+        </div>
         <ReactFlow
           nodes={nodes}
           edges={edges}
