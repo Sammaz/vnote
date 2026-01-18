@@ -13,7 +13,6 @@ import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { Editor } from "@tiptap/core";
 import {
-  Clock,
   Camera,
   Bold,
   Italic,
@@ -596,7 +595,26 @@ export function QuickNotesContent({
       const html = editor.getHTML();
       handleContentChange(html);
     },
-  }, [initialContent]);
+  });
+
+  // Handle external content updates (only when noteId changes, not on every save)
+  const prevNoteIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!editor) return;
+
+    // Only update editor content when switching to a different note
+    if (prevNoteIdRef.current !== null && prevNoteIdRef.current !== noteId) {
+      const currentContent = editor.getHTML();
+      const newContent = initialContent || "";
+
+      // Only update if content actually changed to avoid unnecessary resets
+      if (currentContent !== newContent) {
+        editor.commands.setContent(newContent);
+      }
+    }
+
+    prevNoteIdRef.current = noteId;
+  }, [editor, noteId, initialContent]);
 
   // Auto-save with debounce
   const saveContent = useCallback(async (newContent: string) => {
@@ -650,30 +668,6 @@ export function QuickNotesContent({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
-
-  // Get current video time and insert timestamp
-  const handleInsertTimestamp = useCallback(() => {
-    const videoElement = document.querySelector("video");
-    if (videoElement && editor) {
-      const currentTime = videoElement.currentTime;
-      const hours = Math.floor(currentTime / 3600);
-      const minutes = Math.floor((currentTime % 3600) / 60);
-      const seconds = Math.floor(currentTime % 60);
-
-      let timestamp: string;
-      if (hours > 0) {
-        timestamp = `${hours}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-      } else {
-        timestamp = `${minutes}:${seconds.toString().padStart(2, "0")}`;
-      }
-
-      // Insert timestamp as plain text with special format that CSS will style
-      // Using a format like ⏱00:00 that CSS can target
-      editor.chain().focus().insertContent(`⏱${timestamp} `).run();
-    } else {
-      message.warning("未找到视频播放器");
-    }
-  }, [editor]);
 
   // Insert current screenshot
   const handleInsertScreenshot = useCallback(async () => {
@@ -884,26 +878,17 @@ export function QuickNotesContent({
           <div>
             <h3 className="text-base font-medium text-slate-800 dark:text-slate-100">随手笔记</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              支持时间戳、截图（粘贴/上传），自动保存，无需手动提交。
+              支持截图（粘贴/上传），自动保存，无需手动提交。
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleInsertTimestamp}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
-          >
-            <Clock className="w-4 h-4" />
-            插入时间戳
-          </button>
-          <button
-            onClick={handleInsertScreenshot}
-            className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 rounded-lg transition-all cursor-pointer shadow-sm"
-          >
-            <Camera className="w-4 h-4" />
-            插入当前截图
-          </button>
-        </div>
+        <button
+          onClick={handleInsertScreenshot}
+          className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-gradient-to-r from-blue-500 to-indigo-500 hover:from-blue-600 hover:to-indigo-600 rounded-lg transition-all cursor-pointer shadow-sm"
+        >
+          <Camera className="w-4 h-4" />
+          插入当前截图
+        </button>
       </div>
 
       {/* Toolbar */}
