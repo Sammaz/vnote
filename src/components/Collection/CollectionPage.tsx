@@ -1,17 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import {
-  List,
-  MoreHorizontal,
-  Edit2,
-  Trash2,
-  FileText,
-  BookOpen,
-  Sparkles,
-  Network,
-  RefreshCw,
-} from "lucide-react";
+import { Edit2, Trash2, BookOpen } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { CreateCollectionModal } from "./CreateCollectionModal";
@@ -30,20 +20,14 @@ export function CollectionPage() {
     setSelectedNoteId,
     setCurrentView,
     notes,
-    deleteCollection,
     deleteNote,
   } = useApp();
 
   const [collectionItems, setCollectionItems] = useState<NoteWithDetails[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showAddNotesModal, setShowAddNotesModal] = useState(false);
-  const [showMenu, setShowMenu] = useState(false);
-  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [noteToDelete, setNoteToDelete] = useState<NoteWithDetails | null>(null);
-  const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
 
   const collection = collections.find((c) => c.id === selectedCollectionId);
 
@@ -76,31 +60,6 @@ export function CollectionPage() {
     loadCollectionItems();
   }, [selectedCollectionId, notes]);
 
-  // 点击外部关闭菜单
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setShowMenu(false);
-      }
-    }
-
-    if (showMenu) {
-      document.addEventListener("mousedown", handleClickOutside);
-      return () => document.removeEventListener("mousedown", handleClickOutside);
-    }
-  }, [showMenu]);
-
-  const handleMenuClick = () => {
-    if (!showMenu && menuTriggerRef.current) {
-      const rect = menuTriggerRef.current.getBoundingClientRect();
-      setMenuPosition({
-        top: rect.bottom + 4,
-        left: rect.right - 220,
-      });
-    }
-    setShowMenu(!showMenu);
-  };
-
   const handleDeleteNote = async () => {
     if (!noteToDelete) return;
     try {
@@ -118,17 +77,6 @@ export function CollectionPage() {
     setCurrentView("note");
   };
 
-  const handleDeleteCollection = async () => {
-    if (!selectedCollectionId) return;
-    setShowDeleteConfirm(false);
-    try {
-      await deleteCollection(selectedCollectionId);
-      setCurrentView("home");
-    } catch (error) {
-      console.error("Failed to delete collection:", error);
-    }
-  };
-
   if (!collection) {
     return (
       <div className="flex-1 flex items-center justify-center text-slate-400 dark:text-slate-500">
@@ -139,84 +87,38 @@ export function CollectionPage() {
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-100 dark:bg-neutral-900">
-      {/* 头部卡片区域 */}
-      <div className="flex-shrink-0 m-4 mb-0 p-5 bg-white dark:bg-vnote-card rounded-xl border border-slate-200 dark:border-transparent">
-        {/* 标题行 */}
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <List className="w-6 h-6 text-slate-600 dark:text-slate-300" />
-            <div>
-              <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+      {/* 头部区域 */}
+      <div className="flex-shrink-0 px-6 pt-6 pb-4">
+        <div className="flex items-start gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 truncate">
                 {collection.name}
               </h1>
-              <p className="text-sm text-slate-400 dark:text-slate-500 mt-0.5">
-                {collection.description || "暂无描述"}
+              <button
+                onClick={() => setShowEditModal(true)}
+                className={cn(
+                  "flex-shrink-0 p-1.5 rounded-lg transition-colors cursor-pointer",
+                  "text-slate-400 dark:text-slate-500",
+                  "hover:text-slate-600 dark:hover:text-slate-300",
+                  "hover:bg-slate-200 dark:hover:bg-neutral-700"
+                )}
+                title="编辑合集"
+              >
+                <Edit2 className="w-4 h-4" />
+              </button>
+            </div>
+            {collection.description && (
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 line-clamp-2">
+                {collection.description}
               </p>
-            </div>
+            )}
           </div>
-
-          {/* 操作按钮 */}
-          <div className="flex items-center gap-2">
-            <button
-              className={cn(
-                "flex items-center gap-2 px-3 py-2 rounded-lg transition-colors cursor-pointer",
-                "text-pink-500 dark:text-pink-400 text-sm",
-                "hover:bg-pink-50 dark:hover:bg-pink-500/10"
-              )}
-            >
-              <Sparkles className="w-4 h-4" />
-              <span>Ask AI</span>
-            </button>
-            <button
-              ref={menuTriggerRef}
-              onClick={handleMenuClick}
-              className={cn(
-                "p-2 rounded-lg transition-colors cursor-pointer",
-                "text-slate-500 dark:text-slate-400",
-                "hover:bg-slate-100 dark:hover:bg-neutral-700"
-              )}
-            >
-              <MoreHorizontal className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* 归纳总结卡片 */}
-        <div className="mt-4 p-4 bg-slate-50 dark:bg-neutral-800/50 rounded-xl border border-slate-200 dark:border-neutral-600">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 dark:bg-blue-500/20 rounded-full">
-                <BookOpen className="w-5 h-5 text-blue-500" />
-              </div>
-              <span className="text-sm font-medium text-slate-600 dark:text-slate-300">
-                归纳总结
-              </span>
-            </div>
-            <div className="flex items-center gap-4 text-xs text-slate-400 dark:text-slate-500">
-              <button className="flex items-center gap-1.5 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer">
-                <Network className="w-3.5 h-3.5" />
-                <span>思维导图</span>
-              </button>
-              <button className="flex items-center gap-1.5 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer">
-                <Edit2 className="w-3.5 h-3.5" />
-                <span>编辑</span>
-              </button>
-              <button className="flex items-center gap-1.5 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer">
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>重新总结</span>
-              </button>
-            </div>
-          </div>
-          <p className="mt-3 text-sm text-slate-400 dark:text-slate-500 text-center py-4">
-            基于合集中所有视频内容生成归纳总结
-          </p>
-        </div>
-
-        {/* 统计行 */}
-        <div className="mt-4 text-sm text-slate-500 dark:text-slate-400">
-          {collectionItems.length} 项内容
         </div>
       </div>
+
+      {/* 分隔线 */}
+      <div className="mx-6 border-t border-slate-200 dark:border-neutral-700" />
 
       {/* 内容列表 */}
       <div className="flex-1 overflow-y-auto">
@@ -274,82 +176,6 @@ export function CollectionPage() {
           </div>
         )}
       </div>
-
-      {/* 下拉菜单 - Portal */}
-      {showMenu && createPortal(
-        <div
-          ref={menuRef}
-          className="fixed w-56 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-lg shadow-xl z-[9999]"
-          style={{ top: menuPosition.top, left: menuPosition.left }}
-        >
-          <button
-            onClick={() => {
-              setShowMenu(false);
-              setShowEditModal(true);
-            }}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
-          >
-            <Edit2 className="w-4 h-4" />
-            <span>编辑信息</span>
-          </button>
-
-          <div className="my-1 border-t border-slate-100 dark:border-neutral-700" />
-
-          <button
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
-          >
-            <FileText className="w-4 h-4" />
-            <span>导出总结 (Markdown)</span>
-          </button>
-
-          <div className="my-1 border-t border-slate-100 dark:border-neutral-700" />
-
-          <button
-            onClick={() => {
-              setShowMenu(false);
-              setShowDeleteConfirm(true);
-            }}
-            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>删除整个合集</span>
-          </button>
-        </div>,
-        document.body
-      )}
-
-      {/* 删除确认弹窗 */}
-      {showDeleteConfirm && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setShowDeleteConfirm(false)}
-          />
-          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
-            <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-              确定要删除整个合集吗?
-            </h3>
-            <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">
-              确定要永久删除合集「{collection.name}」吗？此操作会移除合集中的所有内容，且无法撤销。
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 rounded-md transition-colors cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleDeleteCollection}
-                className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-200 dark:bg-neutral-700 hover:bg-slate-300 dark:hover:bg-neutral-600 rounded-md transition-colors cursor-pointer"
-              >
-                永久删除
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
 
       {/* 编辑弹窗 */}
       {showEditModal && (
