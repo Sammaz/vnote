@@ -49,6 +49,7 @@ interface AppContextType {
   toggleCollectionExpand: (id: number) => void;
   addNoteToCollection: (collectionId: number, noteId: number) => Promise<void>;
   removeNoteFromCollection: (collectionId: number, noteId: number) => Promise<void>;
+  notesInCollections: Set<number>;
 
   // 上传状态
   uploadedVideo: UploadedFile | null;
@@ -104,6 +105,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [collections, setCollections] = useState<Collection[]>([]);
   const [selectedCollectionId, setSelectedCollectionId] = useState<number | null>(null);
   const [expandedCollections, setExpandedCollections] = useState<Set<number>>(new Set());
+  const [notesInCollections, setNotesInCollections] = useState<Set<number>>(new Set());
 
   // 上传状态
   const [uploadedVideo, setUploadedVideo] = useState<UploadedFile | null>(null);
@@ -282,6 +284,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // 加载已添加到合集的笔记ID列表
+  const refreshNotesInCollections = useCallback(async () => {
+    try {
+      const noteIds = await invoke<number[]>("get_all_notes_in_collections");
+      setNotesInCollections(new Set(noteIds));
+    } catch (error) {
+      console.error("Failed to load notes in collections:", error);
+    }
+  }, []);
+
   // 创建合集
   const createCollectionFn = useCallback(async (req: CreateCollectionRequest): Promise<Collection> => {
     const newCollection = await invoke<Collection>("create_collection", { req });
@@ -331,12 +343,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addNoteToCollectionFn = useCallback(async (collectionId: number, noteId: number): Promise<void> => {
     await invoke("add_note_to_collection", { collectionId, noteId });
     await refreshCollections();
+    await refreshNotesInCollections();
   }, [refreshCollections]);
 
   // 从合集移除笔记
   const removeNoteFromCollectionFn = useCallback(async (collectionId: number, noteId: number): Promise<void> => {
     await invoke("remove_note_from_collection", { collectionId, noteId });
     await refreshCollections();
+    await refreshNotesInCollections();
   }, [refreshCollections]);
 
   // 初始加载
@@ -345,6 +359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     refreshPromptConfigs();
     refreshNotes();
     refreshCollections();
+    refreshNotesInCollections();
     loadToolbarSettings();
   }, []);
 
@@ -399,6 +414,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toggleCollectionExpand,
     addNoteToCollection: addNoteToCollectionFn,
     removeNoteFromCollection: removeNoteFromCollectionFn,
+    notesInCollections,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,
@@ -447,6 +463,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     toggleCollectionExpand,
     addNoteToCollectionFn,
     removeNoteFromCollectionFn,
+    notesInCollections,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,

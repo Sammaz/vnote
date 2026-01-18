@@ -1470,6 +1470,12 @@ impl Database {
     pub fn add_note_to_collection(&self, collection_id: i64, note_id: i64) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
 
+        // 一个笔记只能属于一个合集，先删除笔记在其他合集中的记录
+        conn.execute(
+            "DELETE FROM collection_items WHERE note_id = ?1",
+            [note_id],
+        )?;
+
         // Get the max sort_order for proper ordering
         let max_sort: i32 = conn
             .query_row(
@@ -1480,7 +1486,7 @@ impl Database {
             .unwrap_or(-1);
 
         conn.execute(
-            "INSERT OR IGNORE INTO collection_items (collection_id, note_id, sort_order) VALUES (?1, ?2, ?3)",
+            "INSERT INTO collection_items (collection_id, note_id, sort_order) VALUES (?1, ?2, ?3)",
             rusqlite::params![collection_id, note_id, max_sort + 1],
         )?;
         Ok(())
@@ -1555,6 +1561,17 @@ impl Database {
         })?;
 
         collections.collect()
+    }
+
+    /// Get all note IDs that are in any collection
+    pub fn get_all_notes_in_collections(&self) -> SqliteResult<Vec<i64>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT DISTINCT note_id FROM collection_items"
+        )?;
+
+        let note_ids = stmt.query_map([], |row| row.get(0))?;
+        note_ids.collect()
     }
 }
 

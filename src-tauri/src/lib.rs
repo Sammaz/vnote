@@ -1275,6 +1275,11 @@ fn get_collections_for_note(note_id: i64) -> Result<Vec<Collection>, String> {
     get_db().get_collections_for_note(note_id).map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_all_notes_in_collections() -> Result<Vec<i64>, String> {
+    get_db().get_all_notes_in_collections().map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1408,6 +1413,7 @@ pub fn run() {
             get_collection_items,
             update_collection_items_order,
             get_collections_for_note,
+            get_all_notes_in_collections,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

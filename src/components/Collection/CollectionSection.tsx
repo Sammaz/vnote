@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { FolderPlus } from "lucide-react";
+import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { CollectionItem } from "./CollectionItem";
 import { CreateCollectionModal } from "./CreateCollectionModal";
@@ -30,33 +31,33 @@ export function CollectionSection() {
         <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
           合集
         </span>
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
-          title="新建合集"
-        >
-          <Plus className="w-3.5 h-3.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
-        </button>
       </div>
 
-      {/* 合集列表 */}
-      <div className="space-y-0.5">
-        {rootCollections.length > 0 ? (
-          rootCollections.map((collection) => (
-            <CollectionItem
-              key={collection.id}
-              collection={collection}
-              level={0}
-              childCollections={collections.filter((c) => c.parent_id === collection.id)}
-              allCollections={collections}
-              onEdit={handleEdit}
-            />
-          ))
-        ) : (
-          <div className="px-2 py-3 text-xs text-slate-400 dark:text-slate-500 text-center">
-            暂无合集，点击 + 创建
-          </div>
+      {/* 新合集按钮 */}
+      <button
+        onClick={() => setShowCreateModal(true)}
+        className={cn(
+          "w-full flex items-center gap-2.5 px-2 py-1.5 rounded-md transition-all duration-150 cursor-pointer",
+          "hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 text-sm",
+          "text-slate-600 dark:text-slate-300"
         )}
+      >
+        <FolderPlus className="w-4 h-4 flex-shrink-0" />
+        <span>新合集</span>
+      </button>
+
+      {/* 合集列表 */}
+      <div className="space-y-0.5 mt-0.5">
+        {rootCollections.map((collection) => (
+          <CollectionItem
+            key={collection.id}
+            collection={collection}
+            level={0}
+            childCollections={collections.filter((c) => c.parent_id === collection.id)}
+            allCollections={collections}
+            onEdit={handleEdit}
+          />
+        ))}
       </div>
 
       {/* 创建/编辑合集弹窗 */}

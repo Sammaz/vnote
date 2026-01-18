@@ -3,12 +3,10 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import {
   List,
-  Plus,
   MoreHorizontal,
   Edit2,
   Trash2,
   FileText,
-  Video,
   BookOpen,
   Sparkles,
   Network,
@@ -17,6 +15,8 @@ import {
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { CreateCollectionModal } from "./CreateCollectionModal";
+import { AddNotesToCollectionModal } from "./AddNotesToCollectionModal";
+import { NoteCard } from "../Notes/NoteCard";
 import type { CollectionItem as CollectionItemType, Note } from "../../types";
 
 interface NoteWithDetails extends CollectionItemType {
@@ -27,50 +27,52 @@ export function CollectionPage() {
   const {
     collections,
     selectedCollectionId,
-    removeNoteFromCollection,
     setSelectedNoteId,
     setCurrentView,
     notes,
     deleteCollection,
+    deleteNote,
   } = useApp();
 
   const [collectionItems, setCollectionItems] = useState<NoteWithDetails[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showAddNotesModal, setShowAddNotesModal] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const [noteToDelete, setNoteToDelete] = useState<NoteWithDetails | null>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const collection = collections.find((c) => c.id === selectedCollectionId);
 
   // 加载合集内容
+  const loadCollectionItems = async () => {
+    if (!selectedCollectionId) return;
+
+    setIsLoading(true);
+    try {
+      const items = await invoke<CollectionItemType[]>("get_collection_items", {
+        collectionId: selectedCollectionId,
+      });
+
+      const itemsWithNotes: NoteWithDetails[] = items
+        .map((item) => ({
+          ...item,
+          note: notes.find((n) => n.id === item.note_id),
+        }))
+        .filter((item): item is NoteWithDetails => item.note !== undefined);
+
+      setCollectionItems(itemsWithNotes);
+    } catch (error) {
+      console.error("Failed to load collection items:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const loadCollectionItems = async () => {
-      if (!selectedCollectionId) return;
-
-      setIsLoading(true);
-      try {
-        const items = await invoke<CollectionItemType[]>("get_collection_items", {
-          collectionId: selectedCollectionId,
-        });
-
-        const itemsWithNotes: NoteWithDetails[] = items
-          .map((item) => ({
-            ...item,
-            note: notes.find((n) => n.id === item.note_id),
-          }))
-          .filter((item): item is NoteWithDetails => item.note !== undefined);
-
-        setCollectionItems(itemsWithNotes);
-      } catch (error) {
-        console.error("Failed to load collection items:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     loadCollectionItems();
   }, [selectedCollectionId, notes]);
 
@@ -99,13 +101,15 @@ export function CollectionPage() {
     setShowMenu(!showMenu);
   };
 
-  const handleRemoveNote = async (noteId: number) => {
-    if (!selectedCollectionId) return;
+  const handleDeleteNote = async () => {
+    if (!noteToDelete) return;
     try {
-      await removeNoteFromCollection(selectedCollectionId, noteId);
-      setCollectionItems((prev) => prev.filter((item) => item.note_id !== noteId));
+      await deleteNote(noteToDelete.note_id);
+      setCollectionItems((prev) => prev.filter((item) => item.note_id !== noteToDelete.note_id));
     } catch (error) {
-      console.error("Failed to remove note from collection:", error);
+      console.error("Failed to delete note:", error);
+    } finally {
+      setNoteToDelete(null);
     }
   };
 
@@ -153,17 +157,6 @@ export function CollectionPage() {
 
           {/* 操作按钮 */}
           <div className="flex items-center gap-2">
-            <button
-              className={cn(
-                "flex items-center gap-2 px-3 py-2 rounded-lg transition-colors cursor-pointer",
-                "bg-slate-100 dark:bg-neutral-700",
-                "text-slate-600 dark:text-slate-300 text-sm",
-                "hover:bg-slate-200 dark:hover:bg-neutral-600"
-              )}
-            >
-              <Plus className="w-4 h-4" />
-              <span>批量添加</span>
-            </button>
             <button
               className={cn(
                 "flex items-center gap-2 px-3 py-2 rounded-lg transition-colors cursor-pointer",
@@ -238,6 +231,7 @@ export function CollectionPage() {
               这个合集还没有内容。
             </p>
             <button
+              onClick={() => setShowAddNotesModal(true)}
               className={cn(
                 "px-4 py-2 rounded-lg transition-colors cursor-pointer",
                 "bg-white dark:bg-neutral-700",
@@ -250,47 +244,33 @@ export function CollectionPage() {
             </button>
           </div>
         ) : (
-          <div className="p-6 space-y-2">
-            {collectionItems.map((item) => (
-              <div
-                key={item.id}
-                className={cn(
-                  "flex items-center gap-4 p-4 rounded-xl transition-all cursor-pointer group",
-                  "bg-white dark:bg-vnote-card",
-                  "border border-slate-200 dark:border-vnote-border",
-                  "hover:border-blue-300 dark:hover:border-blue-500/50",
-                  "hover:shadow-md"
-                )}
-                onClick={() => handleOpenNote(item.note_id)}
-              >
-                <div className="flex-shrink-0 p-2.5 bg-blue-50 dark:bg-blue-500/10 rounded-lg">
-                  <Video className="w-5 h-5 text-blue-500" />
+          <div className="p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {collectionItems.map((item) => (
+                <div key={item.id} className="relative group">
+                  <NoteCard
+                    note={item.note}
+                    onClick={() => handleOpenNote(item.note_id)}
+                  />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setNoteToDelete(item);
+                    }}
+                    className={cn(
+                      "absolute top-2 right-2 p-1.5 rounded-lg transition-all cursor-pointer z-10",
+                      "opacity-0 group-hover:opacity-100",
+                      "bg-white/90 dark:bg-neutral-800/90",
+                      "hover:bg-red-50 dark:hover:bg-red-500/20",
+                      "text-slate-400 hover:text-red-500"
+                    )}
+                    title="删除笔记"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
-                    {item.note.title}
-                  </h4>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    添加于 {new Date(item.created_at).toLocaleDateString("zh-CN")}
-                  </p>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRemoveNote(item.note_id);
-                  }}
-                  className={cn(
-                    "p-2 rounded-lg transition-all cursor-pointer",
-                    "opacity-0 group-hover:opacity-100",
-                    "hover:bg-red-50 dark:hover:bg-red-500/10",
-                    "text-slate-400 hover:text-red-500"
-                  )}
-                  title="从合集移除"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -376,6 +356,49 @@ export function CollectionPage() {
         <CreateCollectionModal
           onClose={() => setShowEditModal(false)}
           editingCollection={collection}
+        />
+      )}
+
+      {/* 删除笔记确认弹窗 */}
+      {noteToDelete && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setNoteToDelete(null)}
+          />
+          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+              确定要删除笔记吗?
+            </h3>
+            <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">
+              确定要永久删除「{noteToDelete.note.title}」吗？此操作无法撤销。
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setNoteToDelete(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 rounded-md transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDeleteNote}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors cursor-pointer"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 添加笔记弹窗 */}
+      {showAddNotesModal && selectedCollectionId && (
+        <AddNotesToCollectionModal
+          collectionId={selectedCollectionId}
+          existingNoteIds={collectionItems.map((item) => item.note_id)}
+          onClose={() => setShowAddNotesModal(false)}
+          onSuccess={loadCollectionItems}
         />
       )}
     </div>
