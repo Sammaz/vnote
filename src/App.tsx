@@ -8,12 +8,13 @@ import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
 import { NotePage } from "./components/Note";
 import { CollectionPage } from "./components/Collection";
+import { RecentNotesPage } from "./components/Notes";
 import "./index.css";
 
 function AppContent() {
   const { currentView, setCurrentView } = useApp();
   const [theme, setTheme] = useState<"light" | "dark">("dark");
-  const [previousView, setPreviousView] = useState<"home" | "note" | "collection">("home");
+  const [previousView, setPreviousView] = useState<"home" | "note" | "collection" | "recent-notes">("home");
 
   useEffect(() => {
     // Load saved theme and show window
@@ -106,7 +107,7 @@ function AppContent() {
       setCurrentView(previousView);
     } else {
       // 不在设置页面时，保存当前视图并进入设置
-      setPreviousView(currentView as "home" | "note" | "collection");
+      setPreviousView(currentView as "home" | "note" | "collection" | "recent-notes");
       setCurrentView("settings");
     }
   };
@@ -190,6 +191,8 @@ function AppContent() {
             <NotePage />
           ) : currentView === "collection" ? (
             <CollectionPage />
+          ) : currentView === "recent-notes" ? (
+            <RecentNotesPage />
           ) : (
             <HomePage />
           )}

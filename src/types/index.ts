@@ -77,7 +77,7 @@ export interface SidebarState {
 }
 
 // 视图类型
-export type ViewType = "home" | "settings" | "note" | "collection";
+export type ViewType = "home" | "settings" | "note" | "collection" | "recent-notes";
 
 // 合集（资源库）
 export interface Collection {

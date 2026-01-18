@@ -19,6 +19,7 @@ export function RecentNotes() {
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-slate-700 dark:text-slate-200">最近笔记</h2>
         <button
+          onClick={() => setCurrentView("recent-notes")}
           className={cn(
             "flex items-center gap-1 text-sm text-slate-500 hover:text-blue-400",
             "transition-colors duration-200 cursor-pointer"
