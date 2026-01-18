@@ -337,11 +337,11 @@ function CodeNode({ data, selected }: { data: any; selected?: boolean }) {
       <Handle type="source" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-source" />
       <div
         className={cn(
-          "w-80 bg-slate-900 dark:bg-slate-950 border-2 rounded-lg shadow-md overflow-hidden transition-all",
+          "w-80 bg-slate-100 dark:bg-slate-950 border-2 rounded-lg shadow-md overflow-hidden transition-all",
           isEditing ? "cursor-text" : "cursor-pointer",
           selected
             ? "border-blue-500 dark:border-blue-400 shadow-xl ring-2 ring-blue-200 dark:ring-blue-800"
-            : "border-slate-700"
+            : "border-slate-300 dark:border-slate-700"
         )}
         onDoubleClick={handleDoubleClick}
         onMouseDown={(e) => {
@@ -350,20 +350,20 @@ function CodeNode({ data, selected }: { data: any; selected?: boolean }) {
           }
         }}
       >
-        <div className="px-3 py-2 bg-slate-800 dark:bg-slate-900 border-b border-slate-700 flex items-center gap-2">
-          <Code className="w-3 h-3 text-slate-400" />
+        <div className="px-3 py-2 bg-slate-200 dark:bg-slate-900 border-b border-slate-300 dark:border-slate-700 flex items-center gap-2">
+          <Code className="w-3 h-3 text-slate-600 dark:text-slate-400" />
           {isEditing ? (
             <input
               type="text"
               value={language}
               onChange={(e) => setLanguage(e.target.value)}
-              className="text-xs text-slate-400 bg-transparent border-none outline-none"
+              className="text-xs text-slate-600 dark:text-slate-400 bg-transparent border-none outline-none"
               placeholder="语言"
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             />
           ) : (
-            <span className="text-xs text-slate-400">{language}</span>
+            <span className="text-xs text-slate-600 dark:text-slate-400">{language}</span>
           )}
         </div>
         {isEditing ? (
@@ -374,12 +374,12 @@ function CodeNode({ data, selected }: { data: any; selected?: boolean }) {
             onBlur={handleBlur}
             rows={10}
             placeholder="代码内容"
-            className="w-full p-3 text-xs text-slate-100 bg-slate-900 dark:bg-slate-950 font-mono outline-none resize-none"
+            className="w-full p-3 text-xs text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-slate-950 font-mono outline-none resize-none"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           />
         ) : (
-          <pre className="p-3 text-xs text-slate-100 overflow-x-auto">
+          <pre className="p-3 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto">
             <code>{code || "// 双击编辑代码"}</code>
           </pre>
         )}
