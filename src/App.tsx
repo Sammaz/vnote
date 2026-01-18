@@ -115,10 +115,10 @@ function AppContent() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-white dark:bg-vnote-bg text-slate-900 dark:text-slate-100 font-sans overflow-hidden transition-colors duration-200">
+    <div className="flex flex-col h-screen w-screen bg-slate-50 dark:bg-vnote-bg text-slate-900 dark:text-slate-100 font-sans overflow-hidden transition-colors duration-300">
       {/* Title Bar */}
       <header
-        className="flex items-center h-9 border-b border-slate-200 dark:border-vnote-border bg-white/80 dark:bg-vnote-card/80 backdrop-blur-xl flex-shrink-0"
+        className="flex items-center h-9 border-b border-slate-200/60 dark:border-vnote-border/60 bg-white/70 dark:bg-vnote-card/70 backdrop-blur-2xl flex-shrink-0 shadow-sm"
         data-tauri-drag-region
         onMouseDown={handleTitleBarMouseDown}
       >
@@ -131,7 +131,7 @@ function AppContent() {
         <div className="flex items-center space-x-1 pr-2" data-tauri-drag-region="false">
           <button
             onClick={toggleTheme}
-            className="p-2 text-slate-400 hover:text-orange-500 dark:text-slate-400 dark:hover:text-yellow-400 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-full transition-colors cursor-pointer"
+            className="p-2 text-slate-400 hover:text-orange-500 dark:text-slate-400 dark:hover:text-yellow-400 hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 rounded-full transition-all duration-200 cursor-pointer hover:scale-110"
           >
             <Sun size={18} className="hidden dark:block" />
             <Moon size={18} className="block dark:hidden" />
@@ -139,10 +139,10 @@ function AppContent() {
           <button
             onClick={handleSettingsClick}
             className={[
-              "p-2 rounded-full transition-colors cursor-pointer",
+              "p-2 rounded-full transition-all duration-200 cursor-pointer",
               isSettingsView
-                ? "text-blue-500 bg-blue-500/10 dark:text-blue-400 dark:bg-blue-400/10"
-                : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                ? "text-blue-500 bg-blue-500/15 dark:text-blue-400 dark:bg-blue-400/15 scale-110"
+                : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 hover:scale-110"
             ].join(" ")}
             title="设置"
           >
@@ -153,19 +153,19 @@ function AppContent() {
         <div className="flex items-center" data-tauri-drag-region="false">
           <button
             onClick={handleMinimize}
-            className="h-9 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
+            className="h-9 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 transition-all duration-200 cursor-pointer"
           >
             <Minus size={14} />
           </button>
           <button
             onClick={handleMaximize}
-            className="h-9 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
+            className="h-9 w-10 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 transition-all duration-200 cursor-pointer"
           >
             <Square size={12} />
           </button>
           <button
             onClick={handleClose}
-            className="h-9 w-12 flex items-center justify-center text-slate-400 hover:text-white hover:bg-red-500 transition-colors cursor-pointer"
+            className="h-9 w-12 flex items-center justify-center text-slate-400 hover:text-white hover:bg-red-500/90 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-red-500/30"
           >
             <X size={14} />
           </button>

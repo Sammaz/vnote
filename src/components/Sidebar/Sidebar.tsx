@@ -30,8 +30,8 @@ function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
       onClick={onClick}
       className={cn(
         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 cursor-pointer",
-        "hover:bg-slate-100 dark:hover:bg-vnote-hover",
-        active ? "bg-blue-50 dark:bg-blue-600/20 text-blue-500 dark:text-blue-400" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200",
+        "hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 hover:scale-[1.02]",
+        active ? "bg-blue-50/90 dark:bg-blue-600/20 text-blue-500 dark:text-blue-400 shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200",
         collapsed && "justify-center px-0"
       )}
       title={collapsed ? label : undefined}
@@ -72,8 +72,8 @@ function FolderItem({
         }}
         className={cn(
           "w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all duration-150 cursor-pointer",
-          "hover:bg-slate-100 dark:hover:bg-vnote-hover text-sm",
-          isSelected ? "bg-slate-100 dark:bg-vnote-hover text-slate-700 dark:text-slate-200" : "text-slate-500 dark:text-slate-400"
+          "hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 text-sm hover:scale-[1.01]",
+          isSelected ? "bg-slate-100/90 dark:bg-vnote-hover/90 text-slate-700 dark:text-slate-200 shadow-sm" : "text-slate-500 dark:text-slate-400"
         )}
         style={{ paddingLeft: `${8 + level * 12}px` }}
       >

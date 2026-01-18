@@ -28,8 +28,9 @@ export function StatCard({
     <div
       className={cn(
         "relative p-5 rounded-xl overflow-hidden",
-        "bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border",
-        "hover:border-slate-300 dark:hover:border-vnote-muted transition-colors duration-200"
+        "bg-white/90 dark:bg-vnote-card/90 border border-slate-200/60 dark:border-vnote-border/60",
+        "backdrop-blur-xl shadow-sm",
+        "hover:border-slate-300 dark:hover:border-vnote-muted hover:shadow-lg transition-all duration-300 hover:scale-[1.02]"
       )}
     >
       {/* 背景渐变 */}

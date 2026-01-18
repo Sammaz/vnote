@@ -59,7 +59,8 @@ export function NoteCard({ note, onClick }: NoteCardProps) {
       onClick={onClick}
       className={cn(
         "note-card group relative rounded-xl overflow-hidden",
-        "bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border",
+        "bg-white/90 dark:bg-vnote-card/90 border border-slate-200/60 dark:border-vnote-border/60",
+        "backdrop-blur-xl shadow-sm hover:shadow-xl",
         "cursor-pointer"
       )}
     >
