@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { X, Video, Check, Search } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
-import type { Note, CollectionItem } from "../../types";
 
 interface AddNotesToCollectionModalProps {
   collectionId: number;

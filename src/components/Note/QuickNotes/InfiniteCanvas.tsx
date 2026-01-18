@@ -3,7 +3,7 @@
  * 基于 React Flow，支持多种节点类型
  */
 
-import { useCallback, useEffect, useRef, useState, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -20,10 +20,9 @@ import {
   type NodeTypes,
   type OnSelectionChangeParams,
   MarkerType,
-  type EdgeTypes,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Palette, Type, StickyNote as StickyNoteIcon, Image as ImageIcon, FileText, Code, Square, Circle, Diamond, Copy, Trash2, Fullscreen, Minimize } from "lucide-react";
+import { Type, StickyNote as StickyNoteIcon, Image as ImageIcon, FileText, Code, Square, Circle, Diamond, Copy, Trash2, Fullscreen, Minimize } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../../utils/cn";
 import ReactMarkdown from "react-markdown";
@@ -129,7 +128,7 @@ function StickyNoteNode({ data, selected }: { data: any; selected?: boolean }) {
     setIsEditing(true);
   };
 
-  const handleBlur = (e: React.FocusEvent) => {
+  const handleBlur = (_e: React.FocusEvent) => {
     // 检查焦点是否移动到容器内的其他元素
     setTimeout(() => {
       if (containerRef.current && !containerRef.current.contains(document.activeElement)) {
@@ -579,11 +578,11 @@ const edgeTypeOptions: { value: EdgeType; label: string; description: string }[]
   { value: 'simplebezier', label: '简单曲线', description: '简单贝塞尔曲线' },
 ];
 
-export function InfiniteCanvas({ noteId, initialData, onContentChange, noteTitle }: InfiniteCanvasProps) {
+export function InfiniteCanvas({ noteId, initialData, onContentChange }: InfiniteCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedTool, setSelectedTool] = useState<string>("select");
-  const [selectedEdgeType, setSelectedEdgeType] = useState<EdgeType>('smoothstep');
+  const [selectedEdgeType] = useState<EdgeType>('smoothstep');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId?: string; edgeId?: string } | null>(null);
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [history, setHistory] = useState<{ nodes: Node[]; edges: Edge[] }[]>([]);
