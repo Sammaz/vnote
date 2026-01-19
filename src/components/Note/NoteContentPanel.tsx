@@ -53,6 +53,8 @@ import {
   setChapterGenerating,
   setInitialAutoGeneration,
   isInitialAutoGeneration,
+  registerActiveGenerationId,
+  unregisterActiveGenerationId,
 } from "../../utils/noteGenerationState";
 import type { ChapterGenerationEvent } from "../../types";
 
@@ -639,6 +641,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             unlisten();
             activeListeners.delete(genId);
           }
+          // 注销 generation_id
+          unregisterActiveGenerationId(noteId, genId);
 
           // 延迟刷新笔记数据，避免与事件处理冲突
           setTimeout(() => {
@@ -664,6 +668,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             unlisten2();
             activeListeners.delete(genId);
           }
+          // 注销 generation_id
+          unregisterActiveGenerationId(noteId, genId);
           // 如果是自动生成流程，通知任务队列任务完成（让下一个任务继续）
           if (isInitialAutoGeneration(noteId)) {
             setInitialAutoGeneration(noteId, false);
@@ -867,6 +873,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setFailedTabs(new Map());
       setRegeneratingTabs(new Set());
       setProgress({ current: 0, total: 4, message: "准备生成..." });
+
+      // 注册 generation_id 以便删除时可以中止
+      registerActiveGenerationId(note.id, id);
 
       // 设置事件监听器
       setupGenerationListener(note.id, id);
@@ -1301,6 +1310,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setChapterGenerating(note.id, true);
       const generationId = crypto.randomUUID();
 
+      // 注册 generation_id 以便删除时可以中止
+      registerActiveGenerationId(note.id, generationId);
+
       // 设置事件监听
       const unlisten = await listen<ChapterGenerationEvent>(
         `chapter-generation-${generationId}`,
@@ -1314,6 +1326,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
                 chapterData: data.chapter_data,
               }).then(() => {
                 setChapterGenerating(note.id, false);
+                // 注销 generation_id
+                unregisterActiveGenerationId(note.id, generationId);
                 onGenerationComplete?.();
                 // 如果是自动生成流程，继续生成高光笔记
                 if (isInitialAutoGeneration(note.id)) {
@@ -1325,6 +1339,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             case "Error":
             case "Aborted":
               setChapterGenerating(note.id, false);
+              // 注销 generation_id
+              unregisterActiveGenerationId(note.id, generationId);
               // 如果是自动生成流程，通知任务队列任务完成
               if (isInitialAutoGeneration(note.id)) {
                 setInitialAutoGeneration(note.id, false);
@@ -1478,12 +1494,17 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         totalDuration: chapterData?.total_duration || 0,
       });
 
+      // 注册 generation_id 以便删除时可以中止
+      registerActiveGenerationId(note.id, generationId);
+
       // 等待生成完成
       const eventName = `highlight-generation-${generationId}`;
       const unlisten = await listen<any>(eventName, (event) => {
         const data = event.payload;
         if (data.status === "AllCompleted") {
           setHighlightIsGenerating(false);
+          // 注销 generation_id
+          unregisterActiveGenerationId(note.id, generationId);
           onGenerationComplete?.();
           // 如果是自动生成流程，跳过视觉化总结，直接触发闪记卡生成
           if (isInitialAutoGeneration(note.id)) {
@@ -1494,6 +1515,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           unlisten();
         } else if (data.status === "Aborted") {
           setHighlightIsGenerating(false);
+          // 注销 generation_id
+          unregisterActiveGenerationId(note.id, generationId);
           // 如果是自动生成流程，通知任务队列任务完成
           if (isInitialAutoGeneration(note.id)) {
             setInitialAutoGeneration(note.id, false);
@@ -1696,6 +1719,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       // 设置生成状态（让标签页显示闪烁动画）
       setFlashcardIsGenerating(true);
 
+      // 注册 generation_id 以便删除时可以中止
+      registerActiveGenerationId(note.id, generationId);
+
       // 设置事件监听
       const unlisten = await listen<FlashcardGenerationEvent>(
         `flashcard-generation-${generationId}`,
@@ -1706,6 +1732,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               onGenerationComplete?.();
               // 清除生成状态
               setFlashcardIsGenerating(false);
+              // 注销 generation_id
+              unregisterActiveGenerationId(note.id, generationId);
               // 结束自动生成流程
               setInitialAutoGeneration(note.id, false);
               // 通知任务队列：整个自动初始化流程完成
@@ -1717,6 +1745,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             case "Aborted":
               // 清除生成状态
               setFlashcardIsGenerating(false);
+              // 注销 generation_id
+              unregisterActiveGenerationId(note.id, generationId);
               // 结束自动生成流程
               setInitialAutoGeneration(note.id, false);
               // 通知任务队列：任务完成（即使失败也要通知，让下一个任务继续）

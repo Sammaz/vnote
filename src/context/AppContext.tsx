@@ -1,7 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, PromptConfig, Collection, CreateCollectionRequest, ViewType } from "../types";
-import { getNoteGenerationState } from "../utils/noteGenerationState";
+import { getNoteGenerationState, getActiveGenerationIds, clearNoteGenerationState } from "../utils/noteGenerationState";
 
 // Mock 数据 - 文件夹暂时保留
 const mockFolders: Folder[] = [
@@ -293,29 +293,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // 删除笔记
   const deleteNote = useCallback(async (id: number): Promise<void> => {
-    // 检查笔记是否正在生成，如果是则中止任务
+    // 获取笔记所有活动的生成任务
+    const activeIds = getActiveGenerationIds(id);
     const generationState = getNoteGenerationState(id);
-    if (generationState.isGenerating && generationState.generationId) {
+
+    // 中止所有活动的生成任务
+    for (const generationId of activeIds) {
+      try {
+        // 尝试中止各种类型的生成任务
+        await Promise.allSettled([
+          invoke("abort_note_generation", { generationId }),
+          invoke("abort_chapter_generation", { generationId }),
+          invoke("abort_highlight_generation", { generationId }),
+          invoke("abort_flashcard_generation", { generationId }),
+        ]);
+        console.log(`[deleteNote] 中止任务: generationId=${generationId}`);
+      } catch (error) {
+        console.error(`[deleteNote] 中止任务失败: generationId=${generationId}`, error);
+      }
+    }
+
+    // 如果有主生成任务但不在 activeIds 中，也尝试中止
+    if (generationState.generationId && !activeIds.includes(generationState.generationId)) {
       try {
         await invoke("abort_note_generation", { generationId: generationState.generationId });
-        // 中止任务后，清除队列中的当前任务，让下一个任务开始执行
+      } catch (error) {
+        console.error("中止主生成任务失败:", error);
+      }
+    }
+
+    // 检查是否是当前正在执行的任务，如果是则通知队列完成
+    try {
+      const position = await invoke<number | null>("get_note_queue_position", { noteId: id });
+      if (position === 0) {
+        console.log(`[deleteNote] 笔记 ${id} 是当前正在执行的任务，通知队列完成`);
         await invoke("complete_init_task_command", { noteId: id });
-      } catch (error) {
-        console.error("中止生成任务失败:", error);
       }
-    } else {
-      // 即使没有 generationId，也检查是否是当前正在执行的任务
-      // 如果是，需要完成任务以推进队列
-      try {
-        const position = await invoke<number | null>("get_note_queue_position", { noteId: id });
-        if (position === 0) {
-          // 位置 0 表示正在执行
-          console.log(`[deleteNote] 笔记 ${id} 是当前正在执行的任务，通知队列完成`);
-          await invoke("complete_init_task_command", { noteId: id });
-        }
-      } catch (error) {
-        console.error("检查队列位置失败:", error);
-      }
+    } catch (error) {
+      console.error("检查队列位置失败:", error);
     }
 
     // 从队列中移除任务（处理等待中的任务）
@@ -324,6 +339,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error("从队列中移除笔记失败:", error);
     }
+
+    // 清理前端状态
+    clearNoteGenerationState(id);
 
     await invoke("delete_note", { id });
     // 刷新笔记列表

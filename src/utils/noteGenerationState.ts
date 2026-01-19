@@ -10,6 +10,8 @@ interface NoteGenerationState {
   failedTabs: Map<string, string>;
   isGeneratingChapters: boolean; // 是否正在生成章节（原文细读）
   isInitialAutoGeneration: boolean; // 是否正在进行首次自动生成流程
+  // 跟踪该笔记所有正在运行的 generation_id（用于删除时中止所有任务）
+  activeGenerationIds: Set<string>;
 }
 
 // 全局存储每个笔记的生成状态
@@ -30,6 +32,7 @@ export function getNoteGenerationState(noteId: number): NoteGenerationState {
       failedTabs: new Map(),
       isGeneratingChapters: false,
       isInitialAutoGeneration: false,
+      activeGenerationIds: new Set(),
     });
   }
   return noteGenerationStates.get(noteId)!;
@@ -81,4 +84,23 @@ export function setInitialAutoGeneration(noteId: number, isInitial: boolean) {
 // 获取首次自动生成流程状态
 export function isInitialAutoGeneration(noteId: number): boolean {
   return getNoteGenerationState(noteId).isInitialAutoGeneration;
+}
+
+// 注册一个活动的 generation_id
+export function registerActiveGenerationId(noteId: number, generationId: string) {
+  const state = getNoteGenerationState(noteId);
+  state.activeGenerationIds.add(generationId);
+  console.log(`[NoteGenerationState] 注册任务: noteId=${noteId}, generationId=${generationId}`);
+}
+
+// 注销一个活动的 generation_id
+export function unregisterActiveGenerationId(noteId: number, generationId: string) {
+  const state = getNoteGenerationState(noteId);
+  state.activeGenerationIds.delete(generationId);
+  console.log(`[NoteGenerationState] 注销任务: noteId=${noteId}, generationId=${generationId}`);
+}
+
+// 获取笔记所有活动的 generation_id
+export function getActiveGenerationIds(noteId: number): string[] {
+  return Array.from(getNoteGenerationState(noteId).activeGenerationIds);
 }
