@@ -1,13 +1,90 @@
+import { useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Library } from "lucide-react";
+import { X, Library, ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import type { Collection } from "../../types";
 
 interface MoveToCollectionModalProps {
   fromCollectionId: number;
   noteIds: number[];
   onClose: () => void;
   onSuccess?: () => void;
+}
+
+// 树形合集项组件
+function CollectionTreeItem({
+  collection,
+  allCollections,
+  excludeId,
+  level,
+  onSelect,
+}: {
+  collection: Collection;
+  allCollections: Collection[];
+  excludeId: number;
+  level: number;
+  onSelect: (id: number) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const children = allCollections.filter((c) => c.parent_id === collection.id && c.id !== excludeId);
+  const hasChildren = children.length > 0;
+
+  return (
+    <div>
+      <button
+        onClick={() => onSelect(collection.id)}
+        className={cn(
+          "w-full flex items-center gap-2 px-3 py-2.5 rounded-md transition-colors cursor-pointer",
+          "hover:bg-slate-50 dark:hover:bg-neutral-800",
+          "text-left"
+        )}
+        style={{ paddingLeft: `${12 + level * 16}px` }}
+      >
+        <span
+          onClick={(e) => {
+            e.stopPropagation();
+            if (hasChildren) setExpanded(!expanded);
+          }}
+          className={cn(
+            "w-4 h-4 flex items-center justify-center flex-shrink-0",
+            hasChildren && "hover:bg-slate-200 dark:hover:bg-neutral-700 rounded cursor-pointer"
+          )}
+        >
+          {hasChildren && (
+            expanded ? (
+              <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            )
+          )}
+        </span>
+        <Library className="w-4 h-4 text-slate-400 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
+            {collection.name}
+          </div>
+        </div>
+        <span className="text-xs text-slate-400 dark:text-neutral-500">
+          {collection.item_count} 项
+        </span>
+      </button>
+      {hasChildren && expanded && (
+        <div>
+          {children.map((child) => (
+            <CollectionTreeItem
+              key={child.id}
+              collection={child}
+              allCollections={allCollections}
+              excludeId={excludeId}
+              level={level + 1}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function MoveToCollectionModal({
@@ -18,8 +95,8 @@ export function MoveToCollectionModal({
 }: MoveToCollectionModalProps) {
   const { collections, batchMoveToCollection } = useApp();
 
-  // 过滤掉当前合集
-  const otherCollections = collections.filter((c) => c.id !== fromCollectionId);
+  // 获取顶级合集（排除当前合集）
+  const rootCollections = collections.filter((c) => c.parent_id === null && c.id !== fromCollectionId);
 
   const handleMove = async (toCollectionId: number) => {
     try {
@@ -53,37 +130,21 @@ export function MoveToCollectionModal({
             选择要移动到的目标合集（{noteIds.length} 个笔记）
           </p>
 
-          <div className="mt-4 max-h-64 overflow-y-auto space-y-1">
-            {otherCollections.length === 0 ? (
+          <div className="mt-4 max-h-64 overflow-y-auto">
+            {rootCollections.length === 0 ? (
               <p className="text-sm text-slate-400 dark:text-neutral-500 text-center py-4">
                 没有其他合集可选
               </p>
             ) : (
-              otherCollections.map((collection) => (
-                <button
+              rootCollections.map((collection) => (
+                <CollectionTreeItem
                   key={collection.id}
-                  onClick={() => handleMove(collection.id)}
-                  className={cn(
-                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-md transition-colors cursor-pointer",
-                    "hover:bg-slate-50 dark:hover:bg-neutral-800",
-                    "text-left"
-                  )}
-                >
-                  <Library className="w-4 h-4 text-slate-400 flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
-                      {collection.name}
-                    </div>
-                    {collection.description && (
-                      <div className="text-xs text-slate-400 dark:text-neutral-500 truncate">
-                        {collection.description}
-                      </div>
-                    )}
-                  </div>
-                  <span className="text-xs text-slate-400 dark:text-neutral-500">
-                    {collection.item_count} 项
-                  </span>
-                </button>
+                  collection={collection}
+                  allCollections={collections}
+                  excludeId={fromCollectionId}
+                  level={0}
+                  onSelect={handleMove}
+                />
               ))
             )}
           </div>

@@ -11,12 +11,13 @@ import {
   FolderPlus,
   Library,
   ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { CollectionSection } from "../Collection";
 import { CreateCollectionModal } from "../Collection/CreateCollectionModal";
-import type { Note } from "../../types";
+import type { Note, Collection } from "../../types";
 import logoImg from "../../assets/logo.png";
 
 interface NavItemProps {
@@ -42,6 +43,70 @@ function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
       <span className="flex-shrink-0">{icon}</span>
       {!collapsed && <span className="text-sm font-medium truncate">{label}</span>}
     </button>
+  );
+}
+
+// 树形合集菜单项组件
+function CollectionTreeMenuItem({
+  collection,
+  allCollections,
+  level,
+  onSelect,
+}: {
+  collection: Collection;
+  allCollections: Collection[];
+  level: number;
+  onSelect: (id: number) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const children = allCollections.filter((c) => c.parent_id === collection.id);
+  const hasChildren = children.length > 0;
+
+  return (
+    <div>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect(collection.id);
+        }}
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+        style={{ paddingLeft: `${12 + level * 12}px` }}
+      >
+        <span
+          onClick={(e) => {
+            e.stopPropagation();
+            if (hasChildren) setExpanded(!expanded);
+          }}
+          className={cn(
+            "w-4 h-4 flex items-center justify-center flex-shrink-0",
+            hasChildren && "hover:bg-slate-200 dark:hover:bg-neutral-600 rounded cursor-pointer"
+          )}
+        >
+          {hasChildren && (
+            expanded ? (
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-3 h-3 text-slate-400" />
+            )
+          )}
+        </span>
+        <Library className="w-3.5 h-3.5 flex-shrink-0" />
+        <span className="truncate">{collection.name}</span>
+      </button>
+      {hasChildren && expanded && (
+        <div>
+          {children.map((child) => (
+            <CollectionTreeMenuItem
+              key={child.id}
+              collection={child}
+              allCollections={allCollections}
+              level={level + 1}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -180,21 +245,17 @@ function NoteItem({ note }: NoteItemProps) {
               <ChevronRight className="w-3 h-3" />
             </button>
 
-            {/* 合集子菜单 */}
+            {/* 合集子菜单 - 树形展示 */}
             {showCollectionSubmenu && (
-              <div className="absolute left-full top-0 ml-1 w-40 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg">
-                {collections.map((collection) => (
-                  <button
+              <div className="absolute left-full top-0 ml-1 w-48 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg max-h-64 overflow-y-auto">
+                {collections.filter((c) => c.parent_id === null).map((collection) => (
+                  <CollectionTreeMenuItem
                     key={collection.id}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleMoveToCollection(collection.id);
-                    }}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
-                  >
-                    <Library className="w-3.5 h-3.5" />
-                    <span className="truncate">{collection.name}</span>
-                  </button>
+                    collection={collection}
+                    allCollections={collections}
+                    level={0}
+                    onSelect={handleMoveToCollection}
+                  />
                 ))}
                 {collections.length > 0 && (
                   <div className="my-1 border-t border-slate-100 dark:border-neutral-700" />

@@ -69,6 +69,9 @@ function SortableMixedCard({
   };
 
   if (item.type === "collection") {
+    // 获取显示的封面：优先使用 cover_image，其次使用 first_item_cover
+    const displayCover = item.data.cover_image || item.data.first_item_cover;
+
     return (
       <div
         ref={setNodeRef}
@@ -84,10 +87,10 @@ function SortableMixedCard({
           )}
         >
           <div className="aspect-video bg-slate-100 dark:bg-vnote-surface relative overflow-hidden">
-            {item.data.cover_image ? (
+            {displayCover ? (
               <>
                 <img
-                  src={convertFileSrc(item.data.cover_image)}
+                  src={convertFileSrc(displayCover)}
                   alt={item.data.name}
                   className="w-full h-full object-cover"
                 />

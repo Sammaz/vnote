@@ -139,6 +139,7 @@ pub struct Collection {
     pub sort_order: i32,
     pub item_count: i32,  // 查询时计算
     pub cover_image: Option<String>,  // 封面图片路径
+    pub first_item_cover: Option<String>,  // 第一个子合集或笔记的封面（用于无封面时的默认显示）
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1390,7 +1391,7 @@ impl Database {
              ORDER BY c.sort_order, c.created_at"
         )?;
 
-        let collections = stmt.query_map([], |row| {
+        let collections: Vec<Collection> = stmt.query_map([], |row| {
             Ok(Collection {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -1401,10 +1402,126 @@ impl Database {
                 created_at: row.get(6)?,
                 updated_at: row.get(7)?,
                 item_count: row.get(8)?,
+                first_item_cover: None, // 稍后填充
             })
-        })?;
+        })?.collect::<SqliteResult<Vec<_>>>()?;
 
-        collections.collect()
+        // 为每个合集计算 first_item_cover 和递归 item_count
+        let mut result = collections;
+
+        // 计算递归 item_count（包含所有子合集的笔记数）
+        let recursive_counts = Self::calculate_recursive_item_counts(&result);
+        for collection in &mut result {
+            if let Some(&count) = recursive_counts.get(&collection.id) {
+                collection.item_count = count;
+            }
+            collection.first_item_cover = self.get_first_item_cover_for_collection(&conn, collection.id);
+        }
+
+        Ok(result)
+    }
+
+    /// 递归计算每个合集的总笔记数（包含所有子合集）
+    fn calculate_recursive_item_counts(collections: &[Collection]) -> std::collections::HashMap<i64, i32> {
+        use std::collections::HashMap;
+
+        // 构建 parent_id -> children 的映射
+        let mut children_map: HashMap<i64, Vec<i64>> = HashMap::new();
+        let mut direct_counts: HashMap<i64, i32> = HashMap::new();
+
+        for c in collections {
+            direct_counts.insert(c.id, c.item_count);
+            if let Some(parent_id) = c.parent_id {
+                children_map.entry(parent_id).or_default().push(c.id);
+            }
+        }
+
+        // 递归计算每个合集的总数
+        fn calc_total(id: i64, children_map: &HashMap<i64, Vec<i64>>, direct_counts: &HashMap<i64, i32>, cache: &mut HashMap<i64, i32>) -> i32 {
+            if let Some(&cached) = cache.get(&id) {
+                return cached;
+            }
+
+            let mut total = *direct_counts.get(&id).unwrap_or(&0);
+            if let Some(children) = children_map.get(&id) {
+                for &child_id in children {
+                    total += calc_total(child_id, children_map, direct_counts, cache);
+                }
+            }
+            cache.insert(id, total);
+            total
+        }
+
+        let mut result: HashMap<i64, i32> = HashMap::new();
+        for c in collections {
+            calc_total(c.id, &children_map, &direct_counts, &mut result);
+        }
+        result
+    }
+
+    /// 获取合集的第一个子项封面（子合集或笔记），支持递归查找
+    fn get_first_item_cover_for_collection(&self, conn: &Connection, collection_id: i64) -> Option<String> {
+        // 获取第一个子合集（按 sort_order 排序）
+        let first_child_collection: Option<(i64, Option<String>, i32)> = conn
+            .query_row(
+                "SELECT id, cover_image, sort_order FROM collections WHERE parent_id = ?1 ORDER BY sort_order LIMIT 1",
+                [collection_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .ok();
+
+        // 获取第一个笔记（按 sort_order 排序）
+        let first_note: Option<(Option<String>, i32)> = conn
+            .query_row(
+                "SELECT n.detailed_reading, ci.sort_order
+                 FROM collection_items ci
+                 JOIN notes n ON ci.note_id = n.id
+                 WHERE ci.collection_id = ?1
+                 ORDER BY ci.sort_order LIMIT 1",
+                [collection_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .ok();
+
+        // 比较 sort_order，选择排序靠前的项
+        match (first_child_collection, first_note) {
+            (Some((child_id, child_cover, child_order)), Some((note_reading, note_order))) => {
+                if child_order <= note_order {
+                    // 子合集排在前面，优先使用子合集封面，否则递归获取子合集内容封面
+                    child_cover
+                        .or_else(|| self.get_first_item_cover_for_collection(conn, child_id))
+                        .or_else(|| Self::extract_screenshot_from_detailed_reading(&note_reading))
+                } else {
+                    // 笔记排在前面
+                    Self::extract_screenshot_from_detailed_reading(&note_reading)
+                        .or(child_cover)
+                        .or_else(|| self.get_first_item_cover_for_collection(conn, child_id))
+                }
+            }
+            (Some((child_id, child_cover, _)), None) => {
+                // 只有子合集，递归获取封面
+                child_cover.or_else(|| self.get_first_item_cover_for_collection(conn, child_id))
+            }
+            (None, Some((note_reading, _))) => Self::extract_screenshot_from_detailed_reading(&note_reading),
+            (None, None) => None,
+        }
+    }
+
+    /// 从 detailed_reading JSON 中提取第一个章节的截图路径
+    fn extract_screenshot_from_detailed_reading(detailed_reading: &Option<String>) -> Option<String> {
+        let reading = detailed_reading.as_ref()?;
+        let parsed: serde_json::Value = serde_json::from_str(reading).ok()?;
+        let chapters = parsed.get("chapters")?.as_array()?;
+
+        // 找到第一个有截图的章节
+        for chapter in chapters {
+            if let Some(screenshot_path) = chapter.get("screenshot_path").and_then(|v| v.as_str()) {
+                if !screenshot_path.is_empty() {
+                    return Some(screenshot_path.to_string());
+                }
+            }
+        }
+        None
     }
 
     pub fn get_collection_by_id(&self, id: i64) -> SqliteResult<Option<Collection>> {
@@ -1427,11 +1544,15 @@ impl Database {
                 created_at: row.get(6)?,
                 updated_at: row.get(7)?,
                 item_count: row.get(8)?,
+                first_item_cover: None, // 稍后填充
             })
         });
 
         match result {
-            Ok(collection) => Ok(Some(collection)),
+            Ok(mut collection) => {
+                collection.first_item_cover = self.get_first_item_cover_for_collection(&conn, collection.id);
+                Ok(Some(collection))
+            }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
@@ -1440,14 +1561,27 @@ impl Database {
     pub fn create_collection(&self, req: &CreateCollectionRequest) -> SqliteResult<Collection> {
         let conn = self.conn.lock().unwrap();
 
-        // Get the max sort_order for proper ordering
-        let max_sort: i32 = conn
+        // Get the max sort_order from both child collections and notes for proper mixed ordering
+        let max_collection_sort: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(sort_order), -1) FROM collections WHERE parent_id IS ?1",
                 [req.parent_id],
                 |row| row.get(0),
             )
             .unwrap_or(-1);
+
+        let max_note_sort: i32 = if let Some(parent_id) = req.parent_id {
+            conn.query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM collection_items WHERE collection_id = ?1",
+                [parent_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(-1)
+        } else {
+            -1
+        };
+
+        let max_sort = max_collection_sort.max(max_note_sort);
 
         conn.execute(
             "INSERT INTO collections (name, description, parent_id, sort_order) VALUES (?1, ?2, ?3, ?4)",
@@ -1506,14 +1640,24 @@ impl Database {
             [note_id],
         )?;
 
-        // Get the max sort_order for proper ordering
-        let max_sort: i32 = conn
+        // Get the max sort_order from both child collections and notes for proper mixed ordering
+        let max_collection_sort: i32 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM collections WHERE parent_id = ?1",
+                [collection_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(-1);
+
+        let max_note_sort: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(sort_order), -1) FROM collection_items WHERE collection_id = ?1",
                 [collection_id],
                 |row| row.get(0),
             )
             .unwrap_or(-1);
+
+        let max_sort = max_collection_sort.max(max_note_sort);
 
         conn.execute(
             "INSERT INTO collection_items (collection_id, note_id, sort_order) VALUES (?1, ?2, ?3)",
@@ -1599,7 +1743,7 @@ impl Database {
              ORDER BY c.sort_order, c.created_at"
         )?;
 
-        let collections = stmt.query_map([note_id], |row| {
+        let collections: Vec<Collection> = stmt.query_map([note_id], |row| {
             Ok(Collection {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -1610,10 +1754,11 @@ impl Database {
                 created_at: row.get(6)?,
                 updated_at: row.get(7)?,
                 item_count: row.get(8)?,
+                first_item_cover: None, // 此方法不需要计算 first_item_cover
             })
-        })?;
+        })?.collect::<SqliteResult<Vec<_>>>()?;
 
-        collections.collect()
+        Ok(collections)
     }
 
     /// Get all note IDs that are in any collection

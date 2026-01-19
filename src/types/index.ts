@@ -88,6 +88,7 @@ export interface Collection {
   sort_order: number;
   item_count: number;  // 查询时计算
   cover_image: string | null;  // 封面图片文件名
+  first_item_cover: string | null;  // 第一个子合集或笔记的封面（用于无封面时的默认显示）
   created_at: string;
   updated_at: string;
 }
