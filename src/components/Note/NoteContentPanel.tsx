@@ -44,6 +44,7 @@ import type { MindMapViewRef } from "./MindMap";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
+import { useInitTaskQueue } from "../../context/InitTaskQueueContext";
 import {
   getNoteGenerationState,
   setNoteGenerationState,
@@ -142,6 +143,9 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
 }
 
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
+  // 任务队列 hook
+  const { submitTask, isNoteInQueue, getNoteQueuePosition, isNoteWaiting, onTaskReady } = useInitTaskQueue();
+
   const [activeTab, setActiveTab] = useState<TabId>("summary");
   const [activeGroup, setActiveGroup] = useState<TabGroupId>("summary");
 
@@ -331,12 +335,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             message.error("所有章节字幕优化失败");
             setSubtitleOptimizationEnabled(false);
           }
-          // 如果是自动生成流程，继续生成闪记卡
-          if (isInitialAutoGeneration(note.id)) {
-            setTimeout(() => {
-              generateFlashcardsDirectlyRef.current?.();
-            }, 500);
-          }
+          // 刷新笔记数据以确保视觉化总结能正确显示
+          onGenerationComplete?.();
           break;
 
         case "Aborted":
@@ -521,6 +521,16 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 视觉化总结页面直接复用原文细读的字幕优化结果
   // 不再自动触发字幕优化，用户需要先在原文细读页面开启"字幕优化"
 
+  // 转换后端的驼峰格式到前端的下划线格式
+  const convertTabType = useCallback((backendTabType: string): TabType => {
+    // FullSummary -> full_summary
+    // DetailedReading -> detailed_reading
+    return backendTabType
+      .replace(/([A-Z])/g, '_$1')
+      .toLowerCase()
+      .replace(/^_/, '') as TabType;
+  }, []);
+
   // 监听笔记内容变化，确保生成完成后更新显示
   useEffect(() => {
     // 当笔记内容更新时，触发重新渲染
@@ -550,7 +560,13 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           break;
 
         case "TabStarted":
+          console.log(`[TabStarted] 收到事件: tab_type=${data.tab_type}, tab_name=${data.tab_name}`);
+          const startedTab = convertTabType(data.tab_type);
+          console.log(`[TabStarted] 转换后的标签: ${startedTab}`);
+          const newRegeneratingOnStart = new Set([...state.regeneratingTabs, startedTab]);
+          console.log(`[TabStarted] 当前正在生成的标签:`, Array.from(newRegeneratingOnStart));
           setNoteGenerationState(noteId, {
+            regeneratingTabs: newRegeneratingOnStart,
             progress: { ...state.progress, message: `正在生成 ${data.tab_name}...` },
           });
           break;
@@ -562,31 +578,44 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           break;
 
         case "TabCompleted":
-          const completedTab = data.tab_type as TabType;
+          console.log(`[TabCompleted] 收到事件: tab_type=${data.tab_type}, content长度=${data.content?.length || 0}`);
+          const completedTab = convertTabType(data.tab_type);
+          console.log(`[TabCompleted] 转换后的标签: ${completedTab}`);
           const newCompleted = new Set([...state.completedTabs, completedTab]);
           const newRegenerating = new Set([...state.regeneratingTabs].filter(t => t !== completedTab));
           setNoteGenerationState(noteId, {
             completedTabs: newCompleted,
             regeneratingTabs: newRegenerating,
           });
+
+          // 刷新笔记数据以显示新生成的内容
+          console.log(`[TabCompleted] 准备刷新笔记数据`);
+          setTimeout(() => {
+            onGenerationComplete?.();
+          }, 500);
           break;
 
         case "TabError":
-          const failedTab = data.tab_type as TabType;
+          const failedTab = convertTabType(data.tab_type);
           const newFailed = new Map([...state.failedTabs, [failedTab, data.error]]);
           const newRegenerating2 = new Set([...state.regeneratingTabs].filter(t => t !== failedTab));
           setNoteGenerationState(noteId, {
             failedTabs: newFailed,
             regeneratingTabs: newRegenerating2,
           });
-          // 显示错误提示
-          const tabName = failedTab === "full_summary" ? "全文总结" :
-            failedTab === "detailed_reading" ? "原文细读" :
-            failedTab === "highlights" ? "高光笔记" :
-            failedTab === "visual_summary" ? "视觉化总结" :
-            "自定义总结";
-          message.error(`${tabName}生成失败: ${data.error}`);
-          console.error(`[TabError] ${tabName} 生成失败:`, data.error);
+
+          // 如果是取消操作，不显示错误提示
+          const isCancelled = data.error.includes("取消") || data.error.includes("中止") || data.error.includes("Aborted");
+          if (!isCancelled) {
+            // 显示错误提示
+            const tabName = failedTab === "full_summary" ? "全文总结" :
+              failedTab === "detailed_reading" ? "原文细读" :
+              failedTab === "highlights" ? "高光笔记" :
+              failedTab === "visual_summary" ? "视觉化总结" :
+              "自定义总结";
+            message.error(`${tabName}生成失败: ${data.error}`);
+          }
+          console.error(`[TabError] ${failedTab} 生成失败:`, data.error);
           break;
 
         case "AllCompleted":
@@ -606,20 +635,15 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             activeListeners.delete(genId);
           }
 
-          // 如果是初始化生成（全文总结完成），且是自动生成流程，则触发原文细读生成
-          // 注意：后端返回的是 "FullSummary"（驼峰），前端使用的是 "full_summary"（下划线）
-          const hasFullSummaryCompleted = newCompletedTabs.has("full_summary") || newCompletedTabs.has("FullSummary");
-
-          if (hasFullSummaryCompleted && isInitialAutoGeneration(noteId)) {
-            // 直接调用后端 API 生成章节，不切换标签页
-            setTimeout(() => {
-              generateChaptersDirectly();
-            }, 500);
-          }
-
           // 延迟刷新笔记数据，避免与事件处理冲突
           setTimeout(() => {
             onGenerationComplete?.();
+            // 如果是自动生成流程，继续生成高光笔记
+            if (isInitialAutoGeneration(noteId)) {
+              setTimeout(() => {
+                generateHighlightsDirectlyRef.current?.();
+              }, 500);
+            }
           }, 200);
           break;
 
@@ -654,7 +678,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     unlistenPromise.then((unlisten) => {
       activeListeners.set(genId, unlisten);
     });
-  }, [note.id]);
+  }, [note.id, convertTabType]);
 
   // 定期同步全局状态到组件state（用于跨组件更新）
   useEffect(() => {
@@ -812,12 +836,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     try {
       const id = crypto.randomUUID();
 
-      // 更新全局状态
+      // 更新全局状态（初始不标记任何标签为正在生成，等待后端 TabStarted 事件）
       setNoteGenerationState(note.id, {
         isGenerating: true,
         generationId: id,
-        regeneratingTabs: new Set(["full_summary"]),
-        progress: { current: 0, total: 1, message: "正在生成全文总结..." },
+        regeneratingTabs: new Set(),
+        progress: { current: 0, total: 4, message: "准备生成..." },
         completedTabs: new Set(),
         failedTabs: new Map(),
       });
@@ -827,8 +851,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setGenerationId(id);
       setCompletedTabs(new Set());
       setFailedTabs(new Map());
-      setRegeneratingTabs(new Set(["full_summary"]));
-      setProgress({ current: 0, total: 1, message: "正在生成全文总结..." });
+      setRegeneratingTabs(new Set());
+      setProgress({ current: 0, total: 4, message: "准备生成..." });
 
       // 设置事件监听器
       setupGenerationListener(note.id, id);
@@ -836,14 +860,16 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       // 等待状态更新和事件监听器设置完成
       await new Promise(resolve => setTimeout(resolve, 100));
 
-      // 调用后端生成接口（只生成全文总结，使用后端默认提示词）
+      // 调用后端生成接口（串行生成4个标签页）
       await invoke("generate_note_content", {
         generationId: id,
         noteId: note.id,
         modelId: note.model_id,
         concurrent: false,
         regenerate: true,
-        tabsToGenerate: ["full_summary"],
+        tabsToGenerate: ["full_summary", "detailed_reading"],
+        concurrentLimit: 1,
+        customPrompt: null,
       });
     } catch (error) {
       console.error(`[handleGenerate] 生成失败:`, error);
@@ -860,7 +886,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   };
 
-  // 自动生成：当组件挂载且没有全文总结时，自动开始生成（仅触发一次）
+  // 自动生成：当组件挂载且没有全文总结时，提交到任务队列（仅触发一次）
   // 同步执行顺序：1. 全文总结 -> 2. 原文细读（在 AllCompleted 事件中触发）
   useEffect(() => {
     // 如果已经尝试过自动生成，跳过
@@ -882,11 +908,59 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       attemptedAutoGenerateNoteIds.add(note.id);
       // 标记为首次自动生成流程
       setInitialAutoGeneration(note.id, true);
-      // 开始生成全文总结（完成后会在 AllCompleted 事件中自动触发原文细读）
-      handleGenerate();
+
+      // 立即设置生成状态，让UI显示加载动画（不等待后端响应）
+      setNoteGenerationState(note.id, {
+        isGenerating: true,
+        generationId: null,
+        regeneratingTabs: new Set(["full_summary"]),
+        progress: { current: 0, total: 3, message: "准备生成..." },
+        completedTabs: new Set(),
+        failedTabs: new Map(),
+      });
+      setIsGenerating(true);
+      setRegeneratingTabs(new Set(["full_summary"] as TabType[]));
+      setProgress({ current: 0, total: 3, message: "准备生成..." });
+
+      // 提交到任务队列
+      submitTask(note.id).then((result) => {
+        if (result.status === "Running") {
+          // 立即执行
+          handleGenerate();
+        } else {
+          // 排队等待，不执行
+          console.log(`[NoteContentPanel] 笔记 ${note.id} 在队列中等待，位置: ${result.position}`);
+        }
+      }).catch((error) => {
+        console.error("[NoteContentPanel] 提交任务失败:", error);
+        // 失败时重置状态
+        setNoteGenerationState(note.id, {
+          isGenerating: false,
+          generationId: null,
+          regeneratingTabs: new Set(),
+        });
+        setIsGenerating(false);
+        setRegeneratingTabs(new Set());
+      });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id, note.full_summary, note.model_id]);
+
+  // 监听任务就绪事件
+  useEffect(() => {
+    const unregister = onTaskReady((readyNoteId) => {
+      if (readyNoteId === note.id) {
+        console.log(`[NoteContentPanel] 笔记 ${note.id} 任务就绪，开始生成`);
+        // 任务就绪，开始生成
+        handleGenerate();
+      }
+    });
+
+    return () => {
+      unregister();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id, onTaskReady]);
 
   // 检查标签页是否正在生成
   const isTabGenerating = (tabId: TabId): boolean => {
@@ -1338,9 +1412,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         if (data.status === "AllCompleted") {
           setHighlightIsGenerating(false);
           onGenerationComplete?.();
-          // 如果是自动生成流程，继续触发视觉化笔记
+          // 如果是自动生成流程，跳过视觉化总结，直接触发闪记卡生成
           if (isInitialAutoGeneration(note.id)) {
-            triggerVisualSummaryOptimizationSilentRef.current?.();
+            setTimeout(() => {
+              generateFlashcardsDirectlyRef.current?.();
+            }, 500);
           }
           unlisten();
         } else if (data.status === "Aborted") {
@@ -1712,120 +1788,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId]);
 
-  // 视觉化总结标签页自动触发字幕优化（静默执行，不改变原文细读的开关状态）
-  useEffect(() => {
-    // 只在切换到视觉化总结标签页时触发
-    if (activeTab !== "visual") return;
-    
-    // 检查必要条件
-    if (!chapterData) return;
-    if (!note.subtitle_path) return;
-    if (!note.model_id) return;
-    
-    // 如果正在优化中，或者已有缓存，则不重复触发
-    if (subtitleOptimizing) return;
-    if (optimizedSubtitles.size > 0) return;
-    
-    // 静默执行字幕优化（不改变 subtitleOptimizationEnabled 状态）
-    const startSilentOptimization = async () => {
-      // 优先使用视频播放器右上角选择的模型
-      const effectiveModelId = currentModelId || note.model_id;
-      if (!chapterData || !effectiveModelId || !note.subtitle_path) {
-        return;
-      }
-
-      // 确保字幕数据已加载
-      let currentSubtitleEntries = subtitleEntries;
-      if (currentSubtitleEntries.length === 0) {
-        try {
-          currentSubtitleEntries = await invoke<Array<{ index: number; start_time: number; end_time: number; text: string; second_language_text?: string | null }>>("parse_subtitle_file", {
-            path: note.subtitle_path,
-          });
-          setSubtitleEntries(currentSubtitleEntries);
-        } catch (error) {
-          console.error("[VisualSummary] 加载字幕失败:", error);
-          return;
-        }
-      }
-
-      if (currentSubtitleEntries.length === 0) {
-        return;
-      }
-
-      const generationId = crypto.randomUUID();
-      subtitleOptimizationIdRef.current = generationId;
-
-      // 准备章节字幕数据
-      const chaptersToOptimize = chapterData.chapters
-        .filter(chapter => chapter.id)
-        .map(chapter => {
-          const filtered = currentSubtitleEntries.filter(
-            sub => sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
-          );
-          
-          if (filtered.length === 0) {
-            return { chapter_id: chapter.id, subtitle_text: "", has_bilingual: false };
-          }
-          
-          const hasBilingual = filtered.some(sub => sub.second_language_text);
-          
-          let subtitleText: string;
-          if (hasBilingual) {
-            const primaryText = filtered.map(sub => sub.text).join(" ");
-            const secondaryText = filtered
-              .filter(sub => sub.second_language_text)
-              .map(sub => sub.second_language_text!)
-              .join(" ");
-            subtitleText = `${primaryText}\n\n${secondaryText}`;
-          } else {
-            subtitleText = filtered.map(sub => sub.text).join(" ");
-          }
-          
-          return {
-            chapter_id: chapter.id,
-            subtitle_text: subtitleText,
-            has_bilingual: hasBilingual,
-          };
-        })
-        .filter(c => c.subtitle_text.trim().length > 0);
-
-      if (chaptersToOptimize.length === 0) {
-        return;
-      }
-
-      // 注意：这里不设置 subtitleOptimizationEnabled，保持原文细读开关状态不变
-      setSubtitleOptimizing(true);
-      setSubtitleOptimizationProgress({ current: 0, total: chaptersToOptimize.length });
-      setOptimizingChapterIds(new Set(chaptersToOptimize.map(c => c.chapter_id)));
-      setFailedChapterIds(new Set());
-
-      await setupSubtitleOptimizationListener(generationId);
-
-      try {
-        await invoke("optimize_chapter_subtitles", {
-          generationId,
-          noteId: note.id,
-          modelId: effectiveModelId,
-          chapters: chaptersToOptimize,
-        });
-      } catch (error) {
-        console.error("[VisualSummary] 字幕优化失败:", error);
-        setSubtitleOptimizing(false);
-        setSubtitleOptimizationProgress(null);
-        setOptimizingChapterIds(new Set());
-      }
-    };
-
-    startSilentOptimization();
-  }, [activeTab, chapterData, note.subtitle_path, note.model_id, note.id, subtitleOptimizing, optimizedSubtitles.size, subtitleEntries, currentModelId, setupSubtitleOptimizationListener]);
-
-  // 触发视觉化笔记（自动生成流程）
-  // 视觉化总结直接复用原文细读的字幕优化结果，不再单独触发优化
-  const triggerVisualSummaryOptimization = useCallback(() => {
-    // 不再切换标签页，直接触发字幕优化
-    triggerVisualSummaryOptimizationSilent();
-  }, [triggerVisualSummaryOptimizationSilent]);
-
   // 高光笔记重新生成处理
   const handleHighlightRegenerate = useCallback(async () => {
     if (!note.subtitle_path || !note.model_id) {
@@ -1849,13 +1811,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         const data = event.payload;
         if (data.status === "AllCompleted") {
           setHighlightIsGenerating(false);
-          // 如果是自动生成流程，继续触发视觉化笔记
-          if (isInitialAutoGeneration(note.id)) {
-            onGenerationComplete?.();
-            triggerVisualSummaryOptimization();
-          } else {
-            onGenerationComplete?.();
-          }
+          onGenerationComplete?.();
           unlisten();
         } else if (data.status === "Aborted") {
           setHighlightIsGenerating(false);
@@ -1867,7 +1823,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       message.error(`生成失败: ${error}`);
       setHighlightIsGenerating(false);
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, triggerVisualSummaryOptimization]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete]);
 
   // 章节生成完成后的回调 - 触发高光笔记生成（自动生成流程）
   const handleChapterGenerationComplete = useCallback(() => {
@@ -2282,9 +2238,6 @@ Video subtitles content:`;
                 {tab.label}
                 {generating && (
                   <span className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
-                )}
-                {completed && !generating && (
-                  <CheckCircle2 className="w-3 h-3 text-green-500" />
                 )}
                 {error && !generating && (
                   <X className="w-3 h-3 text-red-500" />
@@ -2868,7 +2821,28 @@ Video subtitles content:`;
           ? "p-0 overflow-hidden"
           : isEditMode ? "p-0 overflow-y-auto" : "p-6 overflow-y-auto"
       )}>
-        {activeTab === "summary" && (
+        {/* 队列等待状态 */}
+        {isNoteWaiting(note.id) && (
+          <div className="flex flex-col items-center justify-center h-full">
+            <div className="flex flex-col items-center gap-4 p-8 bg-slate-50 dark:bg-vnote-surface rounded-lg border border-slate-200 dark:border-vnote-border">
+              <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+              <div className="text-center">
+                <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-200 mb-2">
+                  排队等待中...
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  当前队列位置: #{getNoteQueuePosition(note.id)}
+                </p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                  前面还有 {getNoteQueuePosition(note.id) || 0} 个笔记在处理
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 正常内容渲染 */}
+        {!isNoteWaiting(note.id) && activeTab === "summary" && (
           <EditableMarkdown
             noteId={note.id}
             tabType="full_summary"
@@ -2879,7 +2853,7 @@ Video subtitles content:`;
             onContentUpdate={onGenerationComplete}
           />
         )}
-        {activeTab === "original" && (() => {
+        {!isNoteWaiting(note.id) && activeTab === "original" && (() => {
           // 辅助模式下显示 AssistModeView
           if (isAssistModeActive) {
             return (
@@ -2942,7 +2916,7 @@ Video subtitles content:`;
             />
           );
         })()}
-        {activeTab === "highlights" && (
+        {!isNoteWaiting(note.id) && activeTab === "highlights" && (
           <HighlightGrid
             ref={highlightGridRef}
             noteId={note.id}
@@ -2951,20 +2925,14 @@ Video subtitles content:`;
             totalDuration={chapterData?.total_duration || 0}
             initialHighlightData={parseHighlightData(note.highlights)}
             onGenerationComplete={() => {
-              // 如果是自动生成流程，继续触发视觉化笔记
-              if (isInitialAutoGeneration(note.id)) {
-                onGenerationComplete?.();
-                triggerVisualSummaryOptimization();
-              } else {
-                onGenerationComplete?.();
-              }
+              onGenerationComplete?.();
             }}
             isGenerating={highlightIsGenerating}
             onRegenerate={handleHighlightRegenerate}
           />
         )}
-        {activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} autoScroll={autoScroll} />}
-        {activeTab === "visual" && (
+        {!isNoteWaiting(note.id) && activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} autoScroll={autoScroll} />}
+        {!isNoteWaiting(note.id) && activeTab === "visual" && (
           <VisualSummaryContent
             ref={mindMapRef}
             chapterData={chapterData}
@@ -2981,7 +2949,7 @@ Video subtitles content:`;
             onDataChange={onGenerationComplete}
           />
         )}
-        {activeTab === "custom" && (
+        {!isNoteWaiting(note.id) && activeTab === "custom" && (
           note.custom_summary ? (
             <EditableMarkdown
               noteId={note.id}
@@ -3023,7 +2991,7 @@ Video subtitles content:`;
             </div>
           )
         )}
-        {activeTab === "flashcard" && (
+        {!isNoteWaiting(note.id) && activeTab === "flashcard" && (
           <FlashcardContent
             noteId={note.id}
             noteName={note.title}
@@ -3034,7 +3002,7 @@ Video subtitles content:`;
             onGenerationComplete={onGenerationComplete}
           />
         )}
-        {activeTab === "quicknotes" && (
+        {!isNoteWaiting(note.id) && activeTab === "quicknotes" && (
           <QuickNotesContainer
             noteId={note.id}
             noteTitle={note.title}
@@ -3045,7 +3013,7 @@ Video subtitles content:`;
             forceTab="richtext"
           />
         )}
-        {activeTab === "mindmap" && (
+        {!isNoteWaiting(note.id) && activeTab === "mindmap" && (
           <QuickNotesContainer
             noteId={note.id}
             noteTitle={note.title}
@@ -3056,7 +3024,7 @@ Video subtitles content:`;
             forceTab="mindmap"
           />
         )}
-        {activeTab === "canvas" && (
+        {!isNoteWaiting(note.id) && activeTab === "canvas" && (
           <QuickNotesContainer
             noteId={note.id}
             noteTitle={note.title}

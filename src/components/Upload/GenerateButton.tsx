@@ -1,7 +1,7 @@
 import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
-import { invoke } from "@tauri-apps/api/core";
+import { useInitTaskQueue } from "../../context/InitTaskQueueContext";
 
 // 获取文件名（不含扩展名）
 function getBaseName(filename: string): string {
@@ -21,8 +21,9 @@ export function GenerateButton() {
     setUploadedSubtitle,
     setCurrentView,
     setSelectedNoteId,
-    updateNoteSuggestedQuestions,
   } = useApp();
+
+  const { submitTask } = useInitTaskQueue();
 
   const canGenerate = uploadedVideo && selectedModelId && !isGenerating;
 
@@ -42,22 +43,17 @@ export function GenerateButton() {
         model_id: selectedModelId,
       });
 
+      // 立即提交到任务队列
+      console.log(`[GenerateButton] 提交笔记 ${newNote.id} 到任务队列`);
+      await submitTask(newNote.id);
+
       // 清空上传状态
       setUploadedVideo(null);
       setUploadedSubtitle(null);
 
-      // 先跳转到笔记页面
+      // 跳转到笔记页面
       setSelectedNoteId(newNote.id);
       setCurrentView("note");
-
-      // 异步生成建议问题（不阻塞跳转）
-      if (uploadedSubtitle && selectedModelId) {
-        invoke<string[]>("generate_questions_for_note", { noteId: newNote.id })
-          .then(questions => {
-            updateNoteSuggestedQuestions(newNote.id, questions);
-          })
-          .catch(err => console.error("生成问题失败:", err));
-      }
     } catch (error) {
       console.error("Failed to create note:", error);
     } finally {

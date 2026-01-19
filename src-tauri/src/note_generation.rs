@@ -39,6 +39,7 @@ pub struct GenerateNoteRequest {
 
 /// 生成选项
 #[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct GenerationOptions {
     /// 是否并发生成所有标签页（默认true，预留用于未来串行/并发切换）
     #[serde(default)]
@@ -1254,19 +1255,116 @@ pub async fn generate_note(
     // 获取模型上下文大小
     let model_context_size = get_model_context_size(&ai_config.model);
 
-    // 分离 DetailedReading 和其他标签页（DetailedReading 需要特殊处理）
-    let has_detailed_reading = tabs_to_generate.contains(&TabType::DetailedReading);
-    let other_tabs: Vec<TabType> = tabs_to_generate
-        .iter()
-        .filter(|t| **t != TabType::DetailedReading)
-        .copied()
-        .collect();
-
     let mut generated_count = 0;
     let mut failed_count = 0;
 
-    // 处理 DetailedReading（生成章节数据）
-    if has_detailed_reading {
+    // 按顺序串行生成所有标签页（当 concurrent_limit = 1 时）
+    if request.options.concurrent_limit == 1 {
+        eprintln!("[笔记生成] 开始串行生成，标签页顺序: {:?}", tabs_to_generate);
+        for tab_type in &tabs_to_generate {
+            eprintln!("[笔记生成] 开始处理标签页: {:?}", tab_type);
+
+            // 检查是否被中止
+            if abort_flag.load(Ordering::Relaxed) {
+                let _ = app.emit(&event_name, GenerationEvent::Aborted {
+                    reason: "用户中止".to_string(),
+                });
+                cleanup_abort_flag(&generation_id).await;
+                return Err("生成已中止".to_string());
+            }
+
+            let tab_name = get_tab_name(tab_type);
+
+            // 根据标签页类型选择生成方法
+            if *tab_type == TabType::DetailedReading {
+                // 原文细读：生成章节数据
+                // 发送开始事件（DetailedReading 需要手动发送，因为不调用 generate_single_tab）
+                let _ = app.emit(
+                    &event_name,
+                    GenerationEvent::TabStarted {
+                        tab_type: format!("{:?}", tab_type),
+                        tab_name: tab_name.clone(),
+                    },
+                );
+
+                // 使用与手动重新生成相同的高质量章节生成方法
+                match crate::chapter::generate_chapters(
+                    app.clone(),
+                    db,
+                    generation_id.clone(),
+                    crate::chapter::GenerateChaptersRequest {
+                        note_id: request.note_id,
+                        model_id: request.model_id,
+                        video_path: note.video_path.clone(),
+                        subtitle_path: subtitle_path.clone(),
+                        capture_screenshots: true,
+                    },
+                ).await {
+                    Ok(chapter_data) => {
+                        eprintln!("[笔记生成] {:?} 生成完成", tab_type);
+                        let content = serde_json::to_string(&chapter_data)
+                            .map_err(|e| format!("序列化章节数据失败: {}", e))?;
+                        update_note_tab(db, request.note_id, tab_type, &content, request.model_id)?;
+                        let _ = app.emit(
+                            &event_name,
+                            GenerationEvent::TabCompleted {
+                                tab_type: format!("{:?}", tab_type),
+                                content,
+                            },
+                        );
+                        generated_count += 1;
+                    }
+                    Err(e) => {
+                        eprintln!("[笔记生成] {:?} 生成失败: {}", tab_type, e);
+                        let _ = app.emit(
+                            &event_name,
+                            GenerationEvent::TabError {
+                                tab_type: format!("{:?}", tab_type),
+                                error: e,
+                            },
+                        );
+                        failed_count += 1;
+                    }
+                }
+            } else {
+                // 其他标签页：生成文本内容
+                let result = generate_single_tab(
+                    &app,
+                    &event_name,
+                    tab_type,
+                    &ai_config,
+                    &subtitle_text,
+                    &abort_flag,
+                    model_context_size,
+                    tab_name,
+                    request.options.custom_prompt.as_deref(),
+                ).await;
+
+                eprintln!("[笔记生成] {:?} 生成结果: success={}", tab_type, result.success);
+
+                if result.success {
+                    generated_count += 1;
+                    if let Err(e) = update_note_tab(db, request.note_id, tab_type, &result.content, request.model_id) {
+                        eprintln!("[笔记生成] 更新数据库失败: {}", e);
+                        failed_count += 1;
+                    }
+                } else {
+                    failed_count += 1;
+                }
+            }
+        }
+    } else {
+        // 并发生成（保留原有逻辑）
+        // 分离 DetailedReading 和其他标签页（DetailedReading 需要特殊处理）
+        let has_detailed_reading = tabs_to_generate.contains(&TabType::DetailedReading);
+        let other_tabs: Vec<TabType> = tabs_to_generate
+            .iter()
+            .filter(|t| **t != TabType::DetailedReading)
+            .copied()
+            .collect();
+
+        // 处理 DetailedReading（生成章节数据）
+        if has_detailed_reading {
         let _ = app.emit(
             &event_name,
             GenerationEvent::TabStarted {
@@ -1383,6 +1481,7 @@ pub async fn generate_note(
             }
         }
     }
+    } // 结束 else 分支（并发生成）
 
     // 发送完成事件
     let _ = app.emit(
@@ -1395,6 +1494,20 @@ pub async fn generate_note(
     );
 
     cleanup_abort_flag(&generation_id).await;
+
+    // 生成建议问题（在所有标签页完成后）
+    eprintln!("[笔记生成] 开始生成建议问题: note_id={}", request.note_id);
+    if let Err(e) = generate_questions_for_note_internal(db, request.note_id).await {
+        eprintln!("[笔记生成] 生成建议问题失败: {}", e);
+    } else {
+        eprintln!("[笔记生成] 建议问题生成完成: note_id={}", request.note_id);
+    }
+
+    // 通知任务队列：任务完成
+    if let Err(e) = crate::init_task_queue::complete_init_task(app.clone(), request.note_id).await {
+        eprintln!("[笔记生成] 通知任务队列失败: {}", e);
+    }
+
     Ok(())
 }
 
@@ -2005,4 +2118,68 @@ pub async fn generate_chapters_with_markers(
     get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
 
     Ok(chapter_data)
+}
+
+// ============================================================================
+// 建议问题生成（内部函数）
+// ============================================================================
+
+/// 为笔记生成建议问题（内部函数，供 generate_note 调用）
+async fn generate_questions_for_note_internal(
+    db: &Database,
+    note_id: i64,
+) -> Result<(), String> {
+    // 获取笔记
+    let note = db
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到")?;
+
+    // 默认问题
+    let default_questions = vec![
+        "这个视频的核心内容是什么?".to_string(),
+        "有哪些关键知识点?".to_string(),
+        "如何在实际项目中应用?".to_string(),
+    ];
+
+    // 检查字幕和模型是否存在
+    let subtitle_path = match &note.subtitle_path {
+        Some(p) => p.clone(),
+        None => {
+            // 没有字幕，保存并返回默认问题
+            let questions_json = serde_json::to_string(&default_questions)
+                .map_err(|e| e.to_string())?;
+            db.update_note_questions(note_id, &questions_json)
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    };
+
+    let model_id = match note.model_id {
+        Some(id) => id,
+        None => {
+            // 没有模型，保存并返回默认问题
+            let questions_json = serde_json::to_string(&default_questions)
+                .map_err(|e| e.to_string())?;
+            db.update_note_questions(note_id, &questions_json)
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    };
+
+    // 生成问题（失败时使用默认问题）
+    let questions = crate::chat::generate_suggested_questions(db, &subtitle_path, model_id)
+        .await
+        .unwrap_or_else(|e| {
+            eprintln!("[建议问题生成] 生成失败: {}", e);
+            default_questions.clone()
+        });
+
+    // 保存到数据库
+    let questions_json = serde_json::to_string(&questions)
+        .map_err(|e| e.to_string())?;
+    db.update_note_questions(note_id, &questions_json)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
 }

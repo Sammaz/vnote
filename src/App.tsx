@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import SettingsPage from "./SettingsPage";
 import { AppProvider, useApp } from "./context/AppContext";
+import { InitTaskQueueProvider } from "./context/InitTaskQueueContext";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
 import { NotePage } from "./components/Note";
@@ -212,7 +213,9 @@ function AppContent() {
 function App() {
   return (
     <AppProvider>
-      <AppContent />
+      <InitTaskQueueProvider>
+        <AppContent />
+      </InitTaskQueueProvider>
     </AppProvider>
   );
 }

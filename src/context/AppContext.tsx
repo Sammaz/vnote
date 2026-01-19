@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, PromptConfig, Collection, CreateCollectionRequest, ViewType } from "../types";
+import { getNoteGenerationState } from "../utils/noteGenerationState";
 
 // Mock 数据 - 文件夹暂时保留
 const mockFolders: Folder[] = [
@@ -292,6 +293,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // 删除笔记
   const deleteNote = useCallback(async (id: number): Promise<void> => {
+    // 检查笔记是否正在生成，如果是则中止任务
+    const generationState = getNoteGenerationState(id);
+    if (generationState.isGenerating && generationState.generationId) {
+      try {
+        await invoke("abort_note_generation", { generationId: generationState.generationId });
+        // 中止任务后，清除队列中的当前任务，让下一个任务开始执行
+        await invoke("complete_init_task_command", { noteId: id });
+      } catch (error) {
+        console.error("中止生成任务失败:", error);
+      }
+    }
+
+    // 从队列中移除任务
+    try {
+      await invoke("remove_note_from_queue", { noteId: id });
+    } catch (error) {
+      console.error("从队列中移除笔记失败:", error);
+    }
+
     await invoke("delete_note", { id });
     // 刷新笔记列表
     await refreshNotes();

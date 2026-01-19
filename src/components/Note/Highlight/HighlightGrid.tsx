@@ -58,11 +58,9 @@ export const HighlightGrid = forwardRef<HighlightGridRef, HighlightGridProps>(fu
   const generationIdRef = useRef<string | null>(null);
   const unlistenRef = useRef<(() => void) | null>(null);
 
-  // 解析初始数据
+  // 同步外部传入的高光数据
   useEffect(() => {
-    if (initialHighlightData) {
-      setHighlightData(initialHighlightData);
-    }
+    setHighlightData(initialHighlightData || null);
   }, [initialHighlightData]);
 
   useEffect(() => {

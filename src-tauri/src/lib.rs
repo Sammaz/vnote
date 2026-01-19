@@ -4,6 +4,7 @@ mod chapter;
 mod db;
 mod flashcard_generation;
 mod highlight_generation;
+mod init_task_queue;
 mod note_generation;
 mod prompts;
 mod rag;
@@ -910,6 +911,7 @@ async fn generate_note_content(
     concurrent: bool,
     regenerate: bool,
     tabs_to_generate: Vec<String>,
+    concurrent_limit: Option<usize>,
     custom_prompt: Option<String>,
 ) -> Result<String, String> {
     use note_generation::{GenerateNoteRequest, GenerationOptions, TabType};
@@ -931,12 +933,14 @@ async fn generate_note_content(
         })
         .collect();
 
-    // 从AI配置中获取并发数
-    let concurrent_limit = if let Ok(Some(ai_config)) = get_db().get_ai_config_by_id(model_id) {
-        ai_config.concurrent_limit as usize
-    } else {
-        5 // 默认5个
-    };
+    // 使用前端传入的 concurrent_limit，或从AI配置中获取
+    let concurrent_limit = concurrent_limit.unwrap_or_else(|| {
+        if let Ok(Some(ai_config)) = get_db().get_ai_config_by_id(model_id) {
+            ai_config.concurrent_limit as usize
+        } else {
+            5 // 默认5个
+        }
+    });
 
     let options = GenerationOptions {
         concurrent,
@@ -1551,6 +1555,12 @@ pub fn run() {
             update_collection_mixed_order,
             get_collections_for_note,
             get_all_notes_in_collections,
+            // Init task queue commands
+            init_task_queue::submit_init_task,
+            init_task_queue::complete_init_task_command,
+            init_task_queue::get_init_queue_status,
+            init_task_queue::get_note_queue_position,
+            init_task_queue::remove_note_from_queue,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
