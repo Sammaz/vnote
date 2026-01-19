@@ -278,8 +278,10 @@ export function CollectionItem({
         .catch((error) => {
           console.error("Failed to load collection notes:", error);
         });
+    } else if (!hasNotes) {
+      setCollectionNotes([]);
     }
-  }, [isExpanded, hasNotes, collection.id, notes]);
+  }, [isExpanded, hasNotes, collection.id, collection.item_count, notes]);
 
   const handleClick = () => {
     setSelectedCollection(collection.id);
