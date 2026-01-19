@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Sun, Moon, Minus, Square, X, Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -213,10 +213,25 @@ function AppContent() {
 function App() {
   return (
     <AppProvider>
-      <InitTaskQueueProvider>
-        <AppContent />
-      </InitTaskQueueProvider>
+      <InitTaskQueueWrapper />
     </AppProvider>
+  );
+}
+
+// 包装组件：将 AppContext 的导航功能传递给 InitTaskQueueProvider
+function InitTaskQueueWrapper() {
+  const { setSelectedNoteId, setCurrentView } = useApp();
+
+  // 当任务就绪时，自动导航到对应笔记
+  const handleTaskReadyNavigate = useCallback((noteId: number) => {
+    setSelectedNoteId(noteId);
+    setCurrentView("note");
+  }, [setSelectedNoteId, setCurrentView]);
+
+  return (
+    <InitTaskQueueProvider onTaskReadyNavigate={handleTaskReadyNavigate}>
+      <AppContent />
+    </InitTaskQueueProvider>
   );
 }
 

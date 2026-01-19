@@ -29,6 +29,13 @@ interface TaskReadyEvent {
   note_id: number;
 }
 
+/** Provider 属性 */
+interface InitTaskQueueProviderProps {
+  children: ReactNode;
+  /** 当任务就绪时的全局处理器（用于导航到对应笔记） */
+  onTaskReadyNavigate?: (noteId: number) => void;
+}
+
 /** Context 状态类型 */
 interface InitTaskQueueContextType {
   /** 当前正在执行任务的笔记ID */
@@ -65,11 +72,18 @@ const InitTaskQueueContext = createContext<InitTaskQueueContextType | null>(null
 // Provider 组件
 // ============================================================================
 
-export function InitTaskQueueProvider({ children }: { children: ReactNode }) {
+export function InitTaskQueueProvider({ children, onTaskReadyNavigate }: InitTaskQueueProviderProps) {
   const [currentTaskNoteId, setCurrentTaskNoteId] = useState<number | null>(null);
   const [waitingNoteIds, setWaitingNoteIds] = useState<number[]>([]);
   // 使用 useRef 存储回调，避免事件监听器依赖变化导致的问题
   const taskReadyCallbacksRef = useRef<Set<(noteId: number) => void>>(new Set());
+  // 存储导航回调的 ref
+  const onTaskReadyNavigateRef = useRef(onTaskReadyNavigate);
+
+  // 更新导航回调 ref
+  useEffect(() => {
+    onTaskReadyNavigateRef.current = onTaskReadyNavigate;
+  }, [onTaskReadyNavigate]);
 
   // 刷新队列状态
   const refreshQueueStatus = useCallback(async () => {
@@ -172,6 +186,11 @@ export function InitTaskQueueProvider({ children }: { children: ReactNode }) {
       taskReadyCallbacksRef.current.forEach(callback => {
         callback(event.payload.note_id);
       });
+      // 如果有导航回调，自动导航到对应笔记（确保任务能被执行）
+      if (onTaskReadyNavigateRef.current) {
+        console.log("[InitTaskQueue] 自动导航到笔记:", event.payload.note_id);
+        onTaskReadyNavigateRef.current(event.payload.note_id);
+      }
     });
 
     return () => {
