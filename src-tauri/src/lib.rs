@@ -382,6 +382,107 @@ fn unset_default_ai_config(id: i64) -> Result<(), String> {
     get_db().unset_default_ai_config(id).map_err(|e| e.to_string())
 }
 
+/// Test API connection for AI/Embedding/Reranker configs
+/// Sends a minimal request to verify the API is accessible
+#[tauri::command]
+async fn test_api_connection(
+    base_url: String,
+    api_key: String,
+    model: String,
+    config_type: String,
+) -> Result<String, String> {
+    use reqwest::Client;
+    use serde_json::json;
+
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
+
+    let base_url = base_url.trim_end_matches('/');
+
+    match config_type.as_str() {
+        "ai" => {
+            // Test chat completion API with minimal request
+            let api_url = format!("{}/chat/completions", base_url);
+            let body = json!({
+                "model": model,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "max_tokens": 1
+            });
+
+            let response = client
+                .post(&api_url)
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("连接失败: {}", e))?;
+
+            if response.status().is_success() {
+                Ok("连接成功".to_string())
+            } else {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                Err(format!("API错误 {}: {}", status, error_text))
+            }
+        }
+        "embedding" => {
+            // Test embedding API
+            let api_url = format!("{}/embeddings", base_url);
+            let body = json!({
+                "model": model,
+                "input": "test"
+            });
+
+            let response = client
+                .post(&api_url)
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("连接失败: {}", e))?;
+
+            if response.status().is_success() {
+                Ok("连接成功".to_string())
+            } else {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                Err(format!("API错误 {}: {}", status, error_text))
+            }
+        }
+        "reranker" => {
+            // Test reranker API (Cohere-style)
+            let api_url = format!("{}/rerank", base_url);
+            let body = json!({
+                "model": model,
+                "query": "test",
+                "documents": ["test document"]
+            });
+
+            let response = client
+                .post(&api_url)
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("连接失败: {}", e))?;
+
+            if response.status().is_success() {
+                Ok("连接成功".to_string())
+            } else {
+                let status = response.status();
+                let error_text = response.text().await.unwrap_or_default();
+                Err(format!("API错误 {}: {}", status, error_text))
+            }
+        }
+        _ => Err("未知的配置类型".to_string()),
+    }
+}
+
 // App settings commands
 #[tauri::command]
 fn get_app_settings() -> Result<AppSettings, String> {
@@ -1355,6 +1456,7 @@ pub fn run() {
             delete_ai_config,
             set_default_ai_config,
             unset_default_ai_config,
+            test_api_connection,
             get_app_settings,
             set_theme,
             get_setting,

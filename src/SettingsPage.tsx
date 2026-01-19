@@ -459,11 +459,25 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     };
 
     const testApiConfig = async () => {
+        const config = getCurrentEditingConfig();
+        if (!config?.base_url || !config?.model) return;
+
         setTestingApi(true);
         setTestResult(null);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        setTestResult({ success: true, message: "连接成功" });
-        setTestingApi(false);
+
+        try {
+            await invoke("test_api_connection", {
+                baseUrl: config.base_url,
+                apiKey: config.api_key || "",
+                model: config.model,
+                configType: editingType || "ai",
+            });
+            setTestResult({ success: true, message: "连接成功" });
+        } catch (error) {
+            setTestResult({ success: false, message: String(error) });
+        } finally {
+            setTestingApi(false);
+        }
     };
 
     const themeButtonClass = (theme: "light" | "dark") =>
