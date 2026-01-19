@@ -1330,7 +1330,18 @@ pub async fn generate_note(
 
             let task = tokio::spawn(async move {
                 // 获取信号量许可（控制标签页级别的并发）
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = match semaphore.acquire().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        eprintln!("[笔记生成] 获取信号量失败: {}", e);
+                        return TabResult {
+                            tab_type,
+                            content: String::new(),
+                            success: false,
+                            error: Some(format!("获取信号量失败: {}", e)),
+                        };
+                    }
+                };
 
                 // 执行生成
                 generate_single_tab(
@@ -1351,14 +1362,24 @@ pub async fn generate_note(
 
         // 等待所有任务完成
         for task in tasks {
-            let result = task.await.unwrap();
-
-            if result.success {
-                generated_count += 1;
-                // 更新数据库
-                update_note_tab(db, request.note_id, &result.tab_type, &result.content, request.model_id)?;
-            } else {
-                failed_count += 1;
+            match task.await {
+                Ok(result) => {
+                    if result.success {
+                        generated_count += 1;
+                        // 更新数据库
+                        if let Err(e) = update_note_tab(db, request.note_id, &result.tab_type, &result.content, request.model_id) {
+                            eprintln!("[笔记生成] 更新数据库失败: {}", e);
+                            failed_count += 1;
+                        }
+                    } else {
+                        failed_count += 1;
+                    }
+                }
+                Err(e) => {
+                    // 任务 panic 或被取消，记录错误但继续处理其他任务
+                    eprintln!("[笔记生成] 任务执行异常: {}", e);
+                    failed_count += 1;
+                }
             }
         }
     }

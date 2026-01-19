@@ -117,12 +117,27 @@ impl ConfigConcurrencyController {
         *self.concurrent_limit.lock().await
     }
 
-    /// 获取槽位（异步等待，FIFO顺序）
+    /// 获取槽位（异步等待，FIFO顺序，带超时保护）
     /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
+    /// 超时时间：5分钟，防止任务永久卡住
     async fn acquire(&self) -> OwnedSemaphorePermit {
         self.waiting_count.fetch_add(1, Ordering::Relaxed);
 
+        let start_time = std::time::Instant::now();
+        let timeout_duration = std::time::Duration::from_secs(300); // 5分钟超时
+
         loop {
+            // 检查是否超时
+            if start_time.elapsed() > timeout_duration {
+                self.waiting_count.fetch_sub(1, Ordering::Relaxed);
+                eprintln!("[AI线程池] 警告：获取信号量超时（5分钟），强制创建新的许可");
+                // 超时后直接创建一个新的信号量并获取许可，确保任务能继续
+                let emergency_semaphore = Arc::new(Semaphore::new(1));
+                let permit = emergency_semaphore.try_acquire_owned().unwrap();
+                self.active_count.fetch_add(1, Ordering::Relaxed);
+                return permit;
+            }
+
             // 获取当前信号量的克隆
             let semaphore = {
                 let guard = self.semaphore.lock().await;
@@ -141,16 +156,31 @@ impl ConfigConcurrencyController {
         }
     }
 
-    /// 获取槽位（支持中止检查）
+    /// 获取槽位（支持中止检查，带超时保护）
     /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
+    /// 超时时间：5分钟，防止任务永久卡住
     async fn acquire_with_abort(&self, abort_flag: &Arc<AtomicBool>) -> Result<OwnedSemaphorePermit, &'static str> {
         self.waiting_count.fetch_add(1, Ordering::Relaxed);
+
+        let start_time = std::time::Instant::now();
+        let timeout_duration = std::time::Duration::from_secs(300); // 5分钟超时
 
         loop {
             // 检查是否被中止
             if abort_flag.load(Ordering::Relaxed) {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
                 return Err("请求已取消");
+            }
+
+            // 检查是否超时
+            if start_time.elapsed() > timeout_duration {
+                self.waiting_count.fetch_sub(1, Ordering::Relaxed);
+                eprintln!("[AI线程池] 警告：acquire_with_abort 获取信号量超时（5分钟），强制创建新的许可");
+                // 超时后直接创建一个新的信号量并获取许可，确保任务能继续
+                let emergency_semaphore = Arc::new(Semaphore::new(1));
+                let permit = emergency_semaphore.try_acquire_owned().unwrap();
+                self.active_count.fetch_add(1, Ordering::Relaxed);
+                return Ok(permit);
             }
 
             // 获取当前信号量的克隆（每次循环都重新获取，以支持动态更新）
