@@ -279,7 +279,21 @@ export function CollectionPage() {
     const newIndex = mixedItems.findIndex((item) => item.sortKey === over.id);
 
     const newItems = arrayMove(mixedItems, oldIndex, newIndex);
+
+    // 立即更新本地状态，避免闪烁
     setMixedItems(newItems);
+
+    // 同步更新 collectionItems 的 sort_order
+    const updatedCollectionItems = collectionItems.map((item) => {
+      const newItemIndex = newItems.findIndex(
+        (ni) => ni.type === "note" && ni.data.note_id === item.note_id
+      );
+      if (newItemIndex !== -1) {
+        return { ...item, sort_order: newItemIndex };
+      }
+      return item;
+    });
+    setCollectionItems(updatedCollectionItems);
 
     try {
       // 构建混合排序数据
@@ -302,6 +316,7 @@ export function CollectionPage() {
       console.error("Failed to update order:", error);
       // 恢复原来的顺序
       setMixedItems(mixedItems);
+      setCollectionItems(collectionItems);
     }
   };
 
