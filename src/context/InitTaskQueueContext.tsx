@@ -108,9 +108,15 @@ export function InitTaskQueueProvider({ children, onTaskReadyNavigate }: InitTas
     }
   }, []);
 
-  // 完成任务
+  // 完成任务（添加防重复调用检查）
   const completeTask = useCallback(async (noteId: number): Promise<void> => {
     try {
+      // 先检查该笔记是否还是当前任务，避免重复调用
+      const status = await invoke<QueueStatus>("get_init_queue_status");
+      if (status.current_task_note_id !== noteId) {
+        console.log(`[InitTaskQueue] 跳过 completeTask: noteId=${noteId} 不是当前任务 (当前任务=${status.current_task_note_id})`);
+        return;
+      }
       await invoke("complete_init_task_command", { noteId });
       console.log(`[InitTaskQueue] 任务完成: noteId=${noteId}`);
     } catch (error) {
