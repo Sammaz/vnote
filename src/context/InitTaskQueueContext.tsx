@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
@@ -68,7 +68,8 @@ const InitTaskQueueContext = createContext<InitTaskQueueContextType | null>(null
 export function InitTaskQueueProvider({ children }: { children: ReactNode }) {
   const [currentTaskNoteId, setCurrentTaskNoteId] = useState<number | null>(null);
   const [waitingNoteIds, setWaitingNoteIds] = useState<number[]>([]);
-  const [taskReadyCallbacks, setTaskReadyCallbacks] = useState<Set<(noteId: number) => void>>(new Set());
+  // 使用 useRef 存储回调，避免事件监听器依赖变化导致的问题
+  const taskReadyCallbacksRef = useRef<Set<(noteId: number) => void>>(new Set());
 
   // 刷新队列状态
   const refreshQueueStatus = useCallback(async () => {
@@ -96,7 +97,7 @@ export function InitTaskQueueProvider({ children }: { children: ReactNode }) {
   // 完成任务
   const completeTask = useCallback(async (noteId: number): Promise<void> => {
     try {
-      await invoke("complete_init_task", { noteId });
+      await invoke("complete_init_task_command", { noteId });
       console.log(`[InitTaskQueue] 任务完成: noteId=${noteId}`);
     } catch (error) {
       console.error("[InitTaskQueue] 完成任务失败:", error);
@@ -144,13 +145,9 @@ export function InitTaskQueueProvider({ children }: { children: ReactNode }) {
 
   // 注册任务就绪回调
   const onTaskReady = useCallback((callback: (noteId: number) => void): (() => void) => {
-    setTaskReadyCallbacks(prev => new Set(prev).add(callback));
+    taskReadyCallbacksRef.current.add(callback);
     return () => {
-      setTaskReadyCallbacks(prev => {
-        const next = new Set(prev);
-        next.delete(callback);
-        return next;
-      });
+      taskReadyCallbacksRef.current.delete(callback);
     };
   }, []);
 
@@ -159,7 +156,7 @@ export function InitTaskQueueProvider({ children }: { children: ReactNode }) {
     refreshQueueStatus();
   }, [refreshQueueStatus]);
 
-  // 监听后端事件
+  // 监听后端事件（只初始化一次，使用 ref 获取最新回调）
   useEffect(() => {
     // 监听队列更新事件
     const unlistenQueueUpdated = listen<QueueUpdatedEvent>("init-queue-updated", (event) => {
@@ -171,8 +168,8 @@ export function InitTaskQueueProvider({ children }: { children: ReactNode }) {
     // 监听任务就绪事件
     const unlistenTaskReady = listen<TaskReadyEvent>("init-task-ready", (event) => {
       console.log("[InitTaskQueue] 任务就绪:", event.payload);
-      // 通知所有注册的回调
-      taskReadyCallbacks.forEach(callback => {
+      // 通知所有注册的回调（使用 ref 确保获取最新的回调集合）
+      taskReadyCallbacksRef.current.forEach(callback => {
         callback(event.payload.note_id);
       });
     });
@@ -181,7 +178,7 @@ export function InitTaskQueueProvider({ children }: { children: ReactNode }) {
       unlistenQueueUpdated.then(fn => fn());
       unlistenTaskReady.then(fn => fn());
     };
-  }, [taskReadyCallbacks]);
+  }, []); // 空依赖数组，只初始化一次
 
   const value: InitTaskQueueContextType = {
     currentTaskNoteId,

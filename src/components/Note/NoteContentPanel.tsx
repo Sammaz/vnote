@@ -664,6 +664,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             unlisten2();
             activeListeners.delete(genId);
           }
+          // 如果是自动生成流程，通知任务队列任务完成（让下一个任务继续）
+          if (isInitialAutoGeneration(noteId)) {
+            setInitialAutoGeneration(noteId, false);
+            console.log(`[setupGenerationListener] 任务中止，通知任务队列: note_id=${noteId}`);
+            completeTask(noteId).catch(console.error);
+          }
           break;
       }
 
@@ -683,7 +689,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     unlistenPromise.then((unlisten) => {
       activeListeners.set(genId, unlisten);
     });
-  }, [note.id, convertTabType]);
+  }, [note.id, convertTabType, completeTask]);
 
   // 定期同步全局状态到组件state（用于跨组件更新）
   useEffect(() => {
@@ -891,6 +897,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setGenerationId(null);
       setRegeneratingTabs(new Set());
       message.error(`生成失败: ${error}`);
+      // 如果是自动生成流程，通知任务队列任务完成
+      if (isInitialAutoGeneration(note.id)) {
+        setInitialAutoGeneration(note.id, false);
+        console.log(`[handleGenerate] 生成失败，通知任务队列: note_id=${note.id}`);
+        completeTask(note.id).catch(console.error);
+      }
     }
   };
 
@@ -1278,6 +1290,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             case "Error":
             case "Aborted":
               setChapterGenerating(note.id, false);
+              // 如果是自动生成流程，通知任务队列任务完成
+              if (isInitialAutoGeneration(note.id)) {
+                setInitialAutoGeneration(note.id, false);
+                console.log(`[generateChaptersDirectly] 任务失败/中止，通知任务队列: note_id=${note.id}`);
+                completeTask(note.id).catch(console.error);
+              }
               unlisten();
               break;
           }
@@ -1296,8 +1314,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     } catch (error) {
       console.error("[generateChaptersDirectly] 生成失败:", error);
       setChapterGenerating(note.id, false);
+      // 如果是自动生成流程，通知任务队列任务完成
+      if (isInitialAutoGeneration(note.id)) {
+        setInitialAutoGeneration(note.id, false);
+        console.log(`[generateChaptersDirectly] 生成失败，通知任务队列: note_id=${note.id}`);
+        completeTask(note.id).catch(console.error);
+      }
     }
-  }, [note.id, note.video_path, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete]);
+  }, [note.id, note.video_path, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete, completeTask]);
 
   // 辅助模式下使用截图标记生成章节
   const generateChaptersWithMarkers = useCallback(async (markers: ScreenshotMarker[]) => {
@@ -1435,14 +1459,26 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           unlisten();
         } else if (data.status === "Aborted") {
           setHighlightIsGenerating(false);
+          // 如果是自动生成流程，通知任务队列任务完成
+          if (isInitialAutoGeneration(note.id)) {
+            setInitialAutoGeneration(note.id, false);
+            console.log(`[generateHighlightsDirectly] 任务中止，通知任务队列: note_id=${note.id}`);
+            completeTask(note.id).catch(console.error);
+          }
           unlisten();
         }
       });
     } catch (error) {
       console.error("[generateHighlightsDirectly] 生成失败:", error);
       setHighlightIsGenerating(false);
+      // 如果是自动生成流程，通知任务队列任务完成
+      if (isInitialAutoGeneration(note.id)) {
+        setInitialAutoGeneration(note.id, false);
+        console.log(`[generateHighlightsDirectly] 生成失败，通知任务队列: note_id=${note.id}`);
+        completeTask(note.id).catch(console.error);
+      }
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating, completeTask]);
 
   // 用于存储 triggerVisualSummaryOptimizationSilent 的 ref，避免循环依赖
   const triggerVisualSummaryOptimizationSilentRef = useRef<(() => Promise<void>) | undefined>(undefined);
