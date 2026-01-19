@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { X, FolderPlus, ListPlus, Image } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -6,6 +6,24 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import type { Collection } from "../../types";
+
+// 获取合集的所有子孙合集ID
+function getDescendantIds(collections: Collection[], parentId: number): Set<number> {
+  const descendants = new Set<number>();
+  const queue = [parentId];
+
+  while (queue.length > 0) {
+    const currentId = queue.shift()!;
+    for (const c of collections) {
+      if (c.parent_id === currentId && !descendants.has(c.id)) {
+        descendants.add(c.id);
+        queue.push(c.id);
+      }
+    }
+  }
+
+  return descendants;
+}
 
 interface CreateCollectionModalProps {
   onClose: () => void;
@@ -35,8 +53,20 @@ export function CreateCollectionModal({
       setName(editingCollection.name);
       setDescription(editingCollection.description || "");
       setCoverImage(editingCollection.cover_image || null);
+      setParentCollectionId(editingCollection.parent_id);
     }
   }, [editingCollection]);
+
+  // 编辑模式下可选的父合集列表（排除自己和所有子孙合集）
+  const availableParentCollections = useMemo(() => {
+    if (!isEditing || !editingCollection) {
+      return collections;
+    }
+    const descendantIds = getDescendantIds(collections, editingCollection.id);
+    return collections.filter(
+      (c) => c.id !== editingCollection.id && !descendantIds.has(c.id)
+    );
+  }, [collections, isEditing, editingCollection]);
 
   const handleSelectCover = async () => {
     try {
@@ -79,6 +109,7 @@ export function CreateCollectionModal({
           name: name.trim(),
           description: description.trim() || null,
           cover_image: coverImage,
+          parent_id: parentCollectionId,
         });
       } else {
         // 创建新合集，如果是 addTo 模式则设置 parent_id
@@ -156,8 +187,8 @@ export function CreateCollectionModal({
 
           {/* 表单 */}
           <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-            {/* 选择父级合集 - 仅在 addTo 模式显示 */}
-            {mode === "addTo" && !isEditing && (
+            {/* 选择父级合集 - 在编辑模式或 addTo 模式显示 */}
+            {(isEditing || mode === "addTo") && (
               <div className="flex items-start gap-4">
                 <label className="w-12 flex-shrink-0 text-sm text-slate-600 dark:text-neutral-400 pt-2.5">
                   父合集
@@ -173,8 +204,8 @@ export function CreateCollectionModal({
                     "text-slate-800 dark:text-slate-200 text-sm"
                   )}
                 >
-                  <option value="">选择父级合集</option>
-                  {collections.map((c) => (
+                  <option value="">无（顶级合集）</option>
+                  {(isEditing ? availableParentCollections : collections).map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.name}
                     </option>
