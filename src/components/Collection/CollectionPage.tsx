@@ -1,7 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { Edit2, Trash2, BookOpen, GripVertical, CheckSquare, Square, Plus } from "lucide-react";
+import { MoreHorizontal, Edit2, Trash2, BookOpen, GripVertical, CheckSquare, Square, Plus } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   DndContext,
@@ -137,6 +137,7 @@ export function CollectionPage() {
     setCurrentView,
     notes,
     deleteNote,
+    deleteCollection,
     batchSelection,
     setBatchSelecting,
     toggleNoteSelection,
@@ -148,6 +149,11 @@ export function CollectionPage() {
   const [showAddNotesModal, setShowAddNotesModal] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState<NoteWithDetails | null>(null);
+  const [showMenu, setShowMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const collection = collections.find((c) => c.id === selectedCollectionId);
 
@@ -205,6 +211,42 @@ export function CollectionPage() {
     loadCollectionItems();
   }, [selectedCollectionId, notes]);
 
+  // 点击外部关闭菜单
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setShowMenu(false);
+      }
+    }
+
+    if (showMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+      return () => document.removeEventListener("mousedown", handleClickOutside);
+    }
+  }, [showMenu]);
+
+  const handleMenuClick = () => {
+    if (!showMenu && menuTriggerRef.current) {
+      const rect = menuTriggerRef.current.getBoundingClientRect();
+      setMenuPosition({
+        top: rect.bottom + 4,
+        left: rect.right - 176,
+      });
+    }
+    setShowMenu(!showMenu);
+  };
+
+  const handleDeleteCollection = async () => {
+    if (!selectedCollectionId) return;
+    setShowDeleteConfirm(false);
+    try {
+      await deleteCollection(selectedCollectionId);
+      setCurrentView("home");
+    } catch (error) {
+      console.error("Failed to delete collection:", error);
+    }
+  };
+
   const handleDeleteNote = async () => {
     if (!noteToDelete) return;
     try {
@@ -259,18 +301,6 @@ export function CollectionPage() {
               <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 truncate">
                 {collection.name}
               </h1>
-              <button
-                onClick={() => setShowEditModal(true)}
-                className={cn(
-                  "flex-shrink-0 p-1.5 rounded-lg transition-colors cursor-pointer",
-                  "text-slate-400 dark:text-slate-500",
-                  "hover:text-slate-600 dark:hover:text-slate-300",
-                  "hover:bg-slate-200 dark:hover:bg-neutral-700"
-                )}
-                title="编辑合集"
-              >
-                <Edit2 className="w-4 h-4" />
-              </button>
               <div className="flex-1" />
               <button
                 onClick={() => setShowAddNotesModal(true)}
@@ -284,6 +314,18 @@ export function CollectionPage() {
               >
                 <Plus className="w-4 h-4" />
                 <span>添加笔记</span>
+              </button>
+              <button
+                ref={menuTriggerRef}
+                onClick={handleMenuClick}
+                className={cn(
+                  "flex-shrink-0 p-2 rounded-lg transition-colors cursor-pointer",
+                  "text-slate-500 dark:text-slate-400",
+                  "hover:bg-slate-200 dark:hover:bg-neutral-700"
+                )}
+                title="更多操作"
+              >
+                <MoreHorizontal className="w-5 h-5" />
               </button>
             </div>
             {collection.description && (
@@ -359,6 +401,73 @@ export function CollectionPage() {
           onClose={() => setShowEditModal(false)}
           editingCollection={collection}
         />
+      )}
+
+      {/* 更多操作下拉菜单 */}
+      {showMenu && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed w-44 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-lg shadow-xl z-[9999]"
+          style={{ top: menuPosition.top, left: menuPosition.left }}
+        >
+          <button
+            onClick={() => {
+              setShowMenu(false);
+              setShowEditModal(true);
+            }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+          >
+            <Edit2 className="w-4 h-4" />
+            <span>编辑信息</span>
+          </button>
+
+          <div className="my-1 border-t border-slate-100 dark:border-neutral-700" />
+
+          <button
+            onClick={() => {
+              setShowMenu(false);
+              setShowDeleteConfirm(true);
+            }}
+            className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>删除合集</span>
+          </button>
+        </div>,
+        document.body
+      )}
+
+      {/* 删除合集确认弹窗 */}
+      {showDeleteConfirm && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowDeleteConfirm(false)}
+          />
+          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+              确定要删除整个合集吗?
+            </h3>
+            <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">
+              确定要永久删除合集「{collection.name}」吗？此操作会移除合集中的所有内容，且无法撤销。
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 rounded-md transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleDeleteCollection}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors cursor-pointer"
+              >
+                永久删除
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* 删除笔记确认弹窗 */}
