@@ -672,7 +672,6 @@ export function CollectionPage() {
       {showAddNotesModal && selectedCollectionId && (
         <AddNotesToCollectionModal
           collectionId={selectedCollectionId}
-          existingNoteIds={collectionItems.map((item) => item.note_id)}
           onClose={() => setShowAddNotesModal(false)}
           onSuccess={loadCollectionItems}
         />

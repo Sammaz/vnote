@@ -6,14 +6,12 @@ import { useApp } from "../../context/AppContext";
 
 interface AddNotesToCollectionModalProps {
   collectionId: number;
-  existingNoteIds: number[];
   onClose: () => void;
   onSuccess: () => void;
 }
 
 export function AddNotesToCollectionModal({
   collectionId,
-  existingNoteIds,
   onClose,
   onSuccess,
 }: AddNotesToCollectionModalProps) {
