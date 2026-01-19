@@ -982,6 +982,41 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id, onTaskReady]);
 
+  // 组件挂载时检查：如果该笔记是当前正在执行的任务但还未开始生成，则立即开始
+  // 这处理了用户从其他笔记切换回来时，该笔记已被轮到执行但组件未挂载的情况
+  useEffect(() => {
+    const checkAndStartIfReady = async () => {
+      // 检查是否需要自动生成
+      const hasNoContent = !note.full_summary && !note.detailed_reading &&
+                           !note.highlights && !note.visual_summary && !note.custom_summary;
+      if (!hasNoContent || !note.model_id) {
+        return;
+      }
+
+      // 检查是否是自动生成流程
+      if (!isInitialAutoGeneration(note.id)) {
+        return;
+      }
+
+      // 检查是否已经在生成中（有 generationId）
+      const currentState = getNoteGenerationState(note.id);
+      if (currentState.generationId) {
+        return;
+      }
+
+      // 检查该笔记是否是当前正在执行的任务
+      const position = getNoteQueuePosition(note.id);
+      if (position === 0) {
+        // 是当前任务，但还未开始生成，立即开始
+        console.log(`[NoteContentPanel] 笔记 ${note.id} 是当前任务且未开始生成，立即开始`);
+        handleGenerate(true);
+      }
+    };
+
+    checkAndStartIfReady();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [note.id, note.full_summary, note.model_id]);
+
   // 检查标签页是否正在生成
   const isTabGenerating = (tabId: TabId): boolean => {
     const tabType = TAB_TYPE_MAPPING[tabId];
