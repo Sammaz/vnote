@@ -14,6 +14,7 @@ mod subtitle_optimizer;
 use chat::ChatRequest;
 use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker};
 use regex::Regex;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 #[cfg(windows)]
@@ -29,6 +30,13 @@ const TRAY_ICON: &[u8] = include_bytes!("../icons/icon.png");
 static TRAY_ENABLED: AtomicBool = AtomicBool::new(false);
 const TRAY_ID: &str = "vnote-tray";
 pub static DATABASE: OnceLock<Database> = OnceLock::new();
+
+// 高光生成防重复：跟踪正在生成高光的 note_id
+static HIGHLIGHT_GENERATING_NOTES: OnceLock<tokio::sync::Mutex<HashSet<i64>>> = OnceLock::new();
+
+fn get_highlight_generating_notes() -> &'static tokio::sync::Mutex<HashSet<i64>> {
+    HIGHLIGHT_GENERATING_NOTES.get_or_init(|| tokio::sync::Mutex::new(HashSet::new()))
+}
 
 fn get_db() -> &'static Database {
     DATABASE.get().expect("Database not initialized")
@@ -1278,6 +1286,21 @@ async fn generate_highlights(
 ) -> Result<String, String> {
     use highlight_generation::{GenerateHighlightsRequest, HighlightType};
 
+    // 防重复检查：如果该 note_id 已经在生成中，直接返回
+    {
+        let generating_notes = get_highlight_generating_notes().lock().await;
+        if generating_notes.contains(&note_id) {
+            eprintln!("[generate_highlights] note_id={} 已在生成中，跳过重复调用", note_id);
+            return Err("该笔记的高光正在生成中".to_string());
+        }
+    }
+
+    // 标记开始生成
+    {
+        let mut generating_notes = get_highlight_generating_notes().lock().await;
+        generating_notes.insert(note_id);
+    }
+
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let return_id = generation_id.clone();
 
@@ -1310,6 +1333,9 @@ async fn generate_highlights(
                 eprintln!("[generate_highlights] 生成失败: {}", e);
             }
         }
+        // 生成完成，移除标记
+        let mut generating_notes = get_highlight_generating_notes().lock().await;
+        generating_notes.remove(&note_id);
     });
 
     Ok(return_id)

@@ -1483,7 +1483,17 @@ pub async fn generate_note(
     }
     } // 结束 else 分支（并发生成）
 
-    // 发送完成事件
+    cleanup_abort_flag(&generation_id).await;
+
+    // 生成建议问题（在发送完成事件之前，确保串行执行）
+    eprintln!("[笔记生成] 开始生成建议问题: note_id={}", request.note_id);
+    if let Err(e) = generate_questions_for_note_internal(db, request.note_id).await {
+        eprintln!("[笔记生成] 生成建议问题失败: {}", e);
+    } else {
+        eprintln!("[笔记生成] 建议问题生成完成: note_id={}", request.note_id);
+    }
+
+    // 发送完成事件（在建议问题生成完成后，确保前端在此之后才触发高光生成）
     let _ = app.emit(
         &event_name,
         GenerationEvent::AllCompleted {
@@ -1492,16 +1502,6 @@ pub async fn generate_note(
             total: generated_count + failed_count,
         },
     );
-
-    cleanup_abort_flag(&generation_id).await;
-
-    // 生成建议问题（在所有标签页完成后）
-    eprintln!("[笔记生成] 开始生成建议问题: note_id={}", request.note_id);
-    if let Err(e) = generate_questions_for_note_internal(db, request.note_id).await {
-        eprintln!("[笔记生成] 生成建议问题失败: {}", e);
-    } else {
-        eprintln!("[笔记生成] 建议问题生成完成: note_id={}", request.note_id);
-    }
 
     // 注意：不再在这里调用 complete_init_task
     // 因为自动初始化流程还包括高光笔记和闪记卡的生成
