@@ -1276,6 +1276,11 @@ fn update_collection_items_order(collection_id: i64, note_ids: Vec<i64>) -> Resu
 }
 
 #[tauri::command]
+fn update_collection_mixed_order(parent_id: i64, items: Vec<(String, i64)>) -> Result<(), String> {
+    get_db().update_collection_mixed_order(parent_id, &items).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_collections_for_note(note_id: i64) -> Result<Vec<Collection>, String> {
     get_db().get_collections_for_note(note_id).map_err(|e| e.to_string())
 }
@@ -1425,6 +1430,7 @@ pub fn run() {
             remove_note_from_collection,
             get_collection_items,
             update_collection_items_order,
+            update_collection_mixed_order,
             get_collections_for_note,
             get_all_notes_in_collections,
         ])

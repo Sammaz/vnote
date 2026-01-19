@@ -1566,6 +1566,28 @@ impl Database {
         Ok(())
     }
 
+    /// 更新合集内混合内容（子合集+笔记）的排序
+    /// items 格式: [{"type": "collection", "id": 1}, {"type": "note", "id": 2}, ...]
+    pub fn update_collection_mixed_order(&self, parent_id: i64, items: &[(String, i64)]) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+
+        for (index, (item_type, id)) in items.iter().enumerate() {
+            if item_type == "collection" {
+                conn.execute(
+                    "UPDATE collections SET sort_order = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2 AND parent_id = ?3",
+                    rusqlite::params![index as i32, id, parent_id],
+                )?;
+            } else if item_type == "note" {
+                conn.execute(
+                    "UPDATE collection_items SET sort_order = ?1 WHERE collection_id = ?2 AND note_id = ?3",
+                    rusqlite::params![index as i32, parent_id, id],
+                )?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn get_collections_for_note(&self, note_id: i64) -> SqliteResult<Vec<Collection>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(

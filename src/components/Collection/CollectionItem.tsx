@@ -262,6 +262,20 @@ export function CollectionItem({
   const hasChildren = childCollections.length > 0;
   const hasNotes = collection.item_count > 0;
 
+  // 构建混合排序列表
+  type MixedSidebarItem =
+    | { type: "collection"; data: Collection }
+    | { type: "note"; data: NoteWithDetails };
+
+  const mixedItems: MixedSidebarItem[] = [
+    ...childCollections.map((c) => ({ type: "collection" as const, data: c })),
+    ...collectionNotes.map((n) => ({ type: "note" as const, data: n })),
+  ].sort((a, b) => {
+    const aOrder = a.type === "collection" ? a.data.sort_order : a.data.sort_order;
+    const bOrder = b.type === "collection" ? b.data.sort_order : b.data.sort_order;
+    return aOrder - bOrder;
+  });
+
   // 加载合集内的笔记
   useEffect(() => {
     if (isExpanded && hasNotes) {
@@ -336,29 +350,28 @@ export function CollectionItem({
         </button>
       </div>
 
-      {/* 展开内容：子合集和笔记 */}
+      {/* 展开内容：混合排序的子合集和笔记 */}
       {isExpanded && (
         <div className="mt-0.5">
-          {/* 子合集 */}
-          {hasChildren && childCollections.map((child) => (
-            <CollectionItem
-              key={child.id}
-              collection={child}
-              level={level + 1}
-              childCollections={allCollections.filter((c) => c.parent_id === child.id)}
-              allCollections={allCollections}
-              onEdit={onEdit}
-            />
-          ))}
-          {/* 合集内的笔记 */}
-          {collectionNotes.map((item) => (
-            <CollectionNoteItem
-              key={item.id}
-              item={item}
-              level={level}
-              currentCollectionId={collection.id}
-            />
-          ))}
+          {mixedItems.map((item) =>
+            item.type === "collection" ? (
+              <CollectionItem
+                key={`collection-${item.data.id}`}
+                collection={item.data}
+                level={level + 1}
+                childCollections={allCollections.filter((c) => c.parent_id === item.data.id)}
+                allCollections={allCollections}
+                onEdit={onEdit}
+              />
+            ) : (
+              <CollectionNoteItem
+                key={`note-${item.data.id}`}
+                item={item.data}
+                level={level}
+                currentCollectionId={collection.id}
+              />
+            )
+          )}
         </div>
       )}
 

@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { MoreHorizontal, Edit2, Trash2, BookOpen, GripVertical, CheckSquare, Square, Plus } from "lucide-react";
+import { MoreHorizontal, Edit2, Trash2, BookOpen, GripVertical, CheckSquare, Square, Plus, FolderOpen } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   DndContext,
@@ -25,22 +25,35 @@ import { AddNotesToCollectionModal } from "./AddNotesToCollectionModal";
 import { BatchActionBar } from "./BatchActionBar";
 import { MoveToCollectionModal } from "./MoveToCollectionModal";
 import { NoteCard } from "../Notes/NoteCard";
-import type { CollectionItem as CollectionItemType, Note } from "../../types";
+import type { CollectionItem as CollectionItemType, Note, Collection } from "../../types";
 
 interface NoteWithDetails extends CollectionItemType {
   note: Note;
 }
 
-interface SortableCardProps {
-  item: NoteWithDetails;
+// 混合列表项类型
+type MixedItem =
+  | { type: "collection"; data: Collection; sortKey: string }
+  | { type: "note"; data: NoteWithDetails; sortKey: string };
+
+// 可排序的混合卡片组件
+function SortableMixedCard({
+  item,
+  onOpenNote,
+  onOpenCollection,
+  onDeleteNote,
+  isSelecting,
+  isSelected,
+  onToggleSelect,
+}: {
+  item: MixedItem;
   onOpenNote: (noteId: number) => void;
-  onDelete: (item: NoteWithDetails) => void;
+  onOpenCollection: (collectionId: number) => void;
+  onDeleteNote: (item: NoteWithDetails) => void;
   isSelecting: boolean;
   isSelected: boolean;
   onToggleSelect: (noteId: number) => void;
-}
-
-function SortableCard({ item, onOpenNote, onDelete, isSelecting, isSelected, onToggleSelect }: SortableCardProps) {
+}) {
   const {
     attributes,
     listeners,
@@ -48,18 +61,81 @@ function SortableCard({ item, onOpenNote, onDelete, isSelecting, isSelected, onT
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.id });
+  } = useSortable({ id: item.sortKey });
 
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
 
+  if (item.type === "collection") {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className={cn("relative group", isDragging && "opacity-50 z-50")}
+      >
+        <div
+          onClick={() => onOpenCollection(item.data.id)}
+          className={cn(
+            "group relative rounded-xl overflow-hidden cursor-pointer",
+            "bg-white/90 dark:bg-vnote-card/90 border border-slate-200/60 dark:border-vnote-border/60",
+            "backdrop-blur-xl shadow-sm hover:shadow-xl"
+          )}
+        >
+          <div className="aspect-video bg-slate-100 dark:bg-vnote-surface relative overflow-hidden">
+            {item.data.cover_image ? (
+              <>
+                <img
+                  src={convertFileSrc(item.data.cover_image)}
+                  alt={item.data.name}
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/10 transition-colors duration-200" />
+              </>
+            ) : (
+              <>
+                <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 dark:from-vnote-surface to-slate-200 dark:to-vnote-elevated">
+                  <FolderOpen className="w-12 h-12 text-slate-400 dark:text-vnote-muted" />
+                </div>
+                <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/10 transition-colors duration-200" />
+              </>
+            )}
+          </div>
+          <div className="p-4">
+            <h3 className="font-medium text-slate-700 dark:text-slate-100 truncate group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
+              {item.data.name}
+            </h3>
+            <p className="text-xs text-slate-500 mt-2">
+              {item.data.item_count} 项内容
+            </p>
+          </div>
+        </div>
+        <div
+          {...attributes}
+          {...listeners}
+          className={cn(
+            "absolute top-2 left-2 p-1.5 rounded-lg transition-all cursor-grab z-10",
+            "opacity-0 group-hover:opacity-100",
+            "bg-white/90 dark:bg-neutral-800/90",
+            "hover:bg-slate-100 dark:hover:bg-neutral-700",
+            "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          )}
+          title="拖拽排序"
+        >
+          <GripVertical className="w-4 h-4" />
+        </div>
+      </div>
+    );
+  }
+
+  // Note card
+  const noteItem = item.data;
   const handleClick = () => {
     if (isSelecting) {
-      onToggleSelect(item.note_id);
+      onToggleSelect(noteItem.note_id);
     } else {
-      onOpenNote(item.note_id);
+      onOpenNote(noteItem.note_id);
     }
   };
 
@@ -77,7 +153,7 @@ function SortableCard({ item, onOpenNote, onDelete, isSelecting, isSelected, onT
         <div
           onClick={(e) => {
             e.stopPropagation();
-            onToggleSelect(item.note_id);
+            onToggleSelect(noteItem.note_id);
           }}
           className="absolute top-2 left-2 z-20 p-1 rounded bg-white/90 dark:bg-neutral-800/90 cursor-pointer"
         >
@@ -89,7 +165,7 @@ function SortableCard({ item, onOpenNote, onDelete, isSelecting, isSelected, onT
         </div>
       )}
       <div onClick={handleClick} className="cursor-pointer">
-        <NoteCard note={item.note} onClick={() => {}} />
+        <NoteCard note={noteItem.note} onClick={() => {}} />
       </div>
       {!isSelecting && (
         <>
@@ -110,7 +186,7 @@ function SortableCard({ item, onOpenNote, onDelete, isSelecting, isSelected, onT
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onDelete(item);
+              onDeleteNote(noteItem);
             }}
             className={cn(
               "absolute top-2 right-2 p-1.5 rounded-lg transition-all cursor-pointer z-10",
@@ -135,15 +211,17 @@ export function CollectionPage() {
     selectedCollectionId,
     setSelectedNoteId,
     setCurrentView,
+    setSelectedCollection,
     notes,
     deleteNote,
     deleteCollection,
     batchSelection,
-    setBatchSelecting,
     toggleNoteSelection,
+    refreshCollections,
   } = useApp();
 
   const [collectionItems, setCollectionItems] = useState<NoteWithDetails[]>([]);
+  const [mixedItems, setMixedItems] = useState<MixedItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showAddNotesModal, setShowAddNotesModal] = useState(false);
@@ -157,6 +235,35 @@ export function CollectionPage() {
 
   const collection = collections.find((c) => c.id === selectedCollectionId);
 
+  // 获取子合集
+  const childCollections = useMemo(() => {
+    return collections.filter((c) => c.parent_id === selectedCollectionId);
+  }, [collections, selectedCollectionId]);
+
+  // 构建混合列表
+  useEffect(() => {
+    const collectionMixedItems: MixedItem[] = childCollections.map((c) => ({
+      type: "collection" as const,
+      data: c,
+      sortKey: `collection-${c.id}`,
+    }));
+
+    const noteMixedItems: MixedItem[] = collectionItems.map((item) => ({
+      type: "note" as const,
+      data: item,
+      sortKey: `note-${item.note_id}`,
+    }));
+
+    // 合并并按 sort_order 排序
+    const allItems = [...collectionMixedItems, ...noteMixedItems].sort((a, b) => {
+      const aOrder = a.type === "collection" ? a.data.sort_order : a.data.sort_order;
+      const bOrder = b.type === "collection" ? b.data.sort_order : b.data.sort_order;
+      return aOrder - bOrder;
+    });
+
+    setMixedItems(allItems);
+  }, [childCollections, collectionItems]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
@@ -165,20 +272,33 @@ export function CollectionPage() {
     const { active, over } = event;
     if (!over || active.id === over.id || !selectedCollectionId) return;
 
-    const oldIndex = collectionItems.findIndex((item) => item.id === active.id);
-    const newIndex = collectionItems.findIndex((item) => item.id === over.id);
+    const oldIndex = mixedItems.findIndex((item) => item.sortKey === active.id);
+    const newIndex = mixedItems.findIndex((item) => item.sortKey === over.id);
 
-    const newItems = arrayMove(collectionItems, oldIndex, newIndex);
-    setCollectionItems(newItems);
+    const newItems = arrayMove(mixedItems, oldIndex, newIndex);
+    setMixedItems(newItems);
 
     try {
-      await invoke("update_collection_items_order", {
-        collectionId: selectedCollectionId,
-        noteIds: newItems.map((item) => item.note_id),
+      // 构建混合排序数据
+      const orderData: [string, number][] = newItems.map((item) => {
+        if (item.type === "collection") {
+          return ["collection", item.data.id];
+        } else {
+          return ["note", item.data.note_id];
+        }
       });
+
+      await invoke("update_collection_mixed_order", {
+        parentId: selectedCollectionId,
+        items: orderData,
+      });
+
+      // 刷新 collections 数据以保持同步
+      await refreshCollections();
     } catch (error) {
       console.error("Failed to update order:", error);
-      setCollectionItems(collectionItems);
+      // 恢复原来的顺序
+      setMixedItems(mixedItems);
     }
   };
 
@@ -264,6 +384,40 @@ export function CollectionPage() {
     setCurrentView("note");
   };
 
+  const handleOpenChildCollection = (collectionId: number) => {
+    setSelectedCollection(collectionId);
+  };
+
+  // 判断是否有内容（子合集或笔记）
+  const hasContent = childCollections.length > 0 || collectionItems.length > 0;
+
+  // 计算合集下所有内容（递归）
+  const deleteStats = useMemo(() => {
+    const countDescendants = (parentId: number): { collections: number; notes: number } => {
+      const children = collections.filter((c) => c.parent_id === parentId);
+      let totalCollections = children.length;
+      let totalNotes = children.reduce((sum, c) => sum + c.item_count, 0);
+
+      for (const child of children) {
+        const childStats = countDescendants(child.id);
+        totalCollections += childStats.collections;
+        totalNotes += childStats.notes;
+      }
+
+      return { collections: totalCollections, notes: totalNotes };
+    };
+
+    if (!selectedCollectionId) return { collections: 0, notes: 0 };
+
+    const current = collections.find((c) => c.id === selectedCollectionId);
+    const descendants = countDescendants(selectedCollectionId);
+
+    return {
+      collections: descendants.collections,
+      notes: (current?.item_count || 0) + descendants.notes,
+    };
+  }, [collections, selectedCollectionId]);
+
   if (!collection) {
     return (
       <div className="flex-1 flex items-center justify-center text-slate-400 dark:text-slate-500">
@@ -346,7 +500,7 @@ export function CollectionPage() {
           <div className="flex items-center justify-center py-12">
             <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : collectionItems.length === 0 ? (
+        ) : !hasContent ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <BookOpen className="w-12 h-12 text-slate-500 dark:text-slate-600 mb-4" />
             <p className="text-slate-500 dark:text-slate-400 mb-4">
@@ -372,19 +526,20 @@ export function CollectionPage() {
             onDragEnd={handleDragEnd}
           >
             <SortableContext
-              items={collectionItems.map((item) => item.id)}
+              items={mixedItems.map((item) => item.sortKey)}
               strategy={rectSortingStrategy}
             >
               <div className="p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                  {collectionItems.map((item) => (
-                    <SortableCard
-                      key={item.id}
+                  {mixedItems.map((item) => (
+                    <SortableMixedCard
+                      key={item.sortKey}
                       item={item}
                       onOpenNote={handleOpenNote}
-                      onDelete={setNoteToDelete}
+                      onOpenCollection={handleOpenChildCollection}
+                      onDeleteNote={setNoteToDelete}
                       isSelecting={batchSelection.isSelecting}
-                      isSelected={batchSelection.selectedNoteIds.has(item.note_id)}
+                      isSelected={item.type === "note" && batchSelection.selectedNoteIds.has(item.data.note_id)}
                       onToggleSelect={toggleNoteSelection}
                     />
                   ))}
@@ -449,7 +604,17 @@ export function CollectionPage() {
               确定要删除整个合集吗?
             </h3>
             <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">
-              确定要永久删除合集「{collection.name}」吗？此操作会移除合集中的所有内容，且无法撤销。
+              确定要永久删除合集「{collection.name}」吗？
+              {(deleteStats.collections > 0 || deleteStats.notes > 0) && (
+                <>
+                  此合集包含
+                  {deleteStats.collections > 0 && ` ${deleteStats.collections} 个子合集`}
+                  {deleteStats.collections > 0 && deleteStats.notes > 0 && "、"}
+                  {deleteStats.notes > 0 && ` ${deleteStats.notes} 篇笔记`}
+                  ，
+                </>
+              )}
+              此操作无法撤销。
             </p>
             <div className="mt-6 flex justify-end gap-3">
               <button
