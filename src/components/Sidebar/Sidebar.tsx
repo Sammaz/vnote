@@ -412,8 +412,8 @@ export function Sidebar() {
             </span>
           </div>
 
-          <div className="space-y-0.5">
-            {filteredNotes.slice(0, 10).map((note) => (
+          <div className="space-y-0.5 overflow-y-auto scrollbar-hide max-h-[calc(100vh-400px)]">
+            {filteredNotes.map((note) => (
               <NoteItem key={note.id} note={note} />
             ))}
           </div>
