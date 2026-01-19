@@ -1503,10 +1503,9 @@ pub async fn generate_note(
         eprintln!("[笔记生成] 建议问题生成完成: note_id={}", request.note_id);
     }
 
-    // 通知任务队列：任务完成
-    if let Err(e) = crate::init_task_queue::complete_init_task(app.clone(), request.note_id).await {
-        eprintln!("[笔记生成] 通知任务队列失败: {}", e);
-    }
+    // 注意：不再在这里调用 complete_init_task
+    // 因为自动初始化流程还包括高光笔记和闪记卡的生成
+    // 任务完成的通知由前端在整个流程结束后统一调用
 
     Ok(())
 }

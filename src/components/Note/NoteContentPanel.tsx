@@ -144,7 +144,7 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
 
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   // 任务队列 hook
-  const { submitTask, isNoteInQueue, getNoteQueuePosition, isNoteWaiting, onTaskReady } = useInitTaskQueue();
+  const { submitTask, completeTask, isNoteInQueue, getNoteQueuePosition, isNoteWaiting, onTaskReady } = useInitTaskQueue();
 
   const [activeTab, setActiveTab] = useState<TabId>("summary");
   const [activeGroup, setActiveGroup] = useState<TabGroupId>("summary");
@@ -508,6 +508,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const hasFullSummary = note.full_summary || globalState.completedTabs.has("full_summary") || globalState.completedTabs.has("FullSummary");
     const hasNoDetailedReading = !note.detailed_reading;
 
+    // 如果当前正在生成中（包括自动初始化流程或章节生成），不再触发
+    if (globalState.isGenerating || globalState.isGeneratingChapters || chapterIsGenerating) {
+      return;
+    }
+
     if (hasFullSummary && hasNoDetailedReading && chapterGridRef.current) {
       // 延迟一点确保 ChapterGrid 完全渲染
       setTimeout(() => {
@@ -516,7 +521,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         }
       }, 300);
     }
-  }, [activeTab, note.id]);
+  }, [activeTab, note.id, chapterIsGenerating]);
 
   // 视觉化总结页面直接复用原文细读的字幕优化结果
   // 不再自动触发字幕优化，用户需要先在原文细读页面开启"字幕优化"
@@ -821,16 +826,19 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   }, [autoScroll, activeTab, chapterData]);
 
   // 开始生成笔记（一键生成全文总结，使用默认配置）
-  const handleGenerate = async () => {
+  // skipCheck: 跳过重复生成检查（用于自动初始化流程，因为状态已经预先设置）
+  const handleGenerate = async (skipCheck = false) => {
     if (!note.model_id) {
       message.warning("请先选择AI模型");
       return;
     }
 
-    // 检查是否已经在生成中
-    const currentState = getNoteGenerationState(note.id);
-    if (currentState.isGenerating) {
-      return;
+    // 检查是否已经在生成中（除非明确跳过检查）
+    if (!skipCheck) {
+      const currentState = getNoteGenerationState(note.id);
+      if (currentState.isGenerating) {
+        return;
+      }
     }
 
     try {
@@ -925,8 +933,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       // 提交到任务队列
       submitTask(note.id).then((result) => {
         if (result.status === "Running") {
-          // 立即执行
-          handleGenerate();
+          // 立即执行（跳过重复检查，因为状态已预先设置）
+          handleGenerate(true);
         } else {
           // 排队等待，不执行
           console.log(`[NoteContentPanel] 笔记 ${note.id} 在队列中等待，位置: ${result.position}`);
@@ -951,8 +959,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const unregister = onTaskReady((readyNoteId) => {
       if (readyNoteId === note.id) {
         console.log(`[NoteContentPanel] 笔记 ${note.id} 任务就绪，开始生成`);
-        // 任务就绪，开始生成
-        handleGenerate();
+        // 任务就绪，开始生成（跳过重复检查）
+        handleGenerate(true);
       }
     });
 
@@ -1389,6 +1397,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 直接调用后端 API 生成高光笔记（用于自动生成流程，不需要切换标签页）
   const generateHighlightsDirectly = useCallback(async () => {
+    // 防止重复生成
+    if (highlightIsGenerating) {
+      console.log("[generateHighlightsDirectly] 已在生成中，跳过");
+      return;
+    }
+
     const effectiveModelId = currentModelId || note.model_id;
     if (!effectiveModelId || !note.subtitle_path) {
       console.error("[generateHighlightsDirectly] 缺少必要参数");
@@ -1428,7 +1442,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       console.error("[generateHighlightsDirectly] 生成失败:", error);
       setHighlightIsGenerating(false);
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 用于存储 triggerVisualSummaryOptimizationSilent 的 ref，避免循环依赖
   const triggerVisualSummaryOptimizationSilentRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -1589,11 +1603,19 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 直接调用后端 API 生成闪记卡（用于自动生成流程，不需要切换标签页）
   const generateFlashcardsDirectly = useCallback(async () => {
+    // 防止重复生成
+    if (flashcardIsGenerating) {
+      console.log("[generateFlashcardsDirectly] 已在生成中，跳过");
+      return;
+    }
+
     const effectiveModelId = currentModelId || note.model_id;
     if (!effectiveModelId || !note.subtitle_path) {
       console.error("[generateFlashcardsDirectly] 缺少必要参数");
       // 结束自动生成流程
       setInitialAutoGeneration(note.id, false);
+      // 通知任务队列：任务完成（即使缺少参数也要通知）
+      completeTask(note.id).catch(console.error);
       return;
     }
 
@@ -1615,6 +1637,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               setFlashcardIsGenerating(false);
               // 结束自动生成流程
               setInitialAutoGeneration(note.id, false);
+              // 通知任务队列：整个自动初始化流程完成
+              console.log(`[generateFlashcardsDirectly] 自动初始化流程完成，通知任务队列: note_id=${note.id}`);
+              completeTask(note.id).catch(console.error);
               unlisten();
               break;
             case "Error":
@@ -1623,6 +1648,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               setFlashcardIsGenerating(false);
               // 结束自动生成流程
               setInitialAutoGeneration(note.id, false);
+              // 通知任务队列：任务完成（即使失败也要通知，让下一个任务继续）
+              console.log(`[generateFlashcardsDirectly] 生成失败/中止，通知任务队列: note_id=${note.id}`);
+              completeTask(note.id).catch(console.error);
               unlisten();
               break;
           }
@@ -1641,8 +1669,10 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setFlashcardIsGenerating(false);
       // 结束自动生成流程
       setInitialAutoGeneration(note.id, false);
+      // 通知任务队列：任务完成（即使失败也要通知）
+      completeTask(note.id).catch(console.error);
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete, completeTask, flashcardIsGenerating]);
 
   // 更新 generateFlashcardsDirectly ref
   useEffect(() => {
@@ -1823,7 +1853,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       message.error(`生成失败: ${error}`);
       setHighlightIsGenerating(false);
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 章节生成完成后的回调 - 触发高光笔记生成（自动生成流程）
   const handleChapterGenerationComplete = useCallback(() => {

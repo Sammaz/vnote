@@ -98,6 +98,12 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
 
   // 生成章节
   const handleGenerateChapters = async () => {
+    // 防止重复生成
+    if (generating) {
+      console.log("[ChapterGrid] 已在生成中，跳过");
+      return;
+    }
+
     if (!modelId || !subtitlePath) {
       return;
     }
