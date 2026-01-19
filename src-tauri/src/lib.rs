@@ -1246,6 +1246,11 @@ fn update_collection(collection: Collection) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn update_collections_order(collection_ids: Vec<i64>) -> Result<(), String> {
+    get_db().update_collections_order(&collection_ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn delete_collection(id: i64) -> Result<(), String> {
     get_db().delete_collection(id).map_err(|e| e.to_string())
 }
@@ -1414,6 +1419,7 @@ pub fn run() {
             get_collection,
             create_collection,
             update_collection,
+            update_collections_order,
             delete_collection,
             add_note_to_collection,
             remove_note_from_collection,

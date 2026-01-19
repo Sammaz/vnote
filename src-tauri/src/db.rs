@@ -138,6 +138,7 @@ pub struct Collection {
     pub parent_id: Option<i64>,
     pub sort_order: i32,
     pub item_count: i32,  // 查询时计算
+    pub cover_image: Option<String>,  // 封面图片路径
     pub created_at: String,
     pub updated_at: String,
 }
@@ -492,6 +493,7 @@ impl Database {
                 description TEXT,
                 parent_id INTEGER,
                 sort_order INTEGER NOT NULL DEFAULT 0,
+                cover_image TEXT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 FOREIGN KEY (parent_id) REFERENCES collections(id) ON DELETE CASCADE
@@ -523,6 +525,20 @@ impl Database {
             "CREATE INDEX IF NOT EXISTS idx_collection_items_note ON collection_items(note_id)",
             [],
         )?;
+
+        // Migration: Add cover_image column to collections if not exists
+        let has_cover_image: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('collections') WHERE name='cover_image'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_cover_image {
+            conn.execute(
+                "ALTER TABLE collections ADD COLUMN cover_image TEXT",
+                [],
+            )?;
+        }
 
         Ok(())
     }
@@ -1368,7 +1384,7 @@ impl Database {
     pub fn get_all_collections(&self) -> SqliteResult<Vec<Collection>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.created_at, c.updated_at,
+            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.cover_image, c.created_at, c.updated_at,
                     (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
              FROM collections c
              ORDER BY c.sort_order, c.created_at"
@@ -1381,9 +1397,10 @@ impl Database {
                 description: row.get(2)?,
                 parent_id: row.get(3)?,
                 sort_order: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-                item_count: row.get(7)?,
+                cover_image: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                item_count: row.get(8)?,
             })
         })?;
 
@@ -1393,7 +1410,7 @@ impl Database {
     pub fn get_collection_by_id(&self, id: i64) -> SqliteResult<Option<Collection>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.created_at, c.updated_at,
+            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.cover_image, c.created_at, c.updated_at,
                     (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
              FROM collections c
              WHERE c.id = ?1"
@@ -1406,9 +1423,10 @@ impl Database {
                 description: row.get(2)?,
                 parent_id: row.get(3)?,
                 sort_order: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-                item_count: row.get(7)?,
+                cover_image: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                item_count: row.get(8)?,
             })
         });
 
@@ -1446,16 +1464,28 @@ impl Database {
     pub fn update_collection(&self, collection: &Collection) -> SqliteResult<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "UPDATE collections SET name = ?1, description = ?2, parent_id = ?3, sort_order = ?4,
-             updated_at = datetime('now', 'localtime') WHERE id = ?5",
+            "UPDATE collections SET name = ?1, description = ?2, parent_id = ?3, sort_order = ?4, cover_image = ?5,
+             updated_at = datetime('now', 'localtime') WHERE id = ?6",
             rusqlite::params![
                 collection.name,
                 collection.description,
                 collection.parent_id,
                 collection.sort_order,
+                collection.cover_image,
                 collection.id
             ],
         )?;
+        Ok(())
+    }
+
+    pub fn update_collections_order(&self, collection_ids: &[i64]) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        for (index, id) in collection_ids.iter().enumerate() {
+            conn.execute(
+                "UPDATE collections SET sort_order = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
+                rusqlite::params![index as i32, id],
+            )?;
+        }
         Ok(())
     }
 
@@ -1539,7 +1569,7 @@ impl Database {
     pub fn get_collections_for_note(&self, note_id: i64) -> SqliteResult<Vec<Collection>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.created_at, c.updated_at,
+            "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.cover_image, c.created_at, c.updated_at,
                     (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
              FROM collections c
              INNER JOIN collection_items ci ON c.id = ci.collection_id
@@ -1554,9 +1584,10 @@ impl Database {
                 description: row.get(2)?,
                 parent_id: row.get(3)?,
                 sort_order: row.get(4)?,
-                created_at: row.get(5)?,
-                updated_at: row.get(6)?,
-                item_count: row.get(7)?,
+                cover_image: row.get(5)?,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                item_count: row.get(8)?,
             })
         })?;
 

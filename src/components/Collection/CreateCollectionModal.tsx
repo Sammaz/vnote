@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { X, FolderPlus, ListPlus } from "lucide-react";
+import { X, FolderPlus, ListPlus, Image } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import type { Collection } from "../../types";
@@ -20,6 +22,7 @@ export function CreateCollectionModal({
   const [mode, setMode] = useState<"create" | "addTo">("create");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [coverImage, setCoverImage] = useState<string | null>(null);
   const [parentCollectionId, setParentCollectionId] = useState<number | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +34,27 @@ export function CreateCollectionModal({
     if (editingCollection) {
       setName(editingCollection.name);
       setDescription(editingCollection.description || "");
+      setCoverImage(editingCollection.cover_image || null);
     }
   }, [editingCollection]);
+
+  const handleSelectCover = async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif"] }],
+      });
+      if (selected) {
+        setCoverImage(selected as string);
+      }
+    } catch (err) {
+      console.error("Failed to select cover image:", err);
+    }
+  };
+
+  const handleRemoveCover = () => {
+    setCoverImage(null);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,6 +78,7 @@ export function CreateCollectionModal({
           ...editingCollection,
           name: name.trim(),
           description: description.trim() || null,
+          cover_image: coverImage,
         });
       } else {
         // 创建新合集，如果是 addTo 模式则设置 parent_id
@@ -201,6 +224,45 @@ export function CreateCollectionModal({
                   "placeholder:text-slate-400 dark:placeholder:text-neutral-500"
                 )}
               />
+            </div>
+
+            {/* 封面图片 */}
+            <div className="flex items-start gap-4">
+              <label className="w-12 flex-shrink-0 text-sm text-slate-600 dark:text-neutral-400 pt-2.5">
+                封面
+              </label>
+              <div className="flex-1">
+                {coverImage ? (
+                  <div className="relative inline-block">
+                    <img
+                      src={convertFileSrc(coverImage)}
+                      alt="封面预览"
+                      className="w-24 h-24 object-cover rounded-lg border border-slate-200 dark:border-neutral-700"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleRemoveCover}
+                      className="absolute -top-2 -right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSelectCover}
+                    className={cn(
+                      "flex items-center gap-2 px-3 py-2 rounded-md border border-dashed transition-colors cursor-pointer",
+                      "border-slate-300 dark:border-neutral-600",
+                      "text-slate-500 dark:text-neutral-400 text-sm",
+                      "hover:border-blue-400 hover:text-blue-500 dark:hover:border-blue-500 dark:hover:text-blue-400"
+                    )}
+                  >
+                    <Image className="w-4 h-4" />
+                    选择封面图片
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* 错误提示 */}

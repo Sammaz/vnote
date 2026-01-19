@@ -50,6 +50,17 @@ interface AppContextType {
   addNoteToCollection: (collectionId: number, noteId: number) => Promise<void>;
   removeNoteFromCollection: (collectionId: number, noteId: number) => Promise<void>;
   notesInCollections: Set<number>;
+  updateCollectionsOrder: (collectionIds: number[]) => Promise<void>;
+
+  // 批量操作
+  batchSelection: { isSelecting: boolean; selectedNoteIds: Set<number> };
+  setBatchSelecting: (isSelecting: boolean) => void;
+  toggleNoteSelection: (noteId: number) => void;
+  selectAllNotes: (noteIds: number[]) => void;
+  clearSelection: () => void;
+  batchRemoveFromCollection: (collectionId: number, noteIds: number[]) => Promise<void>;
+  batchMoveToCollection: (fromCollectionId: number, toCollectionId: number, noteIds: number[]) => Promise<void>;
+  batchDeleteNotes: (noteIds: number[]) => Promise<void>;
 
   // 上传状态
   uploadedVideo: UploadedFile | null;
@@ -109,6 +120,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedCollectionId, setSelectedCollectionId] = useState<number | null>(null);
   const [expandedCollections, setExpandedCollections] = useState<Set<number>>(new Set());
   const [notesInCollections, setNotesInCollections] = useState<Set<number>>(new Set());
+
+  // 批量操作状态
+  const [batchSelection, setBatchSelection] = useState<{ isSelecting: boolean; selectedNoteIds: Set<number> }>({
+    isSelecting: false,
+    selectedNoteIds: new Set(),
+  });
 
   // 上传状态
   const [uploadedVideo, setUploadedVideo] = useState<UploadedFile | null>(null);
@@ -405,6 +422,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await refreshNotesInCollections();
   }, [refreshCollections]);
 
+  // 更新合集排序
+  const updateCollectionsOrder = useCallback(async (collectionIds: number[]): Promise<void> => {
+    await invoke("update_collections_order", { collectionIds });
+    await refreshCollections();
+  }, [refreshCollections]);
+
+  // 批量操作方法
+  const setBatchSelecting = useCallback((isSelecting: boolean) => {
+    setBatchSelection(prev => ({
+      isSelecting,
+      selectedNoteIds: isSelecting ? prev.selectedNoteIds : new Set(),
+    }));
+  }, []);
+
+  const toggleNoteSelection = useCallback((noteId: number) => {
+    setBatchSelection(prev => {
+      const newSelected = new Set(prev.selectedNoteIds);
+      if (newSelected.has(noteId)) {
+        newSelected.delete(noteId);
+      } else {
+        newSelected.add(noteId);
+      }
+      return { ...prev, selectedNoteIds: newSelected };
+    });
+  }, []);
+
+  const selectAllNotes = useCallback((noteIds: number[]) => {
+    setBatchSelection(prev => ({
+      ...prev,
+      selectedNoteIds: new Set(noteIds),
+    }));
+  }, []);
+
+  const clearSelection = useCallback(() => {
+    setBatchSelection(prev => ({
+      ...prev,
+      selectedNoteIds: new Set(),
+    }));
+  }, []);
+
+  const batchRemoveFromCollection = useCallback(async (collectionId: number, noteIds: number[]): Promise<void> => {
+    for (const noteId of noteIds) {
+      await invoke("remove_note_from_collection", { collectionId, noteId });
+    }
+    await refreshCollections();
+    await refreshNotesInCollections();
+    clearSelection();
+  }, [refreshCollections, refreshNotesInCollections, clearSelection]);
+
+  const batchMoveToCollection = useCallback(async (fromCollectionId: number, toCollectionId: number, noteIds: number[]): Promise<void> => {
+    for (const noteId of noteIds) {
+      await invoke("remove_note_from_collection", { collectionId: fromCollectionId, noteId });
+      await invoke("add_note_to_collection", { collectionId: toCollectionId, noteId });
+    }
+    await refreshCollections();
+    await refreshNotesInCollections();
+    clearSelection();
+  }, [refreshCollections, refreshNotesInCollections, clearSelection]);
+
+  const batchDeleteNotes = useCallback(async (noteIds: number[]): Promise<void> => {
+    for (const noteId of noteIds) {
+      await invoke("delete_note", { id: noteId });
+    }
+    await refreshNotes();
+    await refreshCollections();
+    await refreshNotesInCollections();
+    clearSelection();
+  }, [refreshNotes, refreshCollections, refreshNotesInCollections, clearSelection]);
+
   // 初始加载
   useEffect(() => {
     refreshAiConfigs();
@@ -468,6 +554,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addNoteToCollection: addNoteToCollectionFn,
     removeNoteFromCollection: removeNoteFromCollectionFn,
     notesInCollections,
+    updateCollectionsOrder,
+    // 批量操作
+    batchSelection,
+    setBatchSelecting,
+    toggleNoteSelection,
+    selectAllNotes,
+    clearSelection,
+    batchRemoveFromCollection,
+    batchMoveToCollection,
+    batchDeleteNotes,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,
@@ -518,6 +614,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     addNoteToCollectionFn,
     removeNoteFromCollectionFn,
     notesInCollections,
+    updateCollectionsOrder,
+    // 批量操作
+    batchSelection,
+    setBatchSelecting,
+    toggleNoteSelection,
+    selectAllNotes,
+    clearSelection,
+    batchRemoveFromCollection,
+    batchMoveToCollection,
+    batchDeleteNotes,
     uploadedVideo,
     uploadedSubtitle,
     setUploadedVideo,

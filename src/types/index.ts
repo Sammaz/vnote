@@ -87,6 +87,7 @@ export interface Collection {
   parent_id: number | null;
   sort_order: number;
   item_count: number;  // 查询时计算
+  cover_image: string | null;  // 封面图片文件名
   created_at: string;
   updated_at: string;
 }

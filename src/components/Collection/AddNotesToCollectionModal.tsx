@@ -17,16 +17,15 @@ export function AddNotesToCollectionModal({
   onClose,
   onSuccess,
 }: AddNotesToCollectionModalProps) {
-  const { notes, addNoteToCollection } = useApp();
+  const { notes, addNoteToCollection, notesInCollections } = useApp();
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<number>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // 过滤出未添加到合集的笔记
+  // 过滤出未添加到任何合集的笔记
   const availableNotes = useMemo(() => {
-    const existingSet = new Set(existingNoteIds);
-    return notes.filter((note) => !existingSet.has(note.id));
-  }, [notes, existingNoteIds]);
+    return notes.filter((note) => !notesInCollections.has(note.id));
+  }, [notes, notesInCollections]);
 
   // 搜索过滤
   const filteredNotes = useMemo(() => {
@@ -90,7 +89,7 @@ export function AddNotesToCollectionModal({
             添加笔记到合集
           </h2>
           <p className="mt-1 text-sm text-slate-500 dark:text-neutral-400">
-            选择要添加到合集的笔记，已添加的笔记不会显示在列表中
+            选择要添加到合集的笔记
           </p>
 
           {/* 搜索框 */}
@@ -120,7 +119,7 @@ export function AddNotesToCollectionModal({
               <Video className="w-12 h-12 text-slate-300 dark:text-neutral-600 mb-4" />
               <p className="text-slate-500 dark:text-neutral-400">
                 {availableNotes.length === 0
-                  ? "所有笔记都已添加到此合集"
+                  ? "没有可添加的笔记"
                   : "没有找到匹配的笔记"}
               </p>
             </div>
