@@ -241,7 +241,7 @@ function CollectionNoteItem({
 
             {showCollectionSubmenu && (
               <div className="absolute left-full top-0 ml-1 w-48 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg max-h-64 overflow-y-auto">
-                {collections.filter((c) => c.parent_id === null && c.id !== currentCollectionId).map((col) => (
+                {collections.filter((c) => c.parent_id === null).map((col) => (
                   <CollectionTreeMenuItem
                     key={col.id}
                     collection={col}
