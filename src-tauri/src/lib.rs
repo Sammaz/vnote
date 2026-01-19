@@ -15,6 +15,8 @@ use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequ
 use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::image::Image;
@@ -29,6 +31,20 @@ pub static DATABASE: OnceLock<Database> = OnceLock::new();
 
 fn get_db() -> &'static Database {
     DATABASE.get().expect("Database not initialized")
+}
+
+/// Create ffmpeg command with hidden console window on Windows
+#[cfg(windows)]
+fn ffmpeg_command() -> Command {
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let mut cmd = Command::new("ffmpeg");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(not(windows))]
+fn ffmpeg_command() -> Command {
+    Command::new("ffmpeg")
 }
 
 /// Parse asset URLs from Markdown content
@@ -563,7 +579,7 @@ async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Res
     }
 
     // Run ffmpeg to remux (copy streams, no re-encoding)
-    let output = Command::new("ffmpeg")
+    let output = ffmpeg_command()
         .args([
             "-y",                           // Overwrite output
             "-i", &ts_path.to_string_lossy(), // Input file
@@ -585,7 +601,7 @@ async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Res
 /// Check if ffmpeg is available
 #[tauri::command]
 fn check_ffmpeg() -> Result<bool, String> {
-    match Command::new("ffmpeg").arg("-version").output() {
+    match ffmpeg_command().arg("-version").output() {
         Ok(output) => Ok(output.status.success()),
         Err(_) => Ok(false),
     }
@@ -1220,7 +1236,7 @@ async fn capture_video_frame(
     // -i: input file
     // -frames:v 1: capture only 1 frame
     // -q:v 2: high quality JPEG (lower number = higher quality, range 2-31)
-    let output = Command::new("ffmpeg")
+    let output = ffmpeg_command()
         .args([
             "-y",                              // Overwrite output file if exists
             "-ss", &format!("{:.3}", timestamp), // Seek to timestamp (in seconds)

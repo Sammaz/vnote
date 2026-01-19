@@ -11,9 +11,29 @@ use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
+
+// ============================================================================
+// 辅助函数
+// ============================================================================
+
+/// Create ffmpeg command with hidden console window on Windows
+#[cfg(windows)]
+fn ffmpeg_command() -> Command {
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let mut cmd = Command::new("ffmpeg");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(not(windows))]
+fn ffmpeg_command() -> Command {
+    Command::new("ffmpeg")
+}
 
 // ============================================================================
 // 数据结构定义
@@ -430,7 +450,7 @@ pub fn capture_video_screenshot(
     let seconds = (timestamp % 60.0) as f64;
     let time_str = format!("{:02}:{:02}:{:06.3}", hours, minutes, seconds);
 
-    let output = Command::new("ffmpeg")
+    let output = ffmpeg_command()
         .args([
             "-y",                          // 覆盖输出
             "-ss", &time_str,              // 时间戳位置
