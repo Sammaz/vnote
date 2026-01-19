@@ -10,7 +10,6 @@ import {
   Download,
   Edit3,
   RefreshCw,
-  CheckCircle2,
   X,
   ChevronDown,
   Check,
@@ -50,7 +49,6 @@ import {
   setNoteGenerationState,
   attemptedAutoGenerateNoteIds,
   activeListeners,
-  setChapterGenerating,
   setInitialAutoGeneration,
   isInitialAutoGeneration,
   registerActiveGenerationId,
@@ -146,7 +144,7 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
 
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   // 任务队列 hook
-  const { submitTask, completeTask, isNoteInQueue, getNoteQueuePosition, isNoteWaiting, onTaskReady } = useInitTaskQueue();
+  const { submitTask, completeTask, getNoteQueuePosition, isNoteWaiting, onTaskReady } = useInitTaskQueue();
 
   const [activeTab, setActiveTab] = useState<TabId>("summary");
   const [activeGroup, setActiveGroup] = useState<TabGroupId>("summary");
@@ -472,7 +470,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [isGenerating, setIsGenerating] = useState(() => syncStateFromGlobal().isGenerating);
   const [, setRegeneratingTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().regeneratingTabs) as Set<TabType>);
   const [progress, setProgress] = useState<{ current: number; total: number; message: string }>(() => ({ ...syncStateFromGlobal().progress }));
-  const [completedTabs, setCompletedTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().completedTabs) as Set<TabType>);
+  const [, setCompletedTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().completedTabs) as Set<TabType>);
   const [failedTabs, setFailedTabs] = useState<Map<TabType, string>>(() => new Map(syncStateFromGlobal().failedTabs) as Map<TabType, string>);
   const [generationId, setGenerationId] = useState<string | null>(() => syncStateFromGlobal().generationId);
 
@@ -1050,13 +1048,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return false;
   };
 
-  // 检查标签页是否已完成生成
-  const isTabCompleted = (tabId: TabId): boolean => {
-    const tabType = TAB_TYPE_MAPPING[tabId];
-    if (!tabType) return false;
-    return completedTabs.has(tabType);
-  };
-
   // 检查标签页是否生成失败
   const getTabError = (tabId: TabId): string | undefined => {
     const tabType = TAB_TYPE_MAPPING[tabId];
@@ -1297,82 +1288,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
     setIsVisualEditMode(!isVisualEditMode);
   };
-
-  // 直接调用后端 API 生成章节（用于自动生成流程，不需要切换标签页）
-  const generateChaptersDirectly = useCallback(async () => {
-    const effectiveModelId = currentModelId || note.model_id;
-    if (!effectiveModelId || !note.subtitle_path) {
-      console.error("[generateChaptersDirectly] 缺少必要参数");
-      return;
-    }
-
-    try {
-      setChapterGenerating(note.id, true);
-      const generationId = crypto.randomUUID();
-
-      // 注册 generation_id 以便删除时可以中止
-      registerActiveGenerationId(note.id, generationId);
-
-      // 设置事件监听
-      const unlisten = await listen<ChapterGenerationEvent>(
-        `chapter-generation-${generationId}`,
-        (event) => {
-          const data = event.payload;
-          switch (data.status) {
-            case "Completed":
-              // 保存到数据库
-              invoke("save_chapters_to_note", {
-                noteId: note.id,
-                chapterData: data.chapter_data,
-              }).then(() => {
-                setChapterGenerating(note.id, false);
-                // 注销 generation_id
-                unregisterActiveGenerationId(note.id, generationId);
-                onGenerationComplete?.();
-                // 如果是自动生成流程，继续生成高光笔记
-                if (isInitialAutoGeneration(note.id)) {
-                  generateHighlightsDirectlyRef.current?.();
-                }
-              });
-              unlisten();
-              break;
-            case "Error":
-            case "Aborted":
-              setChapterGenerating(note.id, false);
-              // 注销 generation_id
-              unregisterActiveGenerationId(note.id, generationId);
-              // 如果是自动生成流程，通知任务队列任务完成
-              if (isInitialAutoGeneration(note.id)) {
-                setInitialAutoGeneration(note.id, false);
-                console.log(`[generateChaptersDirectly] 任务失败/中止，通知任务队列: note_id=${note.id}`);
-                completeTask(note.id).catch(console.error);
-              }
-              unlisten();
-              break;
-          }
-        }
-      );
-
-      // 开始生成
-      await invoke("generate_chapters", {
-        generationId,
-        noteId: note.id,
-        modelId: effectiveModelId,
-        videoPath: note.video_path,
-        subtitlePath: note.subtitle_path,
-        captureScreenshots: true,
-      });
-    } catch (error) {
-      console.error("[generateChaptersDirectly] 生成失败:", error);
-      setChapterGenerating(note.id, false);
-      // 如果是自动生成流程，通知任务队列任务完成
-      if (isInitialAutoGeneration(note.id)) {
-        setInitialAutoGeneration(note.id, false);
-        console.log(`[generateChaptersDirectly] 生成失败，通知任务队列: note_id=${note.id}`);
-        completeTask(note.id).catch(console.error);
-      }
-    }
-  }, [note.id, note.video_path, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete, completeTask]);
 
   // 辅助模式下使用截图标记生成章节
   const generateChaptersWithMarkers = useCallback(async (markers: ScreenshotMarker[]) => {
@@ -2351,7 +2266,6 @@ Video subtitles content:`;
           <div className="flex flex-wrap flex-1">
             {TAB_GROUPS.find(g => g.id === activeGroup)?.tabs.map((tab) => {
               const generating = isTabGenerating(tab.id);
-              const completed = isTabCompleted(tab.id);
               const error = getTabError(tab.id);
 
             return (
