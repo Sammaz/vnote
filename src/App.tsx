@@ -1,16 +1,32 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { Sun, Moon, Minus, Square, X, Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import SettingsPage from "./SettingsPage";
 import { AppProvider, useApp } from "./context/AppContext";
 import { InitTaskQueueProvider } from "./context/InitTaskQueueContext";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
-import { NotePage } from "./components/Note";
-import { CollectionPage } from "./components/Collection";
-import { RecentNotesPage, SearchPage } from "./components/Notes";
 import "./index.css";
+
+// 代码分割 - 懒加载大型组件
+const NotePage = lazy(() => import("./components/Note").then(m => ({ default: m.NotePage })));
+const CollectionPage = lazy(() => import("./components/Collection").then(m => ({ default: m.CollectionPage })));
+const RecentNotesPage = lazy(() => import("./components/Notes").then(m => ({ default: m.RecentNotesPage })));
+const SearchPage = lazy(() => import("./components/Notes").then(m => ({ default: m.SearchPage })));
+
+// 加载占位组件
+function PageLoadingFallback() {
+  return (
+    <div className="flex-1 flex items-center justify-center bg-slate-50 dark:bg-vnote-bg">
+      <div className="flex flex-col items-center gap-3">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+        <span className="text-sm text-slate-500 dark:text-slate-400">加载中...</span>
+      </div>
+    </div>
+  );
+}
 
 function AppContent() {
   const { currentView, setCurrentView } = useApp();
@@ -81,14 +97,19 @@ function AppContent() {
     } catch {}
   };
 
-  const toggleTheme = async () => {
-    const newTheme = theme === "dark" ? "light" : "dark";
+  // 统一的主题应用函数 - 消除代码重复
+  const applyTheme = (newTheme: "light" | "dark") => {
     if (newTheme === "dark") {
       document.documentElement.classList.add("dark");
     } else {
       document.documentElement.classList.remove("dark");
     }
     setTheme(newTheme);
+  };
+
+  const toggleTheme = async () => {
+    const newTheme = theme === "dark" ? "light" : "dark";
+    applyTheme(newTheme);
     try {
       await invoke("set_theme", { theme: newTheme });
     } catch (error) {
@@ -97,12 +118,7 @@ function AppContent() {
   };
 
   const handleThemeChange = (newTheme: "light" | "dark") => {
-    if (newTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-    setTheme(newTheme);
+    applyTheme(newTheme);
   };
 
   const isSettingsView = currentView === "settings";
@@ -194,13 +210,21 @@ function AppContent() {
               onClose={handleSettingsClose}
             />
           ) : currentView === "note" ? (
-            <NotePage />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <NotePage />
+            </Suspense>
           ) : currentView === "collection" ? (
-            <CollectionPage />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <CollectionPage />
+            </Suspense>
           ) : currentView === "recent-notes" ? (
-            <RecentNotesPage />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <RecentNotesPage />
+            </Suspense>
           ) : currentView === "search" ? (
-            <SearchPage />
+            <Suspense fallback={<PageLoadingFallback />}>
+              <SearchPage />
+            </Suspense>
           ) : (
             <HomePage />
           )}
@@ -212,9 +236,11 @@ function AppContent() {
 
 function App() {
   return (
-    <AppProvider>
-      <InitTaskQueueWrapper />
-    </AppProvider>
+    <ErrorBoundary>
+      <AppProvider>
+        <InitTaskQueueWrapper />
+      </AppProvider>
+    </ErrorBoundary>
   );
 }
 

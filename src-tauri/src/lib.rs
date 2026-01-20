@@ -535,9 +535,35 @@ fn set_setting(key: String, value: String) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Validate and sanitize file path to prevent path traversal attacks
+/// Returns the canonicalized path if valid, or an error if the path is suspicious
+fn validate_file_path(path: &str) -> Result<std::path::PathBuf, String> {
+    let path = std::path::Path::new(path);
+
+    // Check for obvious path traversal patterns
+    let path_str = path.to_string_lossy();
+    if path_str.contains("..") {
+        return Err("Path traversal detected: '..' is not allowed".to_string());
+    }
+
+    // Canonicalize the path to resolve any symbolic links and get absolute path
+    let canonical = path.canonicalize()
+        .map_err(|e| format!("Invalid path '{}': {}", path_str, e))?;
+
+    // Ensure the path exists and is a file (not a directory)
+    if !canonical.is_file() {
+        return Err(format!("Path '{}' is not a valid file", path_str));
+    }
+
+    Ok(canonical)
+}
+
 #[tauri::command]
 fn read_file_content(path: String) -> Result<String, String> {
-    std::fs::read_to_string(&path)
+    // Validate the path first to prevent path traversal attacks
+    let validated_path = validate_file_path(&path)?;
+
+    std::fs::read_to_string(&validated_path)
         .map_err(|e| format!("Failed to read file '{}': {}", path, e))
 }
 
@@ -1437,6 +1463,58 @@ fn get_all_notes_in_collections() -> Result<Vec<i64>, String> {
     get_db().get_all_notes_in_collections().map_err(|e| e.to_string())
 }
 
+// ============================================================================
+// 批量操作 API - 性能优化
+// ============================================================================
+
+/// 批量从合集中移除笔记
+#[tauri::command]
+fn batch_remove_notes_from_collection(collection_id: i64, note_ids: Vec<i64>) -> Result<(), String> {
+    let db = get_db();
+    for note_id in note_ids {
+        db.remove_note_from_collection(collection_id, note_id)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 批量移动笔记到另一个合集
+#[tauri::command]
+fn batch_move_notes_to_collection(
+    from_collection_id: i64,
+    to_collection_id: i64,
+    note_ids: Vec<i64>,
+) -> Result<(), String> {
+    let db = get_db();
+    for note_id in note_ids {
+        db.remove_note_from_collection(from_collection_id, note_id)
+            .map_err(|e| e.to_string())?;
+        db.add_note_to_collection(to_collection_id, note_id)
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 批量删除笔记
+#[tauri::command]
+fn batch_delete_notes(app: AppHandle, note_ids: Vec<i64>) -> Result<(), String> {
+    let db = get_db();
+
+    for id in note_ids {
+        // 删除笔记缓存目录
+        if let Ok(cache_dir) = app.path().app_cache_dir() {
+            let note_cache_dir = cache_dir.join("notes").join(id.to_string());
+            if note_cache_dir.exists() {
+                let _ = std::fs::remove_dir_all(&note_cache_dir);
+            }
+        }
+
+        db.delete_note(id).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1581,6 +1659,10 @@ pub fn run() {
             update_collection_mixed_order,
             get_collections_for_note,
             get_all_notes_in_collections,
+            // Batch operations (性能优化)
+            batch_remove_notes_from_collection,
+            batch_move_notes_to_collection,
+            batch_delete_notes,
             // Init task queue commands
             init_task_queue::submit_init_task,
             init_task_queue::complete_init_task_command,

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import { createPortal } from "react-dom";
 import {
   Sparkles,
@@ -28,7 +28,8 @@ interface NavItemProps {
   onClick?: () => void;
 }
 
-function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
+// 导航项组件 - 使用 memo 优化避免不必要的重渲染
+const NavItem = memo(function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
   return (
     <button
       onClick={onClick}
@@ -44,10 +45,10 @@ function NavItem({ icon, label, active, collapsed, onClick }: NavItemProps) {
       {!collapsed && <span className="text-sm font-medium truncate">{label}</span>}
     </button>
   );
-}
+});
 
-// 树形合集菜单项组件
-function CollectionTreeMenuItem({
+// 树形合集菜单项组件 - 使用 memo 优化
+const CollectionTreeMenuItem = memo(function CollectionTreeMenuItem({
   collection,
   allCollections,
   level,
@@ -108,14 +109,15 @@ function CollectionTreeMenuItem({
       )}
     </div>
   );
-}
+});
 
 // 笔记记录列表项
 interface NoteItemProps {
   note: Note;
 }
 
-function NoteItem({ note }: NoteItemProps) {
+// 笔记记录列表项 - 使用 memo 优化避免不必要的重渲染
+const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
   const { setSelectedNoteId, setCurrentView, selectedNoteId, deleteNote, setSelectedFolder, collections, addNoteToCollection } = useApp();
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -292,7 +294,7 @@ function NoteItem({ note }: NoteItemProps) {
       )}
     </>
   );
-}
+});
 
 export function Sidebar() {
   const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, notesInCollections } = useApp();

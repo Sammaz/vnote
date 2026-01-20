@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { ArrowLeft, Search, FileText, X } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
-import { NoteCard } from "./NoteCard";
+import { VirtualizedNoteGrid } from "./VirtualizedNoteGrid";
 
 export function SearchPage() {
   const { notes, setSelectedNoteId, setCurrentView } = useApp();
@@ -100,42 +100,33 @@ export function SearchPage() {
       {/* 分隔线 */}
       <div className="mx-6 border-t border-slate-200 dark:border-neutral-700" />
 
-      {/* 内容列表 */}
-      <div className="flex-1 overflow-y-auto">
-        {filteredNotes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-neutral-800 flex items-center justify-center mb-4">
-              <FileText className="w-8 h-8 text-slate-400 dark:text-slate-600" />
-            </div>
-            {searchQuery.trim() ? (
-              <>
-                <p className="text-slate-600 dark:text-slate-300 font-medium mb-1">
-                  未找到匹配的笔记
-                </p>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  尝试使用其他关键词搜索
-                </p>
-              </>
-            ) : (
-              <p className="text-slate-500 dark:text-slate-400">
-                还没有任何笔记
+      {/* 内容列表 - 使用虚拟滚动 */}
+      {filteredNotes.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-neutral-800 flex items-center justify-center mb-4">
+            <FileText className="w-8 h-8 text-slate-400 dark:text-slate-600" />
+          </div>
+          {searchQuery.trim() ? (
+            <>
+              <p className="text-slate-600 dark:text-slate-300 font-medium mb-1">
+                未找到匹配的笔记
               </p>
-            )}
-          </div>
-        ) : (
-          <div className="p-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {filteredNotes.map((note) => (
-                <NoteCard
-                  key={note.id}
-                  note={note}
-                  onClick={() => handleOpenNote(note.id)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                尝试使用其他关键词搜索
+              </p>
+            </>
+          ) : (
+            <p className="text-slate-500 dark:text-slate-400">
+              还没有任何笔记
+            </p>
+          )}
+        </div>
+      ) : (
+        <VirtualizedNoteGrid
+          notes={filteredNotes}
+          onNoteClick={handleOpenNote}
+        />
+      )}
     </div>
   );
 }

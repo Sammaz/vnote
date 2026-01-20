@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Video, Calendar } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
@@ -49,7 +50,8 @@ function getFirstChapterScreenshot(detailedReading: string | ChapterData | null)
   return null;
 }
 
-export function NoteCard({ note, onClick }: NoteCardProps) {
+// NoteCard 组件 - 使用 memo 优化避免不必要的重渲染
+export const NoteCard = memo(function NoteCard({ note, onClick }: NoteCardProps) {
   // 获取第一章截图路径
   const screenshotPath = getFirstChapterScreenshot(note.detailed_reading);
   const thumbnailUrl = screenshotPath ? convertFileSrc(screenshotPath) : null;
@@ -103,4 +105,4 @@ export function NoteCard({ note, onClick }: NoteCardProps) {
       </div>
     </div>
   );
-}
+});

@@ -1,23 +1,33 @@
-import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import type { Folder, Note, AppStats, AiConfig, SidebarState, UploadedFile, CreateNoteRequest, VideoToolbarSettings, PromptConfig, Collection, CreateCollectionRequest, ViewType } from "../types";
-import { getNoteGenerationState, getActiveGenerationIds, clearNoteGenerationState } from "../utils/noteGenerationState";
+/**
+ * AppContext - 统一的应用状态管理
+ *
+ * 架构优化说明：
+ * 1. 内部使用拆分的 Provider 来管理不同领域的状态
+ * 2. 对外通过 useApp() 提供统一的 API，保持向后兼容
+ * 3. 各个拆分的 Context 可以独立使用，避免不必要的重渲染
+ */
+import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { SidebarProvider, useSidebar } from "./SidebarContext";
+import { SettingsProvider, useSettings } from "./SettingsContext";
+import { UploadProvider, useUpload } from "./UploadContext";
+import { CollectionsProvider, useCollections } from "./CollectionsContext";
+import { NotesProvider, useNotes } from "./NotesContext";
+import type {
+  Folder,
+  Note,
+  AppStats,
+  AiConfig,
+  SidebarState,
+  UploadedFile,
+  CreateNoteRequest,
+  VideoToolbarSettings,
+  PromptConfig,
+  Collection,
+  CreateCollectionRequest,
+  ViewType,
+} from "../types";
 
-// Mock 数据 - 文件夹暂时保留
-const mockFolders: Folder[] = [
-  { id: "1", name: "学习笔记", parentId: null, createdAt: new Date(), updatedAt: new Date() },
-  { id: "2", name: "工作资料", parentId: null, createdAt: new Date(), updatedAt: new Date() },
-  { id: "3", name: "React 教程", parentId: "1", createdAt: new Date(), updatedAt: new Date() },
-];
-
-const mockStats: AppStats = {
-  totalNotes: 0,
-  totalWatchTime: 0,
-  notesThisWeek: 0,
-  lastActivityDate: new Date(),
-};
-
-// Context 状态类型
+// Context 状态类型 - 保持原有 API
 interface AppContextType {
   // 侧边栏状态
   sidebar: SidebarState;
@@ -101,606 +111,132 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | null>(null);
 
-export function AppProvider({ children }: { children: ReactNode }) {
-  // 侧边栏
-  const [sidebar, setSidebar] = useState<SidebarState>({
-    collapsed: false,
-    selectedFolderId: null,
-    expandedFolders: new Set(["1"]),
-  });
+/**
+ * 内部组件：组合所有拆分的 Context 值
+ */
+function AppContextBridge({ children }: { children: ReactNode }) {
+  // 从各个拆分的 Context 获取状态和方法
+  const sidebarContext = useSidebar();
+  const settingsContext = useSettings();
+  const uploadContext = useUpload();
+  const collectionsContext = useCollections();
+  const notesContext = useNotes();
 
-  // 数据（文件夹暂用 mock）
-  const [folders] = useState<Folder[]>(mockFolders);
-  const [notes, setNotes] = useState<Note[]>([]);
-  const [stats, setStats] = useState<AppStats>(mockStats);
-  const [aiConfigs, setAiConfigs] = useState<AiConfig[]>([]);
-  const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
-
-  // 合集（资源库）状态
-  const [collections, setCollections] = useState<Collection[]>([]);
-  const [selectedCollectionId, setSelectedCollectionId] = useState<number | null>(null);
-  const [expandedCollections, setExpandedCollections] = useState<Set<number>>(new Set());
-  const [notesInCollections, setNotesInCollections] = useState<Set<number>>(new Set());
-
-  // 批量操作状态
-  const [batchSelection, setBatchSelection] = useState<{ isSelecting: boolean; selectedNoteIds: Set<number> }>({
-    isSelecting: false,
-    selectedNoteIds: new Set(),
-  });
-
-  // 上传状态
-  const [uploadedVideo, setUploadedVideo] = useState<UploadedFile | null>(null);
-  const [uploadedSubtitle, setUploadedSubtitle] = useState<UploadedFile | null>(null);
-
-  // AI 模型
-  const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
-
-  // 生成状态
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  // 搜索
-  const [searchQuery, setSearchQuery] = useState("");
-
-  // 视图
-  const [currentView, setCurrentView] = useState<ViewType>("home");
-  const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
-
-  // 视频工具栏设置（全局）
-  const [toolbarSettings, setToolbarSettings] = useState<VideoToolbarSettings>({
-    videoVisible: true,
-    autoPlay: false,
-    layoutSwapped: false,
-    layoutPanelWidth: 40, // 默认左侧占 40%
-    captionsEnabled: true, // 默认字幕开启
-  });
-
-  // 加载工具栏设置
-  const loadToolbarSettings = useCallback(async () => {
-    try {
-      const [videoVisible, autoPlay, layoutSwapped, layoutPanelWidth, captionsEnabled] = await Promise.all([
-        invoke<string | null>("get_setting", { key: "toolbar_video_visible" }),
-        invoke<string | null>("get_setting", { key: "toolbar_auto_play" }),
-        invoke<string | null>("get_setting", { key: "toolbar_layout_swapped" }),
-        invoke<string | null>("get_setting", { key: "toolbar_layout_panel_width" }),
-        invoke<string | null>("get_setting", { key: "toolbar_captions_enabled" }),
-      ]);
-
-      setToolbarSettings({
-        videoVisible: videoVisible !== "false",
-        autoPlay: autoPlay === "true",
-        layoutSwapped: layoutSwapped === "true",
-        layoutPanelWidth: layoutPanelWidth ? Math.max(30, Math.min(70, parseInt(layoutPanelWidth, 10))) : 40,
-        captionsEnabled: captionsEnabled !== "false", // 默认开启
-      });
-    } catch (error) {
-      console.error("Failed to load toolbar settings:", error);
-    }
-  }, []);
-
-  // 保存单个设置
-  const saveSetting = useCallback(async (key: string, value: string) => {
-    try {
-      await invoke("set_setting", { key, value });
-    } catch (error) {
-      console.error(`Failed to save setting ${key}:`, error);
-    }
-  }, []);
-
-  // 设置视频可见性
-  const setVideoVisible = useCallback((visible: boolean) => {
-    setToolbarSettings(prev => ({ ...prev, videoVisible: visible }));
-    saveSetting("toolbar_video_visible", visible.toString());
-  }, [saveSetting]);
-
-  // 设置自动播放
-  const setAutoPlay = useCallback((autoPlay: boolean) => {
-    setToolbarSettings(prev => ({ ...prev, autoPlay }));
-    saveSetting("toolbar_auto_play", autoPlay.toString());
-  }, [saveSetting]);
-
-  // 设置布局交换
-  const setLayoutSwapped = useCallback((swapped: boolean) => {
-    setToolbarSettings(prev => ({ ...prev, layoutSwapped: swapped }));
-    saveSetting("toolbar_layout_swapped", swapped.toString());
-  }, [saveSetting]);
-
-  // 设置布局面板宽度
-  const setLayoutPanelWidth = useCallback((width: number) => {
-    const clampedWidth = Math.max(30, Math.min(70, width));
-    setToolbarSettings(prev => ({ ...prev, layoutPanelWidth: clampedWidth }));
-    saveSetting("toolbar_layout_panel_width", clampedWidth.toString());
-  }, [saveSetting]);
-
-  // 设置字幕开关状态
-  const setCaptionsEnabled = useCallback((enabled: boolean) => {
-    setToolbarSettings(prev => ({ ...prev, captionsEnabled: enabled }));
-    saveSetting("toolbar_captions_enabled", enabled.toString());
-  }, [saveSetting]);
-
-  // 加载累计观看时长
-  const loadTotalWatchTime = useCallback(async () => {
-    try {
-      const value = await invoke<string | null>("get_setting", { key: "total_watch_time" });
-      if (value) {
-        const totalWatchTime = parseInt(value, 10) || 0;
-        setStats(prev => ({ ...prev, totalWatchTime }));
-      }
-    } catch (error) {
-      console.error("Failed to load total watch time:", error);
-    }
-  }, []);
-
-  // 增加观看时长
-  const addWatchTime = useCallback((seconds: number) => {
-    if (seconds <= 0) return;
-    setStats(prev => {
-      const newTotal = prev.totalWatchTime + Math.floor(seconds);
-      // 异步保存到数据库
-      invoke("set_setting", { key: "total_watch_time", value: newTotal.toString() }).catch(err => {
-        console.error("Failed to save watch time:", err);
-      });
-      return { ...prev, totalWatchTime: newTotal };
-    });
-  }, []);
-
-  // 加载笔记列表
-  const refreshNotes = useCallback(async () => {
-    try {
-      const notesList = await invoke<Note[]>("get_notes");
-      setNotes(notesList);
-
-      // 计算本周新增笔记数
-      const now = new Date();
-      const startOfWeek = new Date(now);
-      startOfWeek.setDate(now.getDate() - now.getDay()); // 本周日
-      startOfWeek.setHours(0, 0, 0, 0);
-
-      const notesThisWeek = notesList.filter(note => {
-        const createdAt = new Date(note.created_at);
-        return createdAt >= startOfWeek;
-      }).length;
-
-      // 计算最近活跃时间（最新的 updated_at）
-      let lastActivityDate: Date | null = null;
-      if (notesList.length > 0) {
-        const latestNote = notesList.reduce((latest, note) => {
-          const noteDate = new Date(note.updated_at);
-          const latestDate = new Date(latest.updated_at);
-          return noteDate > latestDate ? note : latest;
-        });
-        lastActivityDate = new Date(latestNote.updated_at);
-      }
-
-      // 更新统计
-      setStats(prev => ({
-        ...prev,
-        totalNotes: notesList.length,
-        notesThisWeek,
-        lastActivityDate,
-      }));
-    } catch (error) {
-      console.error("Failed to load notes:", error);
-    }
-  }, []);
-
-  // 创建笔记
-  const createNote = useCallback(async (req: CreateNoteRequest): Promise<Note> => {
-    const newNote = await invoke<Note>("create_note", { req });
-    // 刷新笔记列表
-    await refreshNotes();
-    return newNote;
-  }, [refreshNotes]);
-
-  // 删除笔记
-  const deleteNote = useCallback(async (id: number): Promise<void> => {
-    // 获取笔记所有活动的生成任务
-    const activeIds = getActiveGenerationIds(id);
-    const generationState = getNoteGenerationState(id);
-
-    // 中止所有活动的生成任务
-    for (const generationId of activeIds) {
-      try {
-        // 尝试中止各种类型的生成任务
-        await Promise.allSettled([
-          invoke("abort_note_generation", { generationId }),
-          invoke("abort_chapter_generation", { generationId }),
-          invoke("abort_highlight_generation", { generationId }),
-          invoke("abort_flashcard_generation", { generationId }),
-        ]);
-        console.log(`[deleteNote] 中止任务: generationId=${generationId}`);
-      } catch (error) {
-        console.error(`[deleteNote] 中止任务失败: generationId=${generationId}`, error);
-      }
-    }
-
-    // 如果有主生成任务但不在 activeIds 中，也尝试中止
-    if (generationState.generationId && !activeIds.includes(generationState.generationId)) {
-      try {
-        await invoke("abort_note_generation", { generationId: generationState.generationId });
-      } catch (error) {
-        console.error("中止主生成任务失败:", error);
-      }
-    }
-
-    // 检查是否是当前正在执行的任务，如果是则通知队列完成
-    try {
-      const position = await invoke<number | null>("get_note_queue_position", { noteId: id });
-      if (position === 0) {
-        console.log(`[deleteNote] 笔记 ${id} 是当前正在执行的任务，通知队列完成`);
-        await invoke("complete_init_task_command", { noteId: id });
-      }
-    } catch (error) {
-      console.error("检查队列位置失败:", error);
-    }
-
-    // 从队列中移除任务（处理等待中的任务）
-    try {
-      await invoke("remove_note_from_queue", { noteId: id });
-    } catch (error) {
-      console.error("从队列中移除笔记失败:", error);
-    }
-
-    // 清理前端状态
-    clearNoteGenerationState(id);
-
-    await invoke("delete_note", { id });
-    // 刷新笔记列表
-    await refreshNotes();
-    // 如果删除的是当前选中的笔记，清除选中状态并返回首页
-    if (selectedNoteId === id) {
-      setSelectedNoteId(null);
-      setCurrentView("home");
-    }
-    // 清除文件夹选中状态
-    setSidebar((prev) => ({ ...prev, selectedFolderId: null }));
-  }, [refreshNotes, selectedNoteId]);
-
-  // 更新笔记的建议问题（用于局部刷新）
-  const updateNoteSuggestedQuestions = useCallback((noteId: number, questions: string[]) => {
-    setNotes(prev => prev.map(note =>
-      note.id === noteId
-        ? { ...note, suggested_questions: JSON.stringify(questions) }
-        : note
-    ));
-  }, []);
-
-  // 加载 AI 配置
-  const refreshAiConfigs = useCallback(async () => {
-    try {
-      const configs = await invoke<AiConfig[]>("get_ai_configs");
-      setAiConfigs(configs);
-
-      // 如果当前没有选中模型，选择默认模型或第一个
-      if (configs.length > 0) {
-        const defaultConfig = configs.find(c => c.is_default);
-        if (defaultConfig) {
-          setSelectedModelId(defaultConfig.id);
-        } else if (!selectedModelId || !configs.find(c => c.id === selectedModelId)) {
-          setSelectedModelId(configs[0].id);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to load AI configs:", error);
-    }
-  }, [selectedModelId]);
-
-  // 加载提示词配置
-  const refreshPromptConfigs = useCallback(async () => {
-    try {
-      const configs = await invoke<PromptConfig[]>("get_prompt_configs");
-      setPromptConfigs(configs);
-    } catch (error) {
-      console.error("Failed to load prompt configs:", error);
-    }
-  }, []);
-
-  // 加载合集列表
-  const refreshCollections = useCallback(async () => {
-    try {
-      const collectionsList = await invoke<Collection[]>("get_collections");
-      setCollections(collectionsList);
-    } catch (error) {
-      console.error("Failed to load collections:", error);
-    }
-  }, []);
-
-  // 加载已添加到合集的笔记ID列表
-  const refreshNotesInCollections = useCallback(async () => {
-    try {
-      const noteIds = await invoke<number[]>("get_all_notes_in_collections");
-      setNotesInCollections(new Set(noteIds));
-    } catch (error) {
-      console.error("Failed to load notes in collections:", error);
-    }
-  }, []);
-
-  // 创建合集
-  const createCollectionFn = useCallback(async (req: CreateCollectionRequest): Promise<Collection> => {
-    const newCollection = await invoke<Collection>("create_collection", { req });
-    await refreshCollections();
-    return newCollection;
-  }, [refreshCollections]);
-
-  // 更新合集
-  const updateCollectionFn = useCallback(async (collection: Collection): Promise<void> => {
-    await invoke("update_collection", { collection });
-    await refreshCollections();
-  }, [refreshCollections]);
-
-  // 删除合集
-  const deleteCollectionFn = useCallback(async (id: number): Promise<void> => {
-    await invoke("delete_collection", { id });
-    await refreshCollections();
-    // 如果删除的是当前选中的合集，清除选中状态并返回首页
-    if (selectedCollectionId === id) {
-      setSelectedCollectionId(null);
-      setCurrentView("home");
-    }
-  }, [refreshCollections, selectedCollectionId]);
-
-  // 设置选中的合集
-  const setSelectedCollection = useCallback((id: number | null) => {
-    setSelectedCollectionId(id);
-    // 选择合集时，清除文件夹和笔记选中状态
-    setSidebar((prev) => ({ ...prev, selectedFolderId: null }));
-    setSelectedNoteId(null);
-  }, []);
-
-  // 切换合集展开状态
-  const toggleCollectionExpand = useCallback((id: number) => {
-    setExpandedCollections((prev) => {
-      const newExpanded = new Set(prev);
-      if (newExpanded.has(id)) {
-        newExpanded.delete(id);
-      } else {
-        newExpanded.add(id);
-      }
-      return newExpanded;
-    });
-  }, []);
-
-  // 添加笔记到合集
-  const addNoteToCollectionFn = useCallback(async (collectionId: number, noteId: number): Promise<void> => {
-    await invoke("add_note_to_collection", { collectionId, noteId });
-    await refreshCollections();
-    await refreshNotesInCollections();
-  }, [refreshCollections]);
-
-  // 从合集移除笔记
-  const removeNoteFromCollectionFn = useCallback(async (collectionId: number, noteId: number): Promise<void> => {
-    await invoke("remove_note_from_collection", { collectionId, noteId });
-    await refreshCollections();
-    await refreshNotesInCollections();
-  }, [refreshCollections]);
-
-  // 更新合集排序
-  const updateCollectionsOrder = useCallback(async (collectionIds: number[]): Promise<void> => {
-    await invoke("update_collections_order", { collectionIds });
-    await refreshCollections();
-  }, [refreshCollections]);
-
-  // 批量操作方法
-  const setBatchSelecting = useCallback((isSelecting: boolean) => {
-    setBatchSelection(prev => ({
-      isSelecting,
-      selectedNoteIds: isSelecting ? prev.selectedNoteIds : new Set(),
-    }));
-  }, []);
-
-  const toggleNoteSelection = useCallback((noteId: number) => {
-    setBatchSelection(prev => {
-      const newSelected = new Set(prev.selectedNoteIds);
-      if (newSelected.has(noteId)) {
-        newSelected.delete(noteId);
-      } else {
-        newSelected.add(noteId);
-      }
-      return { ...prev, selectedNoteIds: newSelected };
-    });
-  }, []);
-
-  const selectAllNotes = useCallback((noteIds: number[]) => {
-    setBatchSelection(prev => ({
-      ...prev,
-      selectedNoteIds: new Set(noteIds),
-    }));
-  }, []);
-
-  const clearSelection = useCallback(() => {
-    setBatchSelection(prev => ({
-      ...prev,
-      selectedNoteIds: new Set(),
-    }));
-  }, []);
-
-  const batchRemoveFromCollection = useCallback(async (collectionId: number, noteIds: number[]): Promise<void> => {
-    for (const noteId of noteIds) {
-      await invoke("remove_note_from_collection", { collectionId, noteId });
-    }
-    await refreshCollections();
-    await refreshNotesInCollections();
-    clearSelection();
-  }, [refreshCollections, refreshNotesInCollections, clearSelection]);
-
-  const batchMoveToCollection = useCallback(async (fromCollectionId: number, toCollectionId: number, noteIds: number[]): Promise<void> => {
-    for (const noteId of noteIds) {
-      await invoke("remove_note_from_collection", { collectionId: fromCollectionId, noteId });
-      await invoke("add_note_to_collection", { collectionId: toCollectionId, noteId });
-    }
-    await refreshCollections();
-    await refreshNotesInCollections();
-    clearSelection();
-  }, [refreshCollections, refreshNotesInCollections, clearSelection]);
-
-  const batchDeleteNotes = useCallback(async (noteIds: number[]): Promise<void> => {
-    for (const noteId of noteIds) {
-      await invoke("delete_note", { id: noteId });
-    }
-    await refreshNotes();
-    await refreshCollections();
-    await refreshNotesInCollections();
-    clearSelection();
-  }, [refreshNotes, refreshCollections, refreshNotesInCollections, clearSelection]);
-
-  // 初始加载
-  useEffect(() => {
-    refreshAiConfigs();
-    refreshPromptConfigs();
-    refreshNotes();
-    refreshCollections();
-    refreshNotesInCollections();
-    loadToolbarSettings();
-    loadTotalWatchTime();
-  }, []);
-
-  // 侧边栏操作
-  const toggleSidebar = useCallback(() => {
-    setSidebar((prev) => ({ ...prev, collapsed: !prev.collapsed }));
-  }, []);
-
-  const setSelectedFolder = useCallback((folderId: string | null) => {
-    setSidebar((prev) => ({ ...prev, selectedFolderId: folderId }));
-    // 选择文件夹时，清除笔记选中状态
-    setSelectedNoteId(null);
-  }, []);
-
-  const toggleFolderExpand = useCallback((folderId: string) => {
-    setSidebar((prev) => {
-      const newExpanded = new Set(prev.expandedFolders);
-      if (newExpanded.has(folderId)) {
-        newExpanded.delete(folderId);
-      } else {
-        newExpanded.add(folderId);
-      }
-      return { ...prev, expandedFolders: newExpanded };
-    });
-  }, []);
-
+  // 组合所有值 - 使用 useMemo 优化
   const value: AppContextType = useMemo(() => ({
-    sidebar,
-    toggleSidebar,
-    setSelectedFolder,
-    toggleFolderExpand,
-    folders,
-    notes,
-    stats,
-    aiConfigs,
-    promptConfigs,
-    refreshAiConfigs,
-    refreshPromptConfigs,
-    refreshNotes,
-    createNote,
-    deleteNote,
-    updateNoteSuggestedQuestions,
-    // 合集（资源库）
-    collections,
-    selectedCollectionId,
-    expandedCollections,
-    refreshCollections,
-    createCollection: createCollectionFn,
-    updateCollection: updateCollectionFn,
-    deleteCollection: deleteCollectionFn,
-    setSelectedCollection,
-    toggleCollectionExpand,
-    addNoteToCollection: addNoteToCollectionFn,
-    removeNoteFromCollection: removeNoteFromCollectionFn,
-    notesInCollections,
-    updateCollectionsOrder,
+    // 侧边栏
+    sidebar: sidebarContext.sidebar,
+    toggleSidebar: sidebarContext.toggleSidebar,
+    setSelectedFolder: sidebarContext.setSelectedFolder,
+    toggleFolderExpand: sidebarContext.toggleFolderExpand,
+    folders: sidebarContext.folders,
+
+    // 笔记
+    notes: notesContext.notes,
+    refreshNotes: notesContext.refreshNotes,
+    createNote: notesContext.createNote,
+    deleteNote: notesContext.deleteNote,
+    updateNoteSuggestedQuestions: notesContext.updateNoteSuggestedQuestions,
+    isGenerating: notesContext.isGenerating,
+    setIsGenerating: notesContext.setIsGenerating,
+    searchQuery: notesContext.searchQuery,
+    setSearchQuery: notesContext.setSearchQuery,
+    currentView: notesContext.currentView,
+    setCurrentView: notesContext.setCurrentView,
+    selectedNoteId: notesContext.selectedNoteId,
+    setSelectedNoteId: notesContext.setSelectedNoteId,
+
+    // 设置
+    stats: settingsContext.stats,
+    aiConfigs: settingsContext.aiConfigs,
+    promptConfigs: settingsContext.promptConfigs,
+    refreshAiConfigs: settingsContext.refreshAiConfigs,
+    refreshPromptConfigs: settingsContext.refreshPromptConfigs,
+    selectedModelId: settingsContext.selectedModelId,
+    setSelectedModelId: settingsContext.setSelectedModelId,
+    toolbarSettings: settingsContext.toolbarSettings,
+    setVideoVisible: settingsContext.setVideoVisible,
+    setAutoPlay: settingsContext.setAutoPlay,
+    setLayoutSwapped: settingsContext.setLayoutSwapped,
+    setLayoutPanelWidth: settingsContext.setLayoutPanelWidth,
+    setCaptionsEnabled: settingsContext.setCaptionsEnabled,
+    addWatchTime: settingsContext.addWatchTime,
+
+    // 上传
+    uploadedVideo: uploadContext.uploadedVideo,
+    uploadedSubtitle: uploadContext.uploadedSubtitle,
+    setUploadedVideo: uploadContext.setUploadedVideo,
+    setUploadedSubtitle: uploadContext.setUploadedSubtitle,
+
+    // 合集
+    collections: collectionsContext.collections,
+    selectedCollectionId: collectionsContext.selectedCollectionId,
+    expandedCollections: collectionsContext.expandedCollections,
+    notesInCollections: collectionsContext.notesInCollections,
+    refreshCollections: collectionsContext.refreshCollections,
+    createCollection: collectionsContext.createCollection,
+    updateCollection: collectionsContext.updateCollection,
+    deleteCollection: collectionsContext.deleteCollection,
+    setSelectedCollection: collectionsContext.setSelectedCollection,
+    toggleCollectionExpand: collectionsContext.toggleCollectionExpand,
+    addNoteToCollection: collectionsContext.addNoteToCollection,
+    removeNoteFromCollection: collectionsContext.removeNoteFromCollection,
+    updateCollectionsOrder: collectionsContext.updateCollectionsOrder,
+
     // 批量操作
-    batchSelection,
-    setBatchSelecting,
-    toggleNoteSelection,
-    selectAllNotes,
-    clearSelection,
-    batchRemoveFromCollection,
-    batchMoveToCollection,
-    batchDeleteNotes,
-    uploadedVideo,
-    uploadedSubtitle,
-    setUploadedVideo,
-    setUploadedSubtitle,
-    selectedModelId,
-    setSelectedModelId,
-    isGenerating,
-    setIsGenerating,
-    searchQuery,
-    setSearchQuery,
-    currentView,
-    setCurrentView,
-    selectedNoteId,
-    setSelectedNoteId,
-    toolbarSettings,
-    setVideoVisible,
-    setAutoPlay,
-    setLayoutSwapped,
-    setLayoutPanelWidth,
-    setCaptionsEnabled,
-    addWatchTime,
+    batchSelection: collectionsContext.batchSelection,
+    setBatchSelecting: collectionsContext.setBatchSelecting,
+    toggleNoteSelection: collectionsContext.toggleNoteSelection,
+    selectAllNotes: collectionsContext.selectAllNotes,
+    clearSelection: collectionsContext.clearSelection,
+    batchRemoveFromCollection: collectionsContext.batchRemoveFromCollection,
+    batchMoveToCollection: collectionsContext.batchMoveToCollection,
+    batchDeleteNotes: async (noteIds: number[]) => {
+      await collectionsContext.batchDeleteNotes(noteIds, notesContext.refreshNotes);
+    },
   }), [
-    sidebar,
-    toggleSidebar,
-    setSelectedFolder,
-    toggleFolderExpand,
-    folders,
-    notes,
-    stats,
-    aiConfigs,
-    promptConfigs,
-    refreshAiConfigs,
-    refreshPromptConfigs,
-    refreshNotes,
-    createNote,
-    deleteNote,
-    updateNoteSuggestedQuestions,
-    // 合集（资源库）
-    collections,
-    selectedCollectionId,
-    expandedCollections,
-    refreshCollections,
-    createCollectionFn,
-    updateCollectionFn,
-    deleteCollectionFn,
-    setSelectedCollection,
-    toggleCollectionExpand,
-    addNoteToCollectionFn,
-    removeNoteFromCollectionFn,
-    notesInCollections,
-    updateCollectionsOrder,
-    // 批量操作
-    batchSelection,
-    setBatchSelecting,
-    toggleNoteSelection,
-    selectAllNotes,
-    clearSelection,
-    batchRemoveFromCollection,
-    batchMoveToCollection,
-    batchDeleteNotes,
-    uploadedVideo,
-    uploadedSubtitle,
-    setUploadedVideo,
-    setUploadedSubtitle,
-    selectedModelId,
-    setSelectedModelId,
-    isGenerating,
-    setIsGenerating,
-    searchQuery,
-    setSearchQuery,
-    currentView,
-    setCurrentView,
-    selectedNoteId,
-    setSelectedNoteId,
-    toolbarSettings,
-    setVideoVisible,
-    setAutoPlay,
-    setLayoutSwapped,
-    setLayoutPanelWidth,
-    setCaptionsEnabled,
-    addWatchTime,
+    sidebarContext,
+    settingsContext,
+    uploadContext,
+    collectionsContext,
+    notesContext,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
 
+/**
+ * AppProvider - 嵌套所有拆分的 Provider
+ * 顺序很重要：外层 Provider 可以被内层访问
+ */
+export function AppProvider({ children }: { children: ReactNode }) {
+  return (
+    <SidebarProvider>
+      <SettingsProvider>
+        <UploadProvider>
+          <NotesProvider>
+            <CollectionsProvider>
+              <AppContextBridge>
+                {children}
+              </AppContextBridge>
+            </CollectionsProvider>
+          </NotesProvider>
+        </UploadProvider>
+      </SettingsProvider>
+    </SidebarProvider>
+  );
+}
+
+/**
+ * useApp - 统一的 hook，保持向后兼容
+ *
+ * 注意：对于性能敏感的组件，建议直接使用拆分的 hooks：
+ * - useSidebar() - 侧边栏状态
+ * - useSettings() - 设置和配置
+ * - useUpload() - 上传状态
+ * - useCollections() - 合集和批量操作
+ * - useNotes() - 笔记数据和视图状态
+ */
 export function useApp() {
   const context = useContext(AppContext);
   if (!context) {
@@ -708,3 +244,10 @@ export function useApp() {
   }
   return context;
 }
+
+// 导出拆分的 hooks，方便组件逐步迁移
+export { useSidebar } from "./SidebarContext";
+export { useSettings } from "./SettingsContext";
+export { useUpload } from "./UploadContext";
+export { useCollections } from "./CollectionsContext";
+export { useNotes } from "./NotesContext";

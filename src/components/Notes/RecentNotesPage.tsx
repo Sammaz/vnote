@@ -1,13 +1,13 @@
 import { ArrowLeft, FileText } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
-import { NoteCard } from "./NoteCard";
+import { VirtualizedNoteGrid } from "./VirtualizedNoteGrid";
 
 export function RecentNotesPage() {
   const { notes, setSelectedNoteId, setCurrentView } = useApp();
 
-  // 取最近 12 条笔记
-  const recentNotes = notes.slice(0, 12);
+  // 显示所有笔记（不再限制12条，虚拟滚动可以处理大量数据）
+  const recentNotes = notes;
 
   const handleOpenNote = (noteId: number) => {
     setSelectedNoteId(noteId);
@@ -40,29 +40,20 @@ export function RecentNotesPage() {
       {/* 分隔线 */}
       <div className="mx-6 border-t border-slate-200 dark:border-neutral-700" />
 
-      {/* 内容列表 */}
-      <div className="flex-1 overflow-y-auto">
-        {recentNotes.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <FileText className="w-12 h-12 text-slate-500 dark:text-slate-600 mb-4" />
-            <p className="text-slate-500 dark:text-slate-400">
-              还没有任何笔记
-            </p>
-          </div>
-        ) : (
-          <div className="p-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-              {recentNotes.map((note) => (
-                <NoteCard
-                  key={note.id}
-                  note={note}
-                  onClick={() => handleOpenNote(note.id)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+      {/* 内容列表 - 使用虚拟滚动 */}
+      {recentNotes.length === 0 ? (
+        <div className="flex-1 flex flex-col items-center justify-center text-center">
+          <FileText className="w-12 h-12 text-slate-500 dark:text-slate-600 mb-4" />
+          <p className="text-slate-500 dark:text-slate-400">
+            还没有任何笔记
+          </p>
+        </div>
+      ) : (
+        <VirtualizedNoteGrid
+          notes={recentNotes}
+          onNoteClick={handleOpenNote}
+        />
+      )}
     </div>
   );
 }
