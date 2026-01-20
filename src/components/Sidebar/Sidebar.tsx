@@ -398,21 +398,24 @@ export function Sidebar() {
 
       {/* 文件夹树 - 仅在展开时显示 */}
       {!collapsed && (
-        <div className="flex-1 overflow-y-auto px-2 pb-4 animate-fade-in">
-          {/* 合集区域 */}
-          <CollectionSection />
+        <div className="flex-1 flex flex-col overflow-hidden px-2 pb-4 animate-fade-in">
+          {/* 合集区域 - 固定高度，不滚动 */}
+          <div className="flex-shrink-0">
+            <CollectionSection />
+          </div>
 
           {/* 分隔线 */}
-          <div className="mx-1 my-3 border-t border-slate-200 dark:border-vnote-border" />
+          <div className="mx-1 my-3 border-t border-slate-200 dark:border-vnote-border flex-shrink-0" />
 
           {/* 笔记记录 */}
-          <div className="flex items-center justify-between px-2 mb-2">
+          <div className="flex items-center justify-between px-2 mb-2 flex-shrink-0">
             <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
               笔记记录
             </span>
           </div>
 
-          <div className="space-y-0.5 overflow-y-auto scrollbar-hide max-h-[calc(100vh-400px)]">
+          {/* 笔记列表 - 独立滚动区域，隐藏滚动条 */}
+          <div className="flex-1 overflow-y-auto scrollbar-hide space-y-0.5">
             {filteredNotes.map((note) => (
               <NoteItem key={note.id} note={note} />
             ))}
