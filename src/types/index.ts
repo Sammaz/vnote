@@ -411,3 +411,79 @@ export type FlashcardGenerationEvent =
   | { status: "Completed"; flashcard_data: FlashcardData }
   | { status: "Error"; error: string }
   | { status: "Aborted" };
+
+// ============================================================================
+// 初始化任务配置类型
+// ============================================================================
+
+// 初始化任务类型标识
+export type InitTaskType =
+  | "full_summary"
+  | "detailed_reading"
+  | "subtitle_optimization"
+  | "highlights"
+  | "suggested_questions"
+  | "flashcards";
+
+// 初始化任务配置
+export interface InitTaskConfig {
+  id: number;
+  task_type: InitTaskType;
+  task_name: string;
+  enabled: boolean;
+  sort_order: number;
+  is_required: boolean;
+  depends_on: string[] | null;
+}
+
+// 更新初始化任务配置请求
+export interface UpdateInitTaskConfigRequest {
+  task_type: string;
+  enabled: boolean;
+  sort_order: number;
+}
+
+// 笔记初始化进度
+export interface NoteInitProgress {
+  id: number;
+  note_id: number;
+  config_snapshot: string;
+  current_task_index: number;
+  overall_status: "pending" | "running" | "completed" | "failed" | "paused";
+  created_at: string;
+  updated_at: string;
+}
+
+// 单个初始化任务状态
+export interface NoteInitTask {
+  id: number;
+  note_id: number;
+  task_type: string;
+  status: "pending" | "running" | "completed" | "failed" | "skipped";
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  progress_current: number;
+  progress_total: number;
+  generation_id: string | null;
+}
+
+// 初始化任务名称映射
+export const INIT_TASK_NAMES: Record<InitTaskType, string> = {
+  full_summary: "全文总结",
+  detailed_reading: "原文细读",
+  subtitle_optimization: "字幕优化",
+  highlights: "高光笔记",
+  suggested_questions: "推荐问题",
+  flashcards: "闪记卡",
+};
+
+// 初始化任务描述映射
+export const INIT_TASK_DESCRIPTIONS: Record<InitTaskType, string> = {
+  full_summary: "生成视频的整体摘要",
+  detailed_reading: "基于字幕生成章节结构",
+  subtitle_optimization: "优化章节字幕文本，去除语气词并重组句子",
+  highlights: "提取视频精彩片段",
+  suggested_questions: "生成建议的问答列表",
+  flashcards: "生成记忆卡片",
+};

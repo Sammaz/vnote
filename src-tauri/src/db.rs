@@ -166,6 +166,13 @@ pub struct Database {
     conn: Mutex<Connection>,
 }
 
+impl Database {
+    /// 获取数据库连接锁（供其他模块使用）
+    pub fn connection(&self) -> std::sync::MutexGuard<'_, Connection> {
+        self.conn.lock().unwrap()
+    }
+}
+
 impl std::fmt::Debug for Database {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Database").finish()
