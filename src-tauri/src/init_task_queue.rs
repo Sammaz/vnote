@@ -212,31 +212,44 @@ pub async fn submit_init_task(app: AppHandle, note_id: i64) -> Result<SubmitResu
 }
 
 /// 标记任务完成（公开函数，供其他模块调用）
-pub async fn complete_init_task(app: AppHandle, note_id: i64) -> Result<(), String> {
+/// 返回 true 表示成功完成，false 表示该笔记不是当前任务
+pub async fn complete_init_task(app: AppHandle, note_id: i64) -> Result<bool, String> {
     let manager = get_queue_manager();
     let next_note_id = manager.task_completed(note_id).await;
 
-    // 发送队列更新事件
+    // 如果 next_note_id 是 None 且当前任务不是该 note_id，说明验证失败
+    // 但由于 task_completed 已经做了验证，这里我们检查是否有实际变化
     let status = manager.get_status().await;
-    let _ = app.emit(
-        "init-queue-updated",
-        QueueUpdatedEvent {
-            current_task_note_id: status.current_task_note_id,
-            waiting_note_ids: status.waiting_note_ids,
-        },
-    );
 
-    // 如果有下一个任务，发送就绪事件
-    if let Some(next_id) = next_note_id {
-        let _ = app.emit("init-task-ready", TaskReadyEvent { note_id: next_id });
+    // 检查是否成功完成（当前任务不再是该 note_id）
+    let was_current_task = status.current_task_note_id != Some(note_id);
+
+    // 只有当确实完成了任务时才发送事件
+    if was_current_task || next_note_id.is_some() {
+        // 发送队列更新事件
+        let _ = app.emit(
+            "init-queue-updated",
+            QueueUpdatedEvent {
+                current_task_note_id: status.current_task_note_id,
+                waiting_note_ids: status.waiting_note_ids,
+            },
+        );
+
+        // 如果有下一个任务，发送就绪事件
+        if let Some(next_id) = next_note_id {
+            let _ = app.emit("init-task-ready", TaskReadyEvent { note_id: next_id });
+        }
+
+        Ok(true)
+    } else {
+        // note_id 不是当前任务，返回 false
+        Ok(false)
     }
-
-    Ok(())
 }
 
 /// Tauri 命令包装器
 #[tauri::command]
-pub async fn complete_init_task_command(app: AppHandle, note_id: i64) -> Result<(), String> {
+pub async fn complete_init_task_command(app: AppHandle, note_id: i64) -> Result<bool, String> {
     complete_init_task(app, note_id).await
 }
 

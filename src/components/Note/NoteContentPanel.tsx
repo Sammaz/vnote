@@ -913,7 +913,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   };
 
-  // 自动生成：当组件挂载且没有全文总结时，提交到任务队列（仅触发一次）
+  // 自动生成：当组件挂载且没有全文总结时，检查队列状态并开始执行
   // 同步执行顺序：1. 全文总结 -> 2. 原文细读（在 AllCompleted 事件中触发）
   useEffect(() => {
     // 如果已经尝试过自动生成，跳过
@@ -949,26 +949,41 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setRegeneratingTabs(new Set(["full_summary"] as TabType[]));
       setProgress({ current: 0, total: 3, message: "准备生成..." });
 
-      // 提交到任务队列
-      submitTask(note.id).then((result) => {
-        if (result.status === "Running") {
-          // 立即执行（跳过重复检查，因为状态已预先设置）
-          handleGenerate(true);
-        } else {
-          // 排队等待，不执行
-          console.log(`[NoteContentPanel] 笔记 ${note.id} 在队列中等待，位置: ${result.position}`);
+      // 检查队列状态并决定是否执行
+      // 注意：由于 GenerateButton 可能已经提交了任务，我们需要调用后端确认状态
+      const checkAndExecute = async () => {
+        try {
+          // 直接调用 submitTask，后端会处理重复提交（返回当前状态）
+          // 这样可以避免 React 状态更新延迟导致的时序问题
+          const result = await submitTask(note.id);
+          console.log(`[NoteContentPanel] 笔记 ${note.id} 队列状态:`, result);
+
+          if (result.status === "Running") {
+            // 是当前任务，立即开始生成
+            console.log(`[NoteContentPanel] 笔记 ${note.id} 是当前任务，开始生成`);
+            handleGenerate(true);
+          } else {
+            // 在队列中等待，等 onTaskReady 事件触发
+            console.log(`[NoteContentPanel] 笔记 ${note.id} 在队列中等待，位置: ${result.position}`);
+          }
+        } catch (error) {
+          console.error("[NoteContentPanel] 检查/提交任务失败:", error);
+          // 失败时重置状态
+          setNoteGenerationState(note.id, {
+            isGenerating: false,
+            generationId: null,
+            regeneratingTabs: new Set(),
+          });
+          setIsGenerating(false);
+          setRegeneratingTabs(new Set());
+          // 从已尝试集合中移除，允许重试
+          attemptedAutoGenerateNoteIds.delete(note.id);
+          // 重置首次自动生成标记
+          setInitialAutoGeneration(note.id, false);
         }
-      }).catch((error) => {
-        console.error("[NoteContentPanel] 提交任务失败:", error);
-        // 失败时重置状态
-        setNoteGenerationState(note.id, {
-          isGenerating: false,
-          generationId: null,
-          regeneratingTabs: new Set(),
-        });
-        setIsGenerating(false);
-        setRegeneratingTabs(new Set());
-      });
+      };
+
+      checkAndExecute();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note.id, note.full_summary, note.model_id]);

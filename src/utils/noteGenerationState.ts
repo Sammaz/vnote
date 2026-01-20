@@ -47,15 +47,31 @@ export function setNoteGenerationState(noteId: number, updates: Partial<NoteGene
 // 清理笔记的生成状态
 export function clearNoteGenerationState(noteId: number) {
   const state = noteGenerationStates.get(noteId);
-  if (state?.generationId) {
-    // 清理事件监听器
-    const unlisten = activeListeners.get(state.generationId);
-    if (unlisten) {
-      unlisten();
-      activeListeners.delete(state.generationId);
+  if (state) {
+    // 清理所有活动的事件监听器（遍历 activeGenerationIds）
+    for (const generationId of state.activeGenerationIds) {
+      const unlisten = activeListeners.get(generationId);
+      if (unlisten) {
+        unlisten();
+        activeListeners.delete(generationId);
+        console.log(`[NoteGenerationState] 清理监听器: generationId=${generationId}`);
+      }
+    }
+    // 也清理主 generationId 的监听器（如果不在 activeGenerationIds 中）
+    if (state.generationId && !state.activeGenerationIds.has(state.generationId)) {
+      const unlisten = activeListeners.get(state.generationId);
+      if (unlisten) {
+        unlisten();
+        activeListeners.delete(state.generationId);
+        console.log(`[NoteGenerationState] 清理主监听器: generationId=${state.generationId}`);
+      }
     }
   }
+  // 清理生成状态
   noteGenerationStates.delete(noteId);
+  // 清理自动生成尝试记录（允许重新触发）
+  attemptedAutoGenerateNoteIds.delete(noteId);
+  console.log(`[NoteGenerationState] 已清理笔记状态: noteId=${noteId}`);
 }
 
 // 判断笔记是否正在生成中

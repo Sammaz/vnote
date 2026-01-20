@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense, useCallback } from "react";
 import { Sun, Moon, Minus, Square, X, Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -246,8 +246,18 @@ function App() {
 
 // 包装组件：提供 InitTaskQueueProvider
 function InitTaskQueueWrapper() {
+  const { setCurrentView, setSelectedNoteId } = useApp();
+
+  // 当任务就绪时自动导航到对应笔记页面
+  // 这样可以确保任务队列中的下一个任务能够自动开始执行
+  const handleTaskReadyNavigate = useCallback((noteId: number) => {
+    console.log("[App] 任务就绪，自动导航到笔记:", noteId);
+    setSelectedNoteId(noteId);
+    setCurrentView("note");
+  }, [setCurrentView, setSelectedNoteId]);
+
   return (
-    <InitTaskQueueProvider>
+    <InitTaskQueueProvider onTaskReadyNavigate={handleTaskReadyNavigate}>
       <AppContent />
     </InitTaskQueueProvider>
   );

@@ -108,17 +108,17 @@ export function InitTaskQueueProvider({ children, onTaskReadyNavigate }: InitTas
     }
   }, []);
 
-  // 完成任务（添加防重复调用检查）
+  // 完成任务（后端负责验证是否为当前任务）
   const completeTask = useCallback(async (noteId: number): Promise<void> => {
     try {
-      // 先检查该笔记是否还是当前任务，避免重复调用
-      const status = await invoke<QueueStatus>("get_init_queue_status");
-      if (status.current_task_note_id !== noteId) {
-        console.log(`[InitTaskQueue] 跳过 completeTask: noteId=${noteId} 不是当前任务 (当前任务=${status.current_task_note_id})`);
-        return;
+      // 直接调用后端完成任务，后端会验证是否为当前任务
+      // 如果不是当前任务，后端会返回 false 但不抛出错误
+      const completed = await invoke<boolean>("complete_init_task_command", { noteId });
+      if (completed) {
+        console.log(`[InitTaskQueue] 任务完成: noteId=${noteId}`);
+      } else {
+        console.log(`[InitTaskQueue] 跳过 completeTask: noteId=${noteId} 不是当前任务`);
       }
-      await invoke("complete_init_task_command", { noteId });
-      console.log(`[InitTaskQueue] 任务完成: noteId=${noteId}`);
     } catch (error) {
       console.error("[InitTaskQueue] 完成任务失败:", error);
       throw error;
@@ -174,6 +174,28 @@ export function InitTaskQueueProvider({ children, onTaskReadyNavigate }: InitTas
   // 初始化时获取队列状态
   useEffect(() => {
     refreshQueueStatus();
+  }, [refreshQueueStatus]);
+
+  // 定期同步队列状态（防止事件丢失导致状态不一致）
+  useEffect(() => {
+    // 每 30 秒同步一次队列状态
+    const syncInterval = setInterval(() => {
+      refreshQueueStatus();
+    }, 30000);
+
+    // 页面可见性变化时刷新状态（用户切换回标签页时）
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        console.log("[InitTaskQueue] 页面可见，刷新队列状态");
+        refreshQueueStatus();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(syncInterval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [refreshQueueStatus]);
 
   // 监听后端事件（只初始化一次，使用 ref 获取最新回调）
