@@ -673,9 +673,11 @@ pub async fn generate_chapters(
     };
 
     // 发送完成事件
-    let _ = app.emit(&event_name, ChapterGenerationEvent::Completed {
+    eprintln!("[章节生成] 准备发送 Completed 事件, event_name={}, 章节数={}", event_name, chapter_data.chapters.len());
+    let emit_result = app.emit(&event_name, ChapterGenerationEvent::Completed {
         chapter_data: chapter_data.clone(),
     });
+    eprintln!("[章节生成] Completed 事件发送结果: {:?}", emit_result);
 
     // 清理
     get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;

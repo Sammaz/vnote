@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { flushSync } from "react-dom";
 import {
   FileText,
   BookOpen,
@@ -44,6 +45,8 @@ import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 import { useInitTaskQueue } from "../../context/InitTaskQueueContext";
+import { useInitTaskConfig } from "../../context/InitTaskConfigContext";
+import { useInitTaskExecutor } from "../../hooks/useInitTaskExecutor";
 import {
   getNoteGenerationState,
   setNoteGenerationState,
@@ -145,6 +148,126 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
   // 任务队列 hook
   const { submitTask, completeTask, getNoteQueuePosition, isNoteWaiting, onTaskReady } = useInitTaskQueue();
+  // 初始化任务配置 hook（保留以备后用）
+  useInitTaskConfig();
+
+  // 初始化任务执行器 hook
+  const taskExecutor = useInitTaskExecutor({
+    noteId: note.id,
+    modelId: note.model_id,
+    videoPath: note.video_path,
+    subtitlePath: note.subtitle_path,
+    onTaskStart: (taskType) => {
+      console.log(`[NoteContentPanel] ★★★ 任务开始: ${taskType} ★★★`);
+      // 更新全局状态，显示生成动画
+      // 使用全局状态而非组件本地状态，确保 UI 能正确响应
+      const state = getNoteGenerationState(note.id);
+      if (taskType === "full_summary") {
+        setNoteGenerationState(note.id, {
+          regeneratingTabs: new Set([...state.regeneratingTabs, "full_summary"]),
+        });
+      } else if (taskType === "detailed_reading") {
+        console.log(`[NoteContentPanel] 设置 isGeneratingChapters = true (全局状态)`);
+        setNoteGenerationState(note.id, {
+          isGeneratingChapters: true,
+        });
+        // 使用 flushSync 强制同步渲染，确保动画立即显示
+        flushSync(() => {
+          setChapterIsGenerating(true);
+        });
+      } else if (taskType === "highlights") {
+        console.log(`[NoteContentPanel] 设置 highlightIsGenerating = true`);
+        flushSync(() => {
+          setHighlightIsGenerating(true);
+        });
+      } else if (taskType === "flashcards") {
+        console.log(`[NoteContentPanel] 设置 flashcardIsGenerating = true`);
+        flushSync(() => {
+          setFlashcardIsGenerating(true);
+        });
+      }
+    },
+    onTaskComplete: (taskType) => {
+      console.log(`[NoteContentPanel] 任务完成: ${taskType}`);
+      // 清除生成状态
+      if (taskType === "full_summary") {
+        const state = getNoteGenerationState(note.id);
+        const newRegenerating = new Set([...state.regeneratingTabs].filter(t => t !== "full_summary"));
+        setNoteGenerationState(note.id, {
+          regeneratingTabs: newRegenerating,
+          completedTabs: new Set([...state.completedTabs, "full_summary"]),
+        });
+      } else if (taskType === "detailed_reading") {
+        setNoteGenerationState(note.id, {
+          isGeneratingChapters: false,
+        });
+        setChapterIsGenerating(false);
+      } else if (taskType === "highlights") {
+        setHighlightIsGenerating(false);
+      } else if (taskType === "flashcards") {
+        setFlashcardIsGenerating(false);
+      } else if (taskType === "subtitle_optimization") {
+        // 字幕优化完成后，从数据库加载优化后的字幕缓存
+        console.log(`[NoteContentPanel] 字幕优化任务完成，开始加载缓存...`);
+        invoke<OptimizedSubtitle[]>("get_optimized_subtitles", { noteId: note.id })
+          .then((savedSubtitles) => {
+            console.log(`[NoteContentPanel] 从数据库获取到 ${savedSubtitles?.length || 0} 条字幕优化缓存`);
+            if (savedSubtitles && savedSubtitles.length > 0) {
+              const subtitleMap = new Map<string, string>();
+              savedSubtitles.forEach(s => subtitleMap.set(s.chapter_id, s.optimized_text));
+              flushSync(() => {
+                setOptimizedSubtitles(subtitleMap);
+                setSubtitleOptimizationEnabled(true);
+              });
+              console.log(`[NoteContentPanel] 字幕优化缓存已加载: ${savedSubtitles.length} 条`);
+            }
+          })
+          .catch((error) => {
+            console.error(`[NoteContentPanel] 加载字幕优化缓存失败:`, error);
+          });
+      }
+      // 刷新笔记数据
+      onGenerationComplete?.();
+    },
+    onTaskError: (taskType, error) => {
+      console.error(`[NoteContentPanel] 任务失败: ${taskType}`, error);
+      // 清除生成状态
+      if (taskType === "detailed_reading") {
+        setNoteGenerationState(note.id, {
+          isGeneratingChapters: false,
+        });
+        setChapterIsGenerating(false);
+      } else if (taskType === "highlights") {
+        setHighlightIsGenerating(false);
+      } else if (taskType === "flashcards") {
+        setFlashcardIsGenerating(false);
+      }
+      message.error(`${taskType} 执行失败: ${error}`);
+    },
+    onAllComplete: () => {
+      console.log(`[NoteContentPanel] 所有初始化任务完成`);
+      // 重置所有生成状态
+      setNoteGenerationState(note.id, {
+        isGenerating: false,
+        generationId: null,
+        regeneratingTabs: new Set(),
+      });
+      setIsGenerating(false);
+      setChapterIsGenerating(false);
+      setHighlightIsGenerating(false);
+      setFlashcardIsGenerating(false);
+      // 通知任务队列当前任务完成
+      if (isInitialAutoGeneration(note.id)) {
+        setInitialAutoGeneration(note.id, false);
+        completeTask(note.id).catch(console.error);
+      }
+      // 刷新笔记数据
+      onGenerationComplete?.();
+    },
+    onRefreshNote: () => {
+      onGenerationComplete?.();
+    },
+  });
 
   const [activeTab, setActiveTab] = useState<TabId>("summary");
   const [activeGroup, setActiveGroup] = useState<TabGroupId>("summary");
@@ -643,14 +766,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           unregisterActiveGenerationId(noteId, genId);
 
           // 延迟刷新笔记数据，避免与事件处理冲突
+          // 注意：不再在这里触发后续任务，由 useInitTaskExecutor 统一管理
           setTimeout(() => {
             onGenerationComplete?.();
-            // 如果是自动生成流程，继续生成高光笔记
-            if (isInitialAutoGeneration(noteId)) {
-              setTimeout(() => {
-                generateHighlightsDirectlyRef.current?.();
-              }, 500);
-            }
           }, 200);
           break;
 
@@ -668,12 +786,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           }
           // 注销 generation_id
           unregisterActiveGenerationId(noteId, genId);
-          // 如果是自动生成流程，通知任务队列任务完成（让下一个任务继续）
-          if (isInitialAutoGeneration(noteId)) {
-            setInitialAutoGeneration(noteId, false);
-            console.log(`[setupGenerationListener] 任务中止，通知任务队列: note_id=${noteId}`);
-            completeTask(noteId).catch(console.error);
-          }
+          // 注意：不再在这里调用 completeTask，由 useInitTaskExecutor 统一管理
           break;
       }
 
@@ -835,89 +948,18 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
   }, [autoScroll, activeTab, chapterData]);
 
-  // 开始生成笔记（一键生成全文总结，使用默认配置）
-  // skipCheck: 跳过重复生成检查（用于自动初始化流程，因为状态已经预先设置）
-  const handleGenerate = async (skipCheck = false) => {
-    if (!note.model_id) {
-      message.warning("请先选择AI模型");
-      return;
-    }
-
-    // 检查是否已经在生成中（除非明确跳过检查）
-    if (!skipCheck) {
-      const currentState = getNoteGenerationState(note.id);
-      if (currentState.isGenerating) {
-        return;
-      }
-    }
-
-    try {
-      const id = crypto.randomUUID();
-
-      // 更新全局状态（初始不标记任何标签为正在生成，等待后端 TabStarted 事件）
-      setNoteGenerationState(note.id, {
-        isGenerating: true,
-        generationId: id,
-        regeneratingTabs: new Set(),
-        progress: { current: 0, total: 4, message: "准备生成..." },
-        completedTabs: new Set(),
-        failedTabs: new Map(),
-      });
-
-      // 更新组件state
-      setIsGenerating(true);
-      setGenerationId(id);
-      setCompletedTabs(new Set());
-      setFailedTabs(new Map());
-      setRegeneratingTabs(new Set());
-      setProgress({ current: 0, total: 4, message: "准备生成..." });
-
-      // 注册 generation_id 以便删除时可以中止
-      registerActiveGenerationId(note.id, id);
-
-      // 设置事件监听器
-      setupGenerationListener(note.id, id);
-
-      // 等待状态更新和事件监听器设置完成
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      // 调用后端生成接口（串行生成4个标签页）
-      await invoke("generate_note_content", {
-        generationId: id,
-        noteId: note.id,
-        modelId: note.model_id,
-        concurrent: false,
-        regenerate: true,
-        tabsToGenerate: ["full_summary", "detailed_reading"],
-        concurrentLimit: 1,
-        customPrompt: null,
-      });
-    } catch (error) {
-      console.error(`[handleGenerate] 生成失败:`, error);
-      // 出错时重置状态
-      setNoteGenerationState(note.id, {
-        isGenerating: false,
-        generationId: null,
-        regeneratingTabs: new Set(),
-      });
-      setIsGenerating(false);
-      setGenerationId(null);
-      setRegeneratingTabs(new Set());
-      message.error(`生成失败: ${error}`);
-      // 如果是自动生成流程，通知任务队列任务完成
-      if (isInitialAutoGeneration(note.id)) {
-        setInitialAutoGeneration(note.id, false);
-        console.log(`[handleGenerate] 生成失败，通知任务队列: note_id=${note.id}`);
-        completeTask(note.id).catch(console.error);
-      }
-    }
-  };
+  // 注意：旧的 handleGenerate 函数已移除，任务执行统一由 useInitTaskExecutor 管理
 
   // 自动生成：当组件挂载且没有全文总结时，检查队列状态并开始执行
-  // 同步执行顺序：1. 全文总结 -> 2. 原文细读（在 AllCompleted 事件中触发）
+  // 使用 useInitTaskExecutor 按用户配置的任务顺序执行所有启用的初始化任务
   useEffect(() => {
     // 如果已经尝试过自动生成，跳过
     if (attemptedAutoGenerateNoteIds.has(note.id)) {
+      return;
+    }
+
+    // 如果任务执行器正在执行，跳过
+    if (taskExecutor.isExecuting) {
       return;
     }
 
@@ -936,32 +978,29 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       // 标记为首次自动生成流程
       setInitialAutoGeneration(note.id, true);
 
-      // 立即设置生成状态，让UI显示加载动画（不等待后端响应）
+      // 立即设置生成状态，让UI显示加载动画
       setNoteGenerationState(note.id, {
         isGenerating: true,
         generationId: null,
-        regeneratingTabs: new Set(["full_summary"]),
-        progress: { current: 0, total: 3, message: "准备生成..." },
+        regeneratingTabs: new Set(),
+        progress: { current: 0, total: 1, message: "准备自动初始化..." },
         completedTabs: new Set(),
         failedTabs: new Map(),
       });
       setIsGenerating(true);
-      setRegeneratingTabs(new Set(["full_summary"] as TabType[]));
-      setProgress({ current: 0, total: 3, message: "准备生成..." });
+      setProgress({ current: 0, total: 1, message: "准备自动初始化..." });
 
       // 检查队列状态并决定是否执行
-      // 注意：由于 GenerateButton 可能已经提交了任务，我们需要调用后端确认状态
       const checkAndExecute = async () => {
         try {
-          // 直接调用 submitTask，后端会处理重复提交（返回当前状态）
-          // 这样可以避免 React 状态更新延迟导致的时序问题
+          // 调用 submitTask，后端会处理重复提交（返回当前状态）
           const result = await submitTask(note.id);
           console.log(`[NoteContentPanel] 笔记 ${note.id} 队列状态:`, result);
 
           if (result.status === "Running") {
-            // 是当前任务，立即开始生成
-            console.log(`[NoteContentPanel] 笔记 ${note.id} 是当前任务，开始生成`);
-            handleGenerate(true);
+            // 是当前任务，使用任务执行器开始执行所有配置的任务
+            console.log(`[NoteContentPanel] 笔记 ${note.id} 是当前任务，开始自动初始化`);
+            taskExecutor.startExecution();
           } else {
             // 在队列中等待，等 onTaskReady 事件触发
             console.log(`[NoteContentPanel] 笔记 ${note.id} 在队列中等待，位置: ${result.position}`);
@@ -975,7 +1014,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             regeneratingTabs: new Set(),
           });
           setIsGenerating(false);
-          setRegeneratingTabs(new Set());
           // 从已尝试集合中移除，允许重试
           attemptedAutoGenerateNoteIds.delete(note.id);
           // 重置首次自动生成标记
@@ -986,15 +1024,15 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       checkAndExecute();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id, note.full_summary, note.model_id]);
+  }, [note.id, note.full_summary, note.model_id, taskExecutor.isExecuting]);
 
   // 监听任务就绪事件
   useEffect(() => {
     const unregister = onTaskReady((readyNoteId) => {
       if (readyNoteId === note.id) {
-        console.log(`[NoteContentPanel] 笔记 ${note.id} 任务就绪，开始生成`);
-        // 任务就绪，开始生成（跳过重复检查）
-        handleGenerate(true);
+        console.log(`[NoteContentPanel] 笔记 ${note.id} 任务就绪，开始自动初始化`);
+        // 任务就绪，使用任务执行器开始执行所有配置的任务
+        taskExecutor.startExecution();
       }
     });
 
@@ -1002,42 +1040,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       unregister();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id, onTaskReady]);
+  }, [note.id, onTaskReady, taskExecutor.startExecution]);
 
-  // 组件挂载时检查：如果该笔记是当前正在执行的任务但还未开始生成，则立即开始
-  // 这处理了用户从其他笔记切换回来时，该笔记已被轮到执行但组件未挂载的情况
-  useEffect(() => {
-    const checkAndStartIfReady = async () => {
-      // 检查是否需要自动生成
-      const hasNoContent = !note.full_summary && !note.detailed_reading &&
-                           !note.highlights && !note.visual_summary && !note.custom_summary;
-      if (!hasNoContent || !note.model_id) {
-        return;
-      }
-
-      // 检查是否是自动生成流程
-      if (!isInitialAutoGeneration(note.id)) {
-        return;
-      }
-
-      // 检查是否已经在生成中（有 generationId）
-      const currentState = getNoteGenerationState(note.id);
-      if (currentState.generationId) {
-        return;
-      }
-
-      // 检查该笔记是否是当前正在执行的任务
-      const position = getNoteQueuePosition(note.id);
-      if (position === 0) {
-        // 是当前任务，但还未开始生成，立即开始
-        console.log(`[NoteContentPanel] 笔记 ${note.id} 是当前任务且未开始生成，立即开始`);
-        handleGenerate(true);
-      }
-    };
-
-    checkAndStartIfReady();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id, note.full_summary, note.model_id]);
+  // 注意：原有的 checkAndStartIfReady useEffect 已移除
+  // 因为它与上面的 checkAndExecute useEffect 功能重复，导致 handleGenerate 被调用两次
+  // 现在统一由 checkAndExecute 处理所有自动生成逻辑
 
   // 检查标签页是否正在生成
   const isTabGenerating = (tabId: TabId): boolean => {
@@ -1048,8 +1055,10 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const globalState = getNoteGenerationState(note.id);
     if (globalState.regeneratingTabs.has(tabType)) return true;
 
-    // 原文细读（detailed_reading）使用组件 state 跟踪章节生成状态
-    if (tabType === "detailed_reading" && chapterIsGenerating) return true;
+    // 原文细读（detailed_reading）优先使用全局状态，其次使用组件 state
+    if (tabType === "detailed_reading") {
+      if (globalState.isGeneratingChapters || chapterIsGenerating) return true;
+    }
 
     // 高光笔记使用单独的生成状态
     if (tabType === "highlights" && highlightIsGenerating) return true;
@@ -1436,37 +1445,22 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           // 注销 generation_id
           unregisterActiveGenerationId(note.id, generationId);
           onGenerationComplete?.();
-          // 如果是自动生成流程，跳过视觉化总结，直接触发闪记卡生成
-          if (isInitialAutoGeneration(note.id)) {
-            setTimeout(() => {
-              generateFlashcardsDirectlyRef.current?.();
-            }, 500);
-          }
+          // 注意：不再在这里触发后续任务，由 useInitTaskExecutor 统一管理
           unlisten();
         } else if (data.status === "Aborted") {
           setHighlightIsGenerating(false);
           // 注销 generation_id
           unregisterActiveGenerationId(note.id, generationId);
-          // 如果是自动生成流程，通知任务队列任务完成
-          if (isInitialAutoGeneration(note.id)) {
-            setInitialAutoGeneration(note.id, false);
-            console.log(`[generateHighlightsDirectly] 任务中止，通知任务队列: note_id=${note.id}`);
-            completeTask(note.id).catch(console.error);
-          }
+          // 注意：不再在这里调用 completeTask，由 useInitTaskExecutor 统一管理
           unlisten();
         }
       });
     } catch (error) {
       console.error("[generateHighlightsDirectly] 生成失败:", error);
       setHighlightIsGenerating(false);
-      // 如果是自动生成流程，通知任务队列任务完成
-      if (isInitialAutoGeneration(note.id)) {
-        setInitialAutoGeneration(note.id, false);
-        console.log(`[generateHighlightsDirectly] 生成失败，通知任务队列: note_id=${note.id}`);
-        completeTask(note.id).catch(console.error);
-      }
+      // 注意：不再在这里调用 completeTask，由 useInitTaskExecutor 统一管理
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating, completeTask]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 用于存储 triggerVisualSummaryOptimizationSilent 的 ref，避免循环依赖
   const triggerVisualSummaryOptimizationSilentRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -1480,40 +1474,21 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   }, [generateHighlightsDirectly]);
 
   // 触发视觉化总结的字幕优化（静默执行，不切换标签页）
+  // 注意：此函数仅用于手动触发，自动初始化流程由 useInitTaskExecutor 管理
   const triggerVisualSummaryOptimizationSilent = useCallback(async () => {
-    // 注意：不在此处结束自动生成流程，而是在闪记卡生成完成后结束
-
-    // 如果已有缓存或正在优化，则不重复触发，但仍需继续自动生成流程
+    // 如果已有缓存或正在优化，则不重复触发
     if (optimizedSubtitles.size > 0 || subtitleOptimizing) {
-      // 如果是自动生成流程，直接触发闪记卡生成
-      if (isInitialAutoGeneration(note.id)) {
-        setTimeout(() => {
-          generateFlashcardsDirectlyRef.current?.();
-        }, 500);
-      }
       return;
     }
 
     // 检查必要条件
     if (!chapterData || !note.subtitle_path || !note.model_id) {
-      // 如果是自动生成流程，仍需触发闪记卡生成
-      if (isInitialAutoGeneration(note.id)) {
-        setTimeout(() => {
-          generateFlashcardsDirectlyRef.current?.();
-        }, 500);
-      }
       return;
     }
 
     // 静默执行字幕优化
     const effectiveModelId = currentModelId || note.model_id;
     if (!effectiveModelId) {
-      // 如果是自动生成流程，仍需触发闪记卡生成
-      if (isInitialAutoGeneration(note.id)) {
-        setTimeout(() => {
-          generateFlashcardsDirectlyRef.current?.();
-        }, 500);
-      }
       return;
     }
 
@@ -1526,23 +1501,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         setSubtitleEntries(currentSubtitleEntries);
       } catch (error) {
         console.error("[triggerVisualSummaryOptimizationSilent] 加载字幕失败:", error);
-        // 如果是自动生成流程，仍需触发闪记卡生成
-        if (isInitialAutoGeneration(note.id)) {
-          setTimeout(() => {
-            generateFlashcardsDirectlyRef.current?.();
-          }, 500);
-        }
         return;
       }
     }
 
     if (currentSubtitleEntries.length === 0) {
-      // 如果是自动生成流程，仍需触发闪记卡生成
-      if (isInitialAutoGeneration(note.id)) {
-        setTimeout(() => {
-          generateFlashcardsDirectlyRef.current?.();
-        }, 500);
-      }
       return;
     }
 
@@ -1584,11 +1547,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     if (chaptersToOptimize.length === 0) {
       // 如果是自动生成流程，仍需触发闪记卡生成
-      if (isInitialAutoGeneration(note.id)) {
-        setTimeout(() => {
-          generateFlashcardsDirectlyRef.current?.();
-        }, 500);
-      }
       return;
     }
 
@@ -1611,12 +1569,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setSubtitleOptimizing(false);
       setSubtitleOptimizationProgress(null);
       setOptimizingChapterIds(new Set());
-      // 如果是自动生成流程，仍需触发闪记卡生成
-      if (isInitialAutoGeneration(note.id)) {
-        setTimeout(() => {
-          generateFlashcardsDirectlyRef.current?.();
-        }, 500);
-      }
+      // 注意：不再在这里调用后续任务，由 useInitTaskExecutor 统一管理
     }
   }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData, subtitleEntries, optimizedSubtitles.size, subtitleOptimizing, setupSubtitleOptimizationListener]);
 
@@ -1625,7 +1578,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     triggerVisualSummaryOptimizationSilentRef.current = triggerVisualSummaryOptimizationSilent;
   }, [triggerVisualSummaryOptimizationSilent]);
 
-  // 直接调用后端 API 生成闪记卡（用于自动生成流程，不需要切换标签页）
+  // 直接调用后端 API 生成闪记卡（仅用于手动触发，不需要切换标签页）
+  // 注意：此函数仅用于手动触发，自动初始化流程由 useInitTaskExecutor 管理
   const generateFlashcardsDirectly = useCallback(async () => {
     // 防止重复生成
     if (flashcardIsGenerating) {
@@ -1636,10 +1590,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const effectiveModelId = currentModelId || note.model_id;
     if (!effectiveModelId || !note.subtitle_path) {
       console.error("[generateFlashcardsDirectly] 缺少必要参数");
-      // 结束自动生成流程
-      setInitialAutoGeneration(note.id, false);
-      // 通知任务队列：任务完成（即使缺少参数也要通知）
-      completeTask(note.id).catch(console.error);
+      // 注意：不再在这里调用 completeTask，由 useInitTaskExecutor 统一管理
       return;
     }
 
@@ -1664,11 +1615,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               setFlashcardIsGenerating(false);
               // 注销 generation_id
               unregisterActiveGenerationId(note.id, generationId);
-              // 结束自动生成流程
-              setInitialAutoGeneration(note.id, false);
-              // 通知任务队列：整个自动初始化流程完成
-              console.log(`[generateFlashcardsDirectly] 自动初始化流程完成，通知任务队列: note_id=${note.id}`);
-              completeTask(note.id).catch(console.error);
+              // 注意：不再在这里调用 completeTask，由 useInitTaskExecutor 统一管理
               unlisten();
               break;
             case "Error":
@@ -1677,11 +1624,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               setFlashcardIsGenerating(false);
               // 注销 generation_id
               unregisterActiveGenerationId(note.id, generationId);
-              // 结束自动生成流程
-              setInitialAutoGeneration(note.id, false);
-              // 通知任务队列：任务完成（即使失败也要通知，让下一个任务继续）
-              console.log(`[generateFlashcardsDirectly] 生成失败/中止，通知任务队列: note_id=${note.id}`);
-              completeTask(note.id).catch(console.error);
+              // 注意：不再在这里调用 completeTask，由 useInitTaskExecutor 统一管理
               unlisten();
               break;
           }
@@ -1698,12 +1641,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       console.error("[generateFlashcardsDirectly] 生成失败:", error);
       // 清除生成状态
       setFlashcardIsGenerating(false);
-      // 结束自动生成流程
-      setInitialAutoGeneration(note.id, false);
-      // 通知任务队列：任务完成（即使失败也要通知）
-      completeTask(note.id).catch(console.error);
+      // 注意：不再在这里调用 completeTask，由 useInitTaskExecutor 统一管理
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete, completeTask, flashcardIsGenerating]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete, flashcardIsGenerating]);
 
   // 更新 generateFlashcardsDirectly ref
   useEffect(() => {
@@ -1886,18 +1826,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
-  // 章节生成完成后的回调 - 触发高光笔记生成（自动生成流程）
+  // 章节生成完成后的回调
+  // 注意：不再在这里触发后续任务，由 useInitTaskExecutor 统一管理
   const handleChapterGenerationComplete = useCallback(() => {
-    // 先刷新笔记数据
+    // 刷新笔记数据
     onGenerationComplete?.();
-
-    // 如果是自动生成流程，继续生成高光笔记（不切换标签页）
-    if (isInitialAutoGeneration(note.id) && !note.highlights) {
-      setTimeout(() => {
-        generateHighlightsDirectly();
-      }, 500);
-    }
-  }, [note.id, note.highlights, onGenerationComplete, generateHighlightsDirectly]);
+  }, [onGenerationComplete]);
 
   // 单章节重新优化字幕
   const handleReoptimizeChapter = useCallback(async (chapterId: string) => {

@@ -1022,6 +1022,8 @@ async fn generate_chapters(
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let return_id = generation_id.clone();
 
+    eprintln!("[原文细读] 开始执行, note_id={}, generation_id={}", note_id, return_id);
+
     let request = chapter::GenerateChaptersRequest {
         note_id,
         model_id,
@@ -1032,8 +1034,23 @@ async fn generate_chapters(
 
     // 在后台任务中执行
     tokio::spawn(async move {
-        if let Err(e) = chapter::generate_chapters(app, get_db(), generation_id, request).await {
-            eprintln!("[generate_chapters] 生成失败: {}", e);
+        match chapter::generate_chapters(app, get_db(), generation_id, request).await {
+            Ok(chapter_data) => {
+                // 保存章节数据到数据库
+                let chapter_json = serde_json::to_string(&chapter_data).unwrap_or_default();
+                let conn = get_db().connection();
+                if let Err(e) = conn.execute(
+                    "UPDATE notes SET detailed_reading = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
+                    (&chapter_json, note_id),
+                ) {
+                    eprintln!("[generate_chapters] 保存章节数据失败: {}", e);
+                } else {
+                    eprintln!("[generate_chapters] 章节数据已保存到数据库, note_id={}", note_id);
+                }
+            }
+            Err(e) => {
+                eprintln!("[generate_chapters] 生成失败: {}", e);
+            }
         }
     });
 

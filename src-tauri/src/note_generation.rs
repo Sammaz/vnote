@@ -1260,9 +1260,18 @@ pub async fn generate_note(
 
     // 按顺序串行生成所有标签页（当 concurrent_limit = 1 时）
     if request.options.concurrent_limit == 1 {
-        eprintln!("[笔记生成] 开始串行生成，标签页顺序: {:?}", tabs_to_generate);
+        // 生成中文任务名称列表用于日志
+        let tab_names: Vec<&str> = tabs_to_generate.iter().map(|t| match t {
+            TabType::FullSummary => "全文总结",
+            TabType::DetailedReading => "原文细读",
+            TabType::Highlights => "高光笔记",
+            TabType::VisualSummary => "视觉化总结",
+            TabType::CustomSummary => "自定义总结",
+        }).collect();
+        eprintln!("[笔记生成] 开始串行生成，标签页顺序: {:?}", tab_names);
         for tab_type in &tabs_to_generate {
-            eprintln!("[笔记生成] 开始处理标签页: {:?}", tab_type);
+            let tab_name = get_tab_name(tab_type);
+            eprintln!("[笔记生成] 开始处理标签页: {}", tab_name);
 
             // 检查是否被中止
             if abort_flag.load(Ordering::Relaxed) {
@@ -1485,15 +1494,10 @@ pub async fn generate_note(
 
     cleanup_abort_flag(&generation_id).await;
 
-    // 生成建议问题（在发送完成事件之前，确保串行执行）
-    eprintln!("[笔记生成] 开始生成建议问题: note_id={}", request.note_id);
-    if let Err(e) = generate_questions_for_note_internal(db, request.note_id).await {
-        eprintln!("[笔记生成] 生成建议问题失败: {}", e);
-    } else {
-        eprintln!("[笔记生成] 建议问题生成完成: note_id={}", request.note_id);
-    }
+    // 注意：不再自动生成推荐问题
+    // 推荐问题的生成由前端 useInitTaskExecutor 按用户配置的顺序调用
 
-    // 发送完成事件（在建议问题生成完成后，确保前端在此之后才触发高光生成）
+    // 发送完成事件
     let _ = app.emit(
         &event_name,
         GenerationEvent::AllCompleted {
@@ -2119,66 +2123,3 @@ pub async fn generate_chapters_with_markers(
     Ok(chapter_data)
 }
 
-// ============================================================================
-// 建议问题生成（内部函数）
-// ============================================================================
-
-/// 为笔记生成建议问题（内部函数，供 generate_note 调用）
-async fn generate_questions_for_note_internal(
-    db: &Database,
-    note_id: i64,
-) -> Result<(), String> {
-    // 获取笔记
-    let note = db
-        .get_note_by_id(note_id)
-        .map_err(|e| e.to_string())?
-        .ok_or("笔记未找到")?;
-
-    // 默认问题
-    let default_questions = vec![
-        "这个视频的核心内容是什么?".to_string(),
-        "有哪些关键知识点?".to_string(),
-        "如何在实际项目中应用?".to_string(),
-    ];
-
-    // 检查字幕和模型是否存在
-    let subtitle_path = match &note.subtitle_path {
-        Some(p) => p.clone(),
-        None => {
-            // 没有字幕，保存并返回默认问题
-            let questions_json = serde_json::to_string(&default_questions)
-                .map_err(|e| e.to_string())?;
-            db.update_note_questions(note_id, &questions_json)
-                .map_err(|e| e.to_string())?;
-            return Ok(());
-        }
-    };
-
-    let model_id = match note.model_id {
-        Some(id) => id,
-        None => {
-            // 没有模型，保存并返回默认问题
-            let questions_json = serde_json::to_string(&default_questions)
-                .map_err(|e| e.to_string())?;
-            db.update_note_questions(note_id, &questions_json)
-                .map_err(|e| e.to_string())?;
-            return Ok(());
-        }
-    };
-
-    // 生成问题（失败时使用默认问题）
-    let questions = crate::chat::generate_suggested_questions(db, &subtitle_path, model_id)
-        .await
-        .unwrap_or_else(|e| {
-            eprintln!("[建议问题生成] 生成失败: {}", e);
-            default_questions.clone()
-        });
-
-    // 保存到数据库
-    let questions_json = serde_json::to_string(&questions)
-        .map_err(|e| e.to_string())?;
-    db.update_note_questions(note_id, &questions_json)
-        .map_err(|e| e.to_string())?;
-
-    Ok(())
-}

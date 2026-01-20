@@ -1,7 +1,6 @@
 import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
-import { useInitTaskQueue } from "../../context/InitTaskQueueContext";
 
 // 获取文件名（不含扩展名）
 function getBaseName(filename: string): string {
@@ -23,8 +22,6 @@ export function GenerateButton() {
     setSelectedNoteId,
   } = useApp();
 
-  const { submitTask } = useInitTaskQueue();
-
   const canGenerate = uploadedVideo && selectedModelId && !isGenerating;
 
   const handleGenerate = async () => {
@@ -43,21 +40,15 @@ export function GenerateButton() {
         model_id: selectedModelId,
       });
 
-      // 立即提交任务到队列，确保按创建顺序排队
-      // 这样即使用户快速连续创建多个笔记，也能保持正确的执行顺序
-      try {
-        const result = await submitTask(newNote.id);
-        console.log(`[GenerateButton] 笔记 ${newNote.id} 已提交到队列:`, result);
-      } catch (error) {
-        console.error(`[GenerateButton] 提交任务失败:`, error);
-        // 即使提交失败也继续，NoteContentPanel 会再次尝试
-      }
+      // 注意：不在这里提交任务到队列
+      // 任务提交由 NoteContentPanel 统一负责，避免重复提交
+      console.log(`[GenerateButton] 笔记 ${newNote.id} 已创建，跳转到笔记页面`);
 
       // 清空上传状态
       setUploadedVideo(null);
       setUploadedSubtitle(null);
 
-      // 跳转到笔记页面
+      // 跳转到笔记页面（NoteContentPanel 会自动提交任务并开始执行）
       setSelectedNoteId(newNote.id);
       setCurrentView("note");
     } catch (error) {

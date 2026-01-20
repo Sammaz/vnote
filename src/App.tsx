@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import SettingsPage from "./SettingsPage";
 import { AppProvider, useApp } from "./context/AppContext";
 import { InitTaskQueueProvider } from "./context/InitTaskQueueContext";
+import { InitTaskConfigProvider } from "./context/InitTaskConfigContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
@@ -258,7 +259,9 @@ function InitTaskQueueWrapper() {
 
   return (
     <InitTaskQueueProvider onTaskReadyNavigate={handleTaskReadyNavigate}>
-      <AppContent />
+      <InitTaskConfigProvider>
+        <AppContent />
+      </InitTaskConfigProvider>
     </InitTaskQueueProvider>
   );
 }

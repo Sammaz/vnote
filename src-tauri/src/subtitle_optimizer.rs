@@ -256,6 +256,11 @@ pub async fn optimize_chapters(
                 // 发送结果事件并更新任务状态
                 match &result {
                     Ok(optimized_text) => {
+                        // 保存到数据库
+                        if let Err(e) = crate::get_db().save_optimized_subtitle(note_id, &chapter.chapter_id, optimized_text) {
+                            eprintln!("[optimize_chapter_subtitles] 保存到数据库失败: {}", e);
+                        }
+
                         let (completed, _failed, total) = get_task_state_manager().chapter_completed(note_id, &chapter.chapter_id).await;
                         let _ = app.emit(
                             &event_name,

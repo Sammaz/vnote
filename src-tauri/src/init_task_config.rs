@@ -235,8 +235,24 @@ pub async fn get_init_task_configs() -> Result<Vec<InitTaskConfig>, String> {
 #[tauri::command]
 pub async fn get_enabled_init_task_configs() -> Result<Vec<InitTaskConfig>, String> {
     let db = crate::get_db();
-    db.get_enabled_init_task_configs()
-        .map_err(|e| format!("获取启用的任务配置失败: {}", e))
+    let configs = db.get_enabled_init_task_configs()
+        .map_err(|e| format!("获取启用的任务配置失败: {}", e))?;
+
+    // 打印完整的任务列表
+    let task_names: Vec<&str> = configs.iter().map(|c| {
+        match c.task_type.as_str() {
+            "full_summary" => "全文总结",
+            "detailed_reading" => "原文细读",
+            "subtitle_optimization" => "字幕优化",
+            "highlights" => "高光笔记",
+            "suggested_questions" => "推荐问题",
+            "flashcards" => "闪记卡",
+            _ => c.task_type.as_str(),
+        }
+    }).collect();
+    eprintln!("[初始化任务] 将按以下顺序执行 {} 个任务: {:?}", configs.len(), task_names);
+
+    Ok(configs)
 }
 
 /// 保存初始化任务配置（批量更新）
