@@ -784,7 +784,7 @@ export function ChatWindow({ noteId, modelId, noteTitle: _noteTitle, suggestedQu
                     <div className="p-2 max-h-64 overflow-y-auto">
                       {questions.map((question, index) => (
                         <button
-                          key={index}
+                          key={`question-${index}-${question.slice(0, 20)}`}
                           onClick={() => {
                             handleSuggestedQuestion(question);
                             setShowQuestionPopover(false);

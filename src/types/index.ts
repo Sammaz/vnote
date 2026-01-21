@@ -79,6 +79,19 @@ export interface SidebarState {
 // 视图类型
 export type ViewType = "home" | "settings" | "note" | "collection" | "recent-notes" | "search";
 
+// 视图类型常量（避免魔法字符串）
+export const VIEW_TYPES = {
+  HOME: "home",
+  SETTINGS: "settings",
+  NOTE: "note",
+  COLLECTION: "collection",
+  RECENT_NOTES: "recent-notes",
+  SEARCH: "search",
+} as const;
+
+// 可返回的视图类型（排除 settings，用于 previousView 状态）
+export type NavigableViewType = Exclude<ViewType, "settings">;
+
 // 合集（资源库）
 export interface Collection {
   id: number;
@@ -231,6 +244,52 @@ export interface ChapterData {
   chapters: Chapter[];
   total_duration: number;          // 总时长（秒）
   generated_at: string;            // 生成时间（ISO格式）
+}
+
+// ============================================================================
+// 类型守卫函数 (Type Guards)
+// ============================================================================
+
+/**
+ * 判断 detailed_reading 是否为 ChapterData 类型
+ * @param value - Note.detailed_reading 字段值
+ * @returns 如果是 ChapterData 返回 true
+ */
+export function isChapterData(value: string | ChapterData | null): value is ChapterData {
+  if (value === null || typeof value === "string") {
+    return false;
+  }
+  return (
+    typeof value === "object" &&
+    Array.isArray(value.chapters) &&
+    typeof value.total_duration === "number" &&
+    typeof value.generated_at === "string"
+  );
+}
+
+/**
+ * 安全解析 detailed_reading 字段
+ * @param value - Note.detailed_reading 字段值
+ * @returns 解析后的 ChapterData 或 null
+ */
+export function parseDetailedReading(value: string | ChapterData | null): ChapterData | null {
+  if (value === null) {
+    return null;
+  }
+  if (isChapterData(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (isChapterData(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // 解析失败，返回 null
+    }
+  }
+  return null;
 }
 
 export type ChapterGenerationEvent =

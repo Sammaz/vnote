@@ -1,4 +1,4 @@
-import { useEffect, useState, lazy, Suspense } from "react";
+import { useEffect, useState, lazy, Suspense, useCallback } from "react";
 import { Sun, Moon, Minus, Square, X, Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
@@ -7,6 +7,8 @@ import { AppProvider, useApp } from "./context/AppContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
+import { cn } from "./utils/cn";
+import { VIEW_TYPES, type NavigableViewType } from "./types";
 import "./index.css";
 
 // 代码分割 - 懒加载大型组件
@@ -30,7 +32,7 @@ function PageLoadingFallback() {
 function AppContent() {
   const { currentView, setCurrentView } = useApp();
   const [theme, setTheme] = useState<"light" | "dark">("dark");
-  const [previousView, setPreviousView] = useState<"home" | "note" | "collection" | "recent-notes" | "search">("home");
+  const [previousView, setPreviousView] = useState<NavigableViewType>(VIEW_TYPES.HOME);
 
   useEffect(() => {
     // Load saved theme and show window
@@ -64,49 +66,55 @@ function AppContent() {
     typeof window !== "undefined" &&
     Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
-  const handleTitleBarMouseDown = (event: React.MouseEvent<HTMLElement>) => {
+  const handleTitleBarMouseDown = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (!isTauri || event.button !== 0) return;
     const target = event.target as HTMLElement;
     if (target.closest('[data-tauri-drag-region="false"]')) return;
     try {
       getCurrentWindow().startDragging();
-    } catch {
-      // Ignore
+    } catch (error) {
+      console.warn("Failed to start window dragging:", error);
     }
-  };
+  }, [isTauri]);
 
-  const handleMinimize = async () => {
+  const handleMinimize = useCallback(async () => {
     if (!isTauri) return;
     try {
       await getCurrentWindow().minimize();
-    } catch {}
-  };
+    } catch (error) {
+      console.warn("Failed to minimize window:", error);
+    }
+  }, [isTauri]);
 
-  const handleMaximize = async () => {
+  const handleMaximize = useCallback(async () => {
     if (!isTauri) return;
     try {
       await getCurrentWindow().toggleMaximize();
-    } catch {}
-  };
+    } catch (error) {
+      console.warn("Failed to toggle maximize:", error);
+    }
+  }, [isTauri]);
 
-  const handleClose = async () => {
+  const handleClose = useCallback(async () => {
     if (!isTauri) return;
     try {
       await getCurrentWindow().close();
-    } catch {}
-  };
+    } catch (error) {
+      console.warn("Failed to close window:", error);
+    }
+  }, [isTauri]);
 
   // 统一的主题应用函数 - 消除代码重复
-  const applyTheme = (newTheme: "light" | "dark") => {
+  const applyTheme = useCallback((newTheme: "light" | "dark") => {
     if (newTheme === "dark") {
       document.documentElement.classList.add("dark");
     } else {
       document.documentElement.classList.remove("dark");
     }
     setTheme(newTheme);
-  };
+  }, []);
 
-  const toggleTheme = async () => {
+  const toggleTheme = useCallback(async () => {
     const newTheme = theme === "dark" ? "light" : "dark";
     applyTheme(newTheme);
     try {
@@ -114,28 +122,28 @@ function AppContent() {
     } catch (error) {
       console.error("Failed to save theme:", error);
     }
-  };
+  }, [theme, applyTheme]);
 
-  const handleThemeChange = (newTheme: "light" | "dark") => {
+  const handleThemeChange = useCallback((newTheme: "light" | "dark") => {
     applyTheme(newTheme);
-  };
+  }, [applyTheme]);
 
-  const isSettingsView = currentView === "settings";
+  const isSettingsView = currentView === VIEW_TYPES.SETTINGS;
 
-  const handleSettingsClick = () => {
+  const handleSettingsClick = useCallback(() => {
     if (isSettingsView) {
       // 在设置页面时，点击返回之前的视图
       setCurrentView(previousView);
     } else {
       // 不在设置页面时，保存当前视图并进入设置
-      setPreviousView(currentView as "home" | "note" | "collection" | "recent-notes" | "search");
-      setCurrentView("settings");
+      setPreviousView(currentView as NavigableViewType);
+      setCurrentView(VIEW_TYPES.SETTINGS);
     }
-  };
+  }, [isSettingsView, previousView, currentView, setCurrentView]);
 
-  const handleSettingsClose = () => {
+  const handleSettingsClose = useCallback(() => {
     setCurrentView(previousView);
-  };
+  }, [previousView, setCurrentView]);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-50 dark:bg-vnote-bg text-slate-900 dark:text-slate-100 font-sans overflow-hidden transition-colors duration-300">
@@ -161,12 +169,12 @@ function AppContent() {
           </button>
           <button
             onClick={handleSettingsClick}
-            className={[
+            className={cn(
               "p-2 rounded-full transition-all duration-200 cursor-pointer",
               isSettingsView
                 ? "text-blue-500 bg-blue-500/15 dark:text-blue-400 dark:bg-blue-400/15 scale-110"
                 : "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 hover:scale-110"
-            ].join(" ")}
+            )}
             title="设置"
           >
             <Settings size={18} />
@@ -212,29 +220,29 @@ function AppContent() {
           )}
 
           {/* 笔记页面 - 使用 CSS 隐藏保持状态 */}
-          <div className={`flex-1 flex overflow-hidden ${currentView === "note" && !isSettingsView ? "" : "hidden"}`}>
+          <div className={cn("flex-1 flex overflow-hidden", currentView === VIEW_TYPES.NOTE && !isSettingsView ? "" : "hidden")}>
             <Suspense fallback={<PageLoadingFallback />}>
               <NotePage />
             </Suspense>
           </div>
 
           {/* 其他页面 - 条件渲染 */}
-          {!isSettingsView && currentView === "collection" && (
+          {!isSettingsView && currentView === VIEW_TYPES.COLLECTION && (
             <Suspense fallback={<PageLoadingFallback />}>
               <CollectionPage />
             </Suspense>
           )}
-          {!isSettingsView && currentView === "recent-notes" && (
+          {!isSettingsView && currentView === VIEW_TYPES.RECENT_NOTES && (
             <Suspense fallback={<PageLoadingFallback />}>
               <RecentNotesPage />
             </Suspense>
           )}
-          {!isSettingsView && currentView === "search" && (
+          {!isSettingsView && currentView === VIEW_TYPES.SEARCH && (
             <Suspense fallback={<PageLoadingFallback />}>
               <SearchPage />
             </Suspense>
           )}
-          {!isSettingsView && currentView === "home" && (
+          {!isSettingsView && currentView === VIEW_TYPES.HOME && (
             <HomePage />
           )}
         </main>

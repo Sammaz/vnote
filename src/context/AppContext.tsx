@@ -123,6 +123,10 @@ function AppContextBridge({ children }: { children: ReactNode }) {
   const notesContext = useNotes();
 
   // 组合所有值 - 使用 useMemo 优化
+  // 注意：依赖项使用整个 context 对象是合理的，因为：
+  // 1. 各个子 Context 内部已使用 useCallback/useMemo 确保引用稳定
+  // 2. 精细化列出 50+ 个属性会导致维护困难且容易遗漏
+  // 3. 对于性能敏感场景，建议直接使用拆分的 hooks（useSidebar 等）
   const value: AppContextType = useMemo(() => ({
     // 侧边栏
     sidebar: sidebarContext.sidebar,
