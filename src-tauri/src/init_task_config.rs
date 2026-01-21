@@ -232,11 +232,18 @@ pub async fn get_init_task_configs() -> Result<Vec<InitTaskConfig>, String> {
 }
 
 /// 获取启用的初始化任务配置
+///
+/// 处理依赖关系的特殊情况：
+/// 1. 原文细读关闭但字幕优化开启 → 跳过字幕优化
+/// 2. 原文细读在字幕优化顺序后面 → 自动调整顺序，字幕优化排到原文细读后面
 #[tauri::command]
 pub async fn get_enabled_init_task_configs() -> Result<Vec<InitTaskConfig>, String> {
     let db = crate::get_db();
     let configs = db.get_enabled_init_task_configs()
         .map_err(|e| format!("获取启用的任务配置失败: {}", e))?;
+
+    // 检查依赖关系并处理特殊情况
+    let configs = process_task_dependencies(configs);
 
     // 打印完整的任务列表
     let task_names: Vec<&str> = configs.iter().map(|c| {
@@ -253,6 +260,72 @@ pub async fn get_enabled_init_task_configs() -> Result<Vec<InitTaskConfig>, Stri
     eprintln!("[初始化任务] 将按以下顺序执行 {} 个任务: {:?}", configs.len(), task_names);
 
     Ok(configs)
+}
+
+/// 处理任务依赖关系
+///
+/// 规则：
+/// 1. 如果任务的依赖项未启用，则跳过该任务
+/// 2. 如果依赖项的顺序在当前任务之后，则自动调整当前任务到依赖项之后
+fn process_task_dependencies(mut configs: Vec<InitTaskConfig>) -> Vec<InitTaskConfig> {
+    // 构建任务类型到索引的映射
+    let task_index_map: std::collections::HashMap<String, usize> = configs
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (c.task_type.clone(), i))
+        .collect();
+
+    // 收集需要移除的任务（依赖项未启用）
+    let mut tasks_to_remove: Vec<String> = Vec::new();
+
+    // 收集需要调整顺序的任务
+    let mut order_adjustments: Vec<(String, i32)> = Vec::new();
+
+    for config in &configs {
+        if let Some(ref depends_on) = config.depends_on {
+            for dep in depends_on {
+                // 检查依赖项是否存在于启用的任务中
+                if let Some(&dep_index) = task_index_map.get(dep) {
+                    // 依赖项存在，检查顺序
+                    if let Some(&current_index) = task_index_map.get(&config.task_type) {
+                        if current_index < dep_index {
+                            // 当前任务在依赖项之前，需要调整顺序
+                            // 将当前任务的 sort_order 设置为依赖项的 sort_order + 1
+                            let dep_sort_order = configs[dep_index].sort_order;
+                            order_adjustments.push((config.task_type.clone(), dep_sort_order + 1));
+                            eprintln!(
+                                "[初始化任务] 任务 '{}' 依赖于 '{}'，但顺序在其之前，自动调整到其后面",
+                                config.task_name, configs[dep_index].task_name
+                            );
+                        }
+                    }
+                } else {
+                    // 依赖项不存在（未启用），需要跳过当前任务
+                    tasks_to_remove.push(config.task_type.clone());
+                    eprintln!(
+                        "[初始化任务] 任务 '{}' 的依赖项 '{}' 未启用，跳过该任务",
+                        config.task_name, dep
+                    );
+                    break; // 只要有一个依赖项未满足就跳过
+                }
+            }
+        }
+    }
+
+    // 移除依赖项未启用的任务
+    configs.retain(|c| !tasks_to_remove.contains(&c.task_type));
+
+    // 应用顺序调整
+    for (task_type, new_sort_order) in order_adjustments {
+        if let Some(config) = configs.iter_mut().find(|c| c.task_type == task_type) {
+            config.sort_order = new_sort_order;
+        }
+    }
+
+    // 按 sort_order 重新排序
+    configs.sort_by_key(|c| c.sort_order);
+
+    configs
 }
 
 /// 保存初始化任务配置（批量更新）
