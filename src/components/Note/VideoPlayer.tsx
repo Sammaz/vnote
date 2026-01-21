@@ -9,6 +9,87 @@ import { useApp } from "../../context/AppContext";
 // 观看时长追踪间隔（秒）
 const WATCH_TIME_INTERVAL = 10;
 
+/**
+ * 预处理 ASS 字幕内容，修复双语字幕位置重叠问题
+ *
+ * 双语字幕通常使用两个不同的 Style，但有时它们的 MarginV（垂直边距）相同，
+ * 导致两种语言的字幕重叠在一起。此函数检测并调整样式，确保双语字幕正确分层显示。
+ */
+function preprocessAssForBilingual(content: string): string {
+  const lines = content.split(/\r?\n/);
+  const styleLines: { index: number; line: string; name: string; marginV: number }[] = [];
+  let formatLine = "";
+  let formatIndex = -1;
+  let marginVIndex = -1;
+  let nameIndex = -1;
+  let alignmentIndex = -1;
+
+  // 第一遍：找到 Format 行和所有 Style 行
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+
+    if (line.startsWith("Format:") && lines[i - 1]?.includes("[V4+ Styles]")) {
+      formatLine = line;
+      formatIndex = i;
+      // 解析 Format 字段顺序
+      const fields = line.substring(7).split(",").map(f => f.trim().toLowerCase());
+      marginVIndex = fields.indexOf("marginv");
+      nameIndex = fields.indexOf("name");
+      alignmentIndex = fields.indexOf("alignment");
+    }
+
+    if (line.startsWith("Style:")) {
+      const parts = line.substring(6).split(",").map(p => p.trim());
+      const name = nameIndex >= 0 ? parts[nameIndex] : parts[0];
+      const marginV = marginVIndex >= 0 ? parseInt(parts[marginVIndex], 10) || 0 : 0;
+      styleLines.push({ index: i, line, name, marginV });
+    }
+  }
+
+  // 如果只有一个样式或没有样式，不需要处理
+  if (styleLines.length <= 1 || marginVIndex < 0) {
+    return content;
+  }
+
+  // 检测是否存在位置冲突（多个样式有相同或相近的 MarginV）
+  const marginVValues = styleLines.map(s => s.marginV);
+  const uniqueMarginV = new Set(marginVValues);
+
+  // 如果所有样式的 MarginV 都不同，且差距足够大，不需要处理
+  if (uniqueMarginV.size === styleLines.length) {
+    const sortedMargins = [...marginVValues].sort((a, b) => a - b);
+    const minGap = Math.min(...sortedMargins.slice(1).map((v, i) => v - sortedMargins[i]));
+    if (minGap >= 30) {
+      return content;
+    }
+  }
+
+  // 调整样式：为每个样式设置不同的 MarginV
+  // 第一个样式是副语言（上方，较大的 MarginV），第二个是主语言（底部，较小的 MarginV）
+  const baseMarginV = 20; // 底部字幕边距
+  const lineHeight = 45; // 每行字幕的高度间隔
+
+  const newLines = [...lines];
+  const totalStyles = styleLines.length;
+
+  styleLines.forEach((style, idx) => {
+    const parts = lines[style.index].substring(6).split(",");
+
+    // 计算新的 MarginV：反转顺序，第一个样式在上方，最后一个样式在底部
+    const newMarginV = baseMarginV + (totalStyles - 1 - idx) * lineHeight;
+    parts[marginVIndex] = String(newMarginV);
+
+    // 确保对齐方式为底部居中（2）
+    if (alignmentIndex >= 0) {
+      parts[alignmentIndex] = "2";
+    }
+
+    newLines[style.index] = "Style:" + parts.join(",");
+  });
+
+  return newLines.join("\n");
+}
+
 // 检查是否是 TS 格式
 function isTsFormat(filePath: string): boolean {
   return filePath.toLowerCase().endsWith(".ts");
@@ -457,7 +538,7 @@ export function VideoPlayer({
       if (isAssSubtitle && subtitleUrl) {
         // 捕获当前的字幕状态，避免闭包问题
         const shouldShowCaptions = captionsEnabled;
-        
+
         Promise.all([
           import("assjs"),
           invoke<string>("read_file_content", { path: subtitleUrl }),
@@ -478,9 +559,13 @@ export function VideoPlayer({
               assRef.current = null;
             }
 
+            // 预处理 ASS 内容，修复双语字幕位置重叠问题
+            // 检测并调整双语字幕的垂直边距，确保不重叠
+            const processedContent = preprocessAssForBilingual(assContent);
+
             // 创建 ASS 实例
             const ASS = assModule.default;
-            assRef.current = new ASS(assContent, videoEl, {
+            assRef.current = new ASS(processedContent, videoEl, {
               container: videoWrapper as HTMLElement,
             });
 
