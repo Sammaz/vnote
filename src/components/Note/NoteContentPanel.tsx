@@ -1420,6 +1420,20 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       return;
     }
 
+    // 尝试从数据库加载缓存（可能是初始化时生成的）
+    try {
+      const savedSubtitles = await invoke<OptimizedSubtitle[]>("get_optimized_subtitles", { noteId: note.id });
+      if (savedSubtitles && savedSubtitles.length > 0) {
+        const subtitleMap = new Map<string, string>();
+        savedSubtitles.forEach(s => subtitleMap.set(s.chapter_id, s.optimized_text));
+        setOptimizedSubtitles(subtitleMap);
+        setSubtitleOptimizationEnabled(true);
+        return;
+      }
+    } catch (error) {
+      console.error("[SubtitleOptimization] 加载缓存失败:", error);
+    }
+
     // 无缓存，开始优化
     // 优先使用视频播放器右上角选择的模型
     const effectiveModelId = currentModelId || note.model_id;

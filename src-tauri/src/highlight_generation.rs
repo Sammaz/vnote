@@ -547,6 +547,46 @@ pub async fn generate_highlights(
     Ok(highlight_data)
 }
 
+/// 直接调用的高光生成函数（同步等待完成，供 note_initialization 使用）
+pub async fn generate_highlights_direct(
+    app: AppHandle,
+    db: &crate::db::Database,
+    generation_id: String,
+    note_id: i64,
+    model_id: i64,
+    subtitle_path: String,
+    highlight_type: String,
+    total_duration: f64,
+) -> Result<(), String> {
+    let hl_type = match highlight_type.as_str() {
+        "emotional" => HighlightType::Emotional,
+        "viral" => HighlightType::Viral,
+        _ => HighlightType::Default,
+    };
+
+    let request = GenerateHighlightsRequest {
+        _note_id: note_id,
+        model_id,
+        subtitle_path,
+        highlight_type: hl_type,
+        total_duration,
+    };
+
+    match generate_highlights(app, db, generation_id, request).await {
+        Ok(highlight_data) => {
+            // 保存到数据库
+            if let Ok(json) = serde_json::to_string(&highlight_data) {
+                if let Ok(Some(mut note)) = db.get_note_by_id(note_id) {
+                    note.highlights = Some(json);
+                    let _ = db.update_note(&note);
+                }
+            }
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// 中止高光生成
 pub async fn abort_highlight_generation(generation_id: String) -> Result<(), String> {
     let flags = get_abort_flags_lock().lock().await;

@@ -330,6 +330,17 @@ pub async fn optimize_chapters(
     Ok(())
 }
 
+/// 直接调用的优化函数（同步等待完成，供 note_initialization 使用）
+pub async fn optimize_chapters_direct(
+    app: AppHandle,
+    generation_id: String,
+    note_id: i64,
+    config: AiConfig,
+    chapters: Vec<ChapterSubtitleInput>,
+) -> Result<(), String> {
+    optimize_chapters(app, generation_id, note_id, config, chapters).await
+}
+
 // ============================================================================
 // Tauri 命令
 // ============================================================================

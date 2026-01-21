@@ -20,6 +20,7 @@ export function GenerateButton() {
     setUploadedSubtitle,
     setCurrentView,
     setSelectedNoteId,
+    setPendingInitialization,
   } = useApp();
 
   const canGenerate = uploadedVideo && selectedModelId && !isGenerating;
@@ -38,6 +39,14 @@ export function GenerateButton() {
         video_path: uploadedVideo.path,
         subtitle_path: uploadedSubtitle?.path || null,
         model_id: selectedModelId,
+      });
+
+      // 设置待初始化参数（在 NotePage 中启动初始化）
+      setPendingInitialization({
+        noteId: newNote.id,
+        modelId: selectedModelId,
+        videoPath: uploadedVideo.path,
+        subtitlePath: uploadedSubtitle?.path || null,
       });
 
       // 清空上传状态

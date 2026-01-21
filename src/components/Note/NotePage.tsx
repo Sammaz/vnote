@@ -3,7 +3,9 @@ import { VideoPlayer } from "./VideoPlayer";
 import { ChatWindow } from "./ChatWindow";
 import { NoteContentPanel } from "./NoteContentPanel";
 import { VideoToolbar } from "./VideoToolbar";
+import { InitializationOverlay } from "./InitializationOverlay";
 import { useApp } from "../../context/AppContext";
+import { useNoteInitialization } from "../../hooks/useNoteInitialization";
 
 // 拖拽分隔条组件
 interface ResizerProps {
@@ -50,7 +52,16 @@ function Resizer({ onDrag, isDragging }: ResizerProps) {
 }
 
 export function NotePage() {
-  const { notes, selectedNoteId, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth } = useApp();
+  const { notes, selectedNoteId, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, pendingInitialization, setPendingInitialization } = useApp();
+
+  // 笔记初始化 Hook
+  const {
+    state: initState,
+    progress: initProgress,
+    startInitialization,
+    abortInitialization,
+    resetState: resetInitState,
+  } = useNoteInitialization();
 
   // 找到当前选中的笔记
   const currentNote = notes.find((note) => note.id === selectedNoteId);
@@ -68,6 +79,28 @@ export function NotePage() {
       setCurrentModelId(currentNote.model_id);
     }
   }, [currentNote?.model_id]);
+
+  // 处理待初始化参数
+  useEffect(() => {
+    if (pendingInitialization && pendingInitialization.noteId === selectedNoteId) {
+      // 启动初始化
+      startInitialization(pendingInitialization);
+      // 清除待初始化参数
+      setPendingInitialization(null);
+    }
+  }, [pendingInitialization, selectedNoteId, startInitialization, setPendingInitialization]);
+
+  // 初始化完成后刷新笔记数据
+  useEffect(() => {
+    if (!initState.isInitializing && initState.completed > 0) {
+      refreshNotes();
+      // 延迟重置状态，让用户看到完成状态
+      const timer = setTimeout(() => {
+        resetInitState();
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [initState.isInitializing, initState.completed, refreshNotes, resetInitState]);
 
   // 从全局设置获取工具栏状态
   const { videoVisible, autoPlay, layoutSwapped, layoutPanelWidth } = toolbarSettings;
@@ -189,6 +222,13 @@ export function NotePage() {
 
   return (
     <div ref={containerRef} className="relative flex-1 flex gap-0 p-4 overflow-hidden">
+      {/* 初始化进度遮罩 */}
+      <InitializationOverlay
+        state={initState}
+        progress={initProgress}
+        onAbort={abortInitialization}
+      />
+
       {layoutSwapped ? (
         <>
           {notePanel}

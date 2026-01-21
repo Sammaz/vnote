@@ -5,6 +5,7 @@ mod db;
 mod flashcard_generation;
 mod highlight_generation;
 mod note_generation;
+mod note_initialization;
 mod prompts;
 mod rag;
 mod subtitle;
@@ -1413,6 +1414,29 @@ fn save_highlights_to_note_internal(note_id: i64, highlight_data: &highlight_gen
     get_db().update_note(&note).map_err(|e| e.to_string())
 }
 
+// Note initialization commands (笔记初始化)
+#[tauri::command]
+async fn initialize_note_data(
+    app: AppHandle,
+    note_id: i64,
+    model_id: i64,
+    video_path: String,
+    subtitle_path: Option<String>,
+) -> Result<String, String> {
+    let params = note_initialization::InitializationParams {
+        note_id,
+        model_id,
+        video_path,
+        subtitle_path,
+    };
+    note_initialization::start_initialization(app, params).await
+}
+
+#[tauri::command]
+async fn abort_note_initialization(initialization_id: String) -> Result<(), String> {
+    note_initialization::abort_initialization(&initialization_id).await
+}
+
 // Collection commands (合集/资源库)
 #[tauri::command]
 fn get_collections() -> Result<Vec<Collection>, String> {
@@ -1661,6 +1685,9 @@ pub fn run() {
             export_visual_summary,
             flashcard_generation::generate_flashcards,
             flashcard_generation::abort_flashcard_generation,
+            // Note initialization commands
+            initialize_note_data,
+            abort_note_initialization,
             // Collection commands
             get_collections,
             get_collection,
