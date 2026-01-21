@@ -621,31 +621,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [note.id]);
 
-  // 监听标签页切换，如果切换到原文细读且未生成，则触发生成
-  useEffect(() => {
-    // 只在切换到原文细读标签页时检查
-    if (activeTab !== "original") return;
-
-    // 检查全文总结是否已完成，原文细读是否未生成
-    const globalState = getNoteGenerationState(note.id);
-    const hasFullSummary = note.full_summary || globalState.completedTabs.has("full_summary") || globalState.completedTabs.has("FullSummary");
-    const hasNoDetailedReading = !note.detailed_reading;
-
-    // 如果当前正在生成中（包括自动初始化流程或章节生成），不再触发
-    if (globalState.isGenerating || globalState.isGeneratingChapters || chapterIsGenerating) {
-      return;
-    }
-
-    if (hasFullSummary && hasNoDetailedReading && chapterGridRef.current) {
-      // 延迟一点确保 ChapterGrid 完全渲染
-      setTimeout(() => {
-        if (chapterGridRef.current) {
-          chapterGridRef.current.generateChapters();
-        }
-      }, 300);
-    }
-  }, [activeTab, note.id, chapterIsGenerating]);
-
   // 视觉化总结页面直接复用原文细读的字幕优化结果
   // 不再自动触发字幕优化，用户需要先在原文细读页面开启"字幕优化"
 
