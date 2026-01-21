@@ -9,7 +9,6 @@ export { SettingsProvider, useSettings, LAYOUT_PANEL_WIDTH } from "./SettingsCon
 export { UploadProvider, useUpload } from "./UploadContext";
 export { CollectionsProvider, useCollections } from "./CollectionsContext";
 export { NotesProvider, useNotes } from "./NotesContext";
-export { InitTaskQueueProvider, useInitTaskQueue } from "./InitTaskQueueContext";
 
 // 兼容性导出 - 保持原有 AppContext 的 API
 export { AppProvider, useApp } from "./AppContext";

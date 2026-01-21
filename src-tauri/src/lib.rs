@@ -4,9 +4,6 @@ mod chapter;
 mod db;
 mod flashcard_generation;
 mod highlight_generation;
-mod init_task_config;
-mod init_task_executor;
-mod init_task_queue;
 mod note_generation;
 mod prompts;
 mod rag;
@@ -1555,9 +1552,6 @@ pub fn run() {
 
             let db = Database::new(app_data_dir).expect("Failed to initialize database");
 
-            // Initialize init task config tables
-            db.init_task_config_tables().expect("Failed to initialize init task config tables");
-
             // Load tray setting from database
             if let Ok(settings) = db.get_app_settings() {
                 TRAY_ENABLED.store(settings.tray_enabled, Ordering::SeqCst);
@@ -1685,27 +1679,6 @@ pub fn run() {
             batch_remove_notes_from_collection,
             batch_move_notes_to_collection,
             batch_delete_notes,
-            // Init task queue commands
-            init_task_queue::submit_init_task,
-            init_task_queue::complete_init_task_command,
-            init_task_queue::get_init_queue_status,
-            init_task_queue::get_note_queue_position,
-            init_task_queue::remove_note_from_queue,
-            // Init task config commands
-            init_task_config::get_init_task_configs,
-            init_task_config::get_enabled_init_task_configs,
-            init_task_config::save_init_task_configs,
-            init_task_config::update_init_task_config,
-            // Init task executor commands
-            init_task_executor::init_note_init_tasks,
-            init_task_executor::update_note_init_task_status,
-            init_task_executor::update_note_init_task_progress,
-            init_task_executor::update_current_init_task_index,
-            init_task_executor::update_note_init_overall_status,
-            init_task_executor::get_note_init_progress,
-            init_task_executor::get_note_init_tasks,
-            init_task_executor::check_pending_init_tasks,
-            init_task_executor::complete_note_init,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

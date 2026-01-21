@@ -40,15 +40,11 @@ export function GenerateButton() {
         model_id: selectedModelId,
       });
 
-      // 注意：不在这里提交任务到队列
-      // 任务提交由 NoteContentPanel 统一负责，避免重复提交
-      console.log(`[GenerateButton] 笔记 ${newNote.id} 已创建，跳转到笔记页面`);
-
       // 清空上传状态
       setUploadedVideo(null);
       setUploadedSubtitle(null);
 
-      // 跳转到笔记页面（NoteContentPanel 会自动提交任务并开始执行）
+      // 跳转到笔记页面
       setSelectedNoteId(newNote.id);
       setCurrentView("note");
     } catch (error) {

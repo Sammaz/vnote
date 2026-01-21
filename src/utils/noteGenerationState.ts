@@ -54,7 +54,6 @@ export function clearNoteGenerationState(noteId: number) {
       if (unlisten) {
         unlisten();
         activeListeners.delete(generationId);
-        console.log(`[NoteGenerationState] 清理监听器: generationId=${generationId}`);
       }
     }
     // 也清理主 generationId 的监听器（如果不在 activeGenerationIds 中）
@@ -63,7 +62,6 @@ export function clearNoteGenerationState(noteId: number) {
       if (unlisten) {
         unlisten();
         activeListeners.delete(state.generationId);
-        console.log(`[NoteGenerationState] 清理主监听器: generationId=${state.generationId}`);
       }
     }
   }
@@ -71,7 +69,6 @@ export function clearNoteGenerationState(noteId: number) {
   noteGenerationStates.delete(noteId);
   // 清理自动生成尝试记录（允许重新触发）
   attemptedAutoGenerateNoteIds.delete(noteId);
-  console.log(`[NoteGenerationState] 已清理笔记状态: noteId=${noteId}`);
 }
 
 // 判断笔记是否正在生成中
@@ -106,14 +103,12 @@ export function isInitialAutoGeneration(noteId: number): boolean {
 export function registerActiveGenerationId(noteId: number, generationId: string) {
   const state = getNoteGenerationState(noteId);
   state.activeGenerationIds.add(generationId);
-  console.log(`[NoteGenerationState] 注册任务: noteId=${noteId}, generationId=${generationId}`);
 }
 
 // 注销一个活动的 generation_id
 export function unregisterActiveGenerationId(noteId: number, generationId: string) {
   const state = getNoteGenerationState(noteId);
   state.activeGenerationIds.delete(generationId);
-  console.log(`[NoteGenerationState] 注销任务: noteId=${noteId}, generationId=${generationId}`);
 }
 
 // 获取笔记所有活动的 generation_id

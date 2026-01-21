@@ -122,23 +122,6 @@ export function NotesProvider({ children, onStatsUpdate }: NotesProviderProps) {
       }
     }
 
-    // 检查是否是当前正在执行的任务
-    try {
-      const position = await invoke<number | null>("get_note_queue_position", { noteId: id });
-      if (position === 0) {
-        await invoke("complete_init_task_command", { noteId: id });
-      }
-    } catch (error) {
-      console.error("检查队列位置失败:", error);
-    }
-
-    // 从队列中移除任务
-    try {
-      await invoke("remove_note_from_queue", { noteId: id });
-    } catch (error) {
-      console.error("从队列中移除笔记失败:", error);
-    }
-
     // 清理前端状态
     clearNoteGenerationState(id);
 

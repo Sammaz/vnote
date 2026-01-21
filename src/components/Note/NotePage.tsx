@@ -3,9 +3,7 @@ import { VideoPlayer } from "./VideoPlayer";
 import { ChatWindow } from "./ChatWindow";
 import { NoteContentPanel } from "./NoteContentPanel";
 import { VideoToolbar } from "./VideoToolbar";
-import { InitializationOverlay } from "./InitializationOverlay";
 import { useApp } from "../../context/AppContext";
-import type { InitTaskConfig } from "../../types";
 
 // 拖拽分隔条组件
 interface ResizerProps {
@@ -57,18 +55,6 @@ export function NotePage() {
   // 找到当前选中的笔记
   const currentNote = notes.find((note) => note.id === selectedNoteId);
 
-  // 条件返回必须在所有 hooks 之前，违反此规则会导致 "Rendered fewer hooks" 错误
-  if (!currentNote) {
-    return (
-      <div className="flex-1 flex items-center justify-center text-slate-500">
-        <div className="text-center">
-          <p className="text-lg mb-2">未找到笔记</p>
-          <p className="text-sm text-slate-400">请从侧边栏选择一个笔记</p>
-        </div>
-      </div>
-    );
-  }
-
   // 当前笔记的模型ID（从笔记记录获取）
   const [currentModelId, setCurrentModelId] = useState<number | null>(null);
 
@@ -78,37 +64,10 @@ export function NotePage() {
 
   // 当笔记变化时，更新模型ID
   useEffect(() => {
-    if (currentNote.model_id) {
+    if (currentNote?.model_id) {
       setCurrentModelId(currentNote.model_id);
     }
-  }, [currentNote.model_id]);
-
-  // 初始化任务执行器状态 - 从 NoteContentPanel 接收
-  const [initTaskState, setInitTaskState] = useState<{
-    isExecuting: boolean;
-    currentTask: string | null;
-    completedTasks: Set<string>;
-    failedTasks: Map<string, string>;
-    progress: { current: number; total: number };
-    taskConfigs: InitTaskConfig[];
-  }>({
-    isExecuting: false,
-    currentTask: null,
-    completedTasks: new Set(),
-    failedTasks: new Map(),
-    progress: { current: 0, total: 0 },
-    taskConfigs: [],
-  });
-
-  // 接收 NoteContentPanel 的初始化状态更新
-  const handleInitStateChange = useCallback((state: typeof initTaskState) => {
-    setInitTaskState(state);
-  }, []);
-
-  // 解析建议问题
-  const suggestedQuestions: string[] = currentNote.suggested_questions
-    ? JSON.parse(currentNote.suggested_questions)
-    : [];
+  }, [currentNote?.model_id]);
 
   // 从全局设置获取工具栏状态
   const { videoVisible, autoPlay, layoutSwapped, layoutPanelWidth } = toolbarSettings;
@@ -157,6 +116,23 @@ export function NotePage() {
     }
   }, [isDragging]);
 
+  // 条件返回：在所有 hooks 之后
+  if (!currentNote) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-slate-500">
+        <div className="text-center">
+          <p className="text-lg mb-2">未找到笔记</p>
+          <p className="text-sm text-slate-400">请从侧边栏选择一个笔记</p>
+        </div>
+      </div>
+    );
+  }
+
+  // 解析建议问题
+  const suggestedQuestions: string[] = currentNote.suggested_questions
+    ? JSON.parse(currentNote.suggested_questions)
+    : [];
+
   // 视频+聊天面板
   const videoPanel = (
     <div className="flex flex-col gap-4 flex-shrink-0" style={{ width: `${leftWidth}%` }}>
@@ -202,29 +178,17 @@ export function NotePage() {
   const notePanel = (
     <div className="min-w-0" style={{ width: `${rightWidth}%` }}>
       <NoteContentPanel
-        key={currentNote.id}
         note={currentNote}
         onGenerationComplete={refreshNotes}
         aiConfigs={aiConfigs}
         currentModelId={currentModelId}
         promptConfigs={promptConfigs}
-        onInitStateChange={handleInitStateChange}
       />
     </div>
   );
 
   return (
     <div ref={containerRef} className="relative flex-1 flex gap-0 p-4 overflow-hidden">
-      {/* 全屏初始化遮罩 */}
-      <InitializationOverlay
-        isVisible={initTaskState.isExecuting}
-        currentTask={initTaskState.currentTask}
-        completedTasks={initTaskState.completedTasks}
-        failedTasks={initTaskState.failedTasks}
-        progress={initTaskState.progress}
-        taskConfigs={initTaskState.taskConfigs}
-      />
-
       {layoutSwapped ? (
         <>
           {notePanel}

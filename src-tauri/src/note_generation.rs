@@ -1494,9 +1494,6 @@ pub async fn generate_note(
 
     cleanup_abort_flag(&generation_id).await;
 
-    // 注意：不再自动生成推荐问题
-    // 推荐问题的生成由前端 useInitTaskExecutor 按用户配置的顺序调用
-
     // 发送完成事件
     let _ = app.emit(
         &event_name,
@@ -1506,10 +1503,6 @@ pub async fn generate_note(
             total: generated_count + failed_count,
         },
     );
-
-    // 注意：不再在这里调用 complete_init_task
-    // 因为自动初始化流程还包括高光笔记和闪记卡的生成
-    // 任务完成的通知由前端在整个流程结束后统一调用
 
     Ok(())
 }

@@ -2,7 +2,6 @@
 //!
 //! 功能：
 //! - 为每个 AiConfig 独立管理并发槽位
-//! - FIFO队列调度
 //! - 统一的请求中止机制
 //! - 流式/非流式请求支持
 
@@ -82,7 +81,7 @@ struct ConfigConcurrencyController {
     concurrent_limit: Arc<Mutex<usize>>,
     /// 当前活跃请求数（用于监控）
     active_count: Arc<AtomicUsize>,
-    /// 等待队列长度（用于监控）
+    /// 等待数量（用于监控）
     waiting_count: Arc<AtomicUsize>,
 }
 
@@ -117,7 +116,7 @@ impl ConfigConcurrencyController {
         *self.concurrent_limit.lock().await
     }
 
-    /// 获取槽位（异步等待，FIFO顺序，带超时保护）
+    /// 获取槽位（异步等待，带超时保护）
     /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
     /// 超时时间：5分钟，防止任务永久卡住
     async fn acquire(&self) -> OwnedSemaphorePermit {
@@ -405,7 +404,7 @@ pub async fn execute_streaming_chat(
     let app = req.app.clone();
     let event_name = req.event_name.clone();
 
-    // 获取许可（FIFO排队，支持中止）
+    // 获取许可（支持中止）
     // permit 会被持有直到函数结束，确保信号量在整个请求期间被占用
     let _permit = match controller.acquire_with_abort(&abort_flag).await {
         Ok(p) => p,
@@ -688,7 +687,7 @@ pub async fn execute_non_streaming(req: NonStreamingRequest) -> Result<NonStream
         .ensure_controller(req.config.id, req.config.concurrent_limit)
         .await;
 
-    // 获取许可（FIFO排队）
+    // 获取许可
     // permit 会在 Drop 时自动释放
     let _permit = controller.acquire().await;
 
@@ -801,7 +800,7 @@ pub async fn execute_non_streaming_with_abort(
         .ensure_controller(req.config.id, req.config.concurrent_limit)
         .await;
 
-    // 获取许可（FIFO排队）
+    // 获取许可
     // permit 会在 Drop 时自动释放
     let permit = controller.acquire().await;
 

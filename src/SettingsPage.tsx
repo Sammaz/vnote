@@ -1,26 +1,10 @@
 import {
-    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, HardDrive, MessageSquareText, Search, GripVertical, ListChecks, Lock
+    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, HardDrive, MessageSquareText, Search
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import {
-    DndContext,
-    closestCenter,
-    PointerSensor,
-    useSensor,
-    useSensors,
-    DragEndEvent,
-} from "@dnd-kit/core";
-import {
-    arrayMove,
-    SortableContext,
-    useSortable,
-    verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
 import { useApp } from "./context/AppContext";
-import type { PromptCategory, PromptConfig, InitTaskConfig, UpdateInitTaskConfigRequest } from "./types";
-import { INIT_TASK_DESCRIPTIONS } from "./types";
+import type { PromptCategory, PromptConfig } from "./types";
 
 interface SettingsPageProps {
     currentTheme: "light" | "dark";
@@ -36,7 +20,6 @@ interface AiConfig {
     model: string;
     sort_order: number;
     is_default: boolean;
-    concurrent_limit: number;
     request_timeout: number;
 }
 
@@ -60,7 +43,7 @@ interface RerankerConfig {
     is_default: boolean;
 }
 
-type SettingsTab = "general" | "model" | "prompt" | "init-tasks";
+type SettingsTab = "general" | "model" | "prompt";
 type EditingType = "ai" | "embedding" | "reranker" | null;
 
 // 分类颜色映射
@@ -71,104 +54,6 @@ const categoryColors: Record<PromptCategory, { bg: string; text: string; label: 
     creative: { bg: "bg-orange-100 dark:bg-orange-900/30", text: "text-orange-600 dark:text-orange-400", label: "创作类" },
     other: { bg: "bg-slate-100 dark:bg-slate-700/30", text: "text-slate-600 dark:text-slate-400", label: "其他" },
 };
-
-// 可排序的任务项组件
-function SortableTaskItem({
-    config,
-    allConfigs,
-    onToggle,
-}: {
-    config: InitTaskConfig;
-    allConfigs: InitTaskConfig[];
-    onToggle: (taskType: string, enabled: boolean) => void;
-}) {
-    const {
-        attributes,
-        listeners,
-        setNodeRef,
-        transform,
-        transition,
-        isDragging,
-    } = useSortable({ id: config.task_type });
-
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-    };
-
-    return (
-        <div
-            ref={setNodeRef}
-            style={style}
-            className={[
-                "flex items-center gap-4 p-4 rounded-lg border transition-all bg-white dark:bg-vnote-card",
-                isDragging
-                    ? "border-blue-400 opacity-50 z-50 shadow-lg"
-                    : "border-slate-200 dark:border-vnote-border",
-            ].join(" ")}
-        >
-            {/* Drag Handle */}
-            <div
-                {...attributes}
-                {...listeners}
-                className="flex-shrink-0 text-slate-400 dark:text-slate-500 cursor-grab active:cursor-grabbing"
-            >
-                <GripVertical size={20} />
-            </div>
-
-            {/* Task Info */}
-            <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-slate-900 dark:text-slate-100">
-                        {config.task_name}
-                    </span>
-                    {config.is_required && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">
-                            <Lock size={10} />
-                            必需
-                        </span>
-                    )}
-                </div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 truncate">
-                    {INIT_TASK_DESCRIPTIONS[config.task_type as keyof typeof INIT_TASK_DESCRIPTIONS] || ""}
-                </p>
-                {config.depends_on && config.depends_on.length > 0 && (
-                    <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-                        依赖: {config.depends_on.map(dep => {
-                            const depConfig = allConfigs.find(c => c.task_type === dep);
-                            return depConfig?.task_name || dep;
-                        }).join(", ")}
-                    </p>
-                )}
-            </div>
-
-            {/* Toggle Switch */}
-            <button
-                onClick={() => {
-                    if (!config.is_required) {
-                        onToggle(config.task_type, !config.enabled);
-                    }
-                }}
-                disabled={config.is_required}
-                className={[
-                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors",
-                    config.is_required
-                        ? "bg-blue-400 cursor-not-allowed opacity-60"
-                        : config.enabled
-                            ? "bg-blue-600 cursor-pointer"
-                            : "bg-slate-300 dark:bg-slate-600 cursor-pointer"
-                ].join(" ")}
-            >
-                <span
-                    className={[
-                        "inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform",
-                        config.enabled ? "translate-x-6" : "translate-x-1"
-                    ].join(" ")}
-                />
-            </button>
-        </div>
-    );
-}
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
     const { refreshAiConfigs, refreshPromptConfigs } = useApp();
@@ -211,27 +96,17 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const [promptCategoryFilter, setPromptCategoryFilter] = useState<PromptCategory | "all">("all");
     const [promptSortBy, setPromptSortBy] = useState<"recent" | "name">("recent");
 
-    // Init task config state
-    const [initTaskConfigs, setInitTaskConfigs] = useState<InitTaskConfig[]>([]);
-    const [savingInitTasks, setSavingInitTasks] = useState(false);
-
-    // dnd-kit sensors for init tasks
-    const sensors = useSensors(
-        useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
-    );
-
     // Load settings from database on mount
     useEffect(() => {
         const loadSettings = async () => {
             try {
-                const [tray, aiCfgs, embCfgs, rerCfgs, cacheSize, promptCfgs, initTaskCfgs] = await Promise.all([
+                const [tray, aiCfgs, embCfgs, rerCfgs, cacheSize, promptCfgs] = await Promise.all([
                     invoke<boolean>("get_tray_enabled"),
                     invoke<AiConfig[]>("get_ai_configs"),
                     invoke<EmbeddingConfig[]>("get_embedding_configs"),
                     invoke<RerankerConfig[]>("get_reranker_configs"),
                     invoke<number>("get_video_cache_size"),
                     invoke<PromptConfig[]>("get_prompt_configs"),
-                    invoke<InitTaskConfig[]>("get_init_task_configs"),
                 ]);
                 setTrayEnabled(tray);
                 setAiConfigs(aiCfgs);
@@ -239,7 +114,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 setRerankerConfigs(rerCfgs);
                 setVideoCacheSize(cacheSize);
                 setPromptConfigs(promptCfgs);
-                setInitTaskConfigs(initTaskCfgs);
             } catch (error) {
                 console.error("Failed to load settings:", error);
             } finally {
@@ -558,34 +432,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     }, [promptConfigs, promptSearchQuery, promptCategoryFilter, promptSortBy]);
 
-    // Handle init task drag end
-    const handleInitTaskDragEnd = async (event: DragEndEvent) => {
-        const { active, over } = event;
-        if (!over || active.id === over.id) return;
-
-        const oldIndex = initTaskConfigs.findIndex(c => c.task_type === active.id);
-        const newIndex = initTaskConfigs.findIndex(c => c.task_type === over.id);
-
-        const newConfigs = arrayMove(initTaskConfigs, oldIndex, newIndex);
-        const updatedConfigs = newConfigs.map((c, i) => ({ ...c, sort_order: i + 1 }));
-        setInitTaskConfigs(updatedConfigs);
-
-        // Save to backend
-        const updates: UpdateInitTaskConfigRequest[] = updatedConfigs.map(c => ({
-            task_type: c.task_type,
-            enabled: c.enabled,
-            sort_order: c.sort_order,
-        }));
-        setSavingInitTasks(true);
-        try {
-            await invoke("save_init_task_configs", { configs: updates });
-        } catch (err) {
-            console.error("Failed to save init task configs:", err);
-        } finally {
-            setSavingInitTasks(false);
-        }
-    };
-
     const closeEditor = () => {
         setEditingType(null);
         setEditingAiConfig(null);
@@ -807,18 +653,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         <MessageSquareText size={16} />
                         提示词管理
                     </button>
-                    <button
-                        onClick={() => setActiveTab("init-tasks")}
-                        className={[
-                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all mt-1 cursor-pointer",
-                            activeTab === "init-tasks"
-                                ? "bg-blue-600 text-white shadow-sm"
-                                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover",
-                        ].join(" ")}
-                    >
-                        <ListChecks size={16} />
-                        初始化任务
-                    </button>
                 </nav>
             </aside>
 
@@ -826,11 +660,11 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 <div className="flex items-center justify-between mb-6">
                     <div>
                         <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                            {activeTab === "general" ? <SettingsIcon size={20} /> : activeTab === "model" ? <Bot size={20} /> : activeTab === "init-tasks" ? <ListChecks size={20} /> : <MessageSquareText size={20} />}
-                            {activeTab === "general" ? "常规设置" : activeTab === "model" ? "模型配置" : activeTab === "init-tasks" ? "初始化任务" : "提示词管理"}
+                            {activeTab === "general" ? <SettingsIcon size={20} /> : activeTab === "model" ? <Bot size={20} /> : <MessageSquareText size={20} />}
+                            {activeTab === "general" ? "常规设置" : activeTab === "model" ? "模型配置" : "提示词管理"}
                         </h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                            {activeTab === "general" ? "界面显示与桌面行为" : activeTab === "model" ? "配置对话模型、Embedding 和 Reranker" : activeTab === "init-tasks" ? "配置笔记创建后自动执行的任务" : "创建和管理自定义提示词模板"}
+                            {activeTab === "general" ? "界面显示与桌面行为" : activeTab === "model" ? "配置对话模型、Embedding 和 Reranker" : "创建和管理自定义提示词模板"}
                         </p>
                     </div>
                     <button
@@ -1363,55 +1197,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         </div>
                     </div>
                 ) : null}
-
-                {/* Init Tasks Tab */}
-                {activeTab === "init-tasks" && (
-                    <DndContext
-                        sensors={sensors}
-                        collisionDetection={closestCenter}
-                        onDragEnd={handleInitTaskDragEnd}
-                    >
-                        <SortableContext
-                            items={initTaskConfigs.map(c => c.task_type)}
-                            strategy={verticalListSortingStrategy}
-                        >
-                            <div className="space-y-2">
-                                {initTaskConfigs.map((config) => (
-                                    <SortableTaskItem
-                                        key={config.task_type}
-                                        config={config}
-                                        allConfigs={initTaskConfigs}
-                                        onToggle={async (taskType, enabled) => {
-                                            const updatedConfigs = initTaskConfigs.map(c =>
-                                                c.task_type === taskType ? { ...c, enabled } : c
-                                            );
-                                            setInitTaskConfigs(updatedConfigs);
-                                            try {
-                                                const cfg = initTaskConfigs.find(c => c.task_type === taskType);
-                                                await invoke("update_init_task_config", {
-                                                    taskType,
-                                                    enabled,
-                                                    sortOrder: cfg?.sort_order ?? 0,
-                                                });
-                                            } catch (err) {
-                                                console.error("Failed to update init task config:", err);
-                                                setInitTaskConfigs(initTaskConfigs);
-                                            }
-                                        }}
-                                    />
-                                ))}
-                            </div>
-                        </SortableContext>
-
-                        {savingInitTasks && (
-                            <div className="flex items-center justify-center gap-2 text-sm text-slate-500 mt-4">
-                                <Loader2 size={14} className="animate-spin" />
-                                保存中...
-                            </div>
-                        )}
-                    </DndContext>
-                )}
-
                 {/* Delete modals */}
                 {deletingAiConfigId !== null && (
                     <DeleteModal

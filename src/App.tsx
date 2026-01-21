@@ -1,11 +1,9 @@
-import { useEffect, useState, lazy, Suspense, useCallback } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { Sun, Moon, Minus, Square, X, Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import SettingsPage from "./SettingsPage";
 import { AppProvider, useApp } from "./context/AppContext";
-import { InitTaskQueueProvider } from "./context/InitTaskQueueContext";
-import { InitTaskConfigProvider } from "./context/InitTaskConfigContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
@@ -204,29 +202,39 @@ function AppContent() {
 
         {/* Main View */}
         <main className="flex-1 flex overflow-hidden bg-slate-50 dark:bg-vnote-bg">
-          {isSettingsView ? (
+          {/* 设置页面 - 条件渲染 */}
+          {isSettingsView && (
             <SettingsPage
               currentTheme={theme}
               onThemeChange={handleThemeChange}
               onClose={handleSettingsClose}
             />
-          ) : currentView === "note" ? (
+          )}
+
+          {/* 笔记页面 - 使用 CSS 隐藏保持状态 */}
+          <div className={`flex-1 flex overflow-hidden ${currentView === "note" && !isSettingsView ? "" : "hidden"}`}>
             <Suspense fallback={<PageLoadingFallback />}>
               <NotePage />
             </Suspense>
-          ) : currentView === "collection" ? (
+          </div>
+
+          {/* 其他页面 - 条件渲染 */}
+          {!isSettingsView && currentView === "collection" && (
             <Suspense fallback={<PageLoadingFallback />}>
               <CollectionPage />
             </Suspense>
-          ) : currentView === "recent-notes" ? (
+          )}
+          {!isSettingsView && currentView === "recent-notes" && (
             <Suspense fallback={<PageLoadingFallback />}>
               <RecentNotesPage />
             </Suspense>
-          ) : currentView === "search" ? (
+          )}
+          {!isSettingsView && currentView === "search" && (
             <Suspense fallback={<PageLoadingFallback />}>
               <SearchPage />
             </Suspense>
-          ) : (
+          )}
+          {!isSettingsView && currentView === "home" && (
             <HomePage />
           )}
         </main>
@@ -239,30 +247,9 @@ function App() {
   return (
     <ErrorBoundary>
       <AppProvider>
-        <InitTaskQueueWrapper />
+        <AppContent />
       </AppProvider>
     </ErrorBoundary>
-  );
-}
-
-// 包装组件：提供 InitTaskQueueProvider
-function InitTaskQueueWrapper() {
-  const { setCurrentView, setSelectedNoteId } = useApp();
-
-  // 当任务就绪时自动导航到对应笔记页面
-  // 这样可以确保任务队列中的下一个任务能够自动开始执行
-  const handleTaskReadyNavigate = useCallback((noteId: number) => {
-    console.log("[App] 任务就绪，自动导航到笔记:", noteId);
-    setSelectedNoteId(noteId);
-    setCurrentView("note");
-  }, [setCurrentView, setSelectedNoteId]);
-
-  return (
-    <InitTaskQueueProvider onTaskReadyNavigate={handleTaskReadyNavigate}>
-      <InitTaskConfigProvider>
-        <AppContent />
-      </InitTaskConfigProvider>
-    </InitTaskQueueProvider>
   );
 }
 
