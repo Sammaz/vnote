@@ -116,11 +116,21 @@ export function useInitTaskExecutor(options: UseInitTaskExecutorOptions): UseIni
   }, []);
 
   // 检查任务依赖是否满足
-  const checkDependencies = useCallback((taskConfig: InitTaskConfig, completed: Set<string>): boolean => {
+  // 如果依赖的任务被禁用，则视为依赖已满足（跳过该依赖）
+  const checkDependencies = useCallback((taskConfig: InitTaskConfig, completed: Set<string>, enabledTaskTypes: Set<string>): boolean => {
     if (!taskConfig.depends_on || taskConfig.depends_on.length === 0) {
       return true;
     }
-    return taskConfig.depends_on.every(dep => completed.has(dep));
+    // 只检查已启用的依赖任务是否已完成
+    // 如果依赖任务被禁用，则视为该依赖已满足
+    return taskConfig.depends_on.every(dep => {
+      if (!enabledTaskTypes.has(dep)) {
+        // 依赖任务被禁用，视为依赖已满足
+        return true;
+      }
+      // 依赖任务已启用，检查是否已完成
+      return completed.has(dep);
+    });
   }, []);
 
   // 执行全文总结任务
@@ -431,7 +441,7 @@ export function useInitTaskExecutor(options: UseInitTaskExecutorOptions): UseIni
   }, [noteId, modelId, subtitlePath]);
 
   // 执行单个任务
-  const executeTask = useCallback(async (taskConfig: InitTaskConfig, completed: Set<string>, taskIndex: number, totalTasks: number): Promise<boolean> => {
+  const executeTask = useCallback(async (taskConfig: InitTaskConfig, completed: Set<string>, enabledTaskTypes: Set<string>, taskIndex: number, totalTasks: number): Promise<boolean> => {
     const { task_type } = taskConfig;
     const taskName = TASK_NAMES[task_type] || task_type;
 
@@ -442,7 +452,7 @@ export function useInitTaskExecutor(options: UseInitTaskExecutorOptions): UseIni
     }
 
     // 检查依赖
-    if (!checkDependencies(taskConfig, completed)) {
+    if (!checkDependencies(taskConfig, completed, enabledTaskTypes)) {
       console.log(`[useInitTaskExecutor] 任务 ${taskName} 依赖未满足，跳过`);
       return true; // 继续执行下一个
     }
@@ -568,6 +578,9 @@ export function useInitTaskExecutor(options: UseInitTaskExecutorOptions): UseIni
     setCompletedTasks(completed);
     setFailedTasks(new Map());
 
+    // 构建启用任务类型集合（用于依赖检查）
+    const enabledTaskTypes = new Set<string>(configs.map(c => c.task_type));
+
     // 依次执行任务
     for (let i = 0; i < configs.length; i++) {
       if (isPausedRef.current || isAbortedRef.current) {
@@ -578,7 +591,7 @@ export function useInitTaskExecutor(options: UseInitTaskExecutorOptions): UseIni
       currentTaskIndexRef.current = i;
       setProgress({ current: i + 1, total: configs.length });
 
-      const success = await executeTask(configs[i], completed, i, configs.length);
+      const success = await executeTask(configs[i], completed, enabledTaskTypes, i, configs.length);
       if (success) {
         completed.add(configs[i].task_type);
         setCompletedTasks(new Set(completed));
@@ -618,6 +631,9 @@ export function useInitTaskExecutor(options: UseInitTaskExecutorOptions): UseIni
 
     const completed = new Set(completedTasks);
 
+    // 构建启用任务类型集合（用于依赖检查）
+    const enabledTaskTypes = new Set<string>(taskConfigs.map(c => c.task_type));
+
     // 从当前索引继续执行
     for (let i = currentTaskIndexRef.current; i < taskConfigs.length; i++) {
       if (isPausedRef.current || isAbortedRef.current) {
@@ -627,7 +643,7 @@ export function useInitTaskExecutor(options: UseInitTaskExecutorOptions): UseIni
       currentTaskIndexRef.current = i;
       setProgress({ current: i + 1, total: taskConfigs.length });
 
-      const success = await executeTask(taskConfigs[i], completed, i, taskConfigs.length);
+      const success = await executeTask(taskConfigs[i], completed, enabledTaskTypes, i, taskConfigs.length);
       if (success) {
         completed.add(taskConfigs[i].task_type);
         setCompletedTasks(new Set(completed));

@@ -67,12 +67,15 @@ impl Database {
 
         if count == 0 {
             // 插入默认任务配置
+            // 依赖关系说明：
+            // - 字幕优化依赖原文细读（需要章节数据）
+            // - 其他任务都是独立的，直接使用字幕文件
             let default_configs = [
                 ("full_summary", "全文总结", 1, 1, 0, None::<&str>),
-                ("detailed_reading", "原文细读", 1, 2, 0, Some("[\"full_summary\"]")),
+                ("detailed_reading", "原文细读", 1, 2, 0, None),
                 ("subtitle_optimization", "字幕优化", 0, 3, 0, Some("[\"detailed_reading\"]")),
-                ("highlights", "高光笔记", 1, 4, 0, Some("[\"detailed_reading\"]")),
-                ("suggested_questions", "推荐问题", 1, 5, 1, Some("[\"full_summary\"]")),
+                ("highlights", "高光笔记", 1, 4, 0, None),  // 直接使用字幕文件，无依赖
+                ("suggested_questions", "推荐问题", 1, 5, 1, None),  // 直接使用字幕文件，无依赖
                 ("flashcards", "闪记卡", 1, 6, 0, None),
             ];
 
@@ -128,6 +131,24 @@ impl Database {
         )?;
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_note_init_tasks_note ON note_init_tasks(note_id)",
+            [],
+        )?;
+
+        // 迁移：修正任务依赖关系（v2）
+        // - 原文细读：移除对全文总结的依赖（独立任务）
+        // - 高光笔记：移除对原文细读的依赖（直接使用字幕文件）
+        // - 推荐问题：移除对全文总结的依赖（直接使用字幕文件）
+        // - 字幕优化：保持对原文细读的依赖（需要章节数据）
+        conn.execute(
+            "UPDATE init_task_configs SET depends_on = NULL WHERE task_type = 'detailed_reading'",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE init_task_configs SET depends_on = NULL WHERE task_type = 'highlights'",
+            [],
+        )?;
+        conn.execute(
+            "UPDATE init_task_configs SET depends_on = NULL WHERE task_type = 'suggested_questions'",
             [],
         )?;
 
@@ -234,15 +255,15 @@ pub async fn get_init_task_configs() -> Result<Vec<InitTaskConfig>, String> {
 /// 获取启用的初始化任务配置
 ///
 /// 处理依赖关系的特殊情况：
-/// 1. 原文细读关闭但字幕优化开启 → 跳过字幕优化
-/// 2. 原文细读在字幕优化顺序后面 → 自动调整顺序，字幕优化排到原文细读后面
+/// 1. 字幕优化依赖原文细读，如果原文细读未启用则移除字幕优化
+/// 2. 如果依赖项的顺序在当前任务之后，则自动调整当前任务到依赖项之后
 #[tauri::command]
 pub async fn get_enabled_init_task_configs() -> Result<Vec<InitTaskConfig>, String> {
     let db = crate::get_db();
     let configs = db.get_enabled_init_task_configs()
         .map_err(|e| format!("获取启用的任务配置失败: {}", e))?;
 
-    // 检查依赖关系并处理特殊情况
+    // 检查依赖关系并处理
     let configs = process_task_dependencies(configs);
 
     // 打印完整的任务列表
@@ -265,7 +286,7 @@ pub async fn get_enabled_init_task_configs() -> Result<Vec<InitTaskConfig>, Stri
 /// 处理任务依赖关系
 ///
 /// 规则：
-/// 1. 如果任务的依赖项未启用，则跳过该任务
+/// 1. 如果任务有依赖项且依赖项未启用，则移除该任务（如字幕优化依赖原文细读）
 /// 2. 如果依赖项的顺序在当前任务之后，则自动调整当前任务到依赖项之后
 fn process_task_dependencies(mut configs: Vec<InitTaskConfig>) -> Vec<InitTaskConfig> {
     // 构建任务类型到索引的映射
@@ -275,7 +296,7 @@ fn process_task_dependencies(mut configs: Vec<InitTaskConfig>) -> Vec<InitTaskCo
         .map(|(i, c)| (c.task_type.clone(), i))
         .collect();
 
-    // 收集需要移除的任务（依赖项未启用）
+    // 收集需要移除的任务（有依赖且依赖项未启用）
     let mut tasks_to_remove: Vec<String> = Vec::new();
 
     // 收集需要调整顺序的任务
@@ -283,6 +304,10 @@ fn process_task_dependencies(mut configs: Vec<InitTaskConfig>) -> Vec<InitTaskCo
 
     for config in &configs {
         if let Some(ref depends_on) = config.depends_on {
+            if depends_on.is_empty() {
+                continue;
+            }
+
             for dep in depends_on {
                 // 检查依赖项是否存在于启用的任务中
                 if let Some(&dep_index) = task_index_map.get(dep) {
@@ -290,7 +315,6 @@ fn process_task_dependencies(mut configs: Vec<InitTaskConfig>) -> Vec<InitTaskCo
                     if let Some(&current_index) = task_index_map.get(&config.task_type) {
                         if current_index < dep_index {
                             // 当前任务在依赖项之前，需要调整顺序
-                            // 将当前任务的 sort_order 设置为依赖项的 sort_order + 1
                             let dep_sort_order = configs[dep_index].sort_order;
                             order_adjustments.push((config.task_type.clone(), dep_sort_order + 1));
                             eprintln!(
@@ -300,13 +324,13 @@ fn process_task_dependencies(mut configs: Vec<InitTaskConfig>) -> Vec<InitTaskCo
                         }
                     }
                 } else {
-                    // 依赖项不存在（未启用），需要跳过当前任务
+                    // 依赖项不存在（未启用），移除当前任务
                     tasks_to_remove.push(config.task_type.clone());
                     eprintln!(
                         "[初始化任务] 任务 '{}' 的依赖项 '{}' 未启用，跳过该任务",
                         config.task_name, dep
                     );
-                    break; // 只要有一个依赖项未满足就跳过
+                    break;
                 }
             }
         }

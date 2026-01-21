@@ -123,6 +123,14 @@ interface NoteContentPanelProps {
   aiConfigs: AiConfig[];
   currentModelId?: number | null; // 视频播放器右上角选择的模型ID
   promptConfigs?: PromptConfig[]; // 提示词配置列表
+  onInitStateChange?: (state: {
+    isExecuting: boolean;
+    currentTask: string | null;
+    completedTasks: Set<string>;
+    failedTasks: Map<string, string>;
+    progress: { current: number; total: number };
+    taskConfigs: import("../../types").InitTaskConfig[];
+  }) => void; // 初始化状态变化回调
 }
 
 // 解析高光数据
@@ -145,7 +153,7 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
   }
 }
 
-export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
+export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [], onInitStateChange }: NoteContentPanelProps) {
   // 任务队列 hook
   const { submitTask, completeTask, getNoteQueuePosition, isNoteWaiting, onTaskReady } = useInitTaskQueue();
   // 初始化任务配置 hook（保留以备后用）
@@ -268,6 +276,26 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       onGenerationComplete?.();
     },
   });
+
+  // 同步 taskExecutor 状态到父组件（用于全屏遮罩显示）
+  useEffect(() => {
+    onInitStateChange?.({
+      isExecuting: taskExecutor.isExecuting,
+      currentTask: taskExecutor.currentTask,
+      completedTasks: taskExecutor.completedTasks,
+      failedTasks: taskExecutor.failedTasks,
+      progress: taskExecutor.progress,
+      taskConfigs: taskExecutor.taskConfigs,
+    });
+  }, [
+    taskExecutor.isExecuting,
+    taskExecutor.currentTask,
+    taskExecutor.completedTasks,
+    taskExecutor.failedTasks,
+    taskExecutor.progress,
+    taskExecutor.taskConfigs,
+    onInitStateChange,
+  ]);
 
   const [activeTab, setActiveTab] = useState<TabId>("summary");
   const [activeGroup, setActiveGroup] = useState<TabGroupId>("summary");

@@ -3,7 +3,9 @@ import { VideoPlayer } from "./VideoPlayer";
 import { ChatWindow } from "./ChatWindow";
 import { NoteContentPanel } from "./NoteContentPanel";
 import { VideoToolbar } from "./VideoToolbar";
+import { InitializationOverlay } from "./InitializationOverlay";
 import { useApp } from "../../context/AppContext";
+import type { InitTaskConfig } from "../../types";
 
 // 拖拽分隔条组件
 interface ResizerProps {
@@ -80,6 +82,28 @@ export function NotePage() {
       setCurrentModelId(currentNote.model_id);
     }
   }, [currentNote.model_id]);
+
+  // 初始化任务执行器状态 - 从 NoteContentPanel 接收
+  const [initTaskState, setInitTaskState] = useState<{
+    isExecuting: boolean;
+    currentTask: string | null;
+    completedTasks: Set<string>;
+    failedTasks: Map<string, string>;
+    progress: { current: number; total: number };
+    taskConfigs: InitTaskConfig[];
+  }>({
+    isExecuting: false,
+    currentTask: null,
+    completedTasks: new Set(),
+    failedTasks: new Map(),
+    progress: { current: 0, total: 0 },
+    taskConfigs: [],
+  });
+
+  // 接收 NoteContentPanel 的初始化状态更新
+  const handleInitStateChange = useCallback((state: typeof initTaskState) => {
+    setInitTaskState(state);
+  }, []);
 
   // 解析建议问题
   const suggestedQuestions: string[] = currentNote.suggested_questions
@@ -184,12 +208,23 @@ export function NotePage() {
         aiConfigs={aiConfigs}
         currentModelId={currentModelId}
         promptConfigs={promptConfigs}
+        onInitStateChange={handleInitStateChange}
       />
     </div>
   );
 
   return (
-    <div ref={containerRef} className="flex-1 flex gap-0 p-4 overflow-hidden">
+    <div ref={containerRef} className="relative flex-1 flex gap-0 p-4 overflow-hidden">
+      {/* 全屏初始化遮罩 */}
+      <InitializationOverlay
+        isVisible={initTaskState.isExecuting}
+        currentTask={initTaskState.currentTask}
+        completedTasks={initTaskState.completedTasks}
+        failedTasks={initTaskState.failedTasks}
+        progress={initTaskState.progress}
+        taskConfigs={initTaskState.taskConfigs}
+      />
+
       {layoutSwapped ? (
         <>
           {notePanel}
