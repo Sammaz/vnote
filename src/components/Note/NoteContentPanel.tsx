@@ -33,6 +33,7 @@ import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData, FlashcardGenerationEvent } from "../../types";
+import { ResponsiveTabs } from "./ResponsiveTabs";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
 import { SubtitleRow } from "./SubtitleRow";
@@ -1942,34 +1943,50 @@ Video subtitles content:`;
       <div className="border-b border-slate-200 dark:border-vnote-border select-none">
         <div className="flex items-center">
           {/* 当前分组的标签 */}
-          <div className="flex flex-wrap flex-1">
-            {TAB_GROUPS.find(g => g.id === activeGroup)?.tabs.map((tab) => {
-              const generating = isTabGenerating(tab.id);
-              const error = getTabError(tab.id);
+          <ResponsiveTabs
+            items={TAB_GROUPS.find(g => g.id === activeGroup)?.tabs || []}
+            activeTabId={activeTab}
+            onTabClick={(id) => setActiveTab(id as TabId)}
+            renderTab={(tab, isDropdown) => {
+              const generating = isTabGenerating(tab.id as TabId);
+              const error = getTabError(tab.id as TabId);
+              const isActive = activeTab === tab.id;
 
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={cn(
-                  "flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors relative cursor-pointer",
-                  activeTab === tab.id
-                    ? "border-blue-500 text-blue-500"
-                    : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                )}
-              >
-                {tab.icon}
-                {tab.label}
-                {generating && (
-                  <span className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
-                )}
-                {error && !generating && (
-                  <X className="w-3 h-3 text-red-500" />
-                )}
-              </button>
-            );
-          })}
-          </div>
+              if (isDropdown) {
+                return (
+                  <div className={cn(
+                    "flex items-center gap-2 px-4 py-2 text-sm text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer w-full select-none",
+                    isActive ? "text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/10" : "text-slate-700 dark:text-slate-300"
+                  )}>
+                    {tab.icon}
+                    <span className="flex-1 truncate">{tab.label}</span>
+                    {generating && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />}
+                    {error && !generating && <X className="w-3 h-3 text-red-500" />}
+                  </div>
+                );
+              }
+
+              return (
+                <button
+                  className={cn(
+                    "flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors relative cursor-pointer whitespace-nowrap",
+                    isActive
+                      ? "border-blue-500 text-blue-500"
+                      : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  )}
+                >
+                  {tab.icon}
+                  {tab.label}
+                  {generating && (
+                    <span className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
+                  )}
+                  {error && !generating && (
+                    <X className="w-3 h-3 text-red-500" />
+                  )}
+                </button>
+              );
+            }}
+          />
 
           {/* 分组切换器 */}
           <div className="flex items-center gap-0.5 p-1 mr-2 bg-slate-100 dark:bg-vnote-surface rounded-lg">
