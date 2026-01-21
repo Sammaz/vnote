@@ -1415,26 +1415,43 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     // 开启优化：检查是否有缓存
     if (optimizedSubtitles.size > 0) {
-      // 有缓存，直接启用显示
-      setSubtitleOptimizationEnabled(true);
-      return;
+      // 检查缓存的章节ID是否与当前章节匹配
+      const currentChapterIds = new Set(chapterData?.chapters.map(c => c.id) || []);
+      const cachedChapterIds = Array.from(optimizedSubtitles.keys());
+      const isMatch = cachedChapterIds.some(id => currentChapterIds.has(id));
+
+      if (isMatch) {
+        // 有匹配的缓存，直接启用显示
+        setSubtitleOptimizationEnabled(true);
+        return;
+      } else {
+        // 缓存的章节ID与当前不匹配（章节已重新生成），清除旧缓存
+        setOptimizedSubtitles(new Map());
+      }
     }
 
     // 尝试从数据库加载缓存（可能是初始化时生成的）
     try {
       const savedSubtitles = await invoke<OptimizedSubtitle[]>("get_optimized_subtitles", { noteId: note.id });
       if (savedSubtitles && savedSubtitles.length > 0) {
-        const subtitleMap = new Map<string, string>();
-        savedSubtitles.forEach(s => subtitleMap.set(s.chapter_id, s.optimized_text));
-        setOptimizedSubtitles(subtitleMap);
-        setSubtitleOptimizationEnabled(true);
-        return;
+        // 检查数据库缓存的章节ID是否与当前章节匹配
+        const currentChapterIds = new Set(chapterData?.chapters.map(c => c.id) || []);
+        const matchedSubtitles = savedSubtitles.filter(s => currentChapterIds.has(s.chapter_id));
+
+        if (matchedSubtitles.length > 0) {
+          const subtitleMap = new Map<string, string>();
+          matchedSubtitles.forEach(s => subtitleMap.set(s.chapter_id, s.optimized_text));
+          setOptimizedSubtitles(subtitleMap);
+          setSubtitleOptimizationEnabled(true);
+          return;
+        }
+        // 如果没有匹配的，继续执行重新生成
       }
     } catch (error) {
       console.error("[SubtitleOptimization] 加载缓存失败:", error);
     }
 
-    // 无缓存，开始优化
+    // 无缓存或缓存不匹配，开始优化
     // 优先使用视频播放器右上角选择的模型
     const effectiveModelId = currentModelId || note.model_id;
     if (!chapterData || !effectiveModelId || !note.subtitle_path) {

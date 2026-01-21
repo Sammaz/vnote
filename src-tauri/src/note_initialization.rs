@@ -628,6 +628,12 @@ async fn execute_subtitle_optimization_step(
         return StepResult::Skipped("章节列表为空".to_string());
     }
 
+    // 需要字幕文件
+    let subtitle_path = match &params.subtitle_path {
+        Some(p) => p.clone(),
+        None => return StepResult::Skipped("无字幕文件".to_string()),
+    };
+
     let _ = app.emit(
         event_name,
         NoteInitializationEvent::StepProgress {
@@ -648,15 +654,58 @@ async fn execute_subtitle_optimization_step(
         Err(e) => return StepResult::Failed(format!("获取AI配置失败: {}", e)),
     };
 
-    // 转换章节数据为优化器需要的格式
+    // 解析原始字幕文件（与前端按钮使用相同的逻辑）
+    let subtitle_entries = match crate::subtitle::parse_subtitle_file(&subtitle_path) {
+        Ok(entries) => entries,
+        Err(e) => return StepResult::Failed(format!("解析字幕失败: {}", e)),
+    };
+
+    if subtitle_entries.is_empty() {
+        return StepResult::Skipped("字幕内容为空".to_string());
+    }
+
+    // 按章节时间范围过滤字幕，构建优化输入（与前端逻辑一致）
     let chapter_inputs: Vec<ChapterSubtitleInput> = chapters
         .iter()
-        .map(|ch| ChapterSubtitleInput {
-            chapter_id: ch.id.clone(),
-            subtitle_text: ch.content.clone(),
-            has_bilingual: false,
+        .filter_map(|ch| {
+            // 过滤出当前章节时间范围内的字幕
+            let filtered: Vec<_> = subtitle_entries
+                .iter()
+                .filter(|sub| sub.start_time >= ch.start_time && sub.start_time < ch.end_time)
+                .collect();
+
+            if filtered.is_empty() {
+                return None;
+            }
+
+            // 检查是否有双语字幕
+            let has_bilingual = filtered.iter().any(|sub| sub.second_language_text.is_some());
+
+            let subtitle_text = if has_bilingual {
+                // 双语字幕：合并两种语言
+                let primary_text: String = filtered.iter().map(|sub| sub.text.as_str()).collect::<Vec<_>>().join(" ");
+                let secondary_text: String = filtered
+                    .iter()
+                    .filter_map(|sub| sub.second_language_text.as_ref())
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("{}\n\n{}", primary_text, secondary_text)
+            } else {
+                // 单语字幕：直接拼接
+                filtered.iter().map(|sub| sub.text.as_str()).collect::<Vec<_>>().join(" ")
+            };
+
+            if subtitle_text.trim().is_empty() {
+                return None;
+            }
+
+            Some(ChapterSubtitleInput {
+                chapter_id: ch.id.clone(),
+                subtitle_text,
+                has_bilingual,
+            })
         })
-        .filter(|c| !c.subtitle_text.trim().is_empty())
         .collect();
 
     if chapter_inputs.is_empty() {
