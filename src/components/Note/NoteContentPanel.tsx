@@ -1718,6 +1718,91 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [chapterData, currentModelId, note.model_id, note.id, note.subtitle_path, subtitleEntries, optimizingChapterIds]);
 
+  // 使用默认配置直接生成全文总结（空状态下的按钮使用）
+  const handleGenerateFullSummaryWithDefaults = useCallback(async () => {
+    // 获取有效的模型ID
+    const effectiveModelId = currentModelId || note.model_id || aiConfigs.find(c => c.is_default)?.id || aiConfigs[0]?.id;
+    if (!effectiveModelId) {
+      message.warning("请先配置 AI 模型");
+      return;
+    }
+
+    // 全文总结独立生成，只检查自身的生成状态
+    const globalState = getNoteGenerationState(note.id);
+    if (globalState.regeneratingTabs.has("full_summary")) {
+      message.warning("全文总结正在生成中，请稍后再试");
+      return;
+    }
+
+    // 使用默认配置生成提示词（中文、显示Emoji、不显示时间戳、5个要点、30字句子）
+    const defaultPrompt = `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
+
+输出要求：
+1. 使用 Markdown 格式输出（不要使用代码块标记）
+2. 必须使用中文输出所有内容
+3. 严格按照以下格式输出：
+
+# 摘要
+摘要段落，概括视频核心内容，每句话不超过30字
+
+# 核心亮点
+提取最重要的5个知识点/亮点，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）
+
+## 🔥 亮点标题1
+详细描述该亮点的内容
+
+## 💡 亮点标题2
+详细描述该亮点的内容
+
+（继续提取5个亮点）
+
+# 关键术语
+- **术语1**：解释
+- **术语2**：解释
+
+视频字幕内容：`;
+
+    try {
+      const id = crypto.randomUUID();
+
+      // 只更新 regeneratingTabs 用于 UI 显示，不设置全局 isGenerating
+      const currentTabs = new Set(globalState.regeneratingTabs);
+      currentTabs.add("full_summary");
+      setNoteGenerationState(note.id, {
+        regeneratingTabs: currentTabs,
+      });
+
+      // 更新组件state
+      setRegeneratingTabs(currentTabs as Set<TabType>);
+
+      // 设置事件监听器
+      setupGenerationListener(note.id, id);
+
+      // 等待状态更新和事件监听器设置完成
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // 后端会立即返回 generation_id，实际生成在后台进行
+      await invoke("generate_note_content", {
+        generationId: id,
+        noteId: note.id,
+        modelId: effectiveModelId,
+        concurrent: true,
+        regenerate: true,
+        tabsToGenerate: ["full_summary"],
+        customPrompt: defaultPrompt,
+      });
+    } catch (error) {
+      // 出错时重置状态
+      const currentTabs = new Set(getNoteGenerationState(note.id).regeneratingTabs);
+      currentTabs.delete("full_summary");
+      setNoteGenerationState(note.id, {
+        regeneratingTabs: currentTabs,
+      });
+      setRegeneratingTabs(currentTabs as Set<TabType>);
+      message.error(`生成失败: ${error}`);
+    }
+  }, [note.id, note.model_id, currentModelId, aiConfigs, setupGenerationListener]);
+
   // 根据配置生成动态提示词（Markdown 格式）
   const generateDynamicPrompt = useCallback((): string => {
     const isEnglish = configLanguage === "en";
@@ -1785,17 +1870,19 @@ Video subtitles content:`;
     }
   }, [configLanguage, configShowEmoji, configShowTimestamp, configHighlightCount, configSentenceLength]);
 
-  // 执行生成
+  // 执行生成（弹框中的重新生成）
   const handleCustomGenerate = async () => {
     if (!selectedModelId) {
       message.warning("请选择AI模型");
       return;
     }
 
-    // 检查是否已经在生成中
-    const currentState = getNoteGenerationState(note.id);
-    if (currentState.isGenerating) {
-      message.warning("该笔记正在生成中，请稍后再试");
+    const currentTabType = TAB_TYPE_MAPPING[activeTab] as TabType;
+
+    // 独立生成，只检查当前标签页的生成状态
+    const globalState = getNoteGenerationState(note.id);
+    if (currentTabType && globalState.regeneratingTabs.has(currentTabType)) {
+      message.warning("当前内容正在生成中，请稍后再试");
       return;
     }
 
@@ -1815,25 +1902,18 @@ Video subtitles content:`;
 
     try {
       const id = crypto.randomUUID();
-      const currentTabType = TAB_TYPE_MAPPING[activeTab] as TabType;
-      const newRegeneratingTabs = currentTabType ? new Set<TabType>([currentTabType]) : new Set<TabType>();
 
-      // 更新全局状态
+      // 只更新 regeneratingTabs 用于 UI 显示，不设置全局 isGenerating
+      const currentTabs = new Set(globalState.regeneratingTabs);
+      if (currentTabType) {
+        currentTabs.add(currentTabType);
+      }
       setNoteGenerationState(note.id, {
-        isGenerating: true,
-        generationId: id,
-        regeneratingTabs: newRegeneratingTabs,
-        progress: { current: 0, total: 0, message: "准备生成..." },
-        completedTabs: new Set<TabType>(),
-        failedTabs: new Map<TabType, string>(),
+        regeneratingTabs: currentTabs,
       });
 
       // 更新组件state
-      setGenerationId(id);
-      setIsGenerating(true);
-      setCompletedTabs(new Set());
-      setFailedTabs(new Map());
-      setRegeneratingTabs(newRegeneratingTabs);
+      setRegeneratingTabs(currentTabs as Set<TabType>);
 
       // 设置事件监听器
       setupGenerationListener(note.id, id);
@@ -1853,14 +1933,14 @@ Video subtitles content:`;
       });
     } catch (error) {
       // 出错时重置状态
+      const currentTabs = new Set(getNoteGenerationState(note.id).regeneratingTabs);
+      if (currentTabType) {
+        currentTabs.delete(currentTabType);
+      }
       setNoteGenerationState(note.id, {
-        isGenerating: false,
-        generationId: null,
-        regeneratingTabs: new Set(),
+        regeneratingTabs: currentTabs,
       });
-      setIsGenerating(false);
-      setGenerationId(null);
-      setRegeneratingTabs(new Set());
+      setRegeneratingTabs(currentTabs as Set<TabType>);
       message.error(`生成失败: ${error}`);
     }
   };
@@ -1877,10 +1957,10 @@ Video subtitles content:`;
       return;
     }
 
-    // 检查是否已经在生成中
-    const currentState = getNoteGenerationState(note.id);
-    if (currentState.isGenerating) {
-      message.warning("该笔记正在生成中，请稍后再试");
+    // 独立生成，只检查自定义总结的生成状态
+    const globalState = getNoteGenerationState(note.id);
+    if (globalState.regeneratingTabs.has("custom_summary")) {
+      message.warning("自定义总结正在生成中，请稍后再试");
       return;
     }
 
@@ -1888,24 +1968,16 @@ Video subtitles content:`;
 
     try {
       const id = crypto.randomUUID();
-      const newRegeneratingTabs = new Set<TabType>(["custom_summary"]);
 
-      // 更新全局状态
+      // 只更新 regeneratingTabs 用于 UI 显示，不设置全局 isGenerating
+      const currentTabs = new Set(globalState.regeneratingTabs);
+      currentTabs.add("custom_summary");
       setNoteGenerationState(note.id, {
-        isGenerating: true,
-        generationId: id,
-        regeneratingTabs: newRegeneratingTabs,
-        progress: { current: 0, total: 0, message: "准备生成自定义总结..." },
-        completedTabs: new Set<TabType>(),
-        failedTabs: new Map<TabType, string>(),
+        regeneratingTabs: currentTabs,
       });
 
       // 更新组件state
-      setGenerationId(id);
-      setIsGenerating(true);
-      setCompletedTabs(new Set());
-      setFailedTabs(new Map());
-      setRegeneratingTabs(newRegeneratingTabs);
+      setRegeneratingTabs(currentTabs as Set<TabType>);
 
       // 设置事件监听器
       setupGenerationListener(note.id, id);
@@ -1925,14 +1997,12 @@ Video subtitles content:`;
       });
     } catch (error) {
       // 出错时重置状态
+      const currentTabs = new Set(getNoteGenerationState(note.id).regeneratingTabs);
+      currentTabs.delete("custom_summary");
       setNoteGenerationState(note.id, {
-        isGenerating: false,
-        generationId: null,
-        regeneratingTabs: new Set(),
+        regeneratingTabs: currentTabs,
       });
-      setIsGenerating(false);
-      setGenerationId(null);
-      setRegeneratingTabs(new Set());
+      setRegeneratingTabs(currentTabs as Set<TabType>);
       message.error(`生成失败: ${error}`);
     }
   };
@@ -2564,15 +2634,56 @@ Video subtitles content:`;
       )}>
         {/* 正常内容渲染 */}
         {activeTab === "summary" && (
-          <EditableMarkdown
-            noteId={note.id}
-            tabType="full_summary"
-            content={note.full_summary}
-            isGenerating={isTabGenerating("summary")}
-            emptyMessage="全文总结内容将在AI分析后生成"
-            isEditMode={isEditMode}
-            onContentUpdate={onGenerationComplete}
-          />
+          note.full_summary ? (
+            <EditableMarkdown
+              noteId={note.id}
+              tabType="full_summary"
+              content={note.full_summary}
+              isGenerating={isTabGenerating("summary")}
+              emptyMessage="全文总结内容将在AI分析后生成"
+              isEditMode={isEditMode}
+              onContentUpdate={onGenerationComplete}
+            />
+          ) : isTabGenerating("summary") ? (
+            <EditableMarkdown
+              noteId={note.id}
+              tabType="full_summary"
+              content={null}
+              isGenerating={true}
+              emptyMessage=""
+              isEditMode={false}
+              onContentUpdate={onGenerationComplete}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="text-center">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                  <FileText className="w-8 h-8 text-slate-400 dark:text-slate-500" />
+                </div>
+                <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">暂无全文总结</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-md">
+                  AI 可以根据视频字幕自动生成结构化的全文总结，包含摘要、核心亮点和关键术语。
+                </p>
+                <button
+                  onClick={handleGenerateFullSummaryWithDefaults}
+                  disabled={!note.subtitle_path || aiConfigs.length === 0}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all mx-auto",
+                    "bg-blue-500 hover:bg-blue-600 text-white",
+                    "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  )}
+                >
+                  <Sparkles className="w-4 h-4" />
+                  生成全文总结
+                </button>
+                {(!note.subtitle_path || aiConfigs.length === 0) && (
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
+                    {!note.subtitle_path ? "请先上传字幕文件" : "请先配置 AI 模型"}
+                  </p>
+                )}
+              </div>
+            </div>
+          )
         )}
         {activeTab === "original" && (() => {
           // 辅助模式下显示 AssistModeView

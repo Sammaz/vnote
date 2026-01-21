@@ -208,27 +208,36 @@ export const ChapterGrid = forwardRef<ChapterGridRef, ChapterGridProps>(function
     );
   }
 
-  // 如果没有章节数据，显示空状态
+  // 如果没有章节数据，显示空状态（与高光笔记保持一致的风格）
+  // 注意：空状态下始终显示生成按钮，不受 showToolbar 控制
   if (!effectiveChapterData || effectiveChapterData.chapters.length === 0) {
     const canGenerate = modelId && subtitlePath;
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-slate-400">
-        <ImageIcon className="w-16 h-16 mb-4 opacity-50" />
-        <p className="text-lg mb-2">暂无章节内容</p>
-        <p className="text-sm mb-6">AI 可以根据视频字幕自动生成章节并截图</p>
-        {showToolbar && canGenerate ? (
-          <button
-            onClick={handleGenerateChapters}
-            className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors cursor-pointer flex items-center gap-2"
-          >
-            <Play className="w-4 h-4" />
-            生成章节
-          </button>
-        ) : showToolbar ? (
-          <p className="text-sm text-orange-400">
-            {!modelId ? "请先配置 AI 模型" : "请先上传字幕文件"}
+      <div className="flex flex-col items-center justify-center h-full min-h-[400px] px-4">
+        <div className="w-16 h-16 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-4">
+          <ImageIcon className="w-8 h-8 text-slate-400 dark:text-slate-500" />
+        </div>
+        <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">
+          暂无章节内容
+        </h3>
+        <p className="text-sm text-slate-500 dark:text-slate-400 text-center mb-6 max-w-md">
+          AI 可以根据视频字幕自动生成章节并截图
+        </p>
+
+        <button
+          onClick={handleGenerateChapters}
+          disabled={!canGenerate}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all bg-blue-500 hover:bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        >
+          <Play className="w-4 h-4" />
+          生成章节
+        </button>
+
+        {!canGenerate && (
+          <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
+            {!subtitlePath ? "请先上传字幕文件" : "请先选择 AI 模型"}
           </p>
-        ) : null}
+        )}
       </div>
     );
   }

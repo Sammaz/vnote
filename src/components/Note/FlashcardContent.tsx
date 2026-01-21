@@ -148,10 +148,9 @@ export function FlashcardContent({
       return;
     }
 
-    // Check if already generating
-    const currentState = getNoteGenerationState(noteId);
-    if (currentState.isGenerating) {
-      message.warning("该笔记正在生成中，请稍后再试");
+    // 闪记卡生成是独立的，只检查自身的生成状态
+    if (localGenerating) {
+      message.warning("闪记卡正在生成中，请稍后再试");
       return;
     }
 
@@ -161,15 +160,7 @@ export function FlashcardContent({
     try {
       const generationId = crypto.randomUUID();
 
-      // Update global state
-      setNoteGenerationState(noteId, {
-        isGenerating: true,
-        generationId,
-        regeneratingTabs: new Set<TabType>(["flashcards"]),
-        progress: { current: 0, total: 0, message: "准备生成闪记卡..." },
-        completedTabs: new Set<TabType>(),
-        failedTabs: new Map<TabType, string>(),
-      });
+      // 闪记卡不设置全局 isGenerating 状态，保持独立性
 
       // Set up event listener
       const unlisten = await listen<FlashcardGenerationEvent>(
@@ -188,32 +179,17 @@ export function FlashcardContent({
             setGenerationProgress(null);
             setCurrentIndex(0);
             setShowAnswer(true);
-            setNoteGenerationState(noteId, {
-              isGenerating: false,
-              generationId: null,
-              regeneratingTabs: new Set(),
-            });
             onGenerationComplete?.();
             message.success(`成功生成 ${payload.flashcard_data.total_count} 张闪记卡`);
             unlisten();
           } else if (payload.status === "Error") {
             setLocalGenerating(false);
             setGenerationProgress(null);
-            setNoteGenerationState(noteId, {
-              isGenerating: false,
-              generationId: null,
-              regeneratingTabs: new Set(),
-            });
             message.error(`生成失败: ${payload.error}`);
             unlisten();
           } else if (payload.status === "Aborted") {
             setLocalGenerating(false);
             setGenerationProgress(null);
-            setNoteGenerationState(noteId, {
-              isGenerating: false,
-              generationId: null,
-              regeneratingTabs: new Set(),
-            });
             message.warning("生成已取消");
             unlisten();
           }
@@ -229,14 +205,9 @@ export function FlashcardContent({
     } catch (error) {
       setLocalGenerating(false);
       setGenerationProgress(null);
-      setNoteGenerationState(noteId, {
-        isGenerating: false,
-        generationId: null,
-        regeneratingTabs: new Set(),
-      });
       message.error(`生成失败: ${error}`);
     }
-  }, [noteId, subtitlePath, modelId, onGenerationComplete]);
+  }, [noteId, subtitlePath, modelId, onGenerationComplete, localGenerating]);
 
   // Listen for external regenerate event
   useEffect(() => {
