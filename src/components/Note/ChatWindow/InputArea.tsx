@@ -2,7 +2,6 @@
  * 输入区域组件
  */
 
-import { useRef } from "react";
 import { Paperclip, Video, Send, Square, X } from "lucide-react";
 import { cn } from "../../../utils/cn";
 import { ACCEPTED_IMAGE_TYPES } from "./constants";

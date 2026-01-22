@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { flushSync } from "react-dom";
 import {
   FileText,
   BookOpen,
@@ -48,10 +47,7 @@ import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 import {
   getNoteGenerationState,
   setNoteGenerationState,
-  attemptedAutoGenerateNoteIds,
   activeListeners,
-  setInitialAutoGeneration,
-  isInitialAutoGeneration,
   registerActiveGenerationId,
   unregisterActiveGenerationId,
 } from "../../utils/noteGenerationState";

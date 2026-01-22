@@ -390,7 +390,7 @@ export function InitializationQueuePanel() {
 
                 {/* 步骤列表 */}
                 <div className="mt-3 space-y-1.5">
-                  {initState.steps.map((step, index) => (
+                  {initState.steps.map((step) => (
                     <div key={step.step} className="flex items-center gap-2 text-xs">
                       {step.status === "pending" && (
                         <div className="w-3.5 h-3.5 rounded-full border border-slate-300 dark:border-slate-500" />

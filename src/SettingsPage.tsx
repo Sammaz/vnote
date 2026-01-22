@@ -20,6 +20,7 @@ interface AiConfig {
     model: string;
     sort_order: number;
     is_default: boolean;
+    concurrent_limit: number;
     request_timeout: number;
 }
 

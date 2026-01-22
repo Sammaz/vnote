@@ -15,12 +15,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { message } from "../../utils/message";
-import type { FlashcardData, FlashcardGenerationEvent, TabType } from "../../types";
+import type { FlashcardData, FlashcardGenerationEvent } from "../../types";
 import { FLASHCARD_DIFFICULTY_LABELS } from "../../types";
-import {
-  getNoteGenerationState,
-  setNoteGenerationState,
-} from "../../utils/noteGenerationState";
 
 interface FlashcardContentProps {
   noteId: number;

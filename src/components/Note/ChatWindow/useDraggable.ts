@@ -13,7 +13,7 @@ interface UseDraggableOptions {
 export function useDraggable({
   initialPosition = { x: 0, y: 0 },
   containerWidth,
-  containerHeight,
+  containerHeight: _containerHeight,
 }: UseDraggableOptions) {
   const [position, setPosition] = useState(initialPosition);
   const [isDragging, setIsDragging] = useState(false);

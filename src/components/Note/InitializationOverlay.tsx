@@ -87,7 +87,7 @@ export function InitializationOverlay({
 
         {/* 步骤列表 */}
         <div className="space-y-2 mb-4">
-          {state.steps.map((step, index) => (
+          {state.steps.map((step) => (
             <div
               key={step.step}
               className={cn(
