@@ -417,7 +417,7 @@ export function CollectionItem({
 
       {/* 展开内容：混合排序的子合集和笔记 */}
       {isExpanded && (
-        <div className="mt-0.5">
+        <div className="mt-0.5 max-h-80 overflow-y-auto scrollbar-hide">
           {mixedItems.map((item) =>
             item.type === "collection" ? (
               <CollectionItem
