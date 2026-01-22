@@ -154,7 +154,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
   // 初始加载
   useEffect(() => {
     refreshNotes();
-  }, []);
+  }, [refreshNotes]);
 
   const value = useMemo(() => ({
     notes,

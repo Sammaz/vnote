@@ -184,7 +184,6 @@ export function NotePage() {
         <ChatWindow
           noteId={currentNote.id}
           modelId={currentModelId}
-          noteTitle={currentNote.title}
           suggestedQuestions={suggestedQuestions}
         />
       </div>
