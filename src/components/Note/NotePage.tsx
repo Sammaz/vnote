@@ -163,6 +163,7 @@ export function NotePage() {
       {videoVisible && (
         <div className="flex-shrink-0">
           <VideoPlayer
+            key={currentNote.id}
             videoUrl={currentNote.video_path}
             subtitleUrl={currentNote.subtitle_path}
             autoPlay={autoPlay}
