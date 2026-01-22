@@ -161,9 +161,19 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
     e.stopPropagation();
     if (!showMenu && menuTriggerRef.current) {
       const rect = menuTriggerRef.current.getBoundingClientRect();
+      const menuHeight = 120; // 菜单预估高度
+      const menuWidth = 176; // 菜单宽度 w-44 = 176px
+      const viewportHeight = window.innerHeight;
+      const viewportWidth = window.innerWidth;
+
+      // 检查向下显示是否会超出视口底部
+      const showAbove = rect.bottom + menuHeight + 4 > viewportHeight;
+      // 检查向左显示是否会超出视口左侧
+      const adjustLeft = rect.right - menuWidth < 0;
+
       setMenuPosition({
-        top: rect.bottom + 4,
-        left: rect.right - 176, // 菜单宽度 w-44 = 176px
+        top: showAbove ? rect.top - menuHeight - 4 : rect.bottom + 4,
+        left: adjustLeft ? Math.max(8, rect.left) : Math.min(rect.right - menuWidth, viewportWidth - menuWidth - 8),
       });
     }
     setShowMenu(!showMenu);
