@@ -37,9 +37,11 @@ const NotesContext = createContext<NotesContextType | null>(null);
 interface NotesProviderProps {
   children: ReactNode;
   onStatsUpdate?: (stats: Partial<AppStats>) => void;
+  /** 删除笔记前的回调（用于清理初始化队列等） */
+  onBeforeNoteDelete?: (noteId: number) => Promise<void>;
 }
 
-export function NotesProvider({ children, onStatsUpdate }: NotesProviderProps) {
+export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: NotesProviderProps) {
   const [notes, setNotes] = useState<Note[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -95,6 +97,11 @@ export function NotesProvider({ children, onStatsUpdate }: NotesProviderProps) {
 
   // 删除笔记
   const deleteNote = useCallback(async (id: number): Promise<void> => {
+    // 先调用删除前回调（清理初始化队列等）
+    if (onBeforeNoteDelete) {
+      await onBeforeNoteDelete(id);
+    }
+
     // 获取笔记所有活动的生成任务
     const activeIds = getActiveGenerationIds(id);
     const generationState = getNoteGenerationState(id);
@@ -133,7 +140,7 @@ export function NotesProvider({ children, onStatsUpdate }: NotesProviderProps) {
       setSelectedNoteId(null);
       setCurrentView("home");
     }
-  }, [refreshNotes, selectedNoteId]);
+  }, [refreshNotes, selectedNoteId, onBeforeNoteDelete]);
 
   // 更新笔记的建议问题
   const updateNoteSuggestedQuestions = useCallback((noteId: number, questions: string[]) => {

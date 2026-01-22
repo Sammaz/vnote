@@ -20,6 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useInitializationQueue } from "../../context/InitializationQueueContext";
 import { CreateCollectionModal } from "./CreateCollectionModal";
 import { AddNotesToCollectionModal } from "./AddNotesToCollectionModal";
 import { BatchActionBar } from "./BatchActionBar";
@@ -222,6 +223,7 @@ export function CollectionPage() {
     toggleNoteSelection,
     refreshCollections,
   } = useApp();
+  const { removeNoteFromQueue } = useInitializationQueue();
 
   const [collectionItems, setCollectionItems] = useState<NoteWithDetails[]>([]);
   const [mixedItems, setMixedItems] = useState<MixedItem[]>([]);
@@ -388,6 +390,8 @@ export function CollectionPage() {
   const handleDeleteNote = async () => {
     if (!noteToDelete) return;
     try {
+      // 先从初始化队列移除（包括中止正在运行的任务）
+      await removeNoteFromQueue(noteToDelete.note_id);
       await deleteNote(noteToDelete.note_id);
       setCollectionItems((prev) => prev.filter((item) => item.note_id !== noteToDelete.note_id));
     } catch (error) {

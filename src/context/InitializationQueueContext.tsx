@@ -54,6 +54,8 @@ interface InitializationQueueContextType {
   addToQueue: (params: InitializationTaskParams) => void;
   /** 从队列移除任务 */
   removeFromQueue: (taskId: string) => void;
+  /** 根据笔记ID移除任务（从队列移除，如果正在运行则中止） */
+  removeNoteFromQueue: (noteId: number) => Promise<void>;
   /** 中止当前任务 */
   abortCurrent: () => Promise<void>;
   /** 清空队列 */
@@ -309,6 +311,34 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
     setQueue([]);
   }, []);
 
+  // 根据笔记ID移除任务（从队列移除，如果正在运行则中止）
+  const removeNoteFromQueue = useCallback(async (noteId: number) => {
+    // 1. 从等待队列中移除该笔记的所有任务
+    setQueue((prev) => prev.filter((t) => t.params.noteId !== noteId));
+
+    // 2. 如果当前正在运行的任务就是这个笔记，中止它
+    if (currentTask && currentTask.params.noteId === noteId && currentTask.status === "running") {
+      // 中止后端初始化任务
+      if (initState.initializationId) {
+        try {
+          await invoke("abort_note_initialization", {
+            initializationId: initState.initializationId,
+          });
+          console.log(`[InitializationQueue] 已中止笔记 ${noteId} 的初始化任务`);
+        } catch (error) {
+          console.error(`[InitializationQueue] 中止笔记 ${noteId} 的初始化任务失败:`, error);
+        }
+      }
+      // 清理前端状态
+      cleanup();
+      setInitState((prev) => ({
+        ...prev,
+        isInitializing: false,
+      }));
+      setCurrentTask((t) => (t ? { ...t, status: "aborted" } : null));
+    }
+  }, [currentTask, initState.initializationId, cleanup]);
+
   // 启动时检查未完成的初始化任务（断点恢复）
   useEffect(() => {
     const checkIncompleteInitializations = async () => {
@@ -364,11 +394,12 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
       initProgress,
       addToQueue,
       removeFromQueue,
+      removeNoteFromQueue,
       abortCurrent,
       clearQueue,
       hasActiveTasks,
     }),
-    [queue, currentTask, initState, initProgress, addToQueue, removeFromQueue, abortCurrent, clearQueue, hasActiveTasks]
+    [queue, currentTask, initState, initProgress, addToQueue, removeFromQueue, removeNoteFromQueue, abortCurrent, clearQueue, hasActiveTasks]
   );
 
   return (

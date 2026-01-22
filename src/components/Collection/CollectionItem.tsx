@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronUp, ChevronDown, MoreHorizontal, Trash2, Video, Library, ChevronRight, FolderPlus } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useInitializationQueue } from "../../context/InitializationQueueContext";
 import { CreateCollectionModal } from "./CreateCollectionModal";
 import type { Collection, CollectionItem as CollectionItemType, Note } from "../../types";
 
@@ -116,6 +117,7 @@ function CollectionNoteItem({
     addNoteToCollection,
     removeNoteFromCollection,
   } = useApp();
+  const { removeNoteFromQueue } = useInitializationQueue();
 
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -171,6 +173,8 @@ function CollectionNoteItem({
   const handleDelete = async () => {
     setShowMenu(false);
     try {
+      // 先从初始化队列移除（包括中止正在运行的任务）
+      await removeNoteFromQueue(item.note_id);
       await deleteNote(item.note_id);
     } catch (error) {
       console.error("Failed to delete note:", error);
