@@ -554,15 +554,43 @@ async fn execute_full_summary_step(
     // 使用 note_generation 模块生成全文总结
     let generation_id = format!("init-summary-{}", uuid::Uuid::new_v4());
 
+    // 默认配置提示词（与前端弹框默认配置一致：中文、显示Emoji、不显示时间戳、5个要点、30字句子）
+    let default_prompt = r#"你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
+
+输出要求：
+1. 使用 Markdown 格式输出（不要使用代码块标记）
+2. 必须使用中文输出所有内容
+3. 严格按照以下格式输出：
+
+# 摘要
+摘要段落，概括视频核心内容，每句话不超过30字
+
+# 核心亮点
+提取最重要的5个知识点/亮点，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）
+
+## 🔥 亮点标题1
+详细描述该亮点的内容
+
+## 💡 亮点标题2
+详细描述该亮点的内容
+
+（继续提取5个亮点）
+
+# 关键术语
+- **术语1**：解释
+- **术语2**：解释
+
+视频字幕内容："#;
+
     let request = note_generation::GenerateNoteRequest {
         note_id: params.note_id,
         model_id: params.model_id,
         options: note_generation::GenerationOptions {
-            concurrent: false,
+            concurrent: true,
             tabs_to_generate: vec![note_generation::TabType::FullSummary],
-            regenerate: false,
+            regenerate: true,
             concurrent_limit: 1,
-            custom_prompt: None,
+            custom_prompt: Some(default_prompt.to_string()),
         },
     };
 
