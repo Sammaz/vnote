@@ -1,4 +1,6 @@
-use crate::ai_pool::{execute_non_streaming, execute_streaming_chat, get_ai_pool_manager, NonStreamingRequest, StreamingChatRequest, StreamEvent};
+use crate::ai_pool::{execute_non_streaming_with_abort, execute_streaming_chat, get_ai_pool_manager, NonStreamingRequest, StreamingChatRequest, StreamEvent};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use crate::db::{Database};
 use crate::rag;
 use serde::Deserialize;
@@ -139,6 +141,7 @@ pub async fn generate_suggested_questions(
     db: &Database,
     subtitle_path: &str,
     model_id: i64,
+    abort_flag: &Arc<AtomicBool>,
 ) -> Result<Vec<String>, String> {
     // 1. Get AI config
     let ai_config = db
@@ -181,7 +184,7 @@ pub async fn generate_suggested_questions(
         prompt,
     };
 
-    let response = execute_non_streaming(req).await?;
+    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
     let content = response.content;
 
     // 5. Parse questions (split by lines, take up to 10 non-empty lines)

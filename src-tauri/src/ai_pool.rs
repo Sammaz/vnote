@@ -678,63 +678,6 @@ pub struct NonStreamingResponse {
     pub content: String,
 }
 
-/// 执行非流式请求（不带中止支持，用于简单请求）
-pub async fn execute_non_streaming(req: NonStreamingRequest) -> Result<NonStreamingResponse, String> {
-    let pool = get_ai_pool_manager();
-
-    // 获取并发控制器
-    let controller = pool
-        .ensure_controller(req.config.id, req.config.concurrent_limit)
-        .await;
-
-    // 获取许可
-    // permit 会在 Drop 时自动释放
-    let _permit = controller.acquire().await;
-
-    // 执行实际的API调用
-    execute_non_streaming_impl(pool, &req).await
-}
-
-/// 实际的非流式API调用实现（带重试）
-async fn execute_non_streaming_impl(
-    pool: &AiPoolManager,
-    req: &NonStreamingRequest,
-) -> Result<NonStreamingResponse, String> {
-    let mut last_error = String::new();
-
-    for attempt in 1..=MAX_RETRY_COUNT {
-        match execute_non_streaming_single_attempt(pool, req).await {
-            Ok(response) => return Ok(response),
-            Err(e) => {
-                last_error = e.clone();
-
-                // 如果错误不可重试，直接返回
-                if !is_retryable_error(&e) {
-                    return Err(e);
-                }
-
-                // 如果还有重试机会，等待后重试
-                if attempt < MAX_RETRY_COUNT {
-                    let delay = calculate_retry_delay(attempt);
-                    eprintln!(
-                        "非流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
-                        attempt,
-                        MAX_RETRY_COUNT,
-                        e,
-                        delay.as_millis()
-                    );
-                    tokio::time::sleep(delay).await;
-                }
-            }
-        }
-    }
-
-    Err(format!(
-        "请求失败，已重试 {} 次: {}",
-        MAX_RETRY_COUNT, last_error
-    ))
-}
-
 /// 单次非流式API调用尝试
 async fn execute_non_streaming_single_attempt(
     pool: &AiPoolManager,

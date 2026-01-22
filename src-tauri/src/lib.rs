@@ -837,7 +837,8 @@ async fn generate_questions_for_note(note_id: i64) -> Result<Vec<String>, String
     };
 
     // Generate questions (use default on failure)
-    let questions = chat::generate_suggested_questions(db, &subtitle_path, model_id)
+    let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let questions = chat::generate_suggested_questions(db, &subtitle_path, model_id, &abort_flag)
         .await
         .unwrap_or_else(|e| {
             eprintln!("Failed to generate questions: {}", e);

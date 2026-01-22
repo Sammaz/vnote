@@ -428,7 +428,7 @@ async fn execute_step(
 ) -> StepResult {
     match step {
         InitializationStep::Questions => {
-            execute_questions_step(app, event_name, params, has_subtitle).await
+            execute_questions_step(app, event_name, params, has_subtitle, abort_flag).await
         }
         InitializationStep::FullSummary => {
             execute_full_summary_step(app, event_name, params, has_subtitle, abort_flag).await
@@ -465,6 +465,7 @@ async fn execute_questions_step(
     event_name: &str,
     params: &InitializationParams,
     has_subtitle: bool,
+    abort_flag: &Arc<AtomicBool>,
 ) -> StepResult {
     if !has_subtitle {
         return StepResult::Skipped("无字幕文件".to_string());
@@ -502,7 +503,7 @@ async fn execute_questions_step(
     };
 
     // 生成问题
-    match chat::generate_suggested_questions(db, &subtitle_path, model_id).await {
+    match chat::generate_suggested_questions(db, &subtitle_path, model_id, abort_flag).await {
         Ok(questions) => {
             // 保存到数据库
             if let Ok(questions_json) = serde_json::to_string(&questions) {
