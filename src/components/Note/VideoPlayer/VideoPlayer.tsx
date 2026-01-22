@@ -404,12 +404,28 @@ export function VideoPlayer({
               container: videoWrapper as HTMLElement,
             });
 
+            const setAssVisibility = (visible: boolean) => {
+              if (assRef.current) {
+                if (visible) {
+                  assRef.current.show();
+                } else {
+                  assRef.current.hide();
+                }
+              }
+              const assBox = videoWrapper.querySelector(".ASS-box") as HTMLElement;
+              if (assBox) {
+                assBox.style.visibility = visible ? "visible" : "hidden";
+              }
+            };
+
             const resizeState = { timeout: null as ReturnType<typeof setTimeout> | null };
             const triggerAssResize = () => {
               if (assRef.current) {
                 const current = assRef.current.resampling;
                 assRef.current.resampling = current === "video_height" ? "video_width" : "video_height";
                 assRef.current.resampling = current;
+                // 重新应用字幕可见性状态，防止 resize 后字幕状态被重置
+                setAssVisibility(assVisibleRef.current);
               }
             };
             const resizeObserver = new ResizeObserver(() => {
@@ -427,20 +443,6 @@ export function VideoPlayer({
 
             cleanupRef.assResizeObserver = resizeObserver;
             cleanupRef.assResizeState = resizeState;
-
-            const setAssVisibility = (visible: boolean) => {
-              if (assRef.current) {
-                if (visible) {
-                  assRef.current.show();
-                } else {
-                  assRef.current.hide();
-                }
-              }
-              const assBox = videoWrapper.querySelector(".ASS-box") as HTMLElement;
-              if (assBox) {
-                assBox.style.visibility = visible ? "visible" : "hidden";
-              }
-            };
 
             // 使用当前的 captionsEnabled 状态，而不是 ref
             // 因为此时设置应该已经从数据库加载完成
