@@ -6,7 +6,7 @@
  * 2. 对外通过 useApp() 提供统一的 API，保持向后兼容
  * 3. 各个拆分的 Context 可以独立使用，避免不必要的重渲染
  */
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useCallback, type ReactNode } from "react";
 import { SidebarProvider, useSidebar } from "./SidebarContext";
 import { SettingsProvider, useSettings } from "./SettingsContext";
 import { UploadProvider, useUpload } from "./UploadContext";
@@ -216,6 +216,24 @@ function AppContextBridge({ children }: { children: ReactNode }) {
 }
 
 /**
+ * 内部组件：连接 SettingsContext 和 NotesProvider
+ * 用于将 setStats 传递给 NotesProvider
+ */
+function NotesProviderWithStats({ children }: { children: ReactNode }) {
+  const { setStats } = useSettings();
+
+  const handleStatsUpdate = useCallback((partialStats: Partial<AppStats>) => {
+    setStats(prev => ({ ...prev, ...partialStats }));
+  }, [setStats]);
+
+  return (
+    <NotesProvider onStatsUpdate={handleStatsUpdate}>
+      {children}
+    </NotesProvider>
+  );
+}
+
+/**
  * AppProvider - 嵌套所有拆分的 Provider
  * 顺序很重要：外层 Provider 可以被内层访问
  */
@@ -224,13 +242,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     <SidebarProvider>
       <SettingsProvider>
         <UploadProvider>
-          <NotesProvider>
+          <NotesProviderWithStats>
             <CollectionsProvider>
               <AppContextBridge>
                 {children}
               </AppContextBridge>
             </CollectionsProvider>
-          </NotesProvider>
+          </NotesProviderWithStats>
         </UploadProvider>
       </SettingsProvider>
     </SidebarProvider>
