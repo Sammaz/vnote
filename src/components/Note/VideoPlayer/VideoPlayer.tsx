@@ -201,7 +201,7 @@ export function VideoPlayer({
       playerRef.current.destroy();
       playerRef.current = null;
     }
-    assVisibleRef.current = true;
+    assVisibleRef.current = captionsEnabled;
 
     if (!actualVideoUrl) {
       setError("视频路径为空");
