@@ -64,7 +64,12 @@ interface InitializationQueueContextType {
 
 const InitializationQueueContext = createContext<InitializationQueueContextType | null>(null);
 
-export function InitializationQueueProvider({ children }: { children: ReactNode }) {
+interface InitializationQueueProviderProps {
+  children: ReactNode;
+  onTaskCompleted?: (noteId: number) => void;
+}
+
+export function InitializationQueueProvider({ children, onTaskCompleted }: InitializationQueueProviderProps) {
   const [queue, setQueue] = useState<QueuedTask[]>([]);
   const [currentTask, setCurrentTask] = useState<QueuedTask | null>(null);
   const [initState, setInitState] = useState<InitializationState>(createInitialState());
@@ -195,7 +200,13 @@ export function InitializationQueueProvider({ children }: { children: ReactNode 
                 newState.failed = payload.failed;
                 newState.total = payload.total;
                 // 任务完成，标记并清理
-                setCurrentTask((t) => (t ? { ...t, status: "completed" } : null));
+                setCurrentTask((t) => {
+                  // 调用完成回调刷新数据
+                  if (t && onTaskCompleted) {
+                    onTaskCompleted(t.params.noteId);
+                  }
+                  return t ? { ...t, status: "completed" } : null;
+                });
                 cleanup();
                 break;
 

@@ -256,13 +256,29 @@ function AppContent() {
   );
 }
 
+// 包装组件：连接 InitializationQueueProvider 和 AppContext
+function InitializationQueueWrapper({ children }: { children: React.ReactNode }) {
+  const { refreshNotes } = useApp();
+
+  const handleTaskCompleted = useCallback(() => {
+    // 任务完成后刷新笔记列表
+    refreshNotes();
+  }, [refreshNotes]);
+
+  return (
+    <InitializationQueueProvider onTaskCompleted={handleTaskCompleted}>
+      {children}
+    </InitializationQueueProvider>
+  );
+}
+
 function App() {
   return (
     <ErrorBoundary>
       <AppProvider>
-        <InitializationQueueProvider>
+        <InitializationQueueWrapper>
           <AppContent />
-        </InitializationQueueProvider>
+        </InitializationQueueWrapper>
       </AppProvider>
     </ErrorBoundary>
   );
