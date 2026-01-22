@@ -193,6 +193,23 @@ export function InitializationQueuePanel() {
     prevTaskIdRef.current = currentTaskId;
   }, [currentTask?.id]);
 
+  // 当队列或任务状态变化时，重新计算位置确保面板贴近右下角
+  const prevQueueLengthRef = useRef(queue.length);
+  useEffect(() => {
+    // 队列长度变化或任务状态变化时，延迟一帧重新计算位置
+    if (!isMinimized) {
+      requestAnimationFrame(() => {
+        const height = panelRef.current?.getBoundingClientRect().height || 300;
+        // 始终保持面板贴近右下角
+        setPosition({
+          x: window.innerWidth - PANEL_WIDTH - 16,
+          y: window.innerHeight - height - 16,
+        });
+      });
+    }
+    prevQueueLengthRef.current = queue.length;
+  }, [queue.length, currentTask?.status, initState.currentStepIndex, isMinimized]);
+
   // 切换最小化状态并同步更新位置
   const toggleMinimize = (minimize: boolean) => {
     const newWidth = minimize ? MINIMIZED_SIZE : PANEL_WIDTH;
