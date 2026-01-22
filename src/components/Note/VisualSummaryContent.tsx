@@ -122,12 +122,15 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
             components={{
               img: ({ src, alt, ...props }) => {
                 return (
-                  <img
-                    src={src}
-                    alt={alt}
-                    {...props}
-                    className="rounded-lg max-w-full"
-                  />
+                  <div className="flex justify-center items-center w-full my-4">
+                    <img
+                      src={src}
+                      alt={alt}
+                      {...props}
+                      className="rounded-lg max-w-full h-auto object-contain"
+                      style={{ maxHeight: '80vh' }}
+                    />
+                  </div>
                 );
               },
             }}

@@ -581,7 +581,7 @@ export function VideoPlayer({
         playerRef.current = null;
       }
     };
-  }, [actualVideoUrl, subtitleUrl, compact, autoPlay, converting, setCaptionsEnabled, captionsEnabled]);
+  }, [actualVideoUrl, subtitleUrl, compact, autoPlay, converting, setCaptionsEnabled]);
 
   // 当字幕状态变化时，更新播放器的字幕显示状态
   useEffect(() => {
