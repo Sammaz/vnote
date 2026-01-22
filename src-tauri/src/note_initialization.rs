@@ -144,6 +144,9 @@ pub struct InitializationParams {
     pub model_id: i64,
     pub video_path: String,
     pub subtitle_path: Option<String>,
+    /// 从哪一步开始执行（用于断点恢复），0-5 对应 6 个步骤
+    #[serde(default)]
+    pub start_from_step: Option<usize>,
 }
 
 /// 步骤执行结果
@@ -284,18 +287,46 @@ async fn run_initialization(
     let mut skipped = 0;
     let mut failed = 0;
 
+    // 获取起始步骤（用于断点恢复）
+    let start_step = params.start_from_step.unwrap_or(0);
+
     // 用于存储章节数据（步骤3的结果，步骤4需要）
     let mut chapter_data: Option<ChapterData> = None;
 
+    // 如果从步骤4开始恢复，需要从数据库加载章节数据
+    if start_step >= 3 {
+        if let Some(detailed_reading) = &note.detailed_reading {
+            if let Ok(data) = serde_json::from_str::<ChapterData>(detailed_reading) {
+                chapter_data = Some(data);
+            }
+        }
+    }
+
     // 按顺序执行6个步骤
     for step in InitializationStep::all() {
+        let step_index = step.index();
+
+        // 跳过已完成的步骤（断点恢复）
+        if step_index < start_step {
+            skipped += 1;
+            let _ = app.emit(
+                event_name,
+                NoteInitializationEvent::StepSkipped {
+                    step,
+                    step_index,
+                    step_name: step.display_name().to_string(),
+                    reason: "已完成（断点恢复）".to_string(),
+                },
+            );
+            continue;
+        }
+
         // 检查中止
         if is_aborted(&abort_flag) {
             let _ = app.emit(event_name, NoteInitializationEvent::Aborted);
             return Ok(());
         }
 
-        let step_index = step.index();
         let step_name = step.display_name().to_string();
 
         // 发送步骤开始事件
@@ -325,6 +356,10 @@ async fn run_initialization(
         match result {
             StepResult::Completed => {
                 completed += 1;
+                // 更新数据库中的 init_status
+                let new_status = (step_index + 1) as i32;
+                let _ = db.update_note_init_status(params.note_id, new_status);
+
                 let _ = app.emit(
                     event_name,
                     NoteInitializationEvent::StepCompleted {
@@ -336,6 +371,10 @@ async fn run_initialization(
             }
             StepResult::Skipped(reason) => {
                 skipped += 1;
+                // 跳过也算完成该步骤，更新状态
+                let new_status = (step_index + 1) as i32;
+                let _ = db.update_note_init_status(params.note_id, new_status);
+
                 let _ = app.emit(
                     event_name,
                     NoteInitializationEvent::StepSkipped {
@@ -348,6 +387,7 @@ async fn run_initialization(
             }
             StepResult::Failed(error) => {
                 failed += 1;
+                // 失败时不更新 init_status，允许下次从此步骤重试
                 let _ = app.emit(
                     event_name,
                     NoteInitializationEvent::StepFailed {

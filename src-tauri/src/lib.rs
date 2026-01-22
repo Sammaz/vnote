@@ -1422,12 +1422,14 @@ async fn initialize_note_data(
     model_id: i64,
     video_path: String,
     subtitle_path: Option<String>,
+    start_from_step: Option<usize>,
 ) -> Result<String, String> {
     let params = note_initialization::InitializationParams {
         note_id,
         model_id,
         video_path,
         subtitle_path,
+        start_from_step,
     };
     note_initialization::start_initialization(app, params).await
 }
@@ -1435,6 +1437,37 @@ async fn initialize_note_data(
 #[tauri::command]
 async fn abort_note_initialization(initialization_id: String) -> Result<(), String> {
     note_initialization::abort_initialization(&initialization_id).await
+}
+
+/// 获取未完成初始化的笔记列表（用于断点恢复）
+#[tauri::command]
+fn get_incomplete_initializations() -> Result<Vec<Note>, String> {
+    get_db().get_incomplete_notes().map_err(|e| e.to_string())
+}
+
+/// 恢复笔记初始化（从断点继续）
+#[tauri::command]
+async fn resume_note_initialization(
+    app: AppHandle,
+    note_id: i64,
+) -> Result<String, String> {
+    let db = get_db();
+    let note = db
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记不存在")?;
+
+    let model_id = note.model_id.ok_or("笔记未配置AI模型")?;
+
+    let params = note_initialization::InitializationParams {
+        note_id,
+        model_id,
+        video_path: note.video_path,
+        subtitle_path: note.subtitle_path,
+        start_from_step: Some(note.init_status as usize),
+    };
+
+    note_initialization::start_initialization(app, params).await
 }
 
 // Collection commands (合集/资源库)
@@ -1688,6 +1721,8 @@ pub fn run() {
             // Note initialization commands
             initialize_note_data,
             abort_note_initialization,
+            get_incomplete_initializations,
+            resume_note_initialization,
             // Collection commands
             get_collections,
             get_collection,

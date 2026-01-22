@@ -29,6 +29,7 @@ pub struct Note {
     pub video_path: String,
     pub subtitle_path: Option<String>,
     pub model_id: Option<i64>, // AI model ID used for generating notes
+    pub init_status: i32, // Initialization status: 0=not started, 1-6=step completed, 6=fully initialized
     pub full_summary: Option<String>,
     pub detailed_reading: Option<String>,
     pub highlights: Option<String>,
@@ -548,6 +549,20 @@ impl Database {
             )?;
         }
 
+        // Migration: Add init_status column to notes if not exists
+        let has_init_status: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='init_status'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_init_status {
+            conn.execute(
+                "ALTER TABLE notes ADD COLUMN init_status INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -650,7 +665,7 @@ impl Database {
     pub fn get_all_notes(&self) -> SqliteResult<Vec<Note>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, flashcards, quick_notes, quick_notes_mindmap,
                     quick_notes_canvas, suggested_questions, last_playback_position,
                     created_at, updated_at
@@ -664,19 +679,20 @@ impl Database {
                 video_path: row.get(2)?,
                 subtitle_path: row.get(3)?,
                 model_id: row.get(4)?,
-                full_summary: row.get(5)?,
-                detailed_reading: row.get(6)?,
-                highlights: row.get(7)?,
-                visual_summary: row.get(8)?,
-                custom_summary: row.get(9)?,
-                flashcards: row.get(10)?,
-                quick_notes: row.get(11)?,
-                quick_notes_mindmap: row.get(12)?,
-                quick_notes_canvas: row.get(13)?,
-                suggested_questions: row.get(14)?,
-                last_playback_position: row.get(15)?,
-                created_at: row.get(16)?,
-                updated_at: row.get(17)?,
+                init_status: row.get(5)?,
+                full_summary: row.get(6)?,
+                detailed_reading: row.get(7)?,
+                highlights: row.get(8)?,
+                visual_summary: row.get(9)?,
+                custom_summary: row.get(10)?,
+                flashcards: row.get(11)?,
+                quick_notes: row.get(12)?,
+                quick_notes_mindmap: row.get(13)?,
+                quick_notes_canvas: row.get(14)?,
+                suggested_questions: row.get(15)?,
+                last_playback_position: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         })?;
 
@@ -686,7 +702,7 @@ impl Database {
     pub fn get_note_by_id(&self, id: i64) -> SqliteResult<Option<Note>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, flashcards, quick_notes, quick_notes_mindmap,
                     quick_notes_canvas, suggested_questions, last_playback_position,
                     created_at, updated_at
@@ -700,19 +716,20 @@ impl Database {
                 video_path: row.get(2)?,
                 subtitle_path: row.get(3)?,
                 model_id: row.get(4)?,
-                full_summary: row.get(5)?,
-                detailed_reading: row.get(6)?,
-                highlights: row.get(7)?,
-                visual_summary: row.get(8)?,
-                custom_summary: row.get(9)?,
-                flashcards: row.get(10)?,
-                quick_notes: row.get(11)?,
-                quick_notes_mindmap: row.get(12)?,
-                quick_notes_canvas: row.get(13)?,
-                suggested_questions: row.get(14)?,
-                last_playback_position: row.get(15)?,
-                created_at: row.get(16)?,
-                updated_at: row.get(17)?,
+                init_status: row.get(5)?,
+                full_summary: row.get(6)?,
+                detailed_reading: row.get(7)?,
+                highlights: row.get(8)?,
+                visual_summary: row.get(9)?,
+                custom_summary: row.get(10)?,
+                flashcards: row.get(11)?,
+                quick_notes: row.get(12)?,
+                quick_notes_mindmap: row.get(13)?,
+                quick_notes_canvas: row.get(14)?,
+                suggested_questions: row.get(15)?,
+                last_playback_position: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         });
 
@@ -726,14 +743,14 @@ impl Database {
     pub fn create_note(&self, req: &CreateNoteRequest) -> SqliteResult<Note> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO notes (title, video_path, subtitle_path, model_id) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO notes (title, video_path, subtitle_path, model_id, init_status) VALUES (?1, ?2, ?3, ?4, 0)",
             (&req.title, &req.video_path, &req.subtitle_path, &req.model_id),
         )?;
         let id = conn.last_insert_rowid();
 
         // Return the created note
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, flashcards, quick_notes, quick_notes_mindmap, quick_notes_canvas,
                     suggested_questions, last_playback_position, created_at, updated_at
              FROM notes WHERE id = ?1"
@@ -746,19 +763,20 @@ impl Database {
                 video_path: row.get(2)?,
                 subtitle_path: row.get(3)?,
                 model_id: row.get(4)?,
-                full_summary: row.get(5)?,
-                detailed_reading: row.get(6)?,
-                highlights: row.get(7)?,
-                visual_summary: row.get(8)?,
-                custom_summary: row.get(9)?,
-                flashcards: row.get(10)?,
-                quick_notes: row.get(11)?,
-                quick_notes_mindmap: row.get(12)?,
-                quick_notes_canvas: row.get(13)?,
-                suggested_questions: row.get(14)?,
-                last_playback_position: row.get(15)?,
-                created_at: row.get(16)?,
-                updated_at: row.get(17)?,
+                init_status: row.get(5)?,
+                full_summary: row.get(6)?,
+                detailed_reading: row.get(7)?,
+                highlights: row.get(8)?,
+                visual_summary: row.get(9)?,
+                custom_summary: row.get(10)?,
+                flashcards: row.get(11)?,
+                quick_notes: row.get(12)?,
+                quick_notes_mindmap: row.get(13)?,
+                quick_notes_canvas: row.get(14)?,
+                suggested_questions: row.get(15)?,
+                last_playback_position: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
             })
         })
     }
@@ -768,20 +786,20 @@ impl Database {
         conn.execute(
             "UPDATE notes SET
                 title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4,
-                full_summary = ?5, detailed_reading = ?6, highlights = ?7,
-                visual_summary = ?8, custom_summary = ?9, flashcards = ?10, quick_notes = ?11,
-                quick_notes_mindmap = ?12, quick_notes_canvas = ?13, suggested_questions = ?14,
-                last_playback_position = ?15,
+                init_status = ?5, full_summary = ?6, detailed_reading = ?7, highlights = ?8,
+                visual_summary = ?9, custom_summary = ?10, flashcards = ?11, quick_notes = ?12,
+                quick_notes_mindmap = ?13, quick_notes_canvas = ?14, suggested_questions = ?15,
+                last_playback_position = ?16,
                 updated_at = datetime('now', 'localtime')
-             WHERE id = ?16",
-            (
+             WHERE id = ?17",
+            rusqlite::params![
                 &note.title, &note.video_path, &note.subtitle_path, &note.model_id,
-                &note.full_summary, &note.detailed_reading, &note.highlights,
+                note.init_status, &note.full_summary, &note.detailed_reading, &note.highlights,
                 &note.visual_summary, &note.custom_summary, &note.flashcards, &note.quick_notes,
                 &note.quick_notes_mindmap, &note.quick_notes_canvas, &note.suggested_questions,
                 &note.last_playback_position,
                 note.id,
-            ),
+            ],
         )?;
         Ok(())
     }
@@ -808,6 +826,55 @@ impl Database {
             (questions_json, note_id),
         )?;
         Ok(())
+    }
+
+    /// Update note initialization status (0-6)
+    pub fn update_note_init_status(&self, note_id: i64, status: i32) -> SqliteResult<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE notes SET init_status = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
+            (status, note_id),
+        )?;
+        Ok(())
+    }
+
+    /// Get notes with incomplete initialization (init_status < 6 and has model_id)
+    /// This includes notes that haven't started (status=0) and notes in progress (status=1-5)
+    pub fn get_incomplete_notes(&self) -> SqliteResult<Vec<Note>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
+                    highlights, visual_summary, custom_summary, flashcards, quick_notes, quick_notes_mindmap,
+                    quick_notes_canvas, suggested_questions, last_playback_position,
+                    created_at, updated_at
+             FROM notes WHERE init_status < 6 AND model_id IS NOT NULL ORDER BY created_at ASC"
+        )?;
+
+        let notes = stmt.query_map([], |row| {
+            Ok(Note {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                video_path: row.get(2)?,
+                subtitle_path: row.get(3)?,
+                model_id: row.get(4)?,
+                init_status: row.get(5)?,
+                full_summary: row.get(6)?,
+                detailed_reading: row.get(7)?,
+                highlights: row.get(8)?,
+                visual_summary: row.get(9)?,
+                custom_summary: row.get(10)?,
+                flashcards: row.get(11)?,
+                quick_notes: row.get(12)?,
+                quick_notes_mindmap: row.get(13)?,
+                quick_notes_canvas: row.get(14)?,
+                suggested_questions: row.get(15)?,
+                last_playback_position: row.get(16)?,
+                created_at: row.get(17)?,
+                updated_at: row.get(18)?,
+            })
+        })?;
+
+        notes.collect()
     }
 
     // Get AI config by ID

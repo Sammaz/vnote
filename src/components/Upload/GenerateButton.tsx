@@ -1,6 +1,7 @@
 import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useInitializationQueue } from "../../context/InitializationQueueContext";
 
 // 获取文件名（不含扩展名）
 function getBaseName(filename: string): string {
@@ -20,8 +21,9 @@ export function GenerateButton() {
     setUploadedSubtitle,
     setCurrentView,
     setSelectedNoteId,
-    setPendingInitialization,
   } = useApp();
+
+  const { addToQueue } = useInitializationQueue();
 
   const canGenerate = uploadedVideo && selectedModelId && !isGenerating;
 
@@ -41,9 +43,10 @@ export function GenerateButton() {
         model_id: selectedModelId,
       });
 
-      // 设置待初始化参数（在 NotePage 中启动初始化）
-      setPendingInitialization({
+      // 添加到初始化队列（替代 setPendingInitialization）
+      addToQueue({
         noteId: newNote.id,
+        noteTitle: noteTitle,
         modelId: selectedModelId,
         videoPath: uploadedVideo.path,
         subtitlePath: uploadedSubtitle?.path || null,

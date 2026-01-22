@@ -4,9 +4,11 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import SettingsPage from "./SettingsPage";
 import { AppProvider, useApp } from "./context/AppContext";
+import { InitializationQueueProvider } from "./context/InitializationQueueContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
+import { InitializationQueuePanel } from "./components/Note/InitializationQueuePanel";
 import { cn } from "./utils/cn";
 import { VIEW_TYPES, type NavigableViewType } from "./types";
 import "./index.css";
@@ -246,6 +248,9 @@ function AppContent() {
             <HomePage />
           )}
         </main>
+
+        {/* 初始化队列面板 - 全局显示 */}
+        <InitializationQueuePanel />
       </div>
     </div>
   );
@@ -255,7 +260,9 @@ function App() {
   return (
     <ErrorBoundary>
       <AppProvider>
-        <AppContent />
+        <InitializationQueueProvider>
+          <AppContent />
+        </InitializationQueueProvider>
       </AppProvider>
     </ErrorBoundary>
   );
