@@ -73,6 +73,11 @@ export function VideoPlayer({
     addWatchTimeRef.current = addWatchTime;
   }, [addWatchTime]);
 
+  // 保持 assVisibleRef 与 captionsEnabled 同步
+  useEffect(() => {
+    assVisibleRef.current = captionsEnabled;
+  }, [captionsEnabled]);
+
   // 从数据库获取最新的播放位置
   useEffect(() => {
     if (!noteId) return;
@@ -201,7 +206,7 @@ export function VideoPlayer({
       playerRef.current.destroy();
       playerRef.current = null;
     }
-    assVisibleRef.current = true;
+    assVisibleRef.current = captionsEnabled;
 
     if (!actualVideoUrl) {
       setError("视频路径为空");
@@ -374,8 +379,6 @@ export function VideoPlayer({
       }
 
       if (isAssSubtitle && subtitleUrl) {
-        const shouldShowCaptions = captionsEnabled;
-
         Promise.all([
           import("assjs"),
           invoke<string>("read_file_content", { path: subtitleUrl }),
@@ -439,12 +442,15 @@ export function VideoPlayer({
               }
             };
 
-            setAssVisibility(shouldShowCaptions);
-            setTimeout(() => setAssVisibility(shouldShowCaptions), 0);
-            setTimeout(() => setAssVisibility(shouldShowCaptions), 50);
-            setTimeout(() => setAssVisibility(shouldShowCaptions), 100);
-
-            assVisibleRef.current = shouldShowCaptions;
+            // 使用当前的 captionsEnabled 状态，而不是 ref
+            // 因为此时设置应该已经从数据库加载完成
+            const shouldShow = assVisibleRef.current;
+            setAssVisibility(shouldShow);
+            setTimeout(() => setAssVisibility(shouldShow), 0);
+            setTimeout(() => setAssVisibility(shouldShow), 50);
+            setTimeout(() => setAssVisibility(shouldShow), 100);
+            setTimeout(() => setAssVisibility(shouldShow), 200);
+            setTimeout(() => setAssVisibility(shouldShow), 500);
           })
           .catch((err) => {
             console.error("Failed to load ASS subtitle:", err);
