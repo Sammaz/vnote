@@ -258,7 +258,7 @@ pub async fn optimize_chapters(
                     Ok(optimized_text) => {
                         // 保存到数据库
                         if let Err(e) = crate::get_db().save_optimized_subtitle(note_id, &chapter.chapter_id, optimized_text) {
-                            eprintln!("[optimize_chapter_subtitles] 保存到数据库失败: {}", e);
+                            tracing::error!("[optimize_chapter_subtitles] 保存到数据库失败: {}", e);
                         }
 
                         let (completed, _failed, total) = get_task_state_manager().chapter_completed(note_id, &chapter.chapter_id).await;
@@ -374,7 +374,7 @@ pub async fn optimize_chapter_subtitles(
     let gen_id = generation_id.clone();
     tokio::spawn(async move {
         if let Err(e) = optimize_chapters(app, gen_id, note_id, config, chapters_to_optimize).await {
-            eprintln!("[optimize_chapter_subtitles] 优化失败: {}", e);
+            tracing::error!("[optimize_chapter_subtitles] 优化失败: {}", e);
         }
     });
 
@@ -460,7 +460,7 @@ pub async fn optimize_single_chapter_subtitle(
             Ok(optimized_text) => {
                 // 保存到数据库
                 if let Err(e) = get_db().save_optimized_subtitle(note_id, &chapter_id, &optimized_text) {
-                    eprintln!("[optimize_single_chapter_subtitle] 保存到数据库失败: {}", e);
+                    tracing::error!("[optimize_single_chapter_subtitle] 保存到数据库失败: {}", e);
                 }
                 let _ = app.emit(
                     &event_name,

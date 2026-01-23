@@ -331,16 +331,16 @@ async fn generate_flashcards_internal(
     let subtitles = parse_subtitle_file(&subtitle_path)
         .map_err(|e| format!("解析字幕失败: {}", e))?;
 
-    eprintln!("[闪记卡] ========================================");
-    eprintln!("[闪记卡] 开始生成闪记卡");
-    eprintln!("[闪记卡] 字幕总条数: {}", subtitles.len());
-    eprintln!("[闪记卡] 使用模型: {}", ai_config.model);
+    tracing::info!("[闪记卡] ========================================");
+    tracing::info!("[闪记卡] 开始生成闪记卡");
+    tracing::info!("[闪记卡] 字幕总条数: {}", subtitles.len());
+    tracing::info!("[闪记卡] 使用模型: {}", ai_config.model);
 
     // 使用与原文细读相同的分段逻辑
     let chunks = split_subtitle_into_chunks(&subtitles);
     let total_chunks = chunks.len();
 
-    eprintln!("[闪记卡] 分段数: {}", total_chunks);
+    tracing::info!("[闪记卡] 分段数: {}", total_chunks);
 
     // 发送进度事件
     let _ = app.emit(event_name, FlashcardGenerationEvent::Progress {
@@ -370,7 +370,7 @@ async fn generate_flashcards_internal(
                 return Err::<(Vec<FlashcardItem>, usize), String>("已中止".to_string());
             }
 
-            eprintln!("[闪记卡] 段 {}/{}: 开始生成...", chunk_idx + 1, total_chunks);
+            tracing::info!("[闪记卡] 段 {}/{}: 开始生成...", chunk_idx + 1, total_chunks);
 
             // 发送进度事件
             let _ = app.emit(
@@ -394,11 +394,11 @@ async fn generate_flashcards_internal(
             // 解析响应
             match parse_flashcards_response(&response) {
                 Ok(cards) => {
-                    eprintln!("[闪记卡] 段 {}/{}: 完成，生成 {} 张卡片", chunk_idx + 1, total_chunks, cards.len());
+                    tracing::info!("[闪记卡] 段 {}/{}: 完成，生成 {} 张卡片", chunk_idx + 1, total_chunks, cards.len());
                     Ok((cards, chunk_idx))
                 }
                 Err(e) => {
-                    eprintln!("[闪记卡] 段 {}/{}: 解析失败 - {}", chunk_idx + 1, total_chunks, e);
+                    tracing::info!("[闪记卡] 段 {}/{}: 解析失败 - {}", chunk_idx + 1, total_chunks, e);
                     // 解析失败时返回空数组，不中断整个流程
                     Ok((Vec::new(), chunk_idx))
                 }
@@ -421,11 +421,11 @@ async fn generate_flashcards_internal(
                 if e == "已中止" {
                     return Err("已中止".to_string());
                 }
-                eprintln!("[闪记卡] 任务失败: {}", e);
+                tracing::info!("[闪记卡] 任务失败: {}", e);
                 has_error = true;
             }
             Err(e) => {
-                eprintln!("[闪记卡] 任务执行错误: {}", e);
+                tracing::info!("[闪记卡] 任务执行错误: {}", e);
                 has_error = true;
             }
         }
@@ -448,8 +448,8 @@ async fn generate_flashcards_internal(
         .flat_map(|(cards, _)| cards)
         .collect();
 
-    eprintln!("[闪记卡] ========================================");
-    eprintln!("[闪记卡] 生成完成，共 {} 张卡片", cards.len());
+    tracing::info!("[闪记卡] ========================================");
+    tracing::info!("[闪记卡] 生成完成，共 {} 张卡片", cards.len());
 
     // 发送完成进度事件
     let _ = app.emit(event_name, FlashcardGenerationEvent::Progress {

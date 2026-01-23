@@ -1,35 +1,23 @@
 use crate::db::{EmbeddingConfig, RerankerConfig, SubtitleChunk};
 use crate::subtitle::{format_timestamp, parse_subtitle_file, SubtitleEntry};
 use crate::DATABASE;
+use crate::settings::{SettingsManager, keys, defaults};
 use reqwest::Client;
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
-use tokio::sync::Mutex;
 
 static EMBEDDING_CLIENT: OnceLock<Client> = OnceLock::new();
-static INDEXING_LOCKS: OnceLock<Mutex<HashMap<i64, bool>>> = OnceLock::new();
 
 fn get_client() -> &'static Client {
     EMBEDDING_CLIENT.get_or_init(|| {
+        let timeout = SettingsManager::get_int(keys::RAG_TIMEOUT_CLIENT, defaults::RAG_TIMEOUT_CLIENT);
         Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(timeout))
             .build()
             .expect("Failed to create HTTP client")
     })
 }
-
-fn get_indexing_locks() -> &'static Mutex<HashMap<i64, bool>> {
-    INDEXING_LOCKS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// Chunk configuration
-const CHUNK_TARGET_CHARS: usize = 500;
-const CHUNK_OVERLAP_CHARS: usize = 50;
-const TOP_K_RESULTS: usize = 10;  // Get more for reranking
-const RERANK_TOP_K: usize = 5;    // Final results after reranking
-const EMBEDDING_BATCH_SIZE: usize = 50;
 
 /// Get RAG context for a query
 /// abort_flag: 可选的中止标志，如果设置则会在长时间操作时检查是否被中止
@@ -73,14 +61,14 @@ pub async fn get_rag_context(
     let query_embedding = generate_embedding(&embedding_config, query).await?;
 
     // Search similar chunks
-    let mut chunks = search_similar_chunks(note_id, &query_embedding, TOP_K_RESULTS)?;
+    let top_k = SettingsManager::get_int(keys::RAG_TOP_K, defaults::RAG_TOP_K);
+    let mut chunks = search_similar_chunks(note_id, &query_embedding, top_k)?;
 
     // Apply reranking if default reranker is configured
     let reranker_config = db.get_default_reranker_config().map_err(|e| e.to_string())?;
-    if let Some(ref config) = reranker_config {
-        chunks = rerank_chunks(config, query, chunks, RERANK_TOP_K).await?;
-    } else {
-        chunks.truncate(RERANK_TOP_K);
+
+    if let Some(config) = reranker_config {
+        chunks = rerank_chunks(&config, query, chunks, top_k).await?;
     }
 
     // Build context string
@@ -142,141 +130,165 @@ async fn ensure_indexed(
     note_id: i64,
     abort_flag: Option<&Arc<AtomicBool>>,
 ) -> Result<(), String> {
-    // Check if already indexing - 使用超时机制防止死锁
-    {
-        // 使用超时获取锁，避免无限期阻塞
-        let locks_result = tokio::time::timeout(
-            tokio::time::Duration::from_millis(100),
-            get_indexing_locks().lock()
-        ).await;
-
-        let locks = match locks_result {
-            Ok(l) => l,
-            Err(_) => {
-                clear_indexing_lock(note_id).await;
-                get_indexing_locks().lock().await
-            }
-        };
-
-        if locks.get(&note_id).copied().unwrap_or(false) {
-            drop(locks);
-
-            // 使用超时等待，避免无限期阻塞
-            let timeout_duration = tokio::time::Duration::from_secs(3); // 3秒超时
-            let start = std::time::Instant::now();
-
-            loop {
-                // 检查是否被中止
-                if let Some(flag) = abort_flag {
-                    if flag.load(Ordering::Relaxed) {
-                        return Err("请求已取消".to_string());
-                    }
-                }
-
-                // 检查超时
-                if start.elapsed() > timeout_duration {
-                    // 强制清理卡住的锁
-                    clear_indexing_lock(note_id).await;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                    break;
-                }
-
-                // 短暂休眠后重试
-                tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
-
-                // 使用超时获取锁
-                let locks_result = tokio::time::timeout(
-                    tokio::time::Duration::from_millis(100),
-                    get_indexing_locks().lock()
-                ).await;
-
-                let locks = match locks_result {
-                    Ok(l) => l,
-                    Err(_) => {
-                        clear_indexing_lock(note_id).await;
-                        tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                        continue;
-                    }
-                };
-
-                if !locks.get(&note_id).copied().unwrap_or(false) {
-                    break;
-                }
-            }
-        } else {
-            drop(locks);
-        }
-
-        // Set indexing lock
-        // 使用超时获取锁，避免无限期阻塞
-        let locks_result = tokio::time::timeout(
-            tokio::time::Duration::from_millis(200),
-            get_indexing_locks().lock()
-        ).await;
-
-        let mut locks = match locks_result {
-            Ok(l) => l,
-            Err(_) => {
-                clear_indexing_lock(note_id).await;
-                tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
-                get_indexing_locks().lock().await
-            }
-        };
-
-        locks.insert(note_id, true);
-        drop(locks);  // 立即释放锁
-
-        // 在释放锁后再次检查是否被中止
-        if let Some(flag) = abort_flag {
-            if flag.load(Ordering::Relaxed) {
-                // 清理锁
-                clear_indexing_lock(note_id).await;
-                return Err("请求已取消".to_string());
-            }
-        }
-    }
-
-    // Check if chunks exist
-    // 再次检查 abort_flag（在获取数据库锁之前）
-    if let Some(flag) = abort_flag {
-        if flag.load(Ordering::Relaxed) {
-            clear_indexing_lock(note_id).await;
-            return Err("请求已取消".to_string());
-        }
-    }
-
     let db = DATABASE.get().ok_or("Database not initialized")?;
+
+    // Check current index status from database
+    let status = db.get_index_status(note_id).map_err(|e| e.to_string())?;
+
+    match status.as_deref() {
+        Some("completed") => {
+            // Already indexed, return immediately
+            return Ok(());
+        }
+        Some("indexing") => {
+            // Check if indexing task is stuck (timeout: 10 minutes)
+            if let Ok(Some(started_at)) = db.get_index_started_at(note_id) {
+                if is_indexing_timeout(&started_at) {
+                    // Task is stuck, mark as failed and retry
+                    let _ = db.set_index_status(note_id, "failed", Some("索引超时"));
+                } else {
+                    // Wait for indexing to complete
+                    return wait_for_indexing_completion(note_id, abort_flag).await;
+                }
+            }
+        }
+        Some("failed") | None => {
+            // Need to start indexing
+        }
+        _ => {}
+    }
+
+    // Check if chunks already exist (for migration from old version)
     let existing_chunks = db
         .get_subtitle_chunks(note_id)
         .map_err(|e| e.to_string())?;
 
     if !existing_chunks.is_empty() {
-        // Already indexed
-        let mut locks = get_indexing_locks().lock().await;
-        locks.remove(&note_id);
+        // Chunks exist but no status record, mark as completed
+        let _ = db.set_index_status(note_id, "completed", None);
         return Ok(());
     }
+
+    // Set status to indexing
+    db.set_index_status(note_id, "indexing", None)
+        .map_err(|e| e.to_string())?;
+
+    // Check abort flag before starting
+    if let Some(flag) = abort_flag {
+        if flag.load(Ordering::Relaxed) {
+            let _ = db.set_index_status(note_id, "failed", Some("请求已取消"));
+            return Err("请求已取消".to_string());
+        }
+    }
+
+    // Perform indexing
+    match perform_indexing(embedding_config, subtitle_path, note_id, abort_flag).await {
+        Ok(()) => {
+            db.set_index_status(note_id, "completed", None)
+                .map_err(|e| e.to_string())?;
+            Ok(())
+        }
+        Err(e) => {
+            db.set_index_status(note_id, "failed", Some(&e))
+                .map_err(|err| err.to_string())?;
+            Err(e)
+        }
+    }
+}
+
+/// Check if indexing task has timed out (10 minutes)
+fn is_indexing_timeout(started_at: &str) -> bool {
+    use chrono::{DateTime, Local, NaiveDateTime};
+
+    // Parse started_at timestamp
+    if let Ok(started) = NaiveDateTime::parse_from_str(started_at, "%Y-%m-%d %H:%M:%S") {
+        let started_dt = DateTime::<Local>::from_naive_utc_and_offset(started, *Local::now().offset());
+        let now = Local::now();
+        let duration = now.signed_duration_since(started_dt);
+
+        // Timeout: 10 minutes
+        duration.num_minutes() > 10
+    } else {
+        // Cannot parse, assume timeout
+        true
+    }
+}
+
+/// Wait for indexing to complete
+async fn wait_for_indexing_completion(
+    note_id: i64,
+    abort_flag: Option<&Arc<AtomicBool>>,
+) -> Result<(), String> {
+    let db = DATABASE.get().ok_or("Database not initialized")?;
+    let timeout = SettingsManager::get_int(keys::RAG_TIMEOUT_INDEXING, defaults::RAG_TIMEOUT_INDEXING);
+    let max_wait_time = std::time::Duration::from_secs(timeout);
+    let start_time = std::time::Instant::now();
+
+    loop {
+        // Check abort flag
+        if let Some(flag) = abort_flag {
+            if flag.load(Ordering::Relaxed) {
+                return Err("请求已取消".to_string());
+            }
+        }
+
+        // Check timeout
+        if start_time.elapsed() > max_wait_time {
+            return Err("等待索引完成超时".to_string());
+        }
+
+        // Check status
+        let status = db.get_index_status(note_id).map_err(|e| e.to_string())?;
+
+        match status.as_deref() {
+            Some("completed") => return Ok(()),
+            Some("failed") => return Err("索引失败".to_string()),
+            Some("indexing") => {
+                // Still indexing, wait and retry
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            }
+            _ => {
+                // Status disappeared, something went wrong
+                return Err("索引状态异常".to_string());
+            }
+        }
+    }
+}
+
+async fn perform_indexing(
+    embedding_config: &EmbeddingConfig,
+    subtitle_path: &str,
+    note_id: i64,
+    abort_flag: Option<&Arc<AtomicBool>>,
+) -> Result<(), String> {
+    let db = DATABASE.get().ok_or("Database not initialized")?;
 
     // Parse subtitles
     let entries = parse_subtitle_file(subtitle_path)?;
     if entries.is_empty() {
-        let mut locks = get_indexing_locks().lock().await;
-        locks.remove(&note_id);
         return Err("No subtitle entries found".to_string());
     }
 
     // Create chunks
-    let chunks = create_chunks(&entries);
+    let chunk_size = SettingsManager::get_int(keys::RAG_CHUNK_SIZE, defaults::RAG_CHUNK_SIZE);
+    let chunk_overlap = SettingsManager::get_int(keys::RAG_CHUNK_OVERLAP, defaults::RAG_CHUNK_OVERLAP);
+    let chunks = create_chunks(&entries, chunk_size, chunk_overlap);
     if chunks.is_empty() {
-        let mut locks = get_indexing_locks().lock().await;
-        locks.remove(&note_id);
         return Err("Failed to create chunks".to_string());
     }
 
     // Generate embeddings in batches
     let mut all_embeddings: Vec<Vec<f32>> = Vec::new();
+    let batch_size = SettingsManager::get_int(keys::RAG_BATCH_SIZE, defaults::RAG_BATCH_SIZE);
 
-    for batch in chunks.chunks(EMBEDDING_BATCH_SIZE) {
+    for batch in chunks.chunks(batch_size) {
+        // Check abort flag
+        if let Some(flag) = abort_flag {
+            if flag.load(Ordering::Relaxed) {
+                return Err("请求已取消".to_string());
+            }
+        }
+
         let texts: Vec<&str> = batch.iter().map(|c| c.2.as_str()).collect();
         let embeddings = generate_embeddings_batch(embedding_config, &texts).await?;
         all_embeddings.extend(embeddings);
@@ -298,15 +310,15 @@ async fn ensure_indexed(
         .map_err(|e| e.to_string())?;
     }
 
-    // Release lock
-    let mut locks = get_indexing_locks().lock().await;
-    locks.remove(&note_id);
-
     Ok(())
 }
 
 /// Create chunks from subtitle entries
-fn create_chunks(entries: &[SubtitleEntry]) -> Vec<(f64, f64, String)> {
+fn create_chunks(
+    entries: &[SubtitleEntry],
+    target_chars: usize,
+    overlap_chars: usize,
+) -> Vec<(f64, f64, String)> {
     let mut chunks: Vec<(f64, f64, String)> = Vec::new();
     let mut current_chunk = String::new();
     let mut chunk_start_time = 0.0;
@@ -325,14 +337,14 @@ fn create_chunks(entries: &[SubtitleEntry]) -> Vec<(f64, f64, String)> {
         chunk_end_time = entry.end_time;
 
         // Check if chunk is large enough
-        if current_chunk.len() >= CHUNK_TARGET_CHARS {
+        if current_chunk.len() >= target_chars {
             chunks.push((chunk_start_time, chunk_end_time, current_chunk.clone()));
 
             // Keep overlap for next chunk (using char-safe boundary)
-            if current_chunk.chars().count() > CHUNK_OVERLAP_CHARS {
+            if current_chunk.chars().count() > overlap_chars {
                 // Find a safe char boundary for overlap
                 let char_count = current_chunk.chars().count();
-                let skip_chars = char_count.saturating_sub(CHUNK_OVERLAP_CHARS);
+                let skip_chars = char_count.saturating_sub(overlap_chars);
 
                 // Get byte index at char boundary
                 let overlap_start = current_chunk
@@ -511,30 +523,16 @@ fn bytes_to_embedding(bytes: &[u8]) -> Vec<f32> {
 /// Clear subtitle chunks for a note (for re-indexing)
 pub fn clear_subtitle_index(note_id: i64) -> Result<(), String> {
     let db = DATABASE.get().ok_or("Database not initialized")?;
+
+    // Delete chunks
     db.delete_subtitle_chunks(note_id)
-        .map_err(|e| e.to_string())
-}
+        .map_err(|e| e.to_string())?;
 
-/// Clear the indexing lock for a note (call this when aborting a request)
-/// 使用带超时的锁获取，确保可以清理锁
-pub async fn clear_indexing_lock(note_id: i64) {
-    // 使用超时获取锁，避免死锁
-    let locks_result = tokio::time::timeout(
-        tokio::time::Duration::from_millis(500),
-        get_indexing_locks().lock()
-    ).await;
+    // Delete index status
+    db.delete_index_status(note_id)
+        .map_err(|e| e.to_string())?;
 
-    if let Ok(mut locks) = locks_result {
-        locks.remove(&note_id);
-    } else {
-        // 如果超时，等待一小段时间后重试
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        // 再次尝试
-        let _ = get_indexing_locks().try_lock().map(|mut locks| {
-            locks.remove(&note_id);
-        });
-    }
+    Ok(())
 }
 
 /// Rerank chunks using a reranker API

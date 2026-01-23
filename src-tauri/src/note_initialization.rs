@@ -521,7 +521,7 @@ async fn execute_questions_step(
             if let Ok(questions_json) = serde_json::to_string(&default_questions) {
                 let _ = db.update_note_questions(params.note_id, &questions_json);
             }
-            eprintln!("[初始化] 问题生成失败，使用默认问题: {}", e);
+            tracing::warn!("[初始化] 问题生成失败，使用默认问题: {}", e);
             StepResult::Completed // 使用默认问题也算完成
         }
     }

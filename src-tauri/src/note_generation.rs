@@ -16,6 +16,7 @@ use crate::chapter::{
 };
 use crate::db::{AiConfig, Database, ScreenshotMarker};
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
+use crate::settings::{SettingsManager, keys, defaults};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
@@ -60,7 +61,11 @@ pub struct GenerationOptions {
 }
 
 fn default_concurrent_limit() -> usize {
-    3
+    if crate::DATABASE.get().is_some() {
+        SettingsManager::get_int(keys::PROCESS_DEFAULT_CONCURRENT, defaults::PROCESS_DEFAULT_CONCURRENT)
+    } else {
+        3
+    }
 }
 
 /// 标签页类型
@@ -335,8 +340,9 @@ fn select_strategy(
     model_context_size: usize,
     _has_custom_prompt: bool,
 ) -> GenerationStrategy {
+    let truncation_limit = SettingsManager::get_int(keys::PROCESS_TRUNCATION_LIMIT, defaults::PROCESS_TRUNCATION_LIMIT);
     // 估算token数（中文约1.5字符/token，保守估计1:1）
-    let estimated_tokens = subtitle_length + 3000; // 加上prompt和输出预留
+    let estimated_tokens = subtitle_length + truncation_limit; // 加上prompt和输出预留
 
     match (subtitle_length, tab_type) {
         // 短字幕（< 10,000字符）：直接发送
@@ -406,16 +412,16 @@ fn ceil_char_boundary(s: &str, index: usize) -> usize {
 
 /// 语义分段（按字幕时间戳和语义边界）
 /// 分段策略：先计算段数 = 字数 / SEGMENT_SIZE + 1，再用字数 / 段数得到每段目标大小
-const SEGMENT_SIZE: usize = 10000;
-
 fn split_subtitle_by_semantic(subtitle: &str) -> Vec<String> {
-    if subtitle.len() < SEGMENT_SIZE {
+    let segment_size = SettingsManager::get_int(keys::PROCESS_SEGMENT_SIZE, defaults::PROCESS_SEGMENT_SIZE);
+
+    if subtitle.len() < segment_size {
         // 内容少于 SEGMENT_SIZE，不需要分段
         return vec![subtitle.to_string()];
     }
 
     // 计算段数：字数 / SEGMENT_SIZE + 1
-    let num_chunks = subtitle.len() / SEGMENT_SIZE + 1;
+    let num_chunks = subtitle.len() / segment_size + 1;
     // 计算每段目标大小：字数 / 段数（确保各段大小均匀）
     let target_chunk_size = subtitle.len() / num_chunks;
 
@@ -535,20 +541,20 @@ async fn generate_full_summary_layered(
     let event_name = event_name.to_string();
 
     let generation_type = if custom_prompt.is_some() { "自定义总结" } else { "全文总结" };
-    eprintln!("[笔记生成] ========================================");
-    eprintln!("[笔记生成] 开始生成: {}", generation_type);
-    eprintln!("[笔记生成] 字幕总长度: {} 字符", full_subtitle.len());
-    eprintln!("[笔记生成] 使用模型: {}", ai_config.model);
+    tracing::info!("[笔记生成] ========================================");
+    tracing::info!("[笔记生成] 开始生成: {}", generation_type);
+    tracing::info!("[笔记生成] 字幕总长度: {} 字符", full_subtitle.len());
+    tracing::info!("[笔记生成] 使用模型: {}", ai_config.model);
 
     // 第一层：动态分段生成摘要框架（按字数/SEGMENT_SIZE+1计算段数，再均分）
     let chunks = split_subtitle_by_semantic(full_subtitle);
     let total_chunks = chunks.len();
 
-    eprintln!("[笔记生成] 分段策略: 字数/10000+1 = {} 段", total_chunks);
+    tracing::info!("[笔记生成] 分段策略: 字数/10000+1 = {} 段", total_chunks);
     for (i, chunk) in chunks.iter().enumerate() {
-        eprintln!("[笔记生成]   段 {}: {} 字符", i + 1, chunk.len());
+        tracing::info!("[笔记生成]   段 {}: {} 字符", i + 1, chunk.len());
     }
-    eprintln!("[笔记生成] ========================================");
+    tracing::info!("[笔记生成] ========================================");
 
     // 并发生成各段摘要（并发控制由 AI 线程池统一管理）
     let mut tasks = Vec::new();
@@ -563,11 +569,11 @@ async fn generate_full_summary_layered(
         let custom_prompt_for_task = custom_prompt.map(|p| p.to_string());
 
         let task = tokio::spawn(async move {
-            eprintln!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
+            tracing::info!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
 
             // 检查中止
             if abort_flag.load(Ordering::Relaxed) {
-                eprintln!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
+                tracing::info!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
                 return Err::<(String, usize), String>("已中止".to_string());
             }
 
@@ -593,11 +599,11 @@ async fn generate_full_summary_layered(
 
             match call_ai_api(&ai_config, &prompt, &abort_flag).await {
                 Ok(summary) => {
-                    eprintln!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
+                    tracing::info!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
                     Ok((summary, chunk_index))
                 }
                 Err(e) => {
-                    eprintln!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
+                    tracing::info!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
                     Err(e)
                 }
             }
@@ -626,7 +632,7 @@ async fn generate_full_summary_layered(
     }
 
     let failed_count = total_chunks - success_count;
-    eprintln!("[笔记生成] 分段生成完成: 成功 {}, 失败 {}", success_count, failed_count);
+    tracing::info!("[笔记生成] 分段生成完成: 成功 {}, 失败 {}", success_count, failed_count);
 
     // 按原始顺序排序
     results.sort_by_key(|(index, _)| *index);
@@ -638,7 +644,7 @@ async fn generate_full_summary_layered(
         chunk_summaries.join("\n\n---\n\n")
     );
 
-    eprintln!("[笔记生成] 开始整合摘要框架...");
+    tracing::info!("[笔记生成] 开始整合摘要框架...");
     // 发送进度事件
     let _ = app.emit(
         &event_name,
@@ -651,7 +657,7 @@ async fn generate_full_summary_layered(
     );
 
     let framework = call_ai_api(ai_config, &framework_prompt, abort_flag).await?;
-    eprintln!("[笔记生成] 框架整合完成 (生成 {} 字符)", framework.len());
+    tracing::info!("[笔记生成] 框架整合完成 (生成 {} 字符)", framework.len());
 
     // 第二层：基于框架生成完整的结构化全文总结
     let final_prompt = if let Some(custom) = custom_prompt {
@@ -661,7 +667,7 @@ async fn generate_full_summary_layered(
         PromptTemplates::framework_expand(&framework)
     };
 
-    eprintln!("[笔记生成] 开始生成最终总结...");
+    tracing::info!("[笔记生成] 开始生成最终总结...");
     // 发送进度事件
     let _ = app.emit(
         &event_name,
@@ -674,8 +680,8 @@ async fn generate_full_summary_layered(
     );
 
     let final_content = call_ai_api(ai_config, &final_prompt, abort_flag).await?;
-    eprintln!("[笔记生成] 最终总结完成 (生成 {} 字符)", final_content.len());
-    eprintln!("[笔记生成] ========================================");
+    tracing::info!("[笔记生成] 最终总结完成 (生成 {} 字符)", final_content.len());
+    tracing::info!("[笔记生成] ========================================");
 
     // 直接返回 Markdown 内容（不再验证 JSON 格式）
     Ok(final_content)
@@ -867,7 +873,7 @@ async fn optimize_chapter_titles(
         return Ok(());
     }
 
-    eprintln!("[标题优化] 开始优化 {} 个章节的标题", chapters.len());
+    tracing::info!("[标题优化] 开始优化 {} 个章节的标题", chapters.len());
 
     // 检查中止
     if abort_flag.load(Ordering::Relaxed) {
@@ -905,7 +911,7 @@ async fn optimize_chapter_titles(
                         }
                     }
 
-                    eprintln!(
+                    tracing::info!(
                         "[标题优化] 章节 {}: \"{}\" (level={}, parent={:?})",
                         opt_ch.index,
                         chapter.title,
@@ -915,11 +921,11 @@ async fn optimize_chapter_titles(
                 }
             }
 
-            eprintln!("[标题优化] 标题优化完成");
+            tracing::info!("[标题优化] 标题优化完成");
             Ok(())
         }
         Err(e) => {
-            eprintln!("[标题优化] 解析失败，保持原标题: {}", e);
+            tracing::warn!("[标题优化] 解析失败，保持原标题: {}", e);
             // 解析失败时，为所有章节设置默认层级
             for chapter in chapters.iter_mut() {
                 chapter.level = Some(1);
@@ -943,10 +949,10 @@ async fn generate_detailed_reading_chapters(
     note_id: i64,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<ChapterData, String> {
-    eprintln!("[原文细读] ========================================");
-    eprintln!("[原文细读] 开始生成章节数据");
-    eprintln!("[原文细读] 字幕总条数: {}", subtitle_entries.len());
-    eprintln!("[原文细读] 使用模型: {}", ai_config.model);
+    tracing::info!("[原文细读] ========================================");
+    tracing::info!("[原文细读] 开始生成章节数据");
+    tracing::info!("[原文细读] 字幕总条数: {}", subtitle_entries.len());
+    tracing::info!("[原文细读] 使用模型: {}", ai_config.model);
 
     // 计算总时长
     let total_duration = subtitle_entries.last().map(|e| e.end_time).unwrap_or(0.0);
@@ -964,7 +970,7 @@ async fn generate_detailed_reading_chapters(
 
     let chunks = split_subtitle_into_chunks(subtitle_entries);
     let total_chunks = chunks.len();
-    eprintln!("[原文细读] 分段数: {}", total_chunks);
+    tracing::info!("[原文细读] 分段数: {}", total_chunks);
 
     // 第二步：并发生成每个分段的章节内容
     let mut tasks = Vec::new();
@@ -1001,7 +1007,7 @@ async fn generate_detailed_reading_chapters(
                 return Err::<(usize, String, String, f64, f64), String>("已中止".to_string());
             }
 
-            eprintln!("[原文细读] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+            tracing::info!("[原文细读] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
                 chunk_idx + 1, total_chunks, chunk_start, chunk_end);
 
             // 发送进度事件
@@ -1024,14 +1030,14 @@ async fn generate_detailed_reading_chapters(
                     match parse_detailed_reading_chapter_response(&response.content) {
                         Ok((t, c)) => (t, c),
                         Err(e) => {
-                            eprintln!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
+                            tracing::error!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
                             // 使用默认标题和内容
                             (format!("章节 {}", chunk_idx + 1), subtitle_text.chars().take(200).collect())
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("[原文细读] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
+                    tracing::error!("[原文细读] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
                     // 使用默认标题和内容
                     (format!("章节 {}", chunk_idx + 1), subtitle_text.chars().take(200).collect())
                 }
@@ -1057,7 +1063,7 @@ async fn generate_detailed_reading_chapters(
                 }
             }
             Err(e) => {
-                eprintln!("[原文细读] 任务执行出错: {}", e);
+                tracing::error!("[原文细读] 任务执行出错: {}", e);
             }
         }
     }
@@ -1104,11 +1110,11 @@ async fn generate_detailed_reading_chapters(
         let screenshot_result = capture_video_screenshot(video_path, start_time, screenshot_path.to_str().unwrap());
         let screenshot_path_str = match screenshot_result {
             Ok(_) => {
-                eprintln!("[原文细读] 第 {} 章截图成功: {}", idx + 1, screenshot_filename);
+                tracing::info!("[原文细读] 第 {} 章截图成功: {}", idx + 1, screenshot_filename);
                 Some(screenshot_path.to_string_lossy().to_string())
             }
             Err(e) => {
-                eprintln!("[原文细读] 第 {} 章截图失败: {}", idx + 1, e);
+                tracing::error!("[原文细读] 第 {} 章截图失败: {}", idx + 1, e);
                 None
             }
         };
@@ -1125,7 +1131,7 @@ async fn generate_detailed_reading_chapters(
         });
     }
 
-    eprintln!("[原文细读] 成功生成 {} 个章节", chapters.len());
+    tracing::info!("[原文细读] 成功生成 {} 个章节", chapters.len());
 
     // 第四步：优化标题（添加层级信息）
     let _ = app.emit(
@@ -1139,11 +1145,11 @@ async fn generate_detailed_reading_chapters(
     );
 
     if let Err(e) = optimize_chapter_titles(ai_config, &mut chapters, abort_flag).await {
-        eprintln!("[原文细读] 标题优化失败: {}", e);
+        tracing::error!("[原文细读] 标题优化失败: {}", e);
         // 标题优化失败不影响整体流程，继续返回结果
     }
 
-    eprintln!("[原文细读] ========================================");
+    tracing::info!("[原文细读] ========================================");
 
     Ok(ChapterData {
         chapters,
@@ -1268,10 +1274,10 @@ pub async fn generate_note(
             TabType::VisualSummary => "视觉化总结",
             TabType::CustomSummary => "自定义总结",
         }).collect();
-        eprintln!("[笔记生成] 开始串行生成，标签页顺序: {:?}", tab_names);
+        tracing::info!("[笔记生成] 开始串行生成，标签页顺序: {:?}", tab_names);
         for tab_type in &tabs_to_generate {
             let tab_name = get_tab_name(tab_type);
-            eprintln!("[笔记生成] 开始处理标签页: {}", tab_name);
+            tracing::info!("[笔记生成] 开始处理标签页: {}", tab_name);
 
             // 检查是否被中止
             if abort_flag.load(Ordering::Relaxed) {
@@ -1310,7 +1316,7 @@ pub async fn generate_note(
                     },
                 ).await {
                     Ok(chapter_data) => {
-                        eprintln!("[笔记生成] {:?} 生成完成", tab_type);
+                        tracing::info!("[笔记生成] {:?} 生成完成", tab_type);
                         let content = serde_json::to_string(&chapter_data)
                             .map_err(|e| format!("序列化章节数据失败: {}", e))?;
                         update_note_tab(db, request.note_id, tab_type, &content, request.model_id)?;
@@ -1324,7 +1330,7 @@ pub async fn generate_note(
                         generated_count += 1;
                     }
                     Err(e) => {
-                        eprintln!("[笔记生成] {:?} 生成失败: {}", tab_type, e);
+                        tracing::info!("[笔记生成] {:?} 生成失败: {}", tab_type, e);
                         let _ = app.emit(
                             &event_name,
                             GenerationEvent::TabError {
@@ -1349,12 +1355,12 @@ pub async fn generate_note(
                     request.options.custom_prompt.as_deref(),
                 ).await;
 
-                eprintln!("[笔记生成] {:?} 生成结果: success={}", tab_type, result.success);
+                tracing::info!("[笔记生成] {:?} 生成结果: success={}", tab_type, result.success);
 
                 if result.success {
                     generated_count += 1;
                     if let Err(e) = update_note_tab(db, request.note_id, tab_type, &result.content, request.model_id) {
-                        eprintln!("[笔记生成] 更新数据库失败: {}", e);
+                        tracing::info!("[笔记生成] 更新数据库失败: {}", e);
                         failed_count += 1;
                     }
                 } else {
@@ -1440,7 +1446,7 @@ pub async fn generate_note(
                 let _permit = match semaphore.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
-                        eprintln!("[笔记生成] 获取信号量失败: {}", e);
+                        tracing::info!("[笔记生成] 获取信号量失败: {}", e);
                         return TabResult {
                             tab_type,
                             content: String::new(),
@@ -1475,7 +1481,7 @@ pub async fn generate_note(
                         generated_count += 1;
                         // 更新数据库
                         if let Err(e) = update_note_tab(db, request.note_id, &result.tab_type, &result.content, request.model_id) {
-                            eprintln!("[笔记生成] 更新数据库失败: {}", e);
+                            tracing::info!("[笔记生成] 更新数据库失败: {}", e);
                             failed_count += 1;
                         }
                     } else {
@@ -1484,7 +1490,7 @@ pub async fn generate_note(
                 }
                 Err(e) => {
                     // 任务 panic 或被取消，记录错误但继续处理其他任务
-                    eprintln!("[笔记生成] 任务执行异常: {}", e);
+                    tracing::info!("[笔记生成] 任务执行异常: {}", e);
                     failed_count += 1;
                 }
             }
@@ -1922,13 +1928,13 @@ pub async fn generate_chapters_with_markers(
     // 计算总时长
     let total_duration = subtitle_entries.last().unwrap().end_time;
 
-    eprintln!("[辅助模式章节生成] 字幕总条数: {}, 标记数: {}", subtitle_entries.len(), markers.len());
+    tracing::info!("[辅助模式章节生成] 字幕总条数: {}, 标记数: {}", subtitle_entries.len(), markers.len());
 
     // 根据标记计算分段
     let segments = calculate_segments_from_markers(&subtitle_entries, &markers);
     let total_segments = segments.len();
 
-    eprintln!("[辅助模式章节生成] 计算得到 {} 个分段", total_segments);
+    tracing::info!("[辅助模式章节生成] 计算得到 {} 个分段", total_segments);
 
     // 准备截图目录
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
@@ -1966,7 +1972,7 @@ pub async fn generate_chapters_with_markers(
                 return Err::<(usize, Chapter), String>("已中止".to_string());
             }
 
-            eprintln!("[辅助模式章节生成] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+            tracing::info!("[辅助模式章节生成] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
                 segment_idx + 1, total_segments, segment.start_index, segment.end_index);
 
             // 提取该分段的字幕文本
@@ -1994,14 +2000,14 @@ pub async fn generate_chapters_with_markers(
                     match parse_chapter_content_response(&response.content) {
                         Ok((t, c)) => (t, c),
                         Err(e) => {
-                            eprintln!("[辅助模式章节生成] 第 {} 段解析失败: {}", segment_idx + 1, e);
+                            tracing::error!("[辅助模式章节生成] 第 {} 段解析失败: {}", segment_idx + 1, e);
                             // 使用默认标题和内容
                             (format!("章节 {}", segment_idx + 1), subtitle_text.chars().take(200).collect())
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("[辅助模式章节生成] 第 {} 段 AI 调用失败: {}", segment_idx + 1, e);
+                    tracing::error!("[辅助模式章节生成] 第 {} 段 AI 调用失败: {}", segment_idx + 1, e);
                     // 使用默认标题和内容
                     (format!("章节 {}", segment_idx + 1), subtitle_text.chars().take(200).collect())
                 }
@@ -2020,11 +2026,11 @@ pub async fn generate_chapters_with_markers(
 
                 match capture_video_screenshot(&video_path, timestamp, screenshot_path.to_str().unwrap()) {
                     Ok(_) => {
-                        eprintln!("[辅助模式章节生成] 第 {} 段自动截图成功: {}", segment_idx + 1, screenshot_filename);
+                        tracing::info!("[辅助模式章节生成] 第 {} 段自动截图成功: {}", segment_idx + 1, screenshot_filename);
                         Some(screenshot_path.to_string_lossy().to_string())
                     }
                     Err(e) => {
-                        eprintln!("[辅助模式章节生成] 第 {} 段自动截图失败: {}", segment_idx + 1, e);
+                        tracing::error!("[辅助模式章节生成] 第 {} 段自动截图失败: {}", segment_idx + 1, e);
                         None
                     }
                 }
@@ -2071,7 +2077,7 @@ pub async fn generate_chapters_with_markers(
                 // 其他错误继续处理
             }
             Err(e) => {
-                eprintln!("[辅助模式章节生成] 任务执行出错: {}", e);
+                tracing::error!("[辅助模式章节生成] 任务执行出错: {}", e);
                 // 继续处理其他任务
             }
         }
@@ -2086,7 +2092,7 @@ pub async fn generate_chapters_with_markers(
         return Err("未能生成任何章节".to_string());
     }
 
-    eprintln!("[辅助模式章节生成] 成功生成 {} 个章节", chapters.len());
+    tracing::info!("[辅助模式章节生成] 成功生成 {} 个章节", chapters.len());
 
     // 优化标题（添加层级信息）
     let _ = app.emit(&event_name, ChapterGenerationEvent::AnalyzingSubtitle {
@@ -2094,7 +2100,7 @@ pub async fn generate_chapters_with_markers(
     });
 
     if let Err(e) = optimize_chapter_titles(&ai_config, &mut chapters, &abort_flag).await {
-        eprintln!("[辅助模式章节生成] 标题优化失败: {}", e);
+        tracing::error!("[辅助模式章节生成] 标题优化失败: {}", e);
         // 标题优化失败不影响整体流程，继续返回结果
     }
 

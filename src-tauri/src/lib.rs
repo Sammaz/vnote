@@ -2,14 +2,18 @@ mod ai_pool;
 mod chat;
 mod chapter;
 mod db;
+pub mod error;
 mod flashcard_generation;
 mod highlight_generation;
 mod note_generation;
 mod note_initialization;
 mod prompts;
 mod rag;
+pub mod settings;
 mod subtitle;
 mod subtitle_optimizer;
+pub mod validation;
+mod keyring_manager;
 
 use chat::ChatRequest;
 use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker};
@@ -190,13 +194,13 @@ async fn export_visual_summary(
     for (asset_url, local_path, filename) in &url_mappings {
         // Skip non-existent files (Requirement 3.4)
         if !local_path.exists() {
-            eprintln!("[export_visual_summary] 跳过不存在的文件: {:?}", local_path);
+            tracing::warn!("[export_visual_summary] 跳过不存在的文件: {:?}", local_path);
             continue;
         }
 
         let dest_path = attachments_dir.join(filename);
         if let Err(e) = fs::copy(local_path, &dest_path) {
-            eprintln!("[export_visual_summary] 复制文件失败 {:?}: {}", local_path, e);
+            tracing::error!("[export_visual_summary] 复制文件失败 {:?}: {}", local_path, e);
             continue;
         }
 
@@ -255,7 +259,7 @@ async fn export_visual_summary(
 
     // Clean up temporary directory
     if let Err(e) = fs::remove_dir_all(&temp_dir) {
-        eprintln!("[export_visual_summary] 清理临时目录失败: {}", e);
+        tracing::warn!("[export_visual_summary] 清理临时目录失败: {}", e);
         // Don't fail the export if cleanup fails
     }
 
@@ -369,11 +373,27 @@ fn get_ai_configs() -> Result<Vec<AiConfig>, String> {
 
 #[tauri::command]
 fn create_ai_config(config: AiConfig) -> Result<i64, String> {
+    // 验证输入
+    validation::validate_config_title(&config.title)?;
+    validation::validate_url(&config.base_url)?;
+    validation::validate_api_key(&config.api_key)?;
+    validation::validate_model_name(&config.model)?;
+    validation::validate_concurrent_limit(config.concurrent_limit)?;
+    validation::validate_request_timeout(config.request_timeout)?;
+
     get_db().create_ai_config(&config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn update_ai_config(config: AiConfig) -> Result<(), String> {
+    // 验证输入
+    validation::validate_config_title(&config.title)?;
+    validation::validate_url(&config.base_url)?;
+    validation::validate_api_key(&config.api_key)?;
+    validation::validate_model_name(&config.model)?;
+    validation::validate_concurrent_limit(config.concurrent_limit)?;
+    validation::validate_request_timeout(config.request_timeout)?;
+
     // 先更新数据库
     get_db().update_ai_config(&config).map_err(|e| e.to_string())?;
 
@@ -753,11 +773,16 @@ fn get_note(id: i64) -> Result<Option<Note>, String> {
 
 #[tauri::command]
 fn create_note(req: CreateNoteRequest) -> Result<Note, String> {
+    // 验证输入
+    validation::validate_title(&req.title)?;
+
     get_db().create_note(&req).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn update_note(note: Note) -> Result<(), String> {
+    // 验证输入
+    validation::validate_title(&note.title)?;
     get_db().update_note(&note).map_err(|e| e.to_string())
 }
 
@@ -841,7 +866,7 @@ async fn generate_questions_for_note(note_id: i64) -> Result<Vec<String>, String
     let questions = chat::generate_suggested_questions(db, &subtitle_path, model_id, &abort_flag)
         .await
         .unwrap_or_else(|e| {
-            eprintln!("Failed to generate questions: {}", e);
+            tracing::error!("Failed to generate questions: {}", e);
             default_questions.clone()
         });
 
@@ -861,11 +886,23 @@ fn get_embedding_configs() -> Result<Vec<EmbeddingConfig>, String> {
 
 #[tauri::command]
 fn create_embedding_config(config: EmbeddingConfig) -> Result<i64, String> {
+    // 验证输入
+    validation::validate_config_title(&config.title)?;
+    validation::validate_url(&config.base_url)?;
+    validation::validate_api_key(&config.api_key)?;
+    validation::validate_model_name(&config.model)?;
+
     get_db().create_embedding_config(&config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn update_embedding_config(config: EmbeddingConfig) -> Result<(), String> {
+    // 验证输入
+    validation::validate_config_title(&config.title)?;
+    validation::validate_url(&config.base_url)?;
+    validation::validate_api_key(&config.api_key)?;
+    validation::validate_model_name(&config.model)?;
+
     get_db().update_embedding_config(&config).map_err(|e| e.to_string())
 }
 
@@ -892,11 +929,23 @@ fn get_reranker_configs() -> Result<Vec<RerankerConfig>, String> {
 
 #[tauri::command]
 fn create_reranker_config(config: RerankerConfig) -> Result<i64, String> {
+    // 验证输入
+    validation::validate_config_title(&config.title)?;
+    validation::validate_url(&config.base_url)?;
+    validation::validate_api_key(&config.api_key)?;
+    validation::validate_model_name(&config.model)?;
+
     get_db().create_reranker_config(&config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn update_reranker_config(config: RerankerConfig) -> Result<(), String> {
+    // 验证输入
+    validation::validate_config_title(&config.title)?;
+    validation::validate_url(&config.base_url)?;
+    validation::validate_api_key(&config.api_key)?;
+    validation::validate_model_name(&config.model)?;
+
     get_db().update_reranker_config(&config).map_err(|e| e.to_string())
 }
 
@@ -923,11 +972,25 @@ fn get_prompt_configs() -> Result<Vec<PromptConfig>, String> {
 
 #[tauri::command]
 fn create_prompt_config(config: PromptConfig) -> Result<i64, String> {
+    // 验证输入
+    validation::validate_config_title(&config.title)?;
+    if let Some(ref desc) = config.description {
+        validation::validate_description(desc)?;
+    }
+    validation::validate_prompt(&config.content)?;
+
     get_db().create_prompt_config(&config).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn update_prompt_config(config: PromptConfig) -> Result<(), String> {
+    // 验证输入
+    validation::validate_config_title(&config.title)?;
+    if let Some(ref desc) = config.description {
+        validation::validate_description(desc)?;
+    }
+    validation::validate_prompt(&config.content)?;
+
     get_db().update_prompt_config(&config).map_err(|e| e.to_string())
 }
 
@@ -994,7 +1057,7 @@ async fn generate_note_content(
     // 在后台任务中执行生成，立即返回 generation_id
     tokio::spawn(async move {
         if let Err(e) = note_generation::generate_note(app, get_db(), generation_id, request).await {
-            eprintln!("[generate_note_content] 生成失败: {}", e);
+            tracing::error!("[generate_note_content] 生成失败: {}", e);
         }
     });
 
@@ -1021,7 +1084,7 @@ async fn generate_chapters(
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let return_id = generation_id.clone();
 
-    eprintln!("[原文细读] 开始执行, note_id={}, generation_id={}", note_id, return_id);
+    tracing::info!("[原文细读] 开始执行, note_id={}, generation_id={}", note_id, return_id);
 
     let request = chapter::GenerateChaptersRequest {
         note_id,
@@ -1042,13 +1105,13 @@ async fn generate_chapters(
                     "UPDATE notes SET detailed_reading = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
                     (&chapter_json, note_id),
                 ) {
-                    eprintln!("[generate_chapters] 保存章节数据失败: {}", e);
+                    tracing::error!("[generate_chapters] 保存章节数据失败: {}", e);
                 } else {
-                    eprintln!("[generate_chapters] 章节数据已保存到数据库, note_id={}", note_id);
+                    tracing::info!("[generate_chapters] 章节数据已保存到数据库, note_id={}", note_id);
                 }
             }
             Err(e) => {
-                eprintln!("[generate_chapters] 生成失败: {}", e);
+                tracing::error!("[generate_chapters] 生成失败: {}", e);
             }
         }
     });
@@ -1241,11 +1304,11 @@ async fn generate_chapters_with_markers(
             Ok(chapter_data) => {
                 // 保存章节数据到笔记
                 if let Err(e) = save_chapters_to_note_internal(note_id, &chapter_data) {
-                    eprintln!("[generate_chapters_with_markers] 保存章节数据失败: {}", e);
+                    tracing::error!("[generate_chapters_with_markers] 保存章节数据失败: {}", e);
                 }
             }
             Err(e) => {
-                eprintln!("[generate_chapters_with_markers] 生成失败: {}", e);
+                tracing::error!("[generate_chapters_with_markers] 生成失败: {}", e);
             }
         }
     });
@@ -1334,7 +1397,7 @@ async fn generate_highlights(
     {
         let generating_notes = get_highlight_generating_notes().lock().await;
         if generating_notes.contains(&note_id) {
-            eprintln!("[generate_highlights] note_id={} 已在生成中，跳过重复调用", note_id);
+            tracing::warn!("[generate_highlights] note_id={} 已在生成中，跳过重复调用", note_id);
             return Err("该笔记的高光正在生成中".to_string());
         }
     }
@@ -1370,11 +1433,11 @@ async fn generate_highlights(
             Ok(highlight_data) => {
                 // 保存到数据库
                 if let Err(e) = save_highlights_to_note_internal(note_id, &highlight_data) {
-                    eprintln!("[generate_highlights] 保存高光数据失败: {}", e);
+                    tracing::error!("[generate_highlights] 保存高光数据失败: {}", e);
                 }
             }
             Err(e) => {
-                eprintln!("[generate_highlights] 生成失败: {}", e);
+                tracing::error!("[generate_highlights] 生成失败: {}", e);
             }
         }
         // 生成完成，移除标记
@@ -1484,11 +1547,23 @@ fn get_collection(id: i64) -> Result<Option<Collection>, String> {
 
 #[tauri::command]
 fn create_collection(req: CreateCollectionRequest) -> Result<Collection, String> {
+    // 验证输入
+    validation::validate_collection_name(&req.name)?;
+    if let Some(ref desc) = req.description {
+        validation::validate_description(desc)?;
+    }
+
     get_db().create_collection(&req).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn update_collection(collection: Collection) -> Result<(), String> {
+    // 验证输入
+    validation::validate_collection_name(&collection.name)?;
+    if let Some(ref desc) = collection.description {
+        validation::validate_description(desc)?;
+    }
+
     get_db().update_collection(&collection).map_err(|e| e.to_string())
 }
 

@@ -33,6 +33,11 @@ pub async fn chat_stream(
     db: &Database,
     request: ChatRequest,
 ) -> Result<String, String> {
+    // 验证所有消息内容
+    for msg in &request.messages {
+        crate::validation::validate_message(&msg.content)?;
+    }
+
     let request_id = uuid::Uuid::new_v4().to_string();
     let event_name = format!("chat-stream-{}", request_id);
 

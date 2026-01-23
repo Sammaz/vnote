@@ -8,6 +8,7 @@
 use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
 use crate::db::AiConfig;
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
+use crate::settings::{SettingsManager, keys, defaults};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
@@ -183,13 +184,13 @@ pub struct SubtitleChunk {
 /// 分段策略：先计算段数 = 总字数 / SEGMENT_SIZE + 1，再用总字数 / 段数得到每段目标大小
 /// 每段的字幕索引从 0 开始（相对索引），便于 AI 处理和后续合并
 pub fn split_subtitle_into_chunks(subtitle_entries: &[SubtitleEntry]) -> Vec<SubtitleChunk> {
-    const SEGMENT_SIZE: usize = 10000;
+    let segment_size = SettingsManager::get_int(keys::PROCESS_SEGMENT_SIZE, defaults::PROCESS_SEGMENT_SIZE);
 
     // 先计算总字符数
     let total_chars: usize = subtitle_entries.iter().map(|e| e.text.len() + 10).sum(); // +10 for "[idx] \n"
 
     // 如果总字符数小于 SEGMENT_SIZE，不分段
-    if total_chars < SEGMENT_SIZE {
+    if total_chars < segment_size {
         let text: String = subtitle_entries
             .iter()
             .enumerate()
@@ -203,7 +204,7 @@ pub fn split_subtitle_into_chunks(subtitle_entries: &[SubtitleEntry]) -> Vec<Sub
     }
 
     // 计算段数：总字数 / SEGMENT_SIZE + 1
-    let num_chunks = total_chars / SEGMENT_SIZE + 1;
+    let num_chunks = total_chars / segment_size + 1;
     // 计算每段目标大小：总字数 / 段数（确保各段大小均匀）
     let target_chunk_size = total_chars / num_chunks;
 
@@ -260,7 +261,7 @@ async fn analyze_subtitle_for_chapters(
     let chunks = split_subtitle_into_chunks(subtitle_entries);
     let total_chunks = chunks.len();
 
-    eprintln!("[章节生成] 字幕总条数: {}, 分为 {} 段处理", subtitle_entries.len(), total_chunks);
+    tracing::info!("[章节生成] 字幕总条数: {}, 分为 {} 段处理", subtitle_entries.len(), total_chunks);
 
     // 如果只有一段，直接处理
     if total_chunks == 1 {
@@ -293,7 +294,7 @@ async fn analyze_subtitle_for_chapters(
                 return Err::<(usize, usize, usize, Vec<AIChapter>), String>("已中止".to_string());
             }
 
-            eprintln!("[章节生成] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+            tracing::info!("[章节生成] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
                 chunk_idx + 1, total_chunks, chunk.start_index, chunk.end_index);
 
             let chunk_size = chunk.end_index - chunk.start_index;
@@ -312,17 +313,17 @@ async fn analyze_subtitle_for_chapters(
                 Ok(response) => {
                     match parse_chapter_ai_response(&response.content, chunk.end_index - chunk.start_index) {
                         Ok(chapters) => {
-                            eprintln!("[章节生成] 第 {} 段生成了 {} 个章节", chunk_idx + 1, chapters.len());
+                            tracing::info!("[章节生成] 第 {} 段生成了 {} 个章节", chunk_idx + 1, chapters.len());
                             Ok((chunk_idx, chunk.start_index, chunk.end_index, chapters))
                         }
                         Err(e) => {
-                            eprintln!("[章节生成] 第 {} 段解析失败: {}", chunk_idx + 1, e);
+                            tracing::info!("[章节生成] 第 {} 段解析失败: {}", chunk_idx + 1, e);
                             Ok((chunk_idx, chunk.start_index, chunk.end_index, Vec::new()))
                         }
                     }
                 }
                 Err(e) => {
-                    eprintln!("[章节生成] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
+                    tracing::info!("[章节生成] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
                     Ok((chunk_idx, chunk.start_index, chunk.end_index, Vec::new()))
                 }
             };
@@ -356,7 +357,7 @@ async fn analyze_subtitle_for_chapters(
                 // 其他错误继续处理
             }
             Err(e) => {
-                eprintln!("[章节生成] 任务执行出错: {}", e);
+                tracing::info!("[章节生成] 任务执行出错: {}", e);
                 // 继续处理其他任务
             }
         }
@@ -385,7 +386,7 @@ async fn analyze_subtitle_for_chapters(
     }
 
     // 不再跨分段排序，保留分段顺序便于观察问题
-    eprintln!("[章节生成] 合并后共 {} 个章节（按分段顺序拼接）", all_chapters.len());
+    tracing::info!("[章节生成] 合并后共 {} 个章节（按分段顺序拼接）", all_chapters.len());
 
     Ok(all_chapters)
 }
@@ -519,7 +520,7 @@ async fn capture_chapter_screenshots(
     let safe_video_name = sanitize_filename(video_name);
 
     let total = chapters.len();
-    eprintln!("[章节截图] 开始为 {} 个章节生成截图，保存目录: {:?}", total, screenshots_dir);
+    tracing::info!("[章节截图] 开始为 {} 个章节生成截图，保存目录: {:?}", total, screenshots_dir);
 
     for (i, chapter) in chapters.iter_mut().enumerate() {
         if abort_flag.load(Ordering::Relaxed) {
@@ -534,10 +535,10 @@ async fn capture_chapter_screenshots(
         match capture_video_screenshot(video_path, chapter.start_time, screenshot_path.to_str().unwrap()) {
             Ok(_) => {
                 chapter.screenshot_path = Some(screenshot_path.to_string_lossy().to_string());
-                eprintln!("[章节截图] 第 {}/{} 张截图成功: {}", i + 1, total, screenshot_filename);
+                tracing::info!("[章节截图] 第 {}/{} 张截图成功: {}", i + 1, total, screenshot_filename);
             }
             Err(e) => {
-                eprintln!("[章节截图] 第 {}/{} 张截图失败: {}", i + 1, total, e);
+                tracing::error!("[章节截图] 第 {}/{} 张截图失败: {}", i + 1, total, e);
                 // 继续处理下一张，不中断
             }
         }
@@ -673,11 +674,11 @@ pub async fn generate_chapters(
     };
 
     // 发送完成事件
-    eprintln!("[章节生成] 准备发送 Completed 事件, event_name={}, 章节数={}", event_name, chapter_data.chapters.len());
+    tracing::info!("[章节生成] 准备发送 Completed 事件, event_name={}, 章节数={}", event_name, chapter_data.chapters.len());
     let emit_result = app.emit(&event_name, ChapterGenerationEvent::Completed {
         chapter_data: chapter_data.clone(),
     });
-    eprintln!("[章节生成] Completed 事件发送结果: {:?}", emit_result);
+    tracing::info!("[章节生成] Completed 事件发送结果: {:?}", emit_result);
 
     // 清理
     get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;

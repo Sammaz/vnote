@@ -30,18 +30,10 @@ pub fn get_ai_pool_manager() -> &'static AiPoolManager {
 }
 
 // ============================================================================
-// 配置常量
+// 配置
 // ============================================================================
 
-/// HTTP连接池配置
-const POOL_MAX_IDLE_PER_HOST: usize = 20;
-const POOL_IDLE_TIMEOUT_SECS: u64 = 90;
-
-/// 最大重试次数
-const MAX_RETRY_COUNT: u32 = 3;
-
-/// 重试间隔基数（毫秒），实际间隔 = 基数 * 2^(重试次数-1)
-const RETRY_BASE_DELAY_MS: u64 = 1000;
+use crate::settings::{SettingsManager, keys, defaults};
 
 // ============================================================================
 // 公共类型定义（复用chat.rs的结构以保持兼容）
@@ -73,6 +65,73 @@ pub enum StreamEvent {
 // 单个配置的并发控制器
 // ============================================================================
 
+/// 令牌桶速率限制器
+struct TokenBucket {
+    /// 令牌数量（每分钟允许的请求数）
+    tokens: f64,
+    /// 令牌桶容量（允许的突发请求数）
+    capacity: f64,
+    /// 每秒恢复的令牌数
+    refill_rate: f64,
+    /// 上次更新时间
+    last_update: std::time::Instant,
+}
+
+impl TokenBucket {
+    /// 创建新的令牌桶
+    /// rate_limit: 每分钟允许的请求数，0表示不限制
+    fn new(rate_limit: i32) -> Self {
+        let rate_limit = rate_limit.max(0).min(1000) as f64;
+        // 容量设置为速率限制的1.5倍，允许一定的突发
+        let capacity = if rate_limit > 0.0 { (rate_limit * 1.5).max(5.0) } else { f64::MAX };
+        // 每秒恢复的令牌数 = 每分钟限制 / 60
+        let refill_rate = rate_limit / 60.0;
+
+        Self {
+            tokens: capacity, // 初始满桶
+            capacity,
+            refill_rate,
+            last_update: std::time::Instant::now(),
+        }
+    }
+
+    /// 尝试消耗一个令牌
+    /// 返回 Ok(()) 如果成功，Err(等待毫秒数) 如果需要等待
+    fn try_acquire(&mut self) -> Result<(), u64> {
+        // 如果refill_rate为0，表示不限制
+        if self.refill_rate <= 0.0 {
+            return Ok(());
+        }
+
+        // 计算自上次更新以来恢复的令牌
+        let now = std::time::Instant::now();
+        let elapsed = now.duration_since(self.last_update).as_secs_f64();
+        self.tokens = (self.tokens + elapsed * self.refill_rate).min(self.capacity);
+        self.last_update = now;
+
+        // 尝试消耗一个令牌
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            Ok(())
+        } else {
+            // 计算需要等待的时间（毫秒）
+            let tokens_needed = 1.0 - self.tokens;
+            let wait_secs = tokens_needed / self.refill_rate;
+            Err((wait_secs * 1000.0).ceil() as u64)
+        }
+    }
+
+    /// 更新速率限制
+    #[allow(dead_code)]
+    fn update_rate_limit(&mut self, rate_limit: i32) {
+        let rate_limit = rate_limit.max(0).min(1000) as f64;
+        self.capacity = if rate_limit > 0.0 { (rate_limit * 1.5).max(5.0) } else { f64::MAX };
+        self.refill_rate = rate_limit / 60.0;
+        // 保持当前令牌数，但不超过新容量
+        self.tokens = self.tokens.min(self.capacity);
+    }
+}
+
 /// 单个AiConfig的并发控制器
 struct ConfigConcurrencyController {
     /// 信号量：控制并发数（使用 Arc<Mutex<>> 支持动态替换）
@@ -83,17 +142,20 @@ struct ConfigConcurrencyController {
     active_count: Arc<AtomicUsize>,
     /// 等待数量（用于监控）
     waiting_count: Arc<AtomicUsize>,
+    /// 令牌桶速率限制器
+    rate_limiter: Arc<Mutex<TokenBucket>>,
 }
 
 impl ConfigConcurrencyController {
     /// 创建新的并发控制器
-    fn new(concurrent_limit: i32) -> Self {
+    fn new(concurrent_limit: i32, rate_limit: i32) -> Self {
         let limit = concurrent_limit.max(1).min(10) as usize;
         Self {
             semaphore: Arc::new(Mutex::new(Arc::new(Semaphore::new(limit)))),
             concurrent_limit: Arc::new(Mutex::new(limit)),
             active_count: Arc::new(AtomicUsize::new(0)),
             waiting_count: Arc::new(AtomicUsize::new(0)),
+            rate_limiter: Arc::new(Mutex::new(TokenBucket::new(rate_limit))),
         }
     }
 
@@ -110,6 +172,59 @@ impl ConfigConcurrencyController {
         *semaphore_guard = new_semaphore;
     }
 
+    /// 动态更新速率限制
+    #[allow(dead_code)]
+    pub async fn update_rate_limit(&self, new_limit: i32) {
+        let mut rate_limiter = self.rate_limiter.lock().await;
+        rate_limiter.update_rate_limit(new_limit);
+        tracing::info!("[AI线程池] 速率限制已更新为 {} 次/分钟", new_limit);
+    }
+
+    /// 检查速率限制（异步等待直到有令牌可用）
+    async fn check_rate_limit(&self) {
+        loop {
+            let result = {
+                let mut rate_limiter = self.rate_limiter.lock().await;
+                rate_limiter.try_acquire()
+            };
+
+            match result {
+                Ok(()) => return, // 获取到令牌，可以继续
+                Err(wait_ms) => {
+                    if wait_ms > 0 {
+                        tracing::debug!("[AI线程池] 速率限制：等待 {}ms 后重试", wait_ms);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms.min(1000))).await;
+                    }
+                }
+            }
+        }
+    }
+
+    /// 检查速率限制（支持中止检查）
+    async fn check_rate_limit_with_abort(&self, abort_flag: &Arc<AtomicBool>) -> Result<(), &'static str> {
+        loop {
+            // 检查是否被中止
+            if abort_flag.load(Ordering::Relaxed) {
+                return Err("请求已取消");
+            }
+
+            let result = {
+                let mut rate_limiter = self.rate_limiter.lock().await;
+                rate_limiter.try_acquire()
+            };
+
+            match result {
+                Ok(()) => return Ok(()), // 获取到令牌，可以继续
+                Err(wait_ms) => {
+                    if wait_ms > 0 {
+                        tracing::debug!("[AI线程池] 速率限制：等待 {}ms 后重试", wait_ms);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(wait_ms.min(1000))).await;
+                    }
+                }
+            }
+        }
+    }
+
     /// 获取当前并发限制
     #[allow(dead_code)]
     pub async fn get_concurrent_limit(&self) -> usize {
@@ -120,16 +235,20 @@ impl ConfigConcurrencyController {
     /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
     /// 超时时间：5分钟，防止任务永久卡住
     async fn acquire(&self) -> OwnedSemaphorePermit {
+        // 先检查速率限制
+        self.check_rate_limit().await;
+
         self.waiting_count.fetch_add(1, Ordering::Relaxed);
 
         let start_time = std::time::Instant::now();
-        let timeout_duration = std::time::Duration::from_secs(300); // 5分钟超时
+        let timeout_secs = SettingsManager::get_int(keys::AI_TIMEOUT_ACQUIRE, defaults::AI_TIMEOUT_ACQUIRE);
+        let timeout_duration = std::time::Duration::from_secs(timeout_secs);
 
         loop {
             // 检查是否超时
             if start_time.elapsed() > timeout_duration {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
-                eprintln!("[AI线程池] 警告：获取信号量超时（5分钟），强制创建新的许可");
+                tracing::warn!("[AI线程池] 警告：获取信号量超时（{}秒），强制创建新的许可", timeout_secs);
                 // 超时后直接创建一个新的信号量并获取许可，确保任务能继续
                 let emergency_semaphore = Arc::new(Semaphore::new(1));
                 let permit = emergency_semaphore.try_acquire_owned().unwrap();
@@ -159,10 +278,14 @@ impl ConfigConcurrencyController {
     /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
     /// 超时时间：5分钟，防止任务永久卡住
     async fn acquire_with_abort(&self, abort_flag: &Arc<AtomicBool>) -> Result<OwnedSemaphorePermit, &'static str> {
+        // 先检查速率限制
+        self.check_rate_limit_with_abort(abort_flag).await?;
+
         self.waiting_count.fetch_add(1, Ordering::Relaxed);
 
         let start_time = std::time::Instant::now();
-        let timeout_duration = std::time::Duration::from_secs(300); // 5分钟超时
+        let timeout_secs = SettingsManager::get_int(keys::AI_TIMEOUT_ACQUIRE, defaults::AI_TIMEOUT_ACQUIRE);
+        let timeout_duration = std::time::Duration::from_secs(timeout_secs);
 
         loop {
             // 检查是否被中止
@@ -174,7 +297,7 @@ impl ConfigConcurrencyController {
             // 检查是否超时
             if start_time.elapsed() > timeout_duration {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
-                eprintln!("[AI线程池] 警告：acquire_with_abort 获取信号量超时（5分钟），强制创建新的许可");
+                tracing::warn!("[AI线程池] 警告：acquire_with_abort 获取信号量超时（{}秒），强制创建新的许可", timeout_secs);
                 // 超时后直接创建一个新的信号量并获取许可，确保任务能继续
                 let emergency_semaphore = Arc::new(Semaphore::new(1));
                 let permit = emergency_semaphore.try_acquire_owned().unwrap();
@@ -253,11 +376,16 @@ impl AiPoolManager {
             }
         }
 
+        // 获取配置
+        let max_idle = SettingsManager::get_int(keys::AI_POOL_MAX_IDLE, defaults::AI_POOL_MAX_IDLE);
+        let idle_timeout = SettingsManager::get_int(keys::AI_POOL_IDLE_TIMEOUT, defaults::AI_POOL_IDLE_TIMEOUT);
+        let connect_timeout = SettingsManager::get_int(keys::AI_TIMEOUT_CONNECT, defaults::AI_TIMEOUT_CONNECT);
+
         // 创建新的客户端
         let mut builder = Client::builder()
-            .pool_max_idle_per_host(POOL_MAX_IDLE_PER_HOST)
-            .pool_idle_timeout(std::time::Duration::from_secs(POOL_IDLE_TIMEOUT_SECS))
-            .connect_timeout(std::time::Duration::from_secs(30))
+            .pool_max_idle_per_host(max_idle)
+            .pool_idle_timeout(std::time::Duration::from_secs(idle_timeout))
+            .connect_timeout(std::time::Duration::from_secs(connect_timeout))
             .http2_keep_alive_interval(std::time::Duration::from_secs(30))
             .http2_keep_alive_timeout(std::time::Duration::from_secs(10));
 
@@ -283,13 +411,14 @@ impl AiPoolManager {
         &self,
         config_id: i64,
         concurrent_limit: i32,
+        rate_limit: i32,
     ) -> Arc<ConfigConcurrencyController> {
         let mut controllers = self.controllers.lock().await;
 
         if let Some(controller) = controllers.get(&config_id) {
             controller.clone()
         } else {
-            let controller = Arc::new(ConfigConcurrencyController::new(concurrent_limit));
+            let controller = Arc::new(ConfigConcurrencyController::new(concurrent_limit, rate_limit));
             controllers.insert(config_id, controller.clone());
             controller
         }
@@ -306,6 +435,22 @@ impl AiPoolManager {
         } else {
             // 控制器不存在，可能还没有创建过
             // 这是正常情况，下次请求时会使用新的并发限制创建控制器
+            Err("AI配置不存在，尚未创建过并发控制器".to_string())
+        }
+    }
+
+    /// 更新速率限制（动态更新，不影响正在进行的请求）
+    #[allow(dead_code)]
+    pub async fn update_rate_limit(&self, config_id: i64, new_limit: i32) -> Result<(), String> {
+        let controllers = self.controllers.lock().await;
+
+        if let Some(controller) = controllers.get(&config_id) {
+            // 动态更新现有控制器的速率限制
+            controller.update_rate_limit(new_limit).await;
+            Ok(())
+        } else {
+            // 控制器不存在，可能还没有创建过
+            // 这是正常情况，下次请求时会使用新的速率限制创建控制器
             Err("AI配置不存在，尚未创建过并发控制器".to_string())
         }
     }
@@ -397,7 +542,7 @@ pub async fn execute_streaming_chat(
 
     // 获取并发控制器
     let controller = pool
-        .ensure_controller(req.config.id, req.config.concurrent_limit)
+        .ensure_controller(req.config.id, req.config.concurrent_limit, req.config.rate_limit)
         .await;
 
     // 保存app和event_name的克隆用于后续发送事件
@@ -466,7 +611,8 @@ fn is_retryable_error(error: &str) -> bool {
 
 /// 计算重试延迟（指数退避）
 fn calculate_retry_delay(attempt: u32) -> std::time::Duration {
-    let delay_ms = RETRY_BASE_DELAY_MS * (1 << (attempt - 1));
+    let base_delay = SettingsManager::get_int(keys::AI_RETRY_DELAY_MS, defaults::AI_RETRY_DELAY_MS);
+    let delay_ms = base_delay * (1 << (attempt - 1));
     std::time::Duration::from_millis(delay_ms)
 }
 
@@ -478,8 +624,9 @@ async fn execute_streaming_chat_impl(
     abort_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut last_error = String::new();
+    let max_retries = SettingsManager::get_int(keys::AI_RETRY_MAX_COUNT, defaults::AI_RETRY_MAX_COUNT);
 
-    for attempt in 1..=MAX_RETRY_COUNT {
+    for attempt in 1..=max_retries {
         // 检查中止
         if abort_flag.load(Ordering::Relaxed) {
             return Err("请求已取消".to_string());
@@ -501,12 +648,12 @@ async fn execute_streaming_chat_impl(
                 }
 
                 // 如果还有重试机会，等待后重试
-                if attempt < MAX_RETRY_COUNT {
+                if attempt < max_retries {
                     let delay = calculate_retry_delay(attempt);
-                    eprintln!(
+                    tracing::warn!(
                         "流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
                         attempt,
-                        MAX_RETRY_COUNT,
+                        max_retries,
                         e,
                         delay.as_millis()
                     );
@@ -518,7 +665,7 @@ async fn execute_streaming_chat_impl(
 
     Err(format!(
         "请求失败，已重试 {} 次: {}",
-        MAX_RETRY_COUNT, last_error
+        max_retries, last_error
     ))
 }
 
@@ -740,7 +887,7 @@ pub async fn execute_non_streaming_with_abort(
 
     // 获取并发控制器
     let controller = pool
-        .ensure_controller(req.config.id, req.config.concurrent_limit)
+        .ensure_controller(req.config.id, req.config.concurrent_limit, req.config.rate_limit)
         .await;
 
     // 获取许可
@@ -773,8 +920,9 @@ async fn execute_non_streaming_impl_with_abort(
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<NonStreamingResponse, String> {
     let mut last_error = String::new();
+    let max_retries = SettingsManager::get_int(keys::AI_RETRY_MAX_COUNT, defaults::AI_RETRY_MAX_COUNT);
 
-    for attempt in 1..=MAX_RETRY_COUNT {
+    for attempt in 1..=max_retries {
         // 检查中止
         if abort_flag.load(Ordering::Relaxed) {
             return Err("请求已取消".to_string());
@@ -796,12 +944,12 @@ async fn execute_non_streaming_impl_with_abort(
                 }
 
                 // 如果还有重试机会，等待后重试
-                if attempt < MAX_RETRY_COUNT {
+                if attempt < max_retries {
                     let delay = calculate_retry_delay(attempt);
-                    eprintln!(
+                    tracing::warn!(
                         "非流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
                         attempt,
-                        MAX_RETRY_COUNT,
+                        max_retries,
                         e,
                         delay.as_millis()
                     );
@@ -813,6 +961,176 @@ async fn execute_non_streaming_impl_with_abort(
 
     Err(format!(
         "请求失败，已重试 {} 次: {}",
-        MAX_RETRY_COUNT, last_error
+        max_retries, last_error
     ))
+}
+
+// ============================================================================
+// 单元测试
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_token_bucket_creation() {
+        // 测试正常速率限制
+        let bucket = TokenBucket::new(60);
+        assert_eq!(bucket.capacity, 90.0); // 60 * 1.5 = 90
+        assert_eq!(bucket.refill_rate, 1.0); // 60 / 60 = 1
+
+        // 测试无限制
+        let bucket = TokenBucket::new(0);
+        assert_eq!(bucket.capacity, f64::MAX);
+        assert_eq!(bucket.refill_rate, 0.0);
+
+        // 测试最小值
+        let bucket = TokenBucket::new(-10);
+        assert_eq!(bucket.capacity, f64::MAX);
+        assert_eq!(bucket.refill_rate, 0.0);
+
+        // 测试最大值限制
+        let bucket = TokenBucket::new(2000);
+        assert_eq!(bucket.capacity, 1500.0); // 1000 * 1.5 = 1500 (capped at 1000)
+    }
+
+    #[test]
+    fn test_token_bucket_acquire() {
+        let mut bucket = TokenBucket::new(60);
+
+        // 初始容量是 90 (60 * 1.5)
+        // 初始时应该有令牌
+        assert!(bucket.try_acquire().is_ok());
+
+        // 直接设置 tokens 为 0.5，模拟即使消耗状态，避免依赖循环运行时间
+        // 注意：由于测试模块定义在 ai_pool.rs 内部，可以访问私有字段
+        bucket.tokens = 0.5;
+
+        // 令牌不足 (0.5 < 1.0)，应该返回失败
+        let result = bucket.try_acquire();
+        assert!(result.is_err(), "当 tokens < 1.0 时应该返回 Err");
+
+        // 验证等待时间
+        // 缺 0.5 个令牌，速率 1.0 个/秒，需要 0.5s = 500ms
+        if let Err(wait_ms) = result {
+            // 允许微小误差
+            assert!(wait_ms >= 490 && wait_ms <= 510, "等待时间应约为500ms，实际: {}ms", wait_ms);
+        }
+
+        // 再次设置 tokens > 1
+        bucket.tokens = 1.1;
+        assert!(bucket.try_acquire().is_ok(), "当 tokens >= 1.0 时应该成功");
+
+        // 消耗后剩余 0.1，再次获取应失败
+        assert!(bucket.try_acquire().is_err(), "消耗后令牌不足应该失败");
+    }
+
+    #[test]
+    fn test_token_bucket_no_limit() {
+        let mut bucket = TokenBucket::new(0);
+        
+        // 无限制时，总是成功
+        for _ in 0..1000 {
+            assert!(bucket.try_acquire().is_ok());
+        }
+    }
+
+    #[test]
+    fn test_token_bucket_update_rate_limit() {
+        let mut bucket = TokenBucket::new(60);
+        
+        // 更新速率限制
+        bucket.update_rate_limit(120);
+        assert_eq!(bucket.capacity, 180.0); // 120 * 1.5 = 180
+        assert_eq!(bucket.refill_rate, 2.0); // 120 / 60 = 2
+        
+        // 更新为无限制
+        bucket.update_rate_limit(0);
+        assert_eq!(bucket.capacity, f64::MAX);
+        assert_eq!(bucket.refill_rate, 0.0);
+    }
+
+    #[test]
+    fn test_config_concurrency_controller_creation() {
+        let controller = ConfigConcurrencyController::new(5, 60);
+        assert_eq!(controller.active_count.load(Ordering::Relaxed), 0);
+        assert_eq!(controller.waiting_count.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn test_config_concurrency_controller_limits() {
+        // 测试并发限制边界
+        let _controller_min = ConfigConcurrencyController::new(0, 60);
+        // 0 应该被限制为 1
+
+        let _controller_max = ConfigConcurrencyController::new(100, 60);
+        // 100 应该被限制为 10
+    }
+
+    #[test]
+    fn test_ai_pool_manager_creation() {
+        let _manager = AiPoolManager::new();
+        // 验证管理器创建成功
+        assert!(true);
+    }
+
+    #[tokio::test]
+    async fn test_ensure_controller() {
+        let manager = AiPoolManager::new();
+        
+        // 创建控制器
+        let controller1 = manager.ensure_controller(1, 5, 60).await;
+        
+        // 再次获取同一个控制器
+        let controller2 = manager.ensure_controller(1, 10, 120).await;
+        
+        // 应该是同一个控制器（使用第一次的配置）
+        assert!(Arc::ptr_eq(&controller1, &controller2));
+    }
+
+    #[tokio::test]
+    async fn test_abort_flag_registration() {
+        let manager = AiPoolManager::new();
+        
+        // 注册中止标志
+        let flag1 = manager.register_abort_flag("request-1".to_string()).await;
+        let flag2 = manager.register_abort_flag("request-1".to_string()).await;
+        
+        // 应该是同一个标志
+        assert!(Arc::ptr_eq(&flag1, &flag2));
+        
+        // 初始值应该是 false
+        assert!(!flag1.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn test_abort_request() {
+        let manager = AiPoolManager::new();
+        
+        // 注册中止标志
+        let flag = manager.register_abort_flag("request-2".to_string()).await;
+        assert!(!flag.load(Ordering::Relaxed));
+        
+        // 中止请求（没有句柄会失败，但标志会被设置）
+        let _ = manager.abort_request("request-2").await;
+        
+        // 标志应该被设置为 true
+        assert!(flag.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_abort_flag() {
+        let manager = AiPoolManager::new();
+        
+        // 注册中止标志
+        let _flag = manager.register_abort_flag("request-3".to_string()).await;
+        
+        // 清理
+        manager.cleanup_abort_flag("request-3").await;
+        
+        // 再次注册应该得到新的标志
+        let new_flag = manager.register_abort_flag("request-3".to_string()).await;
+        assert!(!new_flag.load(Ordering::Relaxed));
+    }
 }

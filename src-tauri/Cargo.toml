@@ -35,10 +35,18 @@ base64 = "0.22"
 uuid = { version = "1.0", features = ["v4"] }
 regex = "1.0"
 chrono = "0.4"
+keyring = "2.3"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
 
 # Export functionality
 zip = "0.6"
 urlencoding = "2.0"
+r2d2 = "0.8"
+r2d2_sqlite = "0.24.0"
 
 [dev-dependencies]
 proptest = "1.4"

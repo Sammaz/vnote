@@ -8,6 +8,7 @@
 use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
 use crate::db::{AiConfig, Database};
 use crate::subtitle::parse_subtitle_file;
+use crate::settings::{SettingsManager, keys, defaults};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -237,8 +238,6 @@ impl HighlightPrompts {
 // 语义分段（复用 note_generation.rs 的逻辑）
 // ============================================================================
 
-const SEGMENT_SIZE: usize = 10000;
-
 fn floor_char_boundary(s: &str, index: usize) -> usize {
     if index >= s.len() {
         return s.len();
@@ -287,12 +286,14 @@ fn find_semantic_boundary_near(text: &str, around: usize, max_distance: usize) -
 /// 语义分段（按字幕时间戳和语义边界）
 /// 分段策略：先计算段数 = 字数 / SEGMENT_SIZE + 1，再用字数 / 段数得到每段目标大小
 pub fn split_subtitle_by_semantic(subtitle: &str) -> Vec<String> {
-    if subtitle.len() < SEGMENT_SIZE {
+    let segment_size = SettingsManager::get_int(keys::PROCESS_SEGMENT_SIZE, defaults::PROCESS_SEGMENT_SIZE);
+
+    if subtitle.len() < segment_size {
         return vec![subtitle.to_string()];
     }
 
     // 计算段数：字数 / SEGMENT_SIZE + 1
-    let num_chunks = subtitle.len() / SEGMENT_SIZE + 1;
+    let num_chunks = subtitle.len() / segment_size + 1;
     // 计算每段目标大小：字数 / 段数（确保各段大小均匀）
     let target_chunk_size = subtitle.len() / num_chunks;
 
@@ -454,8 +455,8 @@ pub async fn generate_highlights(
     let chunks = split_subtitle_by_semantic(&subtitle_text);
     let total_segments = chunks.len();
 
-    eprintln!("[高光生成] 开始生成 {:?} 类型高光", request.highlight_type);
-    eprintln!("[高光生成] 字幕总长度: {} 字符，分为 {} 段", subtitle_text.len(), total_segments);
+    tracing::info!("[高光生成] 开始生成 {:?} 类型高光", request.highlight_type);
+    tracing::info!("[高光生成] 字幕总长度: {} 字符，分为 {} 段", subtitle_text.len(), total_segments);
 
     // 发送开始事件
     let _ = app.emit(&event_name, HighlightGenerationEvent::Starting { total_segments });
@@ -499,7 +500,7 @@ pub async fn generate_highlights(
                         all_highlights.extend(highlights);
                     }
                     Err(e) => {
-                        eprintln!("[高光生成] 段 {} 解析失败: {}", i, e);
+                        tracing::error!("[高光生成] 段 {} 解析失败: {}", i, e);
                         let _ = app.emit(&event_name, HighlightGenerationEvent::SegmentFailed {
                             segment_index: i,
                             error: e,
@@ -508,7 +509,7 @@ pub async fn generate_highlights(
                 }
             }
             Err(e) => {
-                eprintln!("[高光生成] 段 {} 生成失败: {}", i, e);
+                tracing::error!("[高光生成] 段 {} 生成失败: {}", i, e);
                 let _ = app.emit(&event_name, HighlightGenerationEvent::SegmentFailed {
                     segment_index: i,
                     error: e.clone(),
@@ -542,7 +543,7 @@ pub async fn generate_highlights(
 
     cleanup_abort_flag(&generation_id).await;
 
-    eprintln!("[高光生成] 完成，共生成 {} 个高光片段", all_highlights.len());
+    tracing::info!("[高光生成] 完成，共生成 {} 个高光片段", all_highlights.len());
 
     Ok(highlight_data)
 }

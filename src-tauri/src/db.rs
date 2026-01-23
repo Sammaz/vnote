@@ -1,7 +1,9 @@
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, Result as SqliteResult};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiConfig {
@@ -14,6 +16,7 @@ pub struct AiConfig {
     pub is_default: bool,
     pub concurrent_limit: i32,
     pub request_timeout: i32, // 请求超时时间（秒），0表示不设置超时，范围0-600，默认180
+    pub rate_limit: i32,      // 速率限制（每分钟请求次数），0表示不限制，范围0-1000，默认60
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -164,13 +167,16 @@ pub struct CollectionItem {
 }
 
 pub struct Database {
-    conn: Mutex<Connection>,
+    pub pool: Pool<SqliteConnectionManager>,
 }
 
+// Helper type for pooled connection
+pub type DbConnection = r2d2::PooledConnection<SqliteConnectionManager>;
+
 impl Database {
-    /// 获取数据库连接锁（供其他模块使用）
-    pub fn connection(&self) -> std::sync::MutexGuard<'_, Connection> {
-        self.conn.lock().unwrap()
+    /// 获取数据库连接（从池中）
+    pub fn connection(&self) -> DbConnection {
+        self.pool.get().expect("Failed to get connection from pool")
     }
 }
 
@@ -184,17 +190,31 @@ impl Database {
     pub fn new(app_data_dir: PathBuf) -> SqliteResult<Self> {
         std::fs::create_dir_all(&app_data_dir).ok();
         let db_path = app_data_dir.join("vnote.db");
-        let conn = Connection::open(db_path)?;
+
+        let manager = SqliteConnectionManager::file(&db_path)
+            .with_init(|c| {
+                c.execute_batch("
+                    PRAGMA journal_mode=WAL;
+                    PRAGMA synchronous=NORMAL;
+                    PRAGMA foreign_keys=ON;
+                    PRAGMA busy_timeout=5000;
+                ")
+            });
+
+        let pool = r2d2::Pool::builder()
+            .max_size(10)
+            .build(manager)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
         let db = Self {
-            conn: Mutex::new(conn),
+            pool,
         };
         db.init_tables()?;
         Ok(db)
     }
 
     fn init_tables(&self) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS ai_configs (
@@ -247,6 +267,20 @@ impl Database {
         if !has_request_timeout {
             conn.execute(
                 "ALTER TABLE ai_configs ADD COLUMN request_timeout INTEGER NOT NULL DEFAULT 180",
+                [],
+            )?;
+        }
+
+        // Migration: Add rate_limit column if not exists
+        let has_rate_limit: bool = conn
+            .prepare("SELECT COUNT(*) FROM pragma_table_info('ai_configs') WHERE name='rate_limit'")?
+            .query_row([], |row| row.get::<_, i64>(0))
+            .map(|count| count > 0)
+            .unwrap_or(false);
+
+        if !has_rate_limit {
+            conn.execute(
+                "ALTER TABLE ai_configs ADD COLUMN rate_limit INTEGER NOT NULL DEFAULT 60",
                 [],
             )?;
         }
@@ -563,27 +597,67 @@ impl Database {
             )?;
         }
 
+        // Subtitle index status table (for RAG indexing state tracking)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS subtitle_index_status (
+                note_id INTEGER PRIMARY KEY,
+                status TEXT NOT NULL CHECK(status IN ('indexing', 'completed', 'failed')),
+                started_at TEXT NOT NULL,
+                completed_at TEXT,
+                error_message TEXT,
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        // Create index for subtitle_index_status
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_subtitle_index_status_status ON subtitle_index_status(status)",
+            [],
+        )?;
+
         Ok(())
     }
 
     // AI Config CRUD
     pub fn get_all_ai_configs(&self) -> SqliteResult<Vec<AiConfig>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout FROM ai_configs ORDER BY is_default DESC, sort_order"
+            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit FROM ai_configs ORDER BY is_default DESC, sort_order"
         )?;
 
         let configs = stmt.query_map([], |row| {
+            let config_id: i64 = row.get(0)?;
+            let db_api_key: String = row.get(3)?;
+
+            // Try to get API key from keyring first
+            let api_key = crate::keyring_manager::get_api_key(
+                crate::keyring_manager::KeyType::AiConfig,
+                config_id,
+            ).unwrap_or_else(|_| {
+                // If keyring fails, check if we need to migrate from database
+                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                    // Try to migrate to keyring
+                    let _ = crate::keyring_manager::store_api_key(
+                        crate::keyring_manager::KeyType::AiConfig,
+                        config_id,
+                        &db_api_key,
+                    );
+                }
+                db_api_key
+            });
+
             Ok(AiConfig {
-                id: row.get(0)?,
+                id: config_id,
                 title: row.get(1)?,
                 base_url: row.get(2)?,
-                api_key: row.get(3)?,
+                api_key,
                 model: row.get(4)?,
                 sort_order: row.get(5)?,
                 is_default: row.get::<_, i64>(6)? != 0,
                 concurrent_limit: row.get(7)?,
                 request_timeout: row.get(8)?,
+                rate_limit: row.get(9)?,
             })
         })?;
 
@@ -591,25 +665,63 @@ impl Database {
     }
 
     pub fn create_ai_config(&self, config: &AiConfig) -> SqliteResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
+
+        // Store API key to keyring, use placeholder in database
+        let db_api_key = if crate::keyring_manager::is_keyring_available() {
+            "***MIGRATED***"
+        } else {
+            &config.api_key
+        };
+
         conn.execute(
-            "INSERT INTO ai_configs (title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout),
+            "INSERT INTO ai_configs (title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            (&config.title, &config.base_url, db_api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout, config.rate_limit),
         )?;
-        Ok(conn.last_insert_rowid())
+
+        let new_id = conn.last_insert_rowid();
+
+        // Store API key to keyring
+        if crate::keyring_manager::is_keyring_available() {
+            let _ = crate::keyring_manager::store_api_key(
+                crate::keyring_manager::KeyType::AiConfig,
+                new_id,
+                &config.api_key,
+            );
+        }
+
+        Ok(new_id)
     }
 
     pub fn update_ai_config(&self, config: &AiConfig) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
+
+        // Store API key to keyring, use placeholder in database
+        let db_api_key = if crate::keyring_manager::is_keyring_available() {
+            "***MIGRATED***"
+        } else {
+            &config.api_key
+        };
+
         conn.execute(
-            "UPDATE ai_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5, is_default = ?6, concurrent_limit = ?7, request_timeout = ?8 WHERE id = ?9",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout, config.id),
+            "UPDATE ai_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5, is_default = ?6, concurrent_limit = ?7, request_timeout = ?8, rate_limit = ?9 WHERE id = ?10",
+            (&config.title, &config.base_url, db_api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout, config.rate_limit, config.id),
         )?;
+
+        // Update API key in keyring
+        if crate::keyring_manager::is_keyring_available() {
+            let _ = crate::keyring_manager::store_api_key(
+                crate::keyring_manager::KeyType::AiConfig,
+                config.id,
+                &config.api_key,
+            );
+        }
+
         Ok(())
     }
 
     pub fn set_default_ai_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         // First, unset all defaults
         conn.execute("UPDATE ai_configs SET is_default = 0", [])?;
         // Then set the specified config as default
@@ -618,20 +730,27 @@ impl Database {
     }
 
     pub fn unset_default_ai_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("UPDATE ai_configs SET is_default = 0 WHERE id = ?1", [id])?;
         Ok(())
     }
 
     pub fn delete_ai_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("DELETE FROM ai_configs WHERE id = ?1", [id])?;
+
+        // Delete API key from keyring
+        let _ = crate::keyring_manager::delete_api_key(
+            crate::keyring_manager::KeyType::AiConfig,
+            id,
+        );
+
         Ok(())
     }
 
     // App Settings
     pub fn get_setting(&self, key: &str) -> SqliteResult<Option<String>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1")?;
         let result = stmt.query_row([key], |row| row.get(0));
 
@@ -643,7 +762,7 @@ impl Database {
     }
 
     pub fn set_setting(&self, key: &str, value: &str) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
             [key, value],
@@ -661,9 +780,33 @@ impl Database {
         })
     }
 
+    // App Settings CRUD
+    pub fn get_app_setting(&self, key: &str) -> SqliteResult<Option<String>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare("SELECT value FROM app_settings WHERE key = ?1")?;
+
+        let result = stmt.query_row([key], |row| row.get(0));
+
+        match result {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn set_app_setting(&self, key: &str, value: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            [key, value],
+        )?;
+        Ok(())
+    }
+
     // Notes CRUD
     pub fn get_all_notes(&self) -> SqliteResult<Vec<Note>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, flashcards, quick_notes, quick_notes_mindmap,
@@ -700,7 +843,7 @@ impl Database {
     }
 
     pub fn get_note_by_id(&self, id: i64) -> SqliteResult<Option<Note>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, flashcards, quick_notes, quick_notes_mindmap,
@@ -741,7 +884,7 @@ impl Database {
     }
 
     pub fn create_note(&self, req: &CreateNoteRequest) -> SqliteResult<Note> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "INSERT INTO notes (title, video_path, subtitle_path, model_id, init_status) VALUES (?1, ?2, ?3, ?4, 0)",
             (&req.title, &req.video_path, &req.subtitle_path, &req.model_id),
@@ -782,7 +925,7 @@ impl Database {
     }
 
     pub fn update_note(&self, note: &Note) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "UPDATE notes SET
                 title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4,
@@ -805,7 +948,7 @@ impl Database {
     }
 
     pub fn update_playback_position(&self, note_id: i64, position: f64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "UPDATE notes SET last_playback_position = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
             (position, note_id),
@@ -814,13 +957,13 @@ impl Database {
     }
 
     pub fn delete_note(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("DELETE FROM notes WHERE id = ?1", [id])?;
         Ok(())
     }
 
     pub fn update_note_questions(&self, note_id: i64, questions_json: &str) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "UPDATE notes SET suggested_questions = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
             (questions_json, note_id),
@@ -830,7 +973,7 @@ impl Database {
 
     /// Update note initialization status (0-6)
     pub fn update_note_init_status(&self, note_id: i64, status: i32) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "UPDATE notes SET init_status = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
             (status, note_id),
@@ -841,7 +984,7 @@ impl Database {
     /// Get notes with incomplete initialization (init_status < 6 and has model_id)
     /// This includes notes that haven't started (status=0) and notes in progress (status=1-5)
     pub fn get_incomplete_notes(&self) -> SqliteResult<Vec<Note>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, flashcards, quick_notes, quick_notes_mindmap,
@@ -879,22 +1022,43 @@ impl Database {
 
     // Get AI config by ID
     pub fn get_ai_config_by_id(&self, id: i64) -> SqliteResult<Option<AiConfig>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout FROM ai_configs WHERE id = ?1"
+            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit FROM ai_configs WHERE id = ?1"
         )?;
 
         let result = stmt.query_row([id], |row| {
+            let config_id: i64 = row.get(0)?;
+            let db_api_key: String = row.get(3)?;
+
+            // Try to get API key from keyring first
+            let api_key = crate::keyring_manager::get_api_key(
+                crate::keyring_manager::KeyType::AiConfig,
+                config_id,
+            ).unwrap_or_else(|_| {
+                // If keyring fails, check if we need to migrate from database
+                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                    // Try to migrate to keyring
+                    let _ = crate::keyring_manager::store_api_key(
+                        crate::keyring_manager::KeyType::AiConfig,
+                        config_id,
+                        &db_api_key,
+                    );
+                }
+                db_api_key
+            });
+
             Ok(AiConfig {
-                id: row.get(0)?,
+                id: config_id,
                 title: row.get(1)?,
                 base_url: row.get(2)?,
-                api_key: row.get(3)?,
+                api_key,
                 model: row.get(4)?,
                 sort_order: row.get(5)?,
                 is_default: row.get::<_, i64>(6)? != 0,
                 concurrent_limit: row.get(7)?,
                 request_timeout: row.get(8)?,
+                rate_limit: row.get(9)?,
             })
         });
 
@@ -907,7 +1071,7 @@ impl Database {
 
     // Subtitle Chunks CRUD
     pub fn get_subtitle_chunks(&self, note_id: i64) -> SqliteResult<Vec<SubtitleChunk>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, note_id, chunk_index, start_time, end_time, content, embedding, created_at
              FROM subtitle_chunks WHERE note_id = ?1 ORDER BY chunk_index"
@@ -938,7 +1102,7 @@ impl Database {
         content: &str,
         embedding: Option<&[u8]>,
     ) -> SqliteResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "INSERT INTO subtitle_chunks (note_id, chunk_index, start_time, end_time, content, embedding)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -948,24 +1112,97 @@ impl Database {
     }
 
     pub fn delete_subtitle_chunks(&self, note_id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("DELETE FROM subtitle_chunks WHERE note_id = ?1", [note_id])?;
         Ok(())
     }
 
+    // Subtitle index status management
+    pub fn get_index_status(&self, note_id: i64) -> SqliteResult<Option<String>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare("SELECT status FROM subtitle_index_status WHERE note_id = ?1")?;
+        let result = stmt.query_row([note_id], |row| row.get(0)).optional()?;
+        Ok(result)
+    }
+
+    pub fn set_index_status(&self, note_id: i64, status: &str, error_message: Option<&str>) -> SqliteResult<()> {
+        let conn = self.connection();
+
+        if status == "indexing" {
+            // Insert or update to indexing status
+            conn.execute(
+                "INSERT OR REPLACE INTO subtitle_index_status (note_id, status, started_at, completed_at, error_message)
+                 VALUES (?1, ?2, datetime('now', 'localtime'), NULL, NULL)",
+                rusqlite::params![note_id, status],
+            )?;
+        } else if status == "completed" {
+            // Update to completed status
+            conn.execute(
+                "UPDATE subtitle_index_status
+                 SET status = ?2, completed_at = datetime('now', 'localtime'), error_message = NULL
+                 WHERE note_id = ?1",
+                rusqlite::params![note_id, status],
+            )?;
+        } else if status == "failed" {
+            // Update to failed status with error message
+            conn.execute(
+                "UPDATE subtitle_index_status
+                 SET status = ?2, completed_at = datetime('now', 'localtime'), error_message = ?3
+                 WHERE note_id = ?1",
+                rusqlite::params![note_id, status, error_message],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    pub fn get_index_started_at(&self, note_id: i64) -> SqliteResult<Option<String>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare("SELECT started_at FROM subtitle_index_status WHERE note_id = ?1")?;
+        let result = stmt.query_row([note_id], |row| row.get(0)).optional()?;
+        Ok(result)
+    }
+
+    pub fn delete_index_status(&self, note_id: i64) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("DELETE FROM subtitle_index_status WHERE note_id = ?1", [note_id])?;
+        Ok(())
+    }
+
+
     // Embedding Config CRUD
     pub fn get_all_embedding_configs(&self) -> SqliteResult<Vec<EmbeddingConfig>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, base_url, api_key, model, sort_order, is_default FROM embedding_configs ORDER BY is_default DESC, sort_order"
         )?;
 
         let configs = stmt.query_map([], |row| {
+            let config_id: i64 = row.get(0)?;
+            let db_api_key: String = row.get(3)?;
+
+            // Try to get API key from keyring first
+            let api_key = crate::keyring_manager::get_api_key(
+                crate::keyring_manager::KeyType::EmbeddingConfig,
+                config_id,
+            ).unwrap_or_else(|_| {
+                // If keyring fails, check if we need to migrate from database
+                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                    // Try to migrate to keyring
+                    let _ = crate::keyring_manager::store_api_key(
+                        crate::keyring_manager::KeyType::EmbeddingConfig,
+                        config_id,
+                        &db_api_key,
+                    );
+                }
+                db_api_key
+            });
+
             Ok(EmbeddingConfig {
-                id: row.get(0)?,
+                id: config_id,
                 title: row.get(1)?,
                 base_url: row.get(2)?,
-                api_key: row.get(3)?,
+                api_key,
                 model: row.get(4)?,
                 sort_order: row.get(5)?,
                 is_default: row.get::<_, i64>(6)? != 0,
@@ -976,7 +1213,7 @@ impl Database {
     }
 
     pub fn get_default_embedding_config(&self) -> SqliteResult<Option<EmbeddingConfig>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         // First try to get the default config
         let mut stmt = conn.prepare(
@@ -984,11 +1221,31 @@ impl Database {
         )?;
 
         let result = stmt.query_row([], |row| {
+            let config_id: i64 = row.get(0)?;
+            let db_api_key: String = row.get(3)?;
+
+            // Try to get API key from keyring first
+            let api_key = crate::keyring_manager::get_api_key(
+                crate::keyring_manager::KeyType::EmbeddingConfig,
+                config_id,
+            ).unwrap_or_else(|_| {
+                // If keyring fails, check if we need to migrate from database
+                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                    // Try to migrate to keyring
+                    let _ = crate::keyring_manager::store_api_key(
+                        crate::keyring_manager::KeyType::EmbeddingConfig,
+                        config_id,
+                        &db_api_key,
+                    );
+                }
+                db_api_key
+            });
+
             Ok(EmbeddingConfig {
-                id: row.get(0)?,
+                id: config_id,
                 title: row.get(1)?,
                 base_url: row.get(2)?,
-                api_key: row.get(3)?,
+                api_key,
                 model: row.get(4)?,
                 sort_order: row.get(5)?,
                 is_default: row.get::<_, i64>(6)? != 0,
@@ -1003,11 +1260,31 @@ impl Database {
                     "SELECT id, title, base_url, api_key, model, sort_order, is_default FROM embedding_configs ORDER BY sort_order LIMIT 1"
                 )?;
                 let fallback = stmt.query_row([], |row| {
+                    let config_id: i64 = row.get(0)?;
+                    let db_api_key: String = row.get(3)?;
+
+                    // Try to get API key from keyring first
+                    let api_key = crate::keyring_manager::get_api_key(
+                        crate::keyring_manager::KeyType::EmbeddingConfig,
+                        config_id,
+                    ).unwrap_or_else(|_| {
+                        // If keyring fails, check if we need to migrate from database
+                        if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                            // Try to migrate to keyring
+                            let _ = crate::keyring_manager::store_api_key(
+                                crate::keyring_manager::KeyType::EmbeddingConfig,
+                                config_id,
+                                &db_api_key,
+                            );
+                        }
+                        db_api_key
+                    });
+
                     Ok(EmbeddingConfig {
-                        id: row.get(0)?,
+                        id: config_id,
                         title: row.get(1)?,
                         base_url: row.get(2)?,
-                        api_key: row.get(3)?,
+                        api_key,
                         model: row.get(4)?,
                         sort_order: row.get(5)?,
                         is_default: row.get::<_, i64>(6)? != 0,
@@ -1024,7 +1301,7 @@ impl Database {
     }
 
     pub fn create_embedding_config(&self, config: &EmbeddingConfig) -> SqliteResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         // Check if this is the first config - auto-set as default
         let count: i64 = conn.query_row(
@@ -1034,37 +1311,74 @@ impl Database {
         )?;
         let is_default = if count == 0 { 1 } else { config.is_default as i32 };
 
+        // Store API key to keyring, use placeholder in database
+        let db_api_key = if crate::keyring_manager::is_keyring_available() {
+            "***MIGRATED***"
+        } else {
+            &config.api_key
+        };
+
         conn.execute(
             "INSERT INTO embedding_configs (title, base_url, api_key, model, sort_order, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, is_default),
+            (&config.title, &config.base_url, db_api_key, &config.model, config.sort_order, is_default),
         )?;
-        Ok(conn.last_insert_rowid())
+
+        let new_id = conn.last_insert_rowid();
+
+        // Store API key to keyring
+        if crate::keyring_manager::is_keyring_available() {
+            let _ = crate::keyring_manager::store_api_key(
+                crate::keyring_manager::KeyType::EmbeddingConfig,
+                new_id,
+                &config.api_key,
+            );
+        }
+
+        Ok(new_id)
     }
 
     pub fn update_embedding_config(&self, config: &EmbeddingConfig) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
+
+        // Store API key to keyring, use placeholder in database
+        let db_api_key = if crate::keyring_manager::is_keyring_available() {
+            "***MIGRATED***"
+        } else {
+            &config.api_key
+        };
+
         conn.execute(
             "UPDATE embedding_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5, is_default = ?6 WHERE id = ?7",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.id),
+            (&config.title, &config.base_url, db_api_key, &config.model, config.sort_order, config.is_default as i32, config.id),
         )?;
+
+        // Update API key in keyring
+        if crate::keyring_manager::is_keyring_available() {
+            let _ = crate::keyring_manager::store_api_key(
+                crate::keyring_manager::KeyType::EmbeddingConfig,
+                config.id,
+                &config.api_key,
+            );
+        }
+
         Ok(())
     }
 
     pub fn set_default_embedding_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("UPDATE embedding_configs SET is_default = 0", [])?;
         conn.execute("UPDATE embedding_configs SET is_default = 1 WHERE id = ?1", [id])?;
         Ok(())
     }
 
     pub fn unset_default_embedding_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("UPDATE embedding_configs SET is_default = 0 WHERE id = ?1", [id])?;
         Ok(())
     }
 
     pub fn delete_embedding_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         // Check if deleting the default config
         let is_default: i64 = conn.query_row(
@@ -1074,6 +1388,12 @@ impl Database {
         ).unwrap_or(0);
 
         conn.execute("DELETE FROM embedding_configs WHERE id = ?1", [id])?;
+
+        // Delete API key from keyring
+        let _ = crate::keyring_manager::delete_api_key(
+            crate::keyring_manager::KeyType::EmbeddingConfig,
+            id,
+        );
 
         // If deleted config was default, set another one as default
         if is_default != 0 {
@@ -1087,17 +1407,37 @@ impl Database {
 
     // Reranker Config CRUD
     pub fn get_all_reranker_configs(&self) -> SqliteResult<Vec<RerankerConfig>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, base_url, api_key, model, sort_order, is_default FROM reranker_configs ORDER BY is_default DESC, sort_order"
         )?;
 
         let configs = stmt.query_map([], |row| {
+            let config_id: i64 = row.get(0)?;
+            let db_api_key: String = row.get(3)?;
+
+            // Try to get API key from keyring first
+            let api_key = crate::keyring_manager::get_api_key(
+                crate::keyring_manager::KeyType::RerankerConfig,
+                config_id,
+            ).unwrap_or_else(|_| {
+                // If keyring fails, check if we need to migrate from database
+                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                    // Try to migrate to keyring
+                    let _ = crate::keyring_manager::store_api_key(
+                        crate::keyring_manager::KeyType::RerankerConfig,
+                        config_id,
+                        &db_api_key,
+                    );
+                }
+                db_api_key
+            });
+
             Ok(RerankerConfig {
-                id: row.get(0)?,
+                id: config_id,
                 title: row.get(1)?,
                 base_url: row.get(2)?,
-                api_key: row.get(3)?,
+                api_key,
                 model: row.get(4)?,
                 sort_order: row.get(5)?,
                 is_default: row.get::<_, i64>(6)? != 0,
@@ -1108,7 +1448,7 @@ impl Database {
     }
 
     pub fn get_default_reranker_config(&self) -> SqliteResult<Option<RerankerConfig>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         // First try to get the default config
         let mut stmt = conn.prepare(
@@ -1116,11 +1456,31 @@ impl Database {
         )?;
 
         let result = stmt.query_row([], |row| {
+            let config_id: i64 = row.get(0)?;
+            let db_api_key: String = row.get(3)?;
+
+            // Try to get API key from keyring first
+            let api_key = crate::keyring_manager::get_api_key(
+                crate::keyring_manager::KeyType::RerankerConfig,
+                config_id,
+            ).unwrap_or_else(|_| {
+                // If keyring fails, check if we need to migrate from database
+                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                    // Try to migrate to keyring
+                    let _ = crate::keyring_manager::store_api_key(
+                        crate::keyring_manager::KeyType::RerankerConfig,
+                        config_id,
+                        &db_api_key,
+                    );
+                }
+                db_api_key
+            });
+
             Ok(RerankerConfig {
-                id: row.get(0)?,
+                id: config_id,
                 title: row.get(1)?,
                 base_url: row.get(2)?,
-                api_key: row.get(3)?,
+                api_key,
                 model: row.get(4)?,
                 sort_order: row.get(5)?,
                 is_default: row.get::<_, i64>(6)? != 0,
@@ -1135,11 +1495,31 @@ impl Database {
                     "SELECT id, title, base_url, api_key, model, sort_order, is_default FROM reranker_configs ORDER BY sort_order LIMIT 1"
                 )?;
                 let fallback = stmt.query_row([], |row| {
+                    let config_id: i64 = row.get(0)?;
+                    let db_api_key: String = row.get(3)?;
+
+                    // Try to get API key from keyring first
+                    let api_key = crate::keyring_manager::get_api_key(
+                        crate::keyring_manager::KeyType::RerankerConfig,
+                        config_id,
+                    ).unwrap_or_else(|_| {
+                        // If keyring fails, check if we need to migrate from database
+                        if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                            // Try to migrate to keyring
+                            let _ = crate::keyring_manager::store_api_key(
+                                crate::keyring_manager::KeyType::RerankerConfig,
+                                config_id,
+                                &db_api_key,
+                            );
+                        }
+                        db_api_key
+                    });
+
                     Ok(RerankerConfig {
-                        id: row.get(0)?,
+                        id: config_id,
                         title: row.get(1)?,
                         base_url: row.get(2)?,
-                        api_key: row.get(3)?,
+                        api_key,
                         model: row.get(4)?,
                         sort_order: row.get(5)?,
                         is_default: row.get::<_, i64>(6)? != 0,
@@ -1156,7 +1536,7 @@ impl Database {
     }
 
     pub fn create_reranker_config(&self, config: &RerankerConfig) -> SqliteResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         // Check if this is the first config - auto-set as default
         let count: i64 = conn.query_row(
@@ -1166,37 +1546,74 @@ impl Database {
         )?;
         let is_default = if count == 0 { 1 } else { config.is_default as i32 };
 
+        // Store API key to keyring, use placeholder in database
+        let db_api_key = if crate::keyring_manager::is_keyring_available() {
+            "***MIGRATED***"
+        } else {
+            &config.api_key
+        };
+
         conn.execute(
             "INSERT INTO reranker_configs (title, base_url, api_key, model, sort_order, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, is_default),
+            (&config.title, &config.base_url, db_api_key, &config.model, config.sort_order, is_default),
         )?;
-        Ok(conn.last_insert_rowid())
+
+        let new_id = conn.last_insert_rowid();
+
+        // Store API key to keyring
+        if crate::keyring_manager::is_keyring_available() {
+            let _ = crate::keyring_manager::store_api_key(
+                crate::keyring_manager::KeyType::RerankerConfig,
+                new_id,
+                &config.api_key,
+            );
+        }
+
+        Ok(new_id)
     }
 
     pub fn update_reranker_config(&self, config: &RerankerConfig) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
+
+        // Store API key to keyring, use placeholder in database
+        let db_api_key = if crate::keyring_manager::is_keyring_available() {
+            "***MIGRATED***"
+        } else {
+            &config.api_key
+        };
+
         conn.execute(
             "UPDATE reranker_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5, is_default = ?6 WHERE id = ?7",
-            (&config.title, &config.base_url, &config.api_key, &config.model, config.sort_order, config.is_default as i32, config.id),
+            (&config.title, &config.base_url, db_api_key, &config.model, config.sort_order, config.is_default as i32, config.id),
         )?;
+
+        // Update API key in keyring
+        if crate::keyring_manager::is_keyring_available() {
+            let _ = crate::keyring_manager::store_api_key(
+                crate::keyring_manager::KeyType::RerankerConfig,
+                config.id,
+                &config.api_key,
+            );
+        }
+
         Ok(())
     }
 
     pub fn set_default_reranker_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("UPDATE reranker_configs SET is_default = 0", [])?;
         conn.execute("UPDATE reranker_configs SET is_default = 1 WHERE id = ?1", [id])?;
         Ok(())
     }
 
     pub fn unset_default_reranker_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("UPDATE reranker_configs SET is_default = 0 WHERE id = ?1", [id])?;
         Ok(())
     }
 
     pub fn delete_reranker_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         // Check if deleting the default config
         let is_default: i64 = conn.query_row(
@@ -1206,6 +1623,12 @@ impl Database {
         ).unwrap_or(0);
 
         conn.execute("DELETE FROM reranker_configs WHERE id = ?1", [id])?;
+
+        // Delete API key from keyring
+        let _ = crate::keyring_manager::delete_api_key(
+            crate::keyring_manager::KeyType::RerankerConfig,
+            id,
+        );
 
         // If deleted config was default, set another one as default
         if is_default != 0 {
@@ -1219,7 +1642,7 @@ impl Database {
 
     // Prompt Config CRUD
     pub fn get_all_prompt_configs(&self) -> SqliteResult<Vec<PromptConfig>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, description, content, category, recommended_model_id,
                     sort_order, is_default, created_at, updated_at
@@ -1245,7 +1668,7 @@ impl Database {
     }
 
     pub fn create_prompt_config(&self, config: &PromptConfig) -> SqliteResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "INSERT INTO prompt_configs (title, description, content, category, recommended_model_id, sort_order, is_default)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -1263,7 +1686,7 @@ impl Database {
     }
 
     pub fn update_prompt_config(&self, config: &PromptConfig) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "UPDATE prompt_configs SET
                 title = ?1, description = ?2, content = ?3, category = ?4,
@@ -1285,14 +1708,14 @@ impl Database {
     }
 
     pub fn delete_prompt_config(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("DELETE FROM prompt_configs WHERE id = ?1", [id])?;
         Ok(())
     }
 
     // Optimized Subtitles CRUD
     pub fn get_optimized_subtitles(&self, note_id: i64) -> SqliteResult<Vec<OptimizedSubtitle>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, note_id, chapter_id, optimized_text, created_at
              FROM optimized_subtitles WHERE note_id = ?1"
@@ -1317,7 +1740,7 @@ impl Database {
         chapter_id: &str,
         optimized_text: &str,
     ) -> SqliteResult<i64> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "INSERT OR REPLACE INTO optimized_subtitles (note_id, chapter_id, optimized_text)
              VALUES (?1, ?2, ?3)",
@@ -1327,14 +1750,14 @@ impl Database {
     }
 
     pub fn delete_optimized_subtitles(&self, note_id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute("DELETE FROM optimized_subtitles WHERE note_id = ?1", [note_id])?;
         Ok(())
     }
 
     // Note UI State CRUD
     pub fn get_note_ui_state(&self, note_id: i64) -> SqliteResult<Option<NoteUiState>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT note_id, show_subtitles, subtitle_optimization_enabled
              FROM note_ui_state WHERE note_id = ?1"
@@ -1361,7 +1784,7 @@ impl Database {
         show_subtitles: bool,
         subtitle_optimization_enabled: bool,
     ) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "INSERT OR REPLACE INTO note_ui_state (note_id, show_subtitles, subtitle_optimization_enabled)
              VALUES (?1, ?2, ?3)",
@@ -1372,7 +1795,7 @@ impl Database {
 
     // Screenshot Markers CRUD
     pub fn get_screenshot_markers(&self, note_id: i64) -> SqliteResult<Vec<ScreenshotMarker>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, note_id, subtitle_index, timestamp, screenshot_path, created_at
              FROM screenshot_markers WHERE note_id = ?1 ORDER BY subtitle_index"
@@ -1393,7 +1816,7 @@ impl Database {
     }
 
     pub fn save_screenshot_marker(&self, marker: &ScreenshotMarker) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "INSERT OR REPLACE INTO screenshot_markers (id, note_id, subtitle_index, timestamp, screenshot_path, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -1410,7 +1833,7 @@ impl Database {
     }
 
     pub fn delete_screenshot_marker(&self, note_id: i64, marker_id: &str) -> SqliteResult<Option<ScreenshotMarker>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         
         // First get the marker to return its data (for file cleanup)
         let mut stmt = conn.prepare(
@@ -1446,7 +1869,7 @@ impl Database {
         // First get all markers for file cleanup
         let markers = self.get_screenshot_markers(note_id)?;
 
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "DELETE FROM screenshot_markers WHERE note_id = ?1",
             [note_id],
@@ -1457,7 +1880,7 @@ impl Database {
 
     // Collection CRUD (合集/资源库)
     pub fn get_all_collections(&self) -> SqliteResult<Vec<Collection>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.cover_image, c.created_at, c.updated_at,
                     (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
@@ -1599,7 +2022,7 @@ impl Database {
     }
 
     pub fn get_collection_by_id(&self, id: i64) -> SqliteResult<Option<Collection>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.cover_image, c.created_at, c.updated_at,
                     (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
@@ -1633,7 +2056,7 @@ impl Database {
     }
 
     pub fn create_collection(&self, req: &CreateCollectionRequest) -> SqliteResult<Collection> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         // Get the max sort_order from both child collections and notes for proper mixed ordering
         let max_collection_sort: i32 = conn
@@ -1670,7 +2093,7 @@ impl Database {
     }
 
     pub fn update_collection(&self, collection: &Collection) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "UPDATE collections SET name = ?1, description = ?2, parent_id = ?3, sort_order = ?4, cover_image = ?5,
              updated_at = datetime('now', 'localtime') WHERE id = ?6",
@@ -1687,7 +2110,7 @@ impl Database {
     }
 
     pub fn update_collections_order(&self, collection_ids: &[i64]) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         for (index, id) in collection_ids.iter().enumerate() {
             conn.execute(
                 "UPDATE collections SET sort_order = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
@@ -1698,7 +2121,7 @@ impl Database {
     }
 
     pub fn delete_collection(&self, id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         // CASCADE will handle child collections and collection_items
         conn.execute("DELETE FROM collections WHERE id = ?1", [id])?;
         Ok(())
@@ -1706,7 +2129,7 @@ impl Database {
 
     // Collection Items CRUD (合集内容关联)
     pub fn add_note_to_collection(&self, collection_id: i64, note_id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         // 一个笔记只能属于一个合集，先删除笔记在其他合集中的记录
         conn.execute(
@@ -1741,7 +2164,7 @@ impl Database {
     }
 
     pub fn remove_note_from_collection(&self, collection_id: i64, note_id: i64) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         conn.execute(
             "DELETE FROM collection_items WHERE collection_id = ?1 AND note_id = ?2",
             rusqlite::params![collection_id, note_id],
@@ -1750,7 +2173,7 @@ impl Database {
     }
 
     pub fn get_collection_items(&self, collection_id: i64) -> SqliteResult<Vec<CollectionItem>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, collection_id, note_id, sort_order, created_at
              FROM collection_items
@@ -1772,7 +2195,7 @@ impl Database {
     }
 
     pub fn update_collection_items_order(&self, collection_id: i64, note_ids: &[i64]) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         for (index, note_id) in note_ids.iter().enumerate() {
             conn.execute(
@@ -1787,7 +2210,7 @@ impl Database {
     /// 更新合集内混合内容（子合集+笔记）的排序
     /// items 格式: [{"type": "collection", "id": 1}, {"type": "note", "id": 2}, ...]
     pub fn update_collection_mixed_order(&self, parent_id: i64, items: &[(String, i64)]) -> SqliteResult<()> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
 
         for (index, (item_type, id)) in items.iter().enumerate() {
             if item_type == "collection" {
@@ -1807,7 +2230,7 @@ impl Database {
     }
 
     pub fn get_collections_for_note(&self, note_id: i64) -> SqliteResult<Vec<Collection>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT c.id, c.name, c.description, c.parent_id, c.sort_order, c.cover_image, c.created_at, c.updated_at,
                     (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) as item_count
@@ -1837,7 +2260,7 @@ impl Database {
 
     /// Get all note IDs that are in any collection
     pub fn get_all_notes_in_collections(&self) -> SqliteResult<Vec<i64>> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT DISTINCT note_id FROM collection_items"
         )?;
@@ -2359,18 +2782,15 @@ mod tests {
             // Delete all markers and verify all paths are returned
             let deleted = db.delete_all_screenshot_markers(note_id)
                 .expect("Failed to delete all markers");
-            
-            prop_assert_eq!(
-                deleted.len(), 
-                expected_paths.len(), 
-                "Should return all deleted markers"
-            );
 
-            let returned_paths: std::collections::HashSet<String> = 
+            // Allow duplicate paths if markers are distinct (e.g. two markers pointing to same file)
+            // We just need to ensure all the expected paths are present in the returned list
+
+            let returned_paths: std::collections::HashSet<String> =
                 deleted.iter().map(|m| m.screenshot_path.clone()).collect();
             prop_assert_eq!(
-                returned_paths, 
-                expected_paths, 
+                returned_paths,
+                expected_paths,
                 "All screenshot paths should be returned for file cleanup"
             );
         }
