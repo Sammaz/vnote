@@ -1131,6 +1131,13 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         console.error("[generateChaptersWithMarkers] 清除数据库字幕缓存失败:", err);
       }
 
+      // 清除之前生成的截图
+      try {
+        await invoke("clear_chapter_screenshots", { noteId: note.id });
+      } catch (err) {
+        console.error("[generateChaptersWithMarkers] 清除截图缓存失败:", err);
+      }
+
       // 调用后端生成章节（使用截图标记）
       await invoke("generate_chapters_with_markers", {
         generationId,
