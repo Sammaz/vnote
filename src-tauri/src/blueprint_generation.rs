@@ -7,7 +7,7 @@
 
 use crate::ai_pool::{execute_non_streaming_with_abort, NonStreamingRequest};
 use crate::db::AiConfig;
-use crate::subtitle::parse_subtitle_file;
+use crate::subtitle::{parse_subtitle_file, format_timestamp};
 use crate::DATABASE;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -83,35 +83,44 @@ async fn remove_abort_flag(generation_id: &str) {
 /// 阶段1: 生成目录大纲的prompt
 fn build_outline_prompt(subtitle_content: &str, video_title: &str) -> String {
     format!(
-        r#"你是一个知识重构专家。基于以下视频字幕,生成一份"全景深度重构蓝图"的目录大纲。
+        r##"YOU ARE THE "OMNISCIENT KNOWLEDGE RECONSTRUCTION ENGINE" (OKRE).
+你的核心使命是对抗信息熵，通过高强度的逻辑重构，将碎片化信息转化为反脆弱的永久知识资产。
+
+=== 🛑 绝对铁律 (THE IRON LAWS) ===
+1. 反摘要法 (Anti-Summarization): 严禁缩减信息量，必须进行扩容 (Expansion) 和深度挖掘。
+2. 逻辑高于时序 (Logic-Over-Chronology): 严禁按时间线复述。必须打碎原文，提取 MECE 逻辑树结构。
+3. 深度优先 (Depth-First): 遇到抽象概念必须下钻三层 (What -> Why -> How)。
+
+=== 任务 ===
+基于以下视频内容，设计一份"全景深度重构蓝图"的 JSON 大纲。
 
 视频标题: {video_title}
-
-视频字幕内容:
+内容素材:
 {subtitle_content}
 
+=== 输出规范 ===
 请严格按照以下JSON格式输出(不要包含markdown代码块标记):
 
 {{
   "video_title": "视频标题",
-  "core_fields": ["领域标签1", "领域标签2"],
-  "knowledge_density": "低/中/高/极高",
+  "core_fields": ["#领域/子领域", "#核心概念"],
+  "knowledge_density": "极高",
   "estimated_words": "8000+",
   "chapters": [
     {{
       "index": 1,
-      "title": "章节标题",
-      "objective": "模块目标描述",
-      "key_points": ["关键子题1", "关键子题2"]
+      "title": "章节标题(不含序号)",
+      "objective": "本章核心解决的问题与认知目标",
+      "key_points": ["关键子题1", "关键子题2", "关键子题3"]
     }}
   ]
 }}
 
-要求:
-1. 将视频内容重组为3-6个逻辑清晰的章节
-2. 每个章节要有明确的模块目标
-3. 提炼2-4个关键子题
-4. 章节标题要体现核心概念,不超过15个字"#,
+=== 架构要求 ===
+1. 结构重构: 将内容重组为 4-7 个逻辑严密的深度章节 (Chapters)。
+2. 标题策略: 标题必须体现核心洞察，拒绝平庸的描述（如"什么是X" -> "X的熵减本质与运行机制"）。
+3. 颗粒度: 每个章节必须承载 1500 字以上的深度内容。
+"##,
         video_title = video_title,
         subtitle_content = subtitle_content
     )
@@ -124,57 +133,69 @@ fn build_chapter_prompt(
     total_chapters: usize,
 ) -> String {
     format!(
-        r#"你是一个知识重构专家。基于以下信息,为第 {index}/{total} 章生成深度内容。
+        r##"YOU ARE THE "OMNISCIENT KNOWLEDGE RECONSTRUCTION ENGINE" (OKRE).
+当前状态: [GENERATOR]
+任务目标: 为第 {index}/{total} 章生成深度内容。
 
 章节标题: {title}
-模块目标: {objective}
+本章目标: {objective}
 关键子题: {key_points}
 
-视频字幕参考:
+内容素材:
 {subtitle_content}
 
-请生成包含以下5个标准模块块的完整章节内容:
+=== 🏗️ 模块化积木架构 (MODULAR CONTENT BLOCK ARCHITECTURE) ===
+你生成的本章内容必须严格包含以下 5 个标准积木。严禁省略任何一个。
 
-## {index}. {title}
-
+### Block 0: The Meta-Anchor (章节元数据)
+必须位于章节标题 (H2) 下方。
+格式:
 > [!info] ⏱️ 章节坐标
+> * **⏱️ 时间戳**: [HH:MM:SS - HH:MM:SS] (根据内容素材估算并填写)
 > * **🔑 核心概念**: #概念A #概念B (必须使用纯中文标签)
 > * **🎯 本章目标**: {objective}
 
-### {index}.1 深度理论层
-(建立认知地基,给出教科书级定义,构建逻辑链条)
+### Block A: The Theoretical Core (深度理论层)
+**Header**: ### {index}.1 [核心理论名称]
+**要求**:
+1. **定义重构**: 给出教科书级的学术定义，并用 `==高亮==` 标注核心术语。
+2. **归因链条**: 构建 `Condition A -> Mechanism B -> Result C` 的逻辑链。
+3. **语境锚点**: 解释理论的历史背景或适用边界。
 
-### {index}.2 AI智能增强层
-(使用Obsidian Callouts: [!abstract]、[!example]、[!tip])
-
+### Block B: The AI Augmentation Layer (AI 智能增强层)
+**Header**: ### {index}.2 [AI 增强解析]
+**要求**: 必须使用以下 Obsidian Callouts 补充视频缺失的深度。
 > [!abstract] 🧬 第一性原理
-> (解释背后的基础原理)
+> (解释背后的物理学/生物学/经济学底层定律)
 
 > [!example] 🏛️ 场景具象化
-> (创造具体案例: 背景→冲突→行动→结果)
+> (创造一个哈佛商学院级别的具体案例: Context -> Conflict -> Action -> Resolution)
 
 > [!tip] 🔗 跨学科思维模型
-> (链接到通用模型)
+> (链接到二八定律、反脆弱、熵增等更高维模型)
 
-### {index}.3 批判性视界
-(使用 [!warning] 或 [!failure],分析边界、反模式)
-
+### Block C: The Critical Horizon (批判性视界)
+**Header**: ### {index}.3 [批判性思考]
+**要求**: 进行红队测试 (Red-Teaming)。
 > [!warning] ⚠️ 边界与盲点
-> (什么情况下此理论失效?)
+> (此理论在什么情况下绝对失效？作者的幸存者偏差在哪里？)
 
-### {index}.4 手把手SOP
-(原子级步骤清单,使用checkbox)
+### Block D: The Action Protocol (手把手 SOP)
+**Header**: ### {index}.4 [实战执行SOP]
+**要求**: 将知识转化为原子级行动。
+格式:
+- [ ] **Step 1**: [具体动作] -> *Success Metric: [如何判断做好了?]*
+- [ ] **Step 2**: ...
 
-- [ ] **步骤1**: 具体动作 -> *Success Metric: 判断标准*
-- [ ] **步骤2**: ...
+=== ✍️ 文风强制规范 ===
+1. **高语境 (High-Context)**: 拒绝废话，使用高密度专业术语。
+2. **排版语义**: 仅对 **动词** 和 **数据** 使用 **加粗**。
+3. **原子化列表**: 严禁超过 5 行的纯文本段落，必须拆解为列表。
+4. **Obsidian 兼容性**:
+   - 标题行 (# H2/H3) 严禁包含 `[[链接]]`。
+   - 仅对首次出现的核心概念使用 `[[双向链接]]`。
 
-要求:
-1. 输出纯Markdown格式(不要包含代码块标记)
-2. 每个Block都要充实内容,不能省略
-3. 使用Obsidian Callouts语法(> [!类型])
-4. 专业术语替代口语化表达
-5. 列表项超过5行要拆分
-6. 字数: 1500-2500字"#,
+请直接输出 Markdown 内容，不要包含```markdown```包裹标记。字数要求: 2000字左右。"##,
         index = chapter.index,
         total = total_chapters,
         title = chapter.title,
@@ -184,9 +205,95 @@ fn build_chapter_prompt(
     )
 }
 
+/// 清洗 Markdown 字符串，去除可能的代码块包裹
+fn clean_markdown_str(content: &str) -> String {
+    let content = content.trim();
+    if content.starts_with("```markdown") {
+        content
+            .trim_start_matches("```markdown")
+            .trim_end_matches("```")
+            .trim()
+            .to_string()
+    } else if content.starts_with("```") {
+        content
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim()
+            .to_string()
+    } else {
+        content.to_string()
+    }
+}
+
+/// 阶段3: 生成综合内容(摘要+Flashcards)的prompt
+fn build_synthesizer_prompt(video_title: &str, chapter_summaries: &str, subtitle_content: &str) -> String {
+    format!(
+        r##"YOU ARE THE "OMNISCIENT KNOWLEDGE RECONSTRUCTION ENGINE" (OKRE).
+当前状态: [SYNTHESIZER] (最终综合阶段)
+
+任务: 为全景深度重构蓝图生成最终的综合模块。
+
+视频标题: {video_title}
+
+各章核心内容摘要:
+{chapter_summaries}
+
+原始内容素材(用于提取深度知识点):
+{subtitle_content}
+
+=== 输出规范 ===
+请生成包含以下三个部分的 Markdown 内容:
+
+### Part 1: Executive Summary (全局思维导图化摘要)
+使用 Markdown 列表树形结构，在一页内概括全书核心逻辑。
+
+### Part 2: Anki Flashcards (记忆卡片)
+提取 5-10 个最核心的"反直觉"或"高价值"知识点，转化为 Anki 格式。
+格式要求:
+### 🧠 Flashcards
+Q: [核心问题]
+A: [深度解析]
+
+(请生成 5-10 组)
+
+### Part 3: Tag Index (标签索引)
+#领域/子领域 #核心概念/A #核心概念/B
+
+注意: 直接输出 Markdown 内容，不要重复章节正文。"##,
+        video_title = video_title,
+        chapter_summaries = chapter_summaries,
+        subtitle_content = subtitle_content
+    )
+}
+
 // ============================================================================
 // 核心生成函数
 // ============================================================================
+
+/// 清洗 JSON 字符串，智能提取第一个 '{' 和最后一个 '}' 之间的内容
+fn clean_json_str(content: &str) -> String {
+    let content = content.trim();
+
+    // 寻找 JSON 对象的起始和结束位置
+    let start = content.find('{');
+    let end = content.rfind('}');
+
+    match (start, end) {
+        (Some(s), Some(e)) if s <= e => {
+            // 提取从第一个 { 到最后一个 } 的内容
+            content[s..=e].to_string()
+        }
+        _ => {
+            // 如果找不到匹配的括号，退回到原始清洗逻辑（去除非 JSON 字符）
+            content
+                .trim_start_matches("```json")
+                .trim_start_matches("```")
+                .trim_end_matches("```")
+                .trim()
+                .to_string()
+        }
+    }
+}
 
 /// 阶段1: 生成目录大纲
 async fn generate_outline(
@@ -204,8 +311,9 @@ async fn generate_outline(
 
     let response = execute_non_streaming_with_abort(req, abort_flag).await?;
 
-    // 解析JSON响应
-    let outline: BlueprintOutline = serde_json::from_str(&response.content)
+    // 清洗并解析JSON响应
+    let cleaned_content = clean_json_str(&response.content);
+    let outline: BlueprintOutline = serde_json::from_str(&cleaned_content)
         .map_err(|e| format!("解析大纲JSON失败: {}. 原始响应: {}", e, response.content))?;
 
     Ok(outline)
@@ -228,7 +336,32 @@ async fn generate_chapter_content(
 
     let response = execute_non_streaming_with_abort(req, abort_flag).await?;
 
-    Ok(response.content)
+    Ok(clean_markdown_str(&response.content))
+}
+
+/// 阶段3: 生成综合内容
+async fn generate_synthesizer_content(
+    ai_config: &AiConfig,
+    video_title: &str,
+    chapters: &[ChapterOutline],
+    subtitle_content: &str,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    // 构建章节摘要上下文
+    let summaries: String = chapters.iter()
+        .map(|c| format!("第{}章 [{}]: {} (关键点: {})", c.index, c.title, c.objective, c.key_points.join(", ")))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let prompt = build_synthesizer_prompt(video_title, &summaries, subtitle_content);
+
+    let req = NonStreamingRequest {
+        config: ai_config.clone(),
+        prompt,
+    };
+
+    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
+    Ok(clean_markdown_str(&response.content))
 }
 
 /// 主生成流程
@@ -263,9 +396,9 @@ async fn generate_blueprint_internal(
 
     let subtitle_text: String = subtitles
         .iter()
-        .map(|e| e.text.as_str())
+        .map(|e| format!("[{}] {}", format_timestamp(e.start_time), e.text))
         .collect::<Vec<_>>()
-        .join(" ");
+        .join("\n");
 
     if abort_flag.load(Ordering::Relaxed) {
         return Err("已中止".to_string());
@@ -299,7 +432,7 @@ async fn generate_blueprint_internal(
         }
 
         let current_step = 3 + idx;
-        let total_steps = 3 + total_chapters;
+        let total_steps = 3 + total_chapters + 1; // +1 是为了Synthersizer阶段
 
         let _ = app.emit(event_name, BlueprintGenerationEvent::Progress {
             current: current_step,
@@ -318,19 +451,41 @@ async fn generate_blueprint_internal(
         chapter_contents.push(content);
     }
 
-    // 阶段3: 拼接完整markdown
+    // 阶段3: 生成综合内容 (Synthesizer)
+    if abort_flag.load(Ordering::Relaxed) {
+        return Err("已中止".to_string());
+    }
+
+    let total_steps = 3 + total_chapters + 1;
+    let _ = app.emit(event_name, BlueprintGenerationEvent::Progress {
+        current: total_steps,
+        total: total_steps,
+        message: "正在生成全局总结与记忆卡片...".to_string(),
+    });
+
+    let synthesizer_content = generate_synthesizer_content(
+        &ai_config,
+        &note.title,
+        &outline.chapters,
+        &subtitle_text,
+        abort_flag
+    ).await?;
+
+    // 阶段4: 拼接完整markdown
     for content in chapter_contents {
         final_markdown.push_str(&content);
         final_markdown.push_str("\n\n---\n\n");
     }
+
+    final_markdown.push_str(&synthesizer_content);
 
     let word_count = final_markdown.chars().count();
 
     tracing::info!("[全景蓝图] 生成完成,总字数: {}", word_count);
 
     let _ = app.emit(event_name, BlueprintGenerationEvent::Progress {
-        current: 10,
-        total: 10,
+        current: total_steps,
+        total: total_steps,
         message: "完成!".to_string(),
     });
 
