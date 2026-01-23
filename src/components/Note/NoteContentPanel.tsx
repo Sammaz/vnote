@@ -2759,8 +2759,8 @@ Video subtitles content:`;
             </button>
           </div>
         </div>
-      ) : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas" ? (
-        // 随手笔记、思维导图、无限画布标签页不需要次级工具栏（组件内部已有工具栏）
+      ) : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas" || activeTab === "panoramic_blueprint" ? (
+        // 随手笔记、思维导图、无限画布、深度蓝图（无内容时）标签页不需要次级工具栏
         null
       ) : (
         // 其他标签页的简化工具栏
