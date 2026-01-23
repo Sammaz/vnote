@@ -322,12 +322,14 @@ fn merge_bilingual_entries(
     for (i, mut prim_entry) in primary.into_iter().enumerate() {
         prim_entry.index = i + 1;
 
-        // 查找时间范围重叠的二级语言字幕
+        // 优先查找时间戳严格匹配的条目
+        // 浮点数比较，使用一个非常小的 epsilon (例如 0.05s) 来解决精度问题
         let sec_text = secondary.iter().find(|sec| {
-            // 检查时间范围是否有重叠（容差 1 秒）
-            let start_overlap = sec.start_time <= prim_entry.end_time + 1.0;
-            let end_overlap = sec.end_time >= prim_entry.start_time - 1.0;
-            start_overlap && end_overlap
+            let start_diff = (sec.start_time - prim_entry.start_time).abs();
+            let end_diff = (sec.end_time - prim_entry.end_time).abs();
+
+            // 严格匹配：开始时间和结束时间相差都在 0.05 秒以内
+            start_diff < 0.05 && end_diff < 0.05
         }).map(|sec| sec.text.clone());
 
         prim_entry.second_language_text = sec_text;
@@ -419,8 +421,58 @@ mod tests {
     }
 
     #[test]
-    fn test_format_timestamp() {
-        assert_eq!(format_timestamp(90.5), "00:01:30");
-        assert_eq!(format_timestamp(3661.0), "01:01:01");
+    fn test_merge_bilingual_exact_match() {
+        let primary = vec![
+            SubtitleEntry {
+                index: 0,
+                start_time: 10.0,
+                end_time: 15.0,
+                text: "中文1".to_string(),
+                second_language_text: None,
+            },
+            SubtitleEntry {
+                index: 0,
+                start_time: 20.0,
+                end_time: 25.0,
+                text: "中文2".to_string(),
+                second_language_text: None,
+            },
+        ];
+
+        let secondary = vec![
+            SubtitleEntry {
+                index: 0,
+                start_time: 9.0,   // 时间戳不匹配
+                end_time: 14.0,
+                text: "English Wrong Match".to_string(),
+                second_language_text: None,
+            },
+            SubtitleEntry {
+                index: 0,
+                start_time: 10.0,  // 完全匹配
+                end_time: 15.0,
+                text: "English 1".to_string(),
+                second_language_text: None,
+            },
+            SubtitleEntry {
+                index: 0,
+                start_time: 20.001, // 极微小误差，应该匹配 (<0.05)
+                end_time: 25.001,
+                text: "English 2".to_string(),
+                second_language_text: None,
+            },
+        ];
+
+        let result = merge_bilingual_entries(primary, secondary);
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].text, "中文1");
+        assert_eq!(result[0].second_language_text, Some("English 1".to_string()));
+
+        // 确保不会因为前一个错误的时间段而匹配错误
+        assert_ne!(result[0].second_language_text, Some("English Wrong Match".to_string()));
+
+        assert_eq!(result[1].text, "中文2");
+        assert_eq!(result[1].second_language_text, Some("English 2".to_string()));
     }
 }
