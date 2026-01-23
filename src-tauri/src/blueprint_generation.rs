@@ -9,9 +9,10 @@ use crate::ai_pool::{execute_non_streaming_with_abort, NonStreamingRequest};
 use crate::db::AiConfig;
 use crate::subtitle::{parse_subtitle_file, format_timestamp};
 use crate::DATABASE;
+use futures::future::try_join_all;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
@@ -422,33 +423,65 @@ async fn generate_blueprint_internal(
     // 构建markdown（不包含大纲部分，直接从章节内容开始）
     let mut final_markdown = String::new();
 
-    // 阶段2: 逐章生成内容
+    // 阶段2: 逐章生成内容 (并发执行)
     let total_chapters = outline.chapters.len();
-    let mut chapter_contents = Vec::new();
+    let completed_counter = Arc::new(AtomicUsize::new(0));
 
-    for (idx, chapter) in outline.chapters.iter().enumerate() {
-        if abort_flag.load(Ordering::Relaxed) {
-            return Err("已中止".to_string());
+    // 更新初始状态
+    let _ = app.emit(event_name, BlueprintGenerationEvent::Progress {
+        current: 3,
+        total: 3 + total_chapters + 1,
+        message: format!("开始并发生成 {} 个章节...", total_chapters),
+    });
+
+    let chapter_futures = outline.chapters.iter().map(|chapter| {
+        let ai_config = ai_config.clone();
+        let chapter = chapter.clone();
+        let subtitle_text = subtitle_text.clone();
+        let abort_flag = abort_flag.clone();
+        let app = app.clone();
+        let event_name = event_name.to_string();
+        let completed_counter = completed_counter.clone();
+
+        async move {
+            if abort_flag.load(Ordering::Relaxed) {
+                return Err("已中止".to_string());
+            }
+
+            let result = generate_chapter_content(
+                &ai_config,
+                &chapter,
+                &subtitle_text,
+                total_chapters,
+                &abort_flag
+            ).await;
+
+            // 无论成功失败，只要完成了一个，我们就更新一下进度（如果是成功的话）
+            // 如果失败了，try_join_all 会直接抛出错误，所以这里其实只需要处理成功的计数
+            if result.is_ok() {
+                let completed = completed_counter.fetch_add(1, Ordering::Relaxed) + 1;
+                let current_step = 3 + completed;
+                let total_steps = 3 + total_chapters + 1;
+
+                let _ = app.emit(&event_name, BlueprintGenerationEvent::Progress {
+                    current: current_step,
+                    total: total_steps,
+                    message: format!("正在生成章节 ({}/{}): {}...", completed, total_chapters, chapter.title),
+                });
+            }
+
+            result
         }
+    });
 
-        let current_step = 3 + idx;
-        let total_steps = 3 + total_chapters + 1; // +1 是为了Synthersizer阶段
+    // 使用 try_join_all 并发执行所有章节生成任务
+    // 任何一个失败都会立即返回错误
+    // 这里的并发控制由 AiPoolManager 内部处理
+    let chapter_contents = try_join_all(chapter_futures).await?;
 
-        let _ = app.emit(event_name, BlueprintGenerationEvent::Progress {
-            current: current_step,
-            total: total_steps,
-            message: format!("正在生成第{}/{}章: {}...", idx + 1, total_chapters, chapter.title),
-        });
-
-        let content = generate_chapter_content(
-            &ai_config,
-            chapter,
-            &subtitle_text,
-            total_chapters,
-            abort_flag
-        ).await?;
-
-        chapter_contents.push(content);
+    // 再次检查中止状态
+    if abort_flag.load(Ordering::Relaxed) {
+        return Err("已中止".to_string());
     }
 
     // 阶段3: 生成综合内容 (Synthesizer)
