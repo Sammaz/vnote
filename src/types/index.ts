@@ -24,6 +24,7 @@ export interface Note {
   visual_summary: string | null;
   custom_summary: string | null;
   flashcards: string | null; // JSON string of FlashcardData
+  panoramic_blueprint: string | null; // Panoramic depth reconstruction blueprint (markdown)
   quick_notes: string | null; // User's quick notes (markdown)
   quick_notes_mindmap: string | null; // User's mindmap data (JSON)
   quick_notes_canvas: string | null; // User's canvas data (JSON)
@@ -59,6 +60,8 @@ export interface AiConfig {
   sort_order: number;
   is_default: boolean;
   concurrent_limit: number; // 并发生成数，范围1-10，默认5
+  request_timeout: number; // 请求超时时间（秒），0表示不设置超时，范围0-600，默认180
+  rate_limit: number; // 速率限制（每分钟请求次数），0表示不限制，范围0-1000，默认60
 }
 
 // 上传文件信息

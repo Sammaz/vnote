@@ -22,6 +22,7 @@ interface AiConfig {
     is_default: boolean;
     concurrent_limit: number;
     request_timeout: number;
+    rate_limit: number;
 }
 
 interface EmbeddingConfig {
@@ -174,7 +175,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         sort_order: aiConfigs.length,
         is_default: false,
         concurrent_limit: 5,
-        request_timeout: 180
+        request_timeout: 180,
+        rate_limit: 60
     });
 
     const saveAiConfig = async () => {
