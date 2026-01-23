@@ -4,6 +4,7 @@ mod chapter;
 mod db;
 pub mod error;
 mod flashcard_generation;
+mod blueprint_generation;
 mod highlight_generation;
 mod note_generation;
 mod note_initialization;
@@ -1167,6 +1168,7 @@ fn update_note_content(
         "quick_notes" => note.quick_notes = Some(content),
         "quick_notes_mindmap" => note.quick_notes_mindmap = Some(content),
         "quick_notes_canvas" => note.quick_notes_canvas = Some(content),
+        "panoramic_blueprint" => note.panoramic_blueprint = Some(content),
         _ => return Err("无效的标签页类型".to_string()),
     }
 
@@ -1794,6 +1796,8 @@ pub fn run() {
             export_visual_summary,
             flashcard_generation::generate_flashcards,
             flashcard_generation::abort_flashcard_generation,
+            blueprint_generation::generate_panoramic_blueprint,
+            blueprint_generation::abort_blueprint_generation,
             // Note initialization commands
             initialize_note_data,
             abort_note_initialization,

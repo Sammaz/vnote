@@ -9,7 +9,7 @@ import { Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-type TabType = "full_summary" | "detailed_reading" | "highlights" | "visual_summary" | "custom_summary";
+type TabType = "full_summary" | "detailed_reading" | "highlights" | "visual_summary" | "custom_summary" | "panoramic_blueprint";
 
 interface EditableMarkdownProps {
   noteId: number;
@@ -99,6 +99,15 @@ export function EditableMarkdown({
 
   const [markdown, setMarkdown] = useState(displayContent);
   const prevIsEditMode = useRef(isEditMode);
+
+  // 用于跟踪checkbox选中状态的本地状态（不保存到markdown）
+  const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
+  const checkboxIndexRef = useRef(0);
+
+  // 当内容变化时重置checkbox状态
+  useEffect(() => {
+    setCheckedItems(new Set());
+  }, [displayContent]);
 
   // 检测当前主题模式
   const isDarkMode = document.documentElement.classList.contains("dark");
@@ -204,11 +213,41 @@ export function EditableMarkdown({
   }
 
   // 预览模式（使用现有的 ReactMarkdown 样式）
+  // 在每次渲染前重置checkbox索引
+  checkboxIndexRef.current = 0;
+
   return (
     <div className="note-markdown">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          // 自定义checkbox渲染
+          input: ({ node, ...props }) => {
+            if (props.type === 'checkbox') {
+              const currentIndex = checkboxIndexRef.current++;
+              const isChecked = checkedItems.has(currentIndex);
+
+              return (
+                <input
+                  type="checkbox"
+                  checked={isChecked}
+                  onChange={() => {
+                    setCheckedItems(prev => {
+                      const newSet = new Set(prev);
+                      if (newSet.has(currentIndex)) {
+                        newSet.delete(currentIndex);
+                      } else {
+                        newSet.add(currentIndex);
+                      }
+                      return newSet;
+                    });
+                  }}
+                  className="cursor-pointer mr-2"
+                />
+              );
+            }
+            return <input {...props} />;
+          },
           // 处理标题中的时间戳
           h2: ({ children }) => {
             const content = Array.isArray(children) ? children as React.ReactNode[] : [children];

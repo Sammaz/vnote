@@ -26,6 +26,7 @@ import {
   GraduationCap,
   Network,
   Palette,
+  Map as MapIcon,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
@@ -53,7 +54,7 @@ import {
 } from "../../utils/noteGenerationState";
 import type { ChapterGenerationEvent } from "../../types";
 
-type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "flashcard" | "quicknotes" | "mindmap" | "canvas";
+type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "flashcard" | "panoramic_blueprint" | "quicknotes" | "mindmap" | "canvas";
 type TabGroupId = "summary" | "study";
 
 interface Tab {
@@ -92,6 +93,7 @@ const TAB_GROUPS: TabGroup[] = [
       { id: "mindmap", label: "思维导图", icon: <Network className="w-4 h-4" /> },
       { id: "canvas", label: "无限画布", icon: <Palette className="w-4 h-4" /> },
       { id: "flashcard", label: "闪记卡", icon: <Zap className="w-4 h-4" /> },
+      { id: "panoramic_blueprint", label: "深度蓝图", icon: <MapIcon className="w-4 h-4" /> },
     ]
   }
 ];
@@ -204,6 +206,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 闪记卡生成状态（用于显示闪烁小点）
   const [flashcardIsGenerating, setFlashcardIsGenerating] = useState(false);
+
+  // 全景深度重构蓝图生成状态
+  const [blueprintIsGenerating, setBlueprintIsGenerating] = useState(false);
+  const [blueprintProgress, setBlueprintProgress] = useState<{current: number; total: number} | null>(null);
+  const [blueprintEditMode, setBlueprintEditMode] = useState(false);
 
   // 解析 detailed_reading 是否为章节数据
   useEffect(() => {
@@ -1384,6 +1391,55 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   useEffect(() => {
     generateFlashcardsDirectlyRef.current = generateFlashcardsDirectly;
   }, [generateFlashcardsDirectly]);
+
+  // 生成全景深度重构蓝图
+  const generatePanoramicBlueprint = useCallback(async () => {
+    if (blueprintIsGenerating || !note.model_id) return;
+
+    const generationId = crypto.randomUUID();
+    const eventName = `blueprint-generation-${generationId}`;
+
+    setBlueprintIsGenerating(true);
+    setBlueprintProgress({ current: 0, total: 10 });
+
+    const unlisten = await listen(eventName, (event: any) => {
+      const payload = event.payload;
+
+      if (payload.status === 'Progress') {
+        setBlueprintProgress({ current: payload.current, total: payload.total });
+      } else if (payload.status === 'Completed') {
+        setBlueprintIsGenerating(false);
+        setBlueprintProgress(null);
+        onGenerationComplete?.();
+        message.success('全景深度重构蓝图生成完成');
+      } else if (payload.status === 'Error') {
+        setBlueprintIsGenerating(false);
+        setBlueprintProgress(null);
+        message.error(`生成失败: ${payload.error}`);
+      } else if (payload.status === 'Aborted') {
+        setBlueprintIsGenerating(false);
+        setBlueprintProgress(null);
+        message.info('生成已中止');
+      }
+    });
+
+    try {
+      await invoke('generate_panoramic_blueprint', {
+        generationId,
+        noteId: note.id,
+        modelId: note.model_id,
+      });
+    } catch (error) {
+      console.error('生成全景蓝图失败:', error);
+      message.error('生成失败');
+      setBlueprintIsGenerating(false);
+      setBlueprintProgress(null);
+    }
+
+    return () => {
+      unlisten.then(fn => fn());
+    };
+  }, [note.id, note.model_id, blueprintIsGenerating, onGenerationComplete]);
 
   // 字幕优化开关处理
   const handleSubtitleOptimizationToggle = useCallback(async () => {
@@ -2631,6 +2687,78 @@ Video subtitles content:`;
             </button>
           </div>
         </div>
+      ) : activeTab === "panoramic_blueprint" && note.panoramic_blueprint ? (
+        // 深度蓝图标签页的工具栏（有内容时显示）
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          {/* 进度提示 */}
+          {blueprintIsGenerating && blueprintProgress ? (
+            <div className="flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+              <span className="text-sm text-blue-800 dark:text-blue-300">
+                正在生成深度蓝图... ({blueprintProgress.current}/{blueprintProgress.total})
+              </span>
+            </div>
+          ) : (
+            <button
+              onClick={() => setBlueprintEditMode(!blueprintEditMode)}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                blueprintEditMode
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <Edit3 className="w-4 h-4" />
+              {blueprintEditMode ? "预览" : "编辑"}
+            </button>
+          )}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={async () => {
+                if (note.panoramic_blueprint) {
+                  await navigator.clipboard.writeText(note.panoramic_blueprint);
+                  message.success('已复制到剪贴板');
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Copy className="w-4 h-4" /> 复制
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={async () => {
+                if (!note.panoramic_blueprint) return;
+                try {
+                  const filePath = await save({
+                    defaultPath: `${note.title}_深度蓝图.md`,
+                    filters: [{ name: 'Markdown', extensions: ['md'] }]
+                  });
+                  if (filePath) {
+                    await invoke('save_file_content', {
+                      path: filePath,
+                      content: note.panoramic_blueprint
+                    });
+                    message.success('下载成功');
+                  }
+                } catch (error) {
+                  message.error('下载失败');
+                }
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" /> 下载
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={generatePanoramicBlueprint}
+              disabled={blueprintIsGenerating}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={cn("w-4 h-4", blueprintIsGenerating && "animate-spin")} />
+              重新生成
+            </button>
+          </div>
+        </div>
       ) : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas" ? (
         // 随手笔记、思维导图、无限画布标签页不需要次级工具栏（组件内部已有工具栏）
         null
@@ -2900,6 +3028,54 @@ Video subtitles content:`;
             onContentChange={onGenerationComplete}
             forceTab="canvas"
           />
+        )}
+        {activeTab === "panoramic_blueprint" && (
+          note.panoramic_blueprint ? (
+            <EditableMarkdown
+              noteId={note.id}
+              tabType="panoramic_blueprint"
+              content={note.panoramic_blueprint}
+              isGenerating={false}
+              emptyMessage=""
+              isEditMode={blueprintEditMode}
+              onContentUpdate={onGenerationComplete}
+            />
+          ) : (
+            // 空状态：显示生成按钮
+            <div className="flex flex-col items-center justify-center h-full">
+              <div className="text-center">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/30 dark:to-purple-900/30 flex items-center justify-center">
+                  <MapIcon className="w-8 h-8 text-blue-500" />
+                </div>
+                <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-2">
+                  生成全景深度重构蓝图
+                </h3>
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 max-w-md">
+                  使用AI深度分析视频内容，生成5倍字数扩展的结构化知识文档
+                </p>
+                {note.model_id ? (
+                  <button
+                    onClick={generatePanoramicBlueprint}
+                    disabled={blueprintIsGenerating}
+                    className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                  >
+                    {blueprintIsGenerating ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        生成中...
+                      </span>
+                    ) : (
+                      '开始生成'
+                    )}
+                  </button>
+                ) : (
+                  <p className="text-sm text-red-500 dark:text-red-400">
+                    请先在视频播放器右上角选择AI模型
+                  </p>
+                )}
+              </div>
+            </div>
+          )
         )}
       </div>
 
