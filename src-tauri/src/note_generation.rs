@@ -1761,9 +1761,10 @@ fn calculate_segments_from_markers(
                 total_duration
             };
 
-            // 第一段（current_start == 0）且没有前置标记时，screenshot_path 为 None
+            // 第一段（current_start == 0）使用第一个 marker 的截图作为封面
             let screenshot_path = if current_start == 0 {
-                None // 第一段需要自动截图
+                // 使用第一个 marker 的截图作为封面
+                sorted_markers.first().map(|m| m.screenshot_path.clone())
             } else {
                 // 查找前一个标记的截图
                 sorted_markers
