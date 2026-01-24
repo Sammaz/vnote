@@ -70,6 +70,8 @@ export function AssistModeView({
   
   const containerRef = useRef<HTMLDivElement>(null);
   const lastScrolledIndexRef = useRef<number | null>(null);
+  // 记录用户主动 seek 的目标时间和时间戳，用于防止关键帧对齐导致的错误高亮
+  const userSeekRef = useRef<{ targetTime: number; timestamp: number } | null>(null);
 
   // 加载字幕数据
   useEffect(() => {
@@ -138,13 +140,65 @@ export function AssistModeView({
     return null;
   }, [state.subtitles]);
 
+  // 根据目标时间查找字幕索引（用于用户主动点击时）
+  const findEntryIndexByTargetTime = useCallback((targetTime: number): number | null => {
+    const { subtitles } = state;
+    // 查找 start_time 最接近目标时间的字幕
+    let bestIndex: number | null = null;
+    let bestDiff = Infinity;
+    for (let i = 0; i < subtitles.length; i++) {
+      const diff = Math.abs(subtitles[i].start_time - targetTime);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIndex = i;
+      }
+    }
+    // 只有当差距小于 0.1 秒时才认为匹配
+    return bestDiff < 0.1 ? bestIndex : null;
+  }, [state.subtitles]);
+
   // 监听视频时间更新，高亮当前字幕行并自动滚动
   useEffect(() => {
     if (state.subtitles.length === 0) return;
 
+    // 监听 seek-video 事件，记录用户主动 seek 的目标时间
+    const handleSeekVideo = (e: Event) => {
+      const event = e as CustomEvent<{ time: number }>;
+      const targetTime = event.detail.time;
+      // 根据目标时间找到对应的字幕索引
+      const targetIndex = findEntryIndexByTargetTime(targetTime);
+      userSeekRef.current = {
+        targetTime,
+        timestamp: Date.now(),
+      };
+      // 立即更新高亮到目标字幕行，不等待 video-time-update 事件
+      if (targetIndex !== null && targetIndex !== state.activeSubtitleIndex) {
+        setState(prev => ({ ...prev, activeSubtitleIndex: targetIndex }));
+        lastScrolledIndexRef.current = targetIndex;
+        const element = document.getElementById(`subtitle-row-${state.subtitles[targetIndex].index}`);
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    };
+
     const handleVideoTimeUpdate = (e: Event) => {
       const event = e as CustomEvent<{ time: number }>;
       const currentTime = event.detail.time;
+
+      // 检查是否在用户主动 seek 后的短时间内
+      const userSeek = userSeekRef.current;
+      if (userSeek) {
+        const timeSinceSeek = Date.now() - userSeek.timestamp;
+        // 如果在 800ms 内，忽略所有 video-time-update 事件
+        // 这是因为 seek 期间 timeupdate 可能会触发旧的时间值或关键帧对齐后的时间值
+        if (timeSinceSeek < 800) {
+          return;
+        }
+        // 超过 800ms 后清除记录
+        userSeekRef.current = null;
+      }
+
       const index = findCurrentEntryIndex(currentTime);
 
       if (index !== state.activeSubtitleIndex) {
@@ -161,9 +215,13 @@ export function AssistModeView({
       }
     };
 
+    window.addEventListener("seek-video", handleSeekVideo);
     window.addEventListener("video-time-update", handleVideoTimeUpdate);
-    return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
-  }, [state.subtitles, state.activeSubtitleIndex, findCurrentEntryIndex]);
+    return () => {
+      window.removeEventListener("seek-video", handleSeekVideo);
+      window.removeEventListener("video-time-update", handleVideoTimeUpdate);
+    };
+  }, [state.subtitles, state.activeSubtitleIndex, findCurrentEntryIndex, findEntryIndexByTargetTime]);
 
   // 获取指定字幕索引的截图标记
   const getMarkerForIndex = useCallback((index: number): ScreenshotMarker | null => {
