@@ -6,7 +6,7 @@ fn main() {
     // 初始化日志系统
     init_logging();
 
-    tracing::info!("VNote 启动");
+    tracing::info!("VNote Started");
 
     vnote_lib::run()
 }
