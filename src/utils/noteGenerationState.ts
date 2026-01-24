@@ -12,6 +12,10 @@ interface NoteGenerationState {
   isInitialAutoGeneration: boolean; // 是否正在进行首次自动生成流程
   // 跟踪该笔记所有正在运行的 generation_id（用于删除时中止所有任务）
   activeGenerationIds: Set<string>;
+  // 深度蓝图生成状态
+  blueprintIsGenerating: boolean;
+  blueprintProgress: { current: number; total: number } | null;
+  blueprintGenerationId: string | null;
 }
 
 // 全局存储每个笔记的生成状态
@@ -33,6 +37,9 @@ export function getNoteGenerationState(noteId: number): NoteGenerationState {
       isGeneratingChapters: false,
       isInitialAutoGeneration: false,
       activeGenerationIds: new Set(),
+      blueprintIsGenerating: false,
+      blueprintProgress: null,
+      blueprintGenerationId: null,
     });
   }
   return noteGenerationStates.get(noteId)!;

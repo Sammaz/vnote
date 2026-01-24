@@ -492,6 +492,21 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
     setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
 
+    // 重置或恢复深度蓝图生成状态（每个笔记独立）
+    // 如果该笔记之前正在生成深度蓝图，则恢复其进度
+    if (globalState.blueprintIsGenerating) {
+      setBlueprintIsGenerating(true);
+      setBlueprintProgress(globalState.blueprintProgress);
+      // 如果有活动的生成ID，恢复监听
+      if (globalState.blueprintGenerationId) {
+        setupBlueprintListener(note.id, globalState.blueprintGenerationId);
+      }
+    } else {
+      // 否则确保重置为初始状态
+      setBlueprintIsGenerating(false);
+      setBlueprintProgress(null);
+    }
+
     // 触发重新渲染以更新UI
     forceUpdate({});
 
@@ -519,6 +534,76 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 当笔记内容更新时，触发重新渲染
     forceUpdate({});
   }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.full_summary]);
+
+  // 设置深度蓝图生成监听器
+  const setupBlueprintListener = useCallback(async (noteId: number, genId: string) => {
+    // 避免重复监听
+    const eventName = `blueprint-generation-${genId}`;
+    if (activeListeners.has(eventName)) {
+       // 已经有监听器了，可能需要重新绑定UI更新逻辑?
+       // 这里 activeListeners 存储的是 unlisten 函数
+       // 如果我们切换了组件实例（比如切走再切回来），之前的 unlisten 可能已经失效或者需要清除
+       // 实际上 activeListeners 是全局 Map，所以如果已经有了，说明还在监听。
+       // 但问题是，之前的监听器闭包中的 setBlueprintIsGenerating 是属于之前那个组件实例的（?）
+       // React 组件重新渲染或卸载重装，闭包引用的 state setter 会变吗？
+       // 如果 NoteContentPanel 在切换笔记时是被卸载重载的，那么旧的 setter 就失效了。
+       // 应该先清除旧的，再注册新的。
+        const oldUnlisten = activeListeners.get(eventName);
+        if (oldUnlisten) oldUnlisten();
+        activeListeners.delete(eventName);
+    }
+
+    const unlisten = await listen(eventName, (event: any) => {
+        const payload = event.payload;
+
+        // 更新 UI 状态
+        // 只有当当前显示的笔记是正在生成的这个笔记时，才更新UI
+        if (noteId === note.id) {
+            if (payload.status === 'Progress') {
+                setBlueprintProgress({ current: payload.current, total: payload.total });
+            } else if (payload.status === 'Completed') {
+                setBlueprintIsGenerating(false);
+                setBlueprintProgress(null);
+                onGenerationComplete?.();
+                message.success('全景深度重构蓝图生成完成');
+            } else if (payload.status === 'Error') {
+                setBlueprintIsGenerating(false);
+                setBlueprintProgress(null);
+                message.error(`生成失败: ${payload.error}`);
+            } else if (payload.status === 'Aborted') {
+                setBlueprintIsGenerating(false);
+                setBlueprintProgress(null);
+                message.info('生成已中止');
+            }
+        }
+
+        // 更新全局状态
+        if (payload.status === 'Progress') {
+            setNoteGenerationState(noteId, {
+                blueprintProgress: { current: payload.current, total: payload.total }
+            });
+        } else if (payload.status === 'Completed' || payload.status === 'Error' || payload.status === 'Aborted') {
+            setNoteGenerationState(noteId, {
+                blueprintIsGenerating: false,
+                blueprintProgress: null,
+                blueprintGenerationId: null
+            });
+
+            // 清理监听器记录
+             if (activeListeners.has(eventName)) {
+                 activeListeners.delete(eventName);
+                 // 注意：这里我们不需要调用 unlisten，因为事件本身是一次性的（或者我们不再需要监听它）
+                 // 但为了严谨，我们应该在清理时移除监听器。
+                 // 由于我们在回调内部，取消监听也是可以的
+             }
+        }
+    });
+
+    // 注册到全局监听器Map
+    activeListeners.set(eventName, unlisten);
+
+    return unlisten;
+  }, [note.id, onGenerationComplete]);
 
   // 设置生成事件监听器
   const setupGenerationListener = useCallback((noteId: number, genId: string) => {
@@ -1397,31 +1482,20 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     if (blueprintIsGenerating || !note.model_id) return;
 
     const generationId = crypto.randomUUID();
-    const eventName = `blueprint-generation-${generationId}`;
 
+    // 设置本地状态
     setBlueprintIsGenerating(true);
     setBlueprintProgress({ current: 0, total: 10 });
 
-    const unlisten = await listen(eventName, (event: any) => {
-      const payload = event.payload;
-
-      if (payload.status === 'Progress') {
-        setBlueprintProgress({ current: payload.current, total: payload.total });
-      } else if (payload.status === 'Completed') {
-        setBlueprintIsGenerating(false);
-        setBlueprintProgress(null);
-        onGenerationComplete?.();
-        message.success('全景深度重构蓝图生成完成');
-      } else if (payload.status === 'Error') {
-        setBlueprintIsGenerating(false);
-        setBlueprintProgress(null);
-        message.error(`生成失败: ${payload.error}`);
-      } else if (payload.status === 'Aborted') {
-        setBlueprintIsGenerating(false);
-        setBlueprintProgress(null);
-        message.info('生成已中止');
-      }
+    // 设置全局状态
+    setNoteGenerationState(note.id, {
+        blueprintIsGenerating: true,
+        blueprintGenerationId: generationId,
+        blueprintProgress: { current: 0, total: 10 }
     });
+
+    // 设置监听器
+    const unlisten = await setupBlueprintListener(note.id, generationId);
 
     try {
       await invoke('generate_panoramic_blueprint', {
@@ -1434,12 +1508,15 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       message.error('生成失败');
       setBlueprintIsGenerating(false);
       setBlueprintProgress(null);
-    }
 
-    return () => {
-      unlisten();
-    };
-  }, [note.id, note.model_id, blueprintIsGenerating, onGenerationComplete]);
+      // 更新全局状态为失败
+      setNoteGenerationState(note.id, {
+          blueprintIsGenerating: false,
+          blueprintProgress: null,
+          blueprintGenerationId: null
+      });
+    }
+  }, [note.id, note.model_id, blueprintIsGenerating, setupBlueprintListener]);
 
   // 字幕优化开关处理
   const handleSubtitleOptimizationToggle = useCallback(async () => {
