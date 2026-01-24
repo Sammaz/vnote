@@ -662,8 +662,10 @@ export function VideoPlayer({
     if (!player) return;
 
     // 帮助框打开时禁用播放器快捷键，关闭时启用
-    if (player.config && player.config.keyboard) {
-      player.config.keyboard.global = !showHelp;
+    // 使用类型断言访问 Plyr 内部 config 属性
+    const playerWithConfig = player as any;
+    if (playerWithConfig.config && playerWithConfig.config.keyboard) {
+      playerWithConfig.config.keyboard.global = !showHelp;
     }
   }, [showHelp]);
 
