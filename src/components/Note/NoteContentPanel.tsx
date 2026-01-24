@@ -1495,7 +1495,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     });
 
     // 设置监听器
-    const unlisten = await setupBlueprintListener(note.id, generationId);
+    await setupBlueprintListener(note.id, generationId);
 
     try {
       await invoke('generate_panoramic_blueprint', {

@@ -156,53 +156,6 @@ export function UploadZone() {
     }
   }, [setUploadedSubtitle]);
 
-  // 处理选择文件（视频或字幕）
-  const handleSelectFiles = useCallback(async () => {
-    try {
-      const selected = await open({
-        multiple: true,
-        filters: [{
-          name: "视频和字幕文件",
-          extensions: [...VIDEO_EXTENSIONS, ...SUBTITLE_EXTENSIONS],
-        }],
-      });
-
-      if (selected) {
-        const paths = Array.isArray(selected) ? selected : [selected];
-
-        for (const filePath of paths) {
-          const fileName = getFileName(filePath);
-          const ext = getExtension(fileName);
-          const fileInfo = await stat(filePath);
-
-          if (VIDEO_EXTENSIONS.includes(ext)) {
-            const videoFile: UploadedFile = {
-              name: fileName,
-              path: filePath,
-              size: fileInfo.size,
-              type: "video",
-            };
-            setUploadedVideo(videoFile);
-
-            // 自动查找字幕文件
-            const matchingSubtitle = await findMatchingSubtitle(filePath);
-            if (matchingSubtitle) {
-              setUploadedSubtitle(matchingSubtitle);
-            }
-          } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
-            setUploadedSubtitle({
-              name: fileName,
-              path: filePath,
-              size: fileInfo.size,
-              type: "subtitle",
-            });
-          }
-        }
-      }
-    } catch (error) {
-      console.error("选择文件失败:", error);
-    }
-  }, [setUploadedVideo, setUploadedSubtitle, findMatchingSubtitle]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
