@@ -269,7 +269,7 @@ export function UploadZone() {
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      onClick={!hasFiles ? handleSelectFiles : undefined}
+      onClick={!hasFiles ? handleSelectVideo : undefined}
       className={cn(
         "upload-zone relative p-8 text-center",
         isDragOver && "drag-over",
@@ -292,7 +292,7 @@ export function UploadZone() {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              handleSelectFiles();
+              handleSelectVideo();
             }}
             className={cn(
               "inline-flex items-center gap-2 px-4 py-2 rounded-lg",
