@@ -36,7 +36,7 @@ import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterDat
 import { ResponsiveTabs } from "./ResponsiveTabs";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
-import { SubtitleRow } from "./SubtitleRow";
+import { VirtualizedSubtitleList } from "./VirtualizedSubtitleList";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { VisualSummaryContent, type VisualViewMode } from "./VisualSummaryContent";
 import { FlashcardContent } from "./FlashcardContent";
@@ -2787,11 +2787,13 @@ Video subtitles content:`;
 
       {/* 内容区域 */}
       <div className={cn(
-        "flex-1",
+        "flex-1 min-h-0", // min-h-0 确保 flex 子元素可以正确收缩，让虚拟列表获得正确高度
         activeTab === "visual" && visualViewMode === "mindmap"
           ? "p-0 overflow-visible"
           : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas"
           ? "p-0 overflow-hidden"
+          : activeTab === "script"
+          ? "p-0 overflow-hidden" // 字幕脚本使用虚拟列表，需要隐藏外层滚动
           : isEditMode ? "p-0 overflow-y-auto" : "p-6 overflow-y-auto"
       )}>
         {/* 正常内容渲染 */}
@@ -3522,12 +3524,39 @@ interface ScriptContentProps {
   autoScroll: boolean;
 }
 
+/**
+ * 二分查找当前时间对应的字幕索引
+ * 字幕按时间排序，使用二分查找提升性能 O(log n)
+ */
+function findCurrentEntryIndexBinary(entries: SubtitleEntry[], time: number): number | null {
+  if (entries.length === 0) return null;
+
+  let left = 0;
+  let right = entries.length - 1;
+
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2);
+    const entry = entries[mid];
+
+    if (time >= entry.start_time && time <= entry.end_time) {
+      return mid;
+    }
+
+    if (time < entry.start_time) {
+      right = mid - 1;
+    } else {
+      left = mid + 1;
+    }
+  }
+
+  return null;
+}
+
 function ScriptContent({ subtitlePath, autoScroll }: ScriptContentProps) {
   const [subtitleEntries, setSubtitleEntries] = useState<SubtitleEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentEntryIndex, setCurrentEntryIndex] = useState<number | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
 
   // 加载并解析字幕文件
   useEffect(() => {
@@ -3551,42 +3580,23 @@ function ScriptContent({ subtitlePath, autoScroll }: ScriptContentProps) {
       });
   }, [subtitlePath]);
 
-  // 根据时间查找当前字幕条目
-  const findCurrentEntryIndex = useCallback((time: number): number | null => {
-    for (let i = 0; i < subtitleEntries.length; i++) {
-      const entry = subtitleEntries[i];
-      if (time >= entry.start_time && time <= entry.end_time) {
-        return i;
-      }
-    }
-    return null;
-  }, [subtitleEntries]);
-
-  // 监听视频时间更新
+  // 监听视频时间更新（使用二分查找）
   useEffect(() => {
     if (!autoScroll || subtitleEntries.length === 0) return;
 
     const handleVideoTimeUpdate = (e: Event) => {
       const event = e as CustomEvent<{ time: number }>;
       const currentTime = event.detail.time;
-      const index = findCurrentEntryIndex(currentTime);
-      
+      const index = findCurrentEntryIndexBinary(subtitleEntries, currentTime);
+
       if (index !== currentEntryIndex) {
         setCurrentEntryIndex(index);
-        
-        // 自动滚动到当前字幕行
-        if (index !== null) {
-          const element = document.getElementById(`subtitle-row-${subtitleEntries[index].index}`);
-          if (element) {
-            element.scrollIntoView({ behavior: "smooth", block: "center" });
-          }
-        }
       }
     };
 
     window.addEventListener("video-time-update", handleVideoTimeUpdate);
     return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
-  }, [autoScroll, subtitleEntries, currentEntryIndex, findCurrentEntryIndex]);
+  }, [autoScroll, subtitleEntries, currentEntryIndex]);
 
   // 当 autoScroll 关闭时，清除高亮
   useEffect(() => {
@@ -3631,15 +3641,9 @@ function ScriptContent({ subtitlePath, autoScroll }: ScriptContentProps) {
   }
 
   return (
-    <div ref={containerRef} className="space-y-1">
-      {subtitleEntries.map((entry, index) => (
-        <SubtitleRow
-          key={entry.index}
-          entry={entry}
-          isActive={currentEntryIndex === index}
-          onClick={() => {}}
-        />
-      ))}
-    </div>
+    <VirtualizedSubtitleList
+      entries={subtitleEntries}
+      currentEntryIndex={autoScroll ? currentEntryIndex : null}
+    />
   );
 }

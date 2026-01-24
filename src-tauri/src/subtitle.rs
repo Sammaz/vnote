@@ -2,6 +2,51 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
+use std::sync::OnceLock;
+
+// 预编译的正则表达式（只编译一次）
+static SRT_TIME_REGEX: OnceLock<Regex> = OnceLock::new();
+static VTT_TIME_REGEX: OnceLock<Regex> = OnceLock::new();
+static ASS_DIALOGUE_REGEX: OnceLock<Regex> = OnceLock::new();
+static ASS_STYLE_REGEX: OnceLock<Regex> = OnceLock::new();
+static ASS_TAG_REGEX: OnceLock<Regex> = OnceLock::new();
+static HTML_TAG_REGEX: OnceLock<Regex> = OnceLock::new();
+
+fn get_srt_time_regex() -> &'static Regex {
+    SRT_TIME_REGEX.get_or_init(|| {
+        Regex::new(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})").unwrap()
+    })
+}
+
+fn get_vtt_time_regex() -> &'static Regex {
+    VTT_TIME_REGEX.get_or_init(|| {
+        Regex::new(r"(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})").unwrap()
+    })
+}
+
+fn get_ass_dialogue_regex() -> &'static Regex {
+    ASS_DIALOGUE_REGEX.get_or_init(|| {
+        Regex::new(r"^Dialogue:\s*\d+,(\d+):(\d{2}):(\d{2})\.(\d{2}),(\d+):(\d{2}):(\d{2})\.(\d{2}),([^,]*),[^,]*,\d+,\d+,\d+,[^,]*,(.*)$").unwrap()
+    })
+}
+
+fn get_ass_style_regex() -> &'static Regex {
+    ASS_STYLE_REGEX.get_or_init(|| {
+        Regex::new(r"^Style:\s*([^,]+)").unwrap()
+    })
+}
+
+fn get_ass_tag_regex() -> &'static Regex {
+    ASS_TAG_REGEX.get_or_init(|| {
+        Regex::new(r"\{[^}]*\}").unwrap()
+    })
+}
+
+fn get_html_tag_regex() -> &'static Regex {
+    HTML_TAG_REGEX.get_or_init(|| {
+        Regex::new(r"<[^>]+>").unwrap()
+    })
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubtitleEntry {
@@ -56,10 +101,8 @@ fn parse_srt(content: &str) -> Result<Vec<SubtitleEntry>, String> {
     let mut entries = Vec::new();
     let blocks: Vec<&str> = content.split("\n\n").collect();
 
-    // SRT time format: 00:00:00,000 --> 00:00:00,000
-    let time_regex =
-        Regex::new(r"(\d{2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[,.](\d{3})")
-            .unwrap();
+    // 使用预编译的正则表达式
+    let time_regex = get_srt_time_regex();
 
     for block in blocks {
         let lines: Vec<&str> = block.trim().lines().collect();
@@ -130,11 +173,8 @@ fn parse_vtt(content: &str) -> Result<Vec<SubtitleEntry>, String> {
 
     let blocks: Vec<&str> = content.split("\n\n").collect();
 
-    // VTT time format: 00:00:00.000 --> 00:00:00.000
-    let time_regex = Regex::new(
-        r"(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})\s*-->\s*(?:(\d{2}):)?(\d{2}):(\d{2})\.(\d{3})",
-    )
-    .unwrap();
+    // 使用预编译的正则表达式
+    let time_regex = get_vtt_time_regex();
 
     let mut index = 0;
     for block in blocks {
@@ -198,10 +238,8 @@ fn parse_ass(content: &str) -> Result<Vec<SubtitleEntry>, String> {
     let styles = parse_ass_styles(content);
     let has_bilingual = styles.len() > 1;
 
-    // Dialogue 格式
-    let dialogue_regex =
-        Regex::new(r"^Dialogue:\s*\d+,(\d+):(\d{2}):(\d{2})\.(\d{2}),(\d+):(\d{2}):(\d{2})\.(\d{2}),([^,]*),[^,]*,\d+,\d+,\d+,[^,]*,(.*)$")
-            .unwrap();
+    // 使用预编译的正则表达式
+    let dialogue_regex = get_ass_dialogue_regex();
 
     let mut primary_entries: Vec<SubtitleEntry> = Vec::new();
     let mut secondary_entries: Vec<SubtitleEntry> = Vec::new();
@@ -287,7 +325,7 @@ fn parse_ass(content: &str) -> Result<Vec<SubtitleEntry>, String> {
 /// 解析 ASS 文件中的 Styles，返回按顺序排列的 Style 名称列表
 fn parse_ass_styles(content: &str) -> Vec<String> {
     let mut styles = Vec::new();
-    let style_regex = Regex::new(r"^Style:\s*([^,]+)").unwrap();
+    let style_regex = get_ass_style_regex();
 
     for line in content.lines() {
         let line = line.trim();
@@ -361,8 +399,8 @@ fn parse_time_components_ass(hours: &str, minutes: &str, seconds: &str, centis: 
 
 /// Clean ASS formatting tags
 fn clean_ass_text(text: &str) -> String {
-    // Remove ASS override tags like {\pos(x,y)}, {\fad(100,200)}, {\b1}, etc.
-    let tag_regex = Regex::new(r"\{[^}]*\}").unwrap();
+    // 使用预编译的正则表达式
+    let tag_regex = get_ass_tag_regex();
     let cleaned = tag_regex.replace_all(text, "");
 
     // Replace \N with newline
@@ -374,8 +412,8 @@ fn clean_ass_text(text: &str) -> String {
 
 /// Clean common subtitle formatting
 fn clean_subtitle_text(text: &str) -> String {
-    // Remove HTML-like tags
-    let html_regex = Regex::new(r"<[^>]+>").unwrap();
+    // 使用预编译的正则表达式
+    let html_regex = get_html_tag_regex();
     let cleaned = html_regex.replace_all(text, "");
 
     // Remove music symbols and common markers
