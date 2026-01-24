@@ -10,6 +10,7 @@ import Plyr from "plyr";
 import "plyr/dist/plyr.css";
 import { PlaybackResume } from "../PlaybackResume";
 import { useApp } from "../../../context/AppContext";
+import { KeyboardShortcutsHelp } from "./KeyboardShortcutsHelp";
 
 // 导入拆分的模块
 import {
@@ -58,6 +59,7 @@ export function VideoPlayer({
   );
   const [videoDuration, setVideoDuration] = useState<number>(0);
   const [actualVideoUrl, setActualVideoUrl] = useState<string>(videoUrl);
+  const [showHelp, setShowHelp] = useState(false);
 
   // 使用 ref 存储最新值，供事件处理器使用
   const lastSavedPositionRef = useRef<number>(0);
@@ -196,6 +198,28 @@ export function VideoPlayer({
     setShowResumePrompt(false);
   }, []);
 
+  // 监听 H 键显示/隐藏快捷键帮助
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // 忽略输入框等可编辑元素
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target instanceof HTMLElement && e.target.isContentEditable)
+      ) {
+        return;
+      }
+      // 按 H 键切换帮助面板
+      if ((e.key === 'h' || e.key === 'H') && !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey) {
+        e.preventDefault();
+        setShowHelp(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyPress);
+    return () => window.removeEventListener('keydown', handleKeyPress);
+  }, []);
+
   // 主要的播放器初始化 effect
   useEffect(() => {
     if (converting) return;
@@ -261,7 +285,7 @@ export function VideoPlayer({
         settings: ["captions", "quality", "speed"],
         speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] },
         captions: { active: captionsEnabled && !!hasSubtitle, language: "zh", update: true },
-        keyboard: { focused: true, global: false },
+        keyboard: { focused: true, global: true },
         tooltips: { controls: true, seek: true },
         i18n: PLYR_I18N,
       });
@@ -379,6 +403,8 @@ export function VideoPlayer({
       };
 
       player.on("languagechange", handleCaptionsChange);
+      player.on("captionsenabled", handleCaptionsChange);
+      player.on("captionsdisabled", handleCaptionsChange);
 
       const captionBtn = (player.elements as any).buttons?.captions;
       if (captionBtn) {
@@ -496,6 +522,8 @@ export function VideoPlayer({
           clearTimeout(saveTimeoutRef.current);
         }
         player.off("languagechange", handleCaptionsChange);
+        player.off("captionsenabled", handleCaptionsChange);
+        player.off("captionsdisabled", handleCaptionsChange);
         const captionBtn = (player.elements as any).buttons?.captions;
         if (captionBtn && cleanupRef.srtHandler) {
           captionBtn.removeEventListener("click", cleanupRef.srtHandler);
@@ -628,6 +656,17 @@ export function VideoPlayer({
     assVisibleRef.current = captionsEnabled;
   }, [captionsEnabled]);
 
+  // 当帮助框打开/关闭时，切换播放器快捷键的启用状态
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player) return;
+
+    // 帮助框打开时禁用播放器快捷键，关闭时启用
+    if (player.config && player.config.keyboard) {
+      player.config.keyboard.global = !showHelp;
+    }
+  }, [showHelp]);
+
   // 错误状态
   if (error) {
     return (
@@ -675,6 +714,10 @@ export function VideoPlayer({
           onResume={handleResume}
           onDismiss={handleDismissResume}
         />
+      )}
+      {/* 快捷键帮助 */}
+      {showHelp && (
+        <KeyboardShortcutsHelp onClose={() => setShowHelp(false)} />
       )}
     </div>
   );
