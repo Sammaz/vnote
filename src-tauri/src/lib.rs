@@ -21,15 +21,13 @@ use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequ
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
+use tokio::process::Command as TokioCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, WindowEvent};
 
 const TRAY_ICON: &[u8] = include_bytes!("../icons/icon.png");
 static TRAY_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -47,18 +45,20 @@ fn get_db() -> &'static Database {
     DATABASE.get().expect("Database not initialized")
 }
 
-/// Create ffmpeg command with hidden console window on Windows
+/// Create async ffmpeg command with hidden console window on Windows
 #[cfg(windows)]
-fn ffmpeg_command() -> Command {
+fn async_ffmpeg_command() -> TokioCommand {
+    #[allow(unused_imports)]
+    use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let mut cmd = Command::new("ffmpeg");
+    let mut cmd = TokioCommand::new("ffmpeg");
     cmd.creation_flags(CREATE_NO_WINDOW);
     cmd
 }
 
 #[cfg(not(windows))]
-fn ffmpeg_command() -> Command {
-    Command::new("ffmpeg")
+fn async_ffmpeg_command() -> TokioCommand {
+    TokioCommand::new("ffmpeg")
 }
 
 /// Parse asset URLs from Markdown content
@@ -580,26 +580,80 @@ fn validate_file_path(path: &str) -> Result<std::path::PathBuf, String> {
 }
 
 #[tauri::command]
-fn read_file_content(path: String) -> Result<String, String> {
+async fn read_file_content(path: String) -> Result<String, String> {
     // Validate the path first to prevent path traversal attacks
     let validated_path = validate_file_path(&path)?;
 
-    std::fs::read_to_string(&validated_path)
+    tokio::fs::read_to_string(&validated_path)
+        .await
         .map_err(|e| format!("Failed to read file '{}': {}", path, e))
 }
 
 /// Save content to a file
 #[tauri::command]
-fn save_file_content(path: String, content: String) -> Result<(), String> {
-    std::fs::write(&path, content)
+async fn save_file_content(path: String, content: String) -> Result<(), String> {
+    tokio::fs::write(&path, content)
+        .await
         .map_err(|e| format!("Failed to write file '{}': {}", path, e))
 }
 
-/// Convert TS file to MP4 using ffmpeg (fast remux, no re-encoding)
-/// Returns the path to the converted MP4 file
+/// Event payload for TS to MP4 conversion result
+#[derive(Clone, serde::Serialize)]
+struct TsConversionResult {
+    note_id: i64,
+    success: bool,
+    mp4_path: Option<String>,
+    error: Option<String>,
+}
+
+/// Start TS to MP4 conversion in background and emit event when done
+/// This prevents GUI freezing by not blocking the IPC channel
 #[tauri::command]
-async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Result<String, String> {
-    let ts_path = Path::new(&ts_path);
+fn start_ts_conversion(app: AppHandle, ts_path: String, note_id: i64) {
+    // Spawn the conversion task in background and return immediately
+    tauri::async_runtime::spawn(async move {
+        // Check ffmpeg availability first
+        let ffmpeg_available = match async_ffmpeg_command().arg("-version").output().await {
+            Ok(output) => output.status.success(),
+            Err(_) => false,
+        };
+
+        if !ffmpeg_available {
+            let payload = TsConversionResult {
+                note_id,
+                success: false,
+                mp4_path: None,
+                error: Some("未检测到 ffmpeg。请安装 ffmpeg 以支持 TS 视频播放。".to_string()),
+            };
+            let _ = app.emit("ts-conversion-complete", payload);
+            return;
+        }
+
+        let result = convert_ts_to_mp4_internal(&app, &ts_path, note_id).await;
+
+        let payload = match result {
+            Ok(mp4_path) => TsConversionResult {
+                note_id,
+                success: true,
+                mp4_path: Some(mp4_path),
+                error: None,
+            },
+            Err(e) => TsConversionResult {
+                note_id,
+                success: false,
+                mp4_path: None,
+                error: Some(e),
+            },
+        };
+
+        // Emit event to frontend
+        let _ = app.emit("ts-conversion-complete", payload);
+    });
+}
+
+/// Internal function to perform TS to MP4 conversion
+async fn convert_ts_to_mp4_internal(app: &AppHandle, ts_path: &str, note_id: i64) -> Result<String, String> {
+    let ts_path = Path::new(ts_path);
 
     // Verify it's a .ts file
     if ts_path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) != Some("ts".to_string()) {
@@ -609,7 +663,7 @@ async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Res
     // Create output path in app cache directory, organized by note ID
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let note_cache_dir = cache_dir.join("notes").join(note_id.to_string());
-    std::fs::create_dir_all(&note_cache_dir).map_err(|e| e.to_string())?;
+    tokio::fs::create_dir_all(&note_cache_dir).await.map_err(|e| e.to_string())?;
 
     // Generate output filename based on input file hash
     let file_name = ts_path.file_stem()
@@ -619,23 +673,34 @@ async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Res
 
     // If already converted, return existing file
     if mp4_path.exists() {
-        // Check if the mp4 file is newer than the ts file
-        let ts_modified = std::fs::metadata(&ts_path)
-            .and_then(|m| m.modified())
-            .ok();
-        let mp4_modified = std::fs::metadata(&mp4_path)
-            .and_then(|m| m.modified())
-            .ok();
+        // Check if the mp4 file is newer than the ts file (use spawn_blocking for sync I/O)
+        let ts_path_clone = ts_path.to_path_buf();
+        let mp4_path_clone = mp4_path.clone();
 
-        if let (Some(ts_time), Some(mp4_time)) = (ts_modified, mp4_modified) {
-            if mp4_time > ts_time {
-                return Ok(mp4_path.to_string_lossy().to_string());
+        let should_use_cache = tokio::task::spawn_blocking(move || {
+            let ts_modified = std::fs::metadata(&ts_path_clone)
+                .and_then(|m| m.modified())
+                .ok();
+            let mp4_modified = std::fs::metadata(&mp4_path_clone)
+                .and_then(|m| m.modified())
+                .ok();
+
+            if let (Some(ts_time), Some(mp4_time)) = (ts_modified, mp4_modified) {
+                mp4_time > ts_time
+            } else {
+                false
             }
+        })
+        .await
+        .unwrap_or(false);
+
+        if should_use_cache {
+            return Ok(mp4_path.to_string_lossy().to_string());
         }
     }
 
     // Run ffmpeg to remux (copy streams, no re-encoding)
-    let output = ffmpeg_command()
+    let output = async_ffmpeg_command()
         .args([
             "-y",                           // Overwrite output
             "-i", &ts_path.to_string_lossy(), // Input file
@@ -644,6 +709,7 @@ async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Res
             &mp4_path.to_string_lossy(),    // Output file
         ])
         .output()
+        .await
         .map_err(|e| format!("Failed to run ffmpeg: {}. Please ensure ffmpeg is installed.", e))?;
 
     if !output.status.success() {
@@ -654,10 +720,18 @@ async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Res
     Ok(mp4_path.to_string_lossy().to_string())
 }
 
+/// Convert TS file to MP4 using ffmpeg (fast remux, no re-encoding)
+/// Returns the path to the converted MP4 file
+/// Note: For long-running conversions, prefer using start_ts_conversion with events
+#[tauri::command]
+async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Result<String, String> {
+    convert_ts_to_mp4_internal(&app, &ts_path, note_id).await
+}
+
 /// Check if ffmpeg is available
 #[tauri::command]
-fn check_ffmpeg() -> Result<bool, String> {
-    match ffmpeg_command().arg("-version").output() {
+async fn check_ffmpeg() -> Result<bool, String> {
+    match async_ffmpeg_command().arg("-version").output().await {
         Ok(output) => Ok(output.status.success()),
         Err(_) => Ok(false),
     }
@@ -665,7 +739,7 @@ fn check_ffmpeg() -> Result<bool, String> {
 
 /// Get the total size of video cache (converted MP4 files only, excluding screenshots)
 #[tauri::command]
-fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
+async fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let notes_cache_dir = cache_dir.join("notes");
 
@@ -673,45 +747,54 @@ fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
         return Ok(0);
     }
 
-    let mut total_size: u64 = 0;
+    // Move the recursive operation to a blocking thread pool
+    tokio::task::spawn_blocking(move || {
+        let mut total_size: u64 = 0;
 
-    // Recursively find and calculate size of MP4 files only
-    fn calculate_mp4_size(dir: &std::path::Path, total: &mut u64) -> std::io::Result<()> {
-        if dir.is_dir() {
-            for entry in std::fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
+        // Recursively find and calculate size of MP4 files only
+        fn calculate_mp4_size(dir: &std::path::Path, total: &mut u64) -> std::io::Result<()> {
+            if dir.is_dir() {
+                for entry in std::fs::read_dir(dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
 
-                // Skip screenshots directory
-                if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("screenshots") {
-                    continue;
-                }
+                    // Skip screenshots directory
+                    if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("screenshots") {
+                        continue;
+                    }
 
-                if path.is_dir() {
-                    calculate_mp4_size(&path, total)?;
-                } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
-                    if let Ok(metadata) = std::fs::metadata(&path) {
-                        *total += metadata.len();
+                    if path.is_dir() {
+                        calculate_mp4_size(&path, total)?;
+                    } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
+                        if let Ok(metadata) = std::fs::metadata(&path) {
+                            *total += metadata.len();
+                        }
                     }
                 }
             }
+            Ok(())
         }
-        Ok(())
-    }
 
-    let _ = calculate_mp4_size(&notes_cache_dir, &mut total_size);
-
-    Ok(total_size)
+        let _ = calculate_mp4_size(&notes_cache_dir, &mut total_size);
+        Ok::<u64, String>(total_size)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// Clear chapter screenshots for a specific note
 #[tauri::command]
-fn clear_chapter_screenshots(app: AppHandle, note_id: i64) -> Result<(), String> {
+async fn clear_chapter_screenshots(app: AppHandle, note_id: i64) -> Result<(), String> {
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
 
     if screenshots_dir.exists() {
-        std::fs::remove_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
+        tokio::task::spawn_blocking(move || {
+            std::fs::remove_dir_all(&screenshots_dir)
+                .map_err(|e| format!("Failed to clear screenshots: {}", e))
+        })
+        .await
+        .map_err(|e| format!("Task join error: {}", e))??;
     }
 
     Ok(())
@@ -719,7 +802,7 @@ fn clear_chapter_screenshots(app: AppHandle, note_id: i64) -> Result<(), String>
 
 /// Clear video cache (delete MP4 files only, keep screenshots)
 #[tauri::command]
-fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
+async fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let notes_cache_dir = cache_dir.join("notes");
 
@@ -727,38 +810,42 @@ fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
         return Ok(0);
     }
 
-    let mut cleared_size: u64 = 0;
+    // Move the recursive operation to a blocking thread pool
+    tokio::task::spawn_blocking(move || {
+        let mut cleared_size: u64 = 0;
 
-    // Recursively find and delete MP4 files only
-    fn delete_mp4_files(dir: &std::path::Path, cleared: &mut u64) -> std::io::Result<()> {
-        if dir.is_dir() {
-            for entry in std::fs::read_dir(dir)? {
-                let entry = entry?;
-                let path = entry.path();
+        // Recursively find and delete MP4 files only
+        fn delete_mp4_files(dir: &std::path::Path, cleared: &mut u64) -> std::io::Result<()> {
+            if dir.is_dir() {
+                for entry in std::fs::read_dir(dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
 
-                // Skip screenshots directory
-                if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("screenshots") {
-                    continue;
-                }
+                    // Skip screenshots directory
+                    if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("screenshots") {
+                        continue;
+                    }
 
-                if path.is_dir() {
-                    delete_mp4_files(&path, cleared)?;
-                } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
-                    if let Ok(metadata) = std::fs::metadata(&path) {
-                        let file_size = metadata.len();
-                        if std::fs::remove_file(&path).is_ok() {
-                            *cleared += file_size;
+                    if path.is_dir() {
+                        delete_mp4_files(&path, cleared)?;
+                    } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
+                        if let Ok(metadata) = std::fs::metadata(&path) {
+                            let file_size = metadata.len();
+                            if std::fs::remove_file(&path).is_ok() {
+                                *cleared += file_size;
+                            }
                         }
                     }
                 }
             }
+            Ok(())
         }
-        Ok(())
-    }
 
-    let _ = delete_mp4_files(&notes_cache_dir, &mut cleared_size);
-
-    Ok(cleared_size)
+        let _ = delete_mp4_files(&notes_cache_dir, &mut cleared_size);
+        Ok::<u64, String>(cleared_size)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 // Note commands
@@ -788,18 +875,28 @@ fn update_note(note: Note) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_note(app: AppHandle, id: i64) -> Result<(), String> {
+async fn delete_note(app: AppHandle, id: i64) -> Result<(), String> {
     let db = get_db();
 
     // Delete entire note cache directory (includes TS video cache and chapter screenshots)
     if let Ok(cache_dir) = app.path().app_cache_dir() {
         let note_cache_dir = cache_dir.join("notes").join(id.to_string());
         if note_cache_dir.exists() {
-            let _ = std::fs::remove_dir_all(&note_cache_dir);
+            tokio::task::spawn_blocking(move || {
+                let _ = std::fs::remove_dir_all(&note_cache_dir);
+            })
+            .await
+            .map_err(|e| format!("Task join error: {}", e))?;
         }
     }
 
-    db.delete_note(id).map_err(|e| e.to_string())
+    // Database operation in spawn_blocking
+    let note_id = id;
+    tokio::task::spawn_blocking(move || {
+        db.delete_note(note_id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -1126,8 +1223,12 @@ async fn abort_chapter_generation(generation_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn parse_subtitle_file(path: String) -> Result<Vec<subtitle::SubtitleEntry>, String> {
-    subtitle::parse_subtitle_file(&path)
+async fn parse_subtitle_file(path: String) -> Result<Vec<subtitle::SubtitleEntry>, String> {
+    tokio::task::spawn_blocking(move || {
+        subtitle::parse_subtitle_file(&path)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
@@ -1348,7 +1449,8 @@ async fn capture_video_frame(
     // Ensure output directory exists
     let output_path_obj = Path::new(&output_path);
     if let Some(parent) = output_path_obj.parent() {
-        std::fs::create_dir_all(parent)
+        tokio::fs::create_dir_all(parent)
+            .await
             .map_err(|e| format!("Failed to create output directory: {}", e))?;
     }
 
@@ -1357,7 +1459,7 @@ async fn capture_video_frame(
     // -i: input file
     // -frames:v 1: capture only 1 frame
     // -q:v 2: high quality JPEG (lower number = higher quality, range 2-31)
-    let output = ffmpeg_command()
+    let output = async_ffmpeg_command()
         .args([
             "-y",                              // Overwrite output file if exists
             "-ss", &format!("{:.3}", timestamp), // Seek to timestamp (in seconds)
@@ -1367,6 +1469,7 @@ async fn capture_video_frame(
             &output_path,                      // Output file path
         ])
         .output()
+        .await
         .map_err(|e| format!("Failed to run ffmpeg: {}. Please ensure ffmpeg is installed.", e))?;
 
     if !output.status.success() {
@@ -1739,6 +1842,7 @@ pub fn run() {
             read_file_content,
             save_file_content,
             convert_ts_to_mp4,
+            start_ts_conversion,
             check_ffmpeg,
             get_video_cache_size,
             clear_video_cache,

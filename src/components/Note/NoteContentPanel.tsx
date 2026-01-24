@@ -1437,7 +1437,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     return () => {
-      unlisten.then(fn => fn());
+      unlisten();
     };
   }, [note.id, note.model_id, blueprintIsGenerating, onGenerationComplete]);
 

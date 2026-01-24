@@ -126,7 +126,7 @@ export function VideoPlayer({
     }
   }, [loading, videoDuration, lastPlaybackPosition]);
 
-  // TS 文件转换为 MP4
+  // TS 文件转换为 MP4 (使用事件驱动模式避免 GUI 卡顿)
   useEffect(() => {
     if (!isTsFormat(videoUrl)) {
       setActualVideoUrl(videoUrl);
@@ -138,37 +138,48 @@ export function VideoPlayer({
     setConverting(true);
     setLoading(true);
 
-    const convertVideo = async () => {
-      try {
-        const ffmpegAvailable = await invoke<boolean>("check_ffmpeg");
-        if (!ffmpegAvailable) {
-          throw new Error("未检测到 ffmpeg。请安装 ffmpeg 以支持 TS 视频播放。");
-        }
+    // 监听转换完成事件
+    let unlisten: (() => void) | null = null;
 
-        const mp4Path = await invoke<string>("convert_ts_to_mp4", {
+    // 使用 requestAnimationFrame 确保 UI 先渲染，再启动后台任务
+    requestAnimationFrame(() => {
+      if (cancelled) return;
+
+      import("@tauri-apps/api/event").then(({ listen }) => {
+        if (cancelled) return;
+
+        listen<{ note_id: number; success: boolean; mp4_path: string | null; error: string | null }>(
+          "ts-conversion-complete",
+          (event) => {
+            // 只处理当前 noteId 的转换结果
+            if (event.payload.note_id === noteId && !cancelled) {
+              if (event.payload.success && event.payload.mp4_path) {
+                setActualVideoUrl(event.payload.mp4_path);
+                setConverting(false);
+              } else {
+                setError("TS 视频转换失败：" + (event.payload.error || "未知错误"));
+                setConverting(false);
+                setLoading(false);
+              }
+            }
+          }
+        ).then((unlistenFn) => {
+          unlisten = unlistenFn;
+        });
+
+        // 启动转换（完全非阻塞，ffmpeg 检查在后端进行）
+        invoke("start_ts_conversion", {
           tsPath: videoUrl,
           noteId: noteId
         });
-
-        if (!cancelled) {
-          setActualVideoUrl(mp4Path);
-          setConverting(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.error("TS conversion error:", err);
-          const errorMsg = err instanceof Error ? err.message : String(err);
-          setError("TS 视频转换失败：" + errorMsg);
-          setConverting(false);
-          setLoading(false);
-        }
-      }
-    };
-
-    convertVideo();
+      });
+    });
 
     return () => {
       cancelled = true;
+      if (unlisten) {
+        unlisten();
+      }
     };
   }, [videoUrl, noteId]);
 
