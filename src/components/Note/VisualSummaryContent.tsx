@@ -4,13 +4,14 @@
  * 支持 Markdown 和思维导图两种视图模式
  */
 
-import { useMemo, useEffect, forwardRef } from "react";
+import { useMemo, useEffect, forwardRef, useRef } from "react";
 import { BarChart3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChapterData, SubtitleEntry } from "../../types";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 import { MindMapView, type MindMapViewRef } from "./MindMap";
+import { TableOfContents, generateId, getTextFromChildren } from "./TableOfContents";
 
 /** 视觉化总结视图模式 */
 export type VisualViewMode = "markdown" | "mindmap";
@@ -112,17 +113,80 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
     );
   }
 
+  const slugCountsRef = useRef<Record<string, number>>({});
+
+  // Reset slug counts before render (technically inside render phase, consistent with React patterns for this use case)
+  slugCountsRef.current = {};
+
+  const generateHeaderId = (children: React.ReactNode) => {
+    const rawText = getTextFromChildren(children).replace(/\[\d{2}:\d{2}:\d{2}\]/g, "").trim();
+    let id = generateId(rawText, "viz");
+    // console.log("Viz ID Gen:", { rawText, id }); // Debug
+    if (slugCountsRef.current[id]) {
+        slugCountsRef.current[id]++;
+        id = `${id}-${slugCountsRef.current[id]}`;
+    } else {
+        slugCountsRef.current[id] = 1;
+    }
+    return id;
+  };
+
+  // Stack component for timestamp rendering (copied from EditableMarkdown to ensure consistency)
+  const renderWithTimestamp = (children: React.ReactNode[]) => {
+    const TIMESTAMP_REGEX = /\[(\d{2}:\d{2}:\d{2})\]/g;
+    return children.map((child, index) => {
+      if (typeof child === 'string') {
+        if (TIMESTAMP_REGEX.test(child)) {
+          const parts = child.split(TIMESTAMP_REGEX);
+          const matches = child.match(TIMESTAMP_REGEX) || [];
+          let matchIndex = 0;
+          return parts.map((part, partIndex) => {
+            if (matchIndex < matches.length && matches[matchIndex] === `[${part}]`) {
+              matchIndex++;
+              return <span key={`${index}-${partIndex}`} className="timestamp">{part}</span>;
+            }
+            return <span key={`${index}-${partIndex}`}>{part}</span>;
+          });
+        }
+      }
+      return <span key={index}>{child}</span>;
+    });
+  };
+
   // Markdown 预览模式
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto px-2 py-2">
+    <div className="relative h-full flex flex-row group">
+      <div className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
         <div className="note-markdown">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
+              h1: ({ children }) => {
+                const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+                const id = generateHeaderId(children);
+                return <h1 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h1>;
+              },
+              h2: ({ children }) => {
+                const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+                const id = generateHeaderId(children);
+                return <h2 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h2>;
+              },
+              h3: ({ children }) => {
+                const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+                const id = generateHeaderId(children);
+                return <h3 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h3>;
+              },
+              p: ({ children }) => {
+                const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+                return <p>{renderWithTimestamp(content)}</p>;
+              },
+              strong: ({ children }) => {
+                const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+                return <strong>{renderWithTimestamp(content)}</strong>;
+              },
               img: ({ src, alt, ...props }) => {
                 return (
-                  <div className="flex justify-center items-center w-full my-4">
+                  <span className="flex justify-center items-center w-full my-4">
                     <img
                       src={src}
                       alt={alt}
@@ -130,7 +194,7 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
                       className="rounded-lg max-w-full h-auto object-contain"
                       style={{ maxHeight: '80vh' }}
                     />
-                  </div>
+                  </span>
                 );
               },
             }}
@@ -139,6 +203,7 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
           </ReactMarkdown>
         </div>
       </div>
+      <TableOfContents markdown={markdownContent} idPrefix="viz" />
     </div>
   );
 });

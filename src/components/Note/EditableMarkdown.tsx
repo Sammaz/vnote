@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { TableOfContents, generateId, getTextFromChildren } from "./TableOfContents";
 
 type TabType = "full_summary" | "detailed_reading" | "highlights" | "visual_summary" | "custom_summary" | "panoramic_blueprint";
 
@@ -103,6 +104,7 @@ export function EditableMarkdown({
   // 用于跟踪checkbox选中状态的本地状态（不保存到markdown）
   const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
   const checkboxIndexRef = useRef(0);
+  const slugCountsRef = useRef<Record<string, number>>({});
 
   // 当内容变化时重置checkbox状态
   useEffect(() => {
@@ -213,64 +215,87 @@ export function EditableMarkdown({
   }
 
   // 预览模式（使用现有的 ReactMarkdown 样式）
-  // 在每次渲染前重置checkbox索引
+  // 在每次渲染前重置checkbox索引和标题ID计数
   checkboxIndexRef.current = 0;
+  slugCountsRef.current = {};
+
+  const generateHeaderId = (children: React.ReactNode) => {
+    const rawText = getTextFromChildren(children).replace(/\[\d{2}:\d{2}:\d{2}\]/g, "").trim();
+    let id = generateId(rawText, "doc");
+    if (slugCountsRef.current[id]) {
+        slugCountsRef.current[id]++;
+        id = `${id}-${slugCountsRef.current[id]}`;
+    } else {
+        slugCountsRef.current[id] = 1;
+    }
+    return id;
+  };
 
   return (
-    <div className="note-markdown">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={{
-          // 自定义checkbox渲染
-          input: ({ node, ...props }) => {
-            if (props.type === 'checkbox') {
-              const currentIndex = checkboxIndexRef.current++;
-              const isChecked = checkedItems.has(currentIndex);
+    <div className="relative h-full flex flex-row group">
+      <div className="note-markdown flex-1 overflow-y-auto px-4 h-full custom-scrollbar">
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // 自定义checkbox渲染
+            input: ({ node, ...props }) => {
+              if (props.type === 'checkbox') {
+                const currentIndex = checkboxIndexRef.current++;
+                const isChecked = checkedItems.has(currentIndex);
 
-              return (
-                <input
-                  type="checkbox"
-                  checked={isChecked}
-                  onChange={() => {
-                    setCheckedItems(prev => {
-                      const newSet = new Set(prev);
-                      if (newSet.has(currentIndex)) {
-                        newSet.delete(currentIndex);
-                      } else {
-                        newSet.add(currentIndex);
-                      }
-                      return newSet;
-                    });
-                  }}
-                  className="cursor-pointer mr-2"
-                />
-              );
-            }
-            return <input {...props} />;
-          },
-          // 处理标题中的时间戳
-          h2: ({ children }) => {
-            const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-            return <h2>{renderWithTimestamp(content)}</h2>;
-          },
-          h3: ({ children }) => {
-            const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-            return <h3>{renderWithTimestamp(content)}</h3>;
-          },
-          // 处理段落中的时间戳
-          p: ({ children }) => {
-            const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-            return <p>{renderWithTimestamp(content)}</p>;
-          },
-          // 处理强调文本中的时间戳
-          strong: ({ children }) => {
-            const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-            return <strong>{renderWithTimestamp(content)}</strong>;
-          },
-        }}
-      >
-        {markdown}
-      </ReactMarkdown>
+                return (
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={() => {
+                      setCheckedItems(prev => {
+                        const newSet = new Set(prev);
+                        if (newSet.has(currentIndex)) {
+                          newSet.delete(currentIndex);
+                        } else {
+                          newSet.add(currentIndex);
+                        }
+                        return newSet;
+                      });
+                    }}
+                    className="cursor-pointer mr-2"
+                  />
+                );
+              }
+              return <input {...props} />;
+            },
+            // 处理标题中的时间戳并添加ID
+            h1: ({ children }) => {
+              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+              const id = generateHeaderId(children);
+              return <h1 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h1>;
+            },
+            h2: ({ children }) => {
+              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+              const id = generateHeaderId(children);
+              return <h2 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h2>;
+            },
+            h3: ({ children }) => {
+              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+              const id = generateHeaderId(children);
+              return <h3 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h3>;
+            },
+            // 处理段落中的时间戳
+            p: ({ children }) => {
+              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+              return <p>{renderWithTimestamp(content)}</p>;
+            },
+            // 处理强调文本中的时间戳
+            strong: ({ children }) => {
+              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
+              return <strong>{renderWithTimestamp(content)}</strong>;
+            },
+          }}
+        >
+          {markdown}
+        </ReactMarkdown>
+      </div>
+      <TableOfContents markdown={markdown} idPrefix="doc" />
     </div>
   );
 }
