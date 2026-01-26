@@ -959,8 +959,9 @@
 }
 
 /* 中等毛玻璃 - 适用于侧边栏、导航栏 */
+/* 注意：backdrop-filter 在某些 WebView 环境中可能不生效，因此使用较高的背景不透明度作为回退 */
 .glass-medium {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid rgba(0, 0, 0, 0.1);
@@ -968,7 +969,7 @@
 }
 
 .dark .glass-medium {
-  background: rgba(20, 20, 20, 0.7);
+  background: rgba(30, 41, 59, 0.98);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
 }
