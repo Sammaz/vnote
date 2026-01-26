@@ -193,7 +193,7 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
-        className={`absolute right-6 top-4 z-40 p-2.5 rounded-xl glass-button transition-all duration-300 text-slate-500 dark:text-slate-400 hover:text-blue-500 dark:hover:text-blue-400 shadow-sm hover:shadow-md ${
+        className={`absolute right-3 top-0 z-40 p-2.5 rounded-xl glass-button transition-all duration-300 text-slate-500 dark:text-slate-400 hover:text-blue-500 dark:hover:text-blue-400 shadow-sm hover:shadow-md ${
           isOpen ? "opacity-0 pointer-events-none translate-x-4" : "opacity-100 translate-x-0"
         }`}
         title="目录"
@@ -203,7 +203,7 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
 
       <div
         data-tauri-drag-region="false"
-        className={`absolute right-4 top-4 bottom-4 w-72 glass-medium rounded-2xl border border-white/20 dark:border-white/5 shadow-2xl z-50 transition-all duration-300 flex flex-col transform ${
+        className={`absolute right-4 top-0 bottom-4 w-72 glass-medium rounded-2xl border border-white/20 dark:border-white/5 shadow-2xl z-50 transition-all duration-300 flex flex-col transform ${
           isOpen ? "translate-x-0 opacity-100" : "translate-x-[120%] opacity-0 pointer-events-none"
         }`}
       >
