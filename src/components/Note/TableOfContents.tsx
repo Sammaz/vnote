@@ -203,18 +203,18 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
 
       <div
         data-tauri-drag-region="false"
-        className={`absolute right-2 -top-4 bottom-4 w-72 glass-medium rounded-2xl border border-white/20 dark:border-white/5 shadow-2xl z-50 transition-all duration-300 flex flex-col transform ${
+        className={`absolute right-2 -top-4 bottom-4 w-72 glass-medium bg-white/50 dark:bg-slate-900/70 rounded-2xl border border-white/20 dark:border-white/5 shadow-2xl z-50 transition-all duration-300 flex flex-col transform ${
           isOpen ? "translate-x-0 opacity-100" : "translate-x-[120%] opacity-0 pointer-events-none"
         }`}
       >
-        <div className="flex items-center justify-between p-4 pb-2 border-b border-slate-200/50 dark:border-slate-700/50 bg-white/30 dark:bg-black/20 rounded-t-2xl backdrop-blur-sm">
+        <div className="flex items-center justify-between p-4 pb-2 border-b border-slate-200/50 dark:border-slate-700/50 bg-white/60 dark:bg-slate-800/60 rounded-t-2xl backdrop-blur-sm">
           <h3 className="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2">
             <List size={16} className="text-blue-500" />
             目录导航
           </h3>
           <button
             onClick={() => setIsOpen(false)}
-            className="p-1.5 hover:bg-slate-200/50 dark:hover:bg-slate-700/50 rounded-lg text-slate-500 transition-colors"
+            className="p-1.5 hover:bg-slate-200/70 dark:hover:bg-slate-700/70 rounded-lg text-slate-500 transition-colors"
           >
             <ChevronRight size={18} />
           </button>
@@ -231,8 +231,8 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
                   item.level === 2 ? "pl-6 text-[0.95em]" : "pl-10 text-[0.9em]"
                 } ${
                   activeIndex === item.index
-                    ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium shadow-sm"
-                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100/80 dark:hover:bg-slate-800/50 hover:text-slate-900 dark:hover:text-slate-200"
+                    ? "bg-blue-50/80 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-medium shadow-sm"
+                    : "text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800/70 hover:text-slate-900 dark:hover:text-slate-200"
                 }`}
                 onClick={(e) => {
                   e.preventDefault();
