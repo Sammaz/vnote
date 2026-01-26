@@ -134,69 +134,61 @@ fn build_chapter_prompt(
     total_chapters: usize,
 ) -> String {
     format!(
-        r##"YOU ARE THE "OMNISCIENT KNOWLEDGE RECONSTRUCTION ENGINE" (OKRE).
-当前状态: [GENERATOR]
-任务目标: 为第 {index}/{total} 章生成深度内容。
+        r##"你是"全知知识重构引擎"(OKRE)，负责为第 {index}/{total} 章生成深度内容。
 
-章节标题: {title}
-本章目标: {objective}
-关键子题: {key_points}
+【输入信息】
+- 章节标题: {title}
+- 本章目标: {objective}
+- 关键子题: {key_points}
+- 内容素材: {subtitle_content}
 
-内容素材:
-{subtitle_content}
+【输出格式 - 必须严格遵守】
 
-=== 🏗️ 模块化积木架构 (MODULAR CONTENT BLOCK ARCHITECTURE) ===
-你生成的本章内容必须严格包含以下 5 个标准积木。严禁省略任何一个。
+你的输出必须且只能包含以下结构，按顺序输出：
 
-### Block 0: The Meta-Anchor (章节元数据)
-必须位于章节标题 (H2) 下方。
-格式:
-> [!info] ⏱️ 章节坐标
-> * **⏱️ 时间戳**: [HH:MM:SS - HH:MM:SS] (根据内容素材估算并填写)
-> * **🔑 核心概念**: #概念A #概念B (必须使用纯中文标签)
-> * **🎯 本章目标**: {objective}
+1. 章节主标题 (H2)，格式必须精确为:
+   ## 第 {index} 章 {title}
 
-### Block A: The Theoretical Core (深度理论层)
-**Header**: ### {index}.1 [核心理论名称]
-**要求**:
-1. **定义重构**: 给出教科书级的学术定义，并用 `==高亮==` 标注核心术语。
-2. **归因链条**: 构建 `Condition A -> Mechanism B -> Result C` 的逻辑链。
-3. **语境锚点**: 解释理论的历史背景或适用边界。
+2. 紧跟章节元数据 Callout (无标题，直接输出):
+   > [!info] ⏱️ 章节坐标
+   > * **⏱️ 时间戳**: [HH:MM:SS - HH:MM:SS]
+   > * **🔑 核心概念**: #概念A #概念B
+   > * **🎯 本章目标**: {objective}
 
-### Block B: The AI Augmentation Layer (AI 智能增强层)
-**Header**: ### {index}.2 [AI 增强解析]
-**要求**: 必须使用以下 Obsidian Callouts 补充视频缺失的深度。
-> [!abstract] 🧬 第一性原理
-> (解释背后的物理学/生物学/经济学底层定律)
+3. 理论核心部分 (H3):
+   ### {index}.1 [核心理论名称]
+   内容要求: 定义重构(用==高亮==标注核心术语)、归因链条、语境锚点
 
-> [!example] 🏛️ 场景具象化
-> (创造一个哈佛商学院级别的具体案例: Context -> Conflict -> Action -> Resolution)
+4. AI增强解析部分 (H3):
+   ### {index}.2 AI 增强解析
+   必须包含三个 Callout:
+   > [!abstract] 🧬 第一性原理
+   > [!example] 🏛️ 场景具象化
+   > [!tip] 🔗 跨学科思维模型
 
-> [!tip] 🔗 跨学科思维模型
-> (链接到二八定律、反脆弱、熵增等更高维模型)
+5. 批判性思考部分 (H3):
+   ### {index}.3 批判性思考
+   必须包含:
+   > [!warning] ⚠️ 边界与盲点
 
-### Block C: The Critical Horizon (批判性视界)
-**Header**: ### {index}.3 [批判性思考]
-**要求**: 进行红队测试 (Red-Teaming)。
-> [!warning] ⚠️ 边界与盲点
-> (此理论在什么情况下绝对失效？作者的幸存者偏差在哪里？)
+6. 实战SOP部分 (H3):
+   ### {index}.4 实战执行 SOP
+   格式:
+   - [ ] **Step 1: [动作名称]** -> *Success Metric: ...*
+   - [ ] **Step 2: [动作名称]** -> *Success Metric: ...*
 
-### Block D: The Action Protocol (手把手 SOP)
-**Header**: ### {index}.4 [实战执行SOP]
-**要求**: 将知识转化为原子级行动。
-格式:
-- [ ] **Step 1**: [具体动作] -> *Success Metric: [如何判断做好了?]*
-- [ ] **Step 2**: ...
+【禁止事项】
+- 禁止输出任何指令文本、状态信息或元描述
+- 禁止添加 "Block 0"、"Block A" 等标签作为标题
+- 禁止在 H2/H3 标题中使用 [[双向链接]]
+- 禁止输出 ```markdown``` 包裹标记
 
-=== ✍️ 文风强制规范 ===
-1. **高语境 (High-Context)**: 拒绝废话，使用高密度专业术语。
-2. **排版语义**: 仅对 **动词** 和 **数据** 使用 **加粗**。
-3. **原子化列表**: 严禁超过 5 行的纯文本段落，必须拆解为列表。
-4. **Obsidian 兼容性**:
-   - 标题行 (# H2/H3) 严禁包含 `[[链接]]`。
-   - 仅对首次出现的核心概念使用 `[[双向链接]]`。
+【文风规范】
+- 高密度专业术语，拒绝废话
+- 仅对动词和数据使用**加粗**
+- 严禁超过5行的纯文本段落
 
-请直接输出 Markdown 内容，不要包含```markdown```包裹标记。字数要求: 2000字左右。"##,
+字数要求: 2000字左右。直接输出 Markdown 内容。"##,
         index = chapter.index,
         total = total_chapters,
         title = chapter.title,
@@ -242,25 +234,32 @@ fn build_synthesizer_prompt(video_title: &str, chapter_summaries: &str, subtitle
 原始内容素材(用于提取深度知识点):
 {subtitle_content}
 
-=== 输出规范 ===
-请生成包含以下三个部分的 Markdown 内容:
+=== 🚨 输出规范 - 必须严格遵守以下格式 ===
+请生成包含以下三个部分的 Markdown 内容，标题格式必须**完全一致**:
 
-### Part 1: Executive Summary (全局思维导图化摘要)
+### Part 1: Executive Summary (全景深度重构蓝图)
 使用 Markdown 列表树形结构，在一页内概括全书核心逻辑。
+- 使用多级缩进列表展示知识层级
+- 每个核心概念用 **加粗** 标注
 
-### Part 2: Anki Flashcards (记忆卡片)
+### Part 2: Anki Flashcards
 提取 5-10 个最核心的"反直觉"或"高价值"知识点，转化为 Anki 格式。
-格式要求:
-### 🧠 Flashcards
-Q: [核心问题]
-A: [深度解析]
 
-(请生成 5-10 组)
+格式要求 (必须严格遵守，直接在 Part 2 标题下输出卡片，不要添加额外的子标题):
 
-### Part 3: Tag Index (标签索引)
-#领域/子领域 #核心概念/A #核心概念/B
+**Q: [核心问题]**
+**A:** [深度解析，2-4句话]
 
-注意: 直接输出 Markdown 内容，不要重复章节正文。"##,
+(请生成 5-10 组，每组之间空一行)
+
+### Part 3: Tag Index
+格式: 在一行内列出所有标签，用空格分隔
+#领域/子领域 #核心概念A #核心概念B #核心概念C
+
+=== ⚠️ 注意事项 ===
+1. 直接输出 Markdown 内容，不要包含```markdown```包裹标记
+2. 不要重复章节正文内容
+3. Part 标题必须使用 ### (H3) 级别"##,
         video_title = video_title,
         chapter_summaries = chapter_summaries,
         subtitle_content = subtitle_content
