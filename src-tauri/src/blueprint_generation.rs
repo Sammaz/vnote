@@ -27,6 +27,8 @@ pub struct ChapterOutline {
     pub title: String,
     pub objective: String,
     pub key_points: Vec<String>,
+    pub start_time: String,  // 章节开始时间戳 (HH:MM:SS)
+    pub end_time: String,    // 章节结束时间戳 (HH:MM:SS)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -96,7 +98,7 @@ fn build_outline_prompt(subtitle_content: &str, video_title: &str) -> String {
 基于以下视频内容，设计一份"全景深度重构蓝图"的 JSON 大纲。
 
 视频标题: {video_title}
-内容素材:
+内容素材(每行格式为 [时间戳] 字幕内容):
 {subtitle_content}
 
 === 输出规范 ===
@@ -112,7 +114,9 @@ fn build_outline_prompt(subtitle_content: &str, video_title: &str) -> String {
       "index": 1,
       "title": "章节标题(不含序号)",
       "objective": "本章核心解决的问题与认知目标",
-      "key_points": ["关键子题1", "关键子题2", "关键子题3"]
+      "key_points": ["关键子题1", "关键子题2", "关键子题3"],
+      "start_time": "00:00:00",
+      "end_time": "00:05:30"
     }}
   ]
 }}
@@ -121,6 +125,7 @@ fn build_outline_prompt(subtitle_content: &str, video_title: &str) -> String {
 1. 结构重构: 将内容重组为 4-7 个逻辑严密的深度章节 (Chapters)。
 2. 标题策略: 标题必须体现核心洞察，拒绝平庸的描述（如"什么是X" -> "X的熵减本质与运行机制"）。
 3. 颗粒度: 每个章节必须承载 1500 字以上的深度内容。
+4. 时间戳要求: 每个章节必须标注 start_time 和 end_time，格式为 HH:MM:SS。时间戳必须基于内容素材中的实际时间戳，准确反映该章节内容在视频中的时间范围。章节之间的时间应该连续覆盖整个视频。
 "##,
         video_title = video_title,
         subtitle_content = subtitle_content
@@ -140,6 +145,7 @@ fn build_chapter_prompt(
 - 章节标题: {title}
 - 本章目标: {objective}
 - 关键子题: {key_points}
+- 章节时间范围: {start_time} - {end_time}
 - 内容素材: {subtitle_content}
 
 【输出格式 - 必须严格遵守】
@@ -151,7 +157,7 @@ fn build_chapter_prompt(
 
 2. 紧跟章节元数据 Callout (无标题，直接输出):
    > [!info] ⏱️ 章节坐标
-   > * **⏱️ 时间戳**: [HH:MM:SS - HH:MM:SS]
+   > * **⏱️ 时间戳**: [{start_time} - {end_time}]
    > * **🔑 核心概念**: #概念A #概念B
    > * **🎯 本章目标**: {objective}
 
@@ -194,6 +200,8 @@ fn build_chapter_prompt(
         title = chapter.title,
         objective = chapter.objective,
         key_points = chapter.key_points.join("、"),
+        start_time = chapter.start_time,
+        end_time = chapter.end_time,
         subtitle_content = subtitle_content
     )
 }
