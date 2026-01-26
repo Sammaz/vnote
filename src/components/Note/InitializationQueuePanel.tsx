@@ -238,6 +238,8 @@ export function InitializationQueuePanel() {
     return null;
   }
 
+  const hideSubtitleGeneration = Boolean(currentTask?.params.subtitlePath) || initState.total === 6;
+
   // 获取当前步骤名称
   const currentStepName =
     initState.currentStepIndex >= 0 && initState.currentStepIndex < INITIALIZATION_STEPS.length
@@ -247,6 +249,16 @@ export function InitializationQueuePanel() {
   // 获取当前步骤的消息
   const currentStepMessage =
     initState.currentStepIndex >= 0 && initState.steps[initState.currentStepIndex]?.message;
+
+  const displayCurrentStepName =
+    hideSubtitleGeneration && initState.currentStepIndex === 0 ? "" : currentStepName;
+
+  const displayCurrentStepMessage =
+    hideSubtitleGeneration && initState.currentStepIndex === 0 ? null : currentStepMessage;
+
+  const displaySteps = hideSubtitleGeneration
+    ? initState.steps.filter((step) => step.step !== "subtitle_generation")
+    : initState.steps;
 
   // 计算总任务数（当前任务 + 队列中的任务）
   const totalTasks = (currentTask ? 1 : 0) + queue.length;
@@ -353,9 +365,9 @@ export function InitializationQueuePanel() {
                     {currentTask.params.noteTitle}
                   </span>
                 </div>
-                {currentTask.status === "running" && currentStepMessage && (
+                {currentTask.status === "running" && displayCurrentStepMessage && (
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">
-                    {currentStepMessage}
+                    {displayCurrentStepMessage}
                   </p>
                 )}
               </div>
@@ -375,7 +387,7 @@ export function InitializationQueuePanel() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-slate-500 dark:text-slate-400">
-                    {currentStepName}
+                    {displayCurrentStepName}
                   </span>
                   <span className="text-slate-600 dark:text-slate-300 font-medium">
                     {initProgress}%
@@ -390,7 +402,7 @@ export function InitializationQueuePanel() {
 
                 {/* 步骤列表 */}
                 <div className="mt-3 space-y-1.5">
-                  {initState.steps.map((step) => (
+                  {displaySteps.map((step) => (
                     <div key={step.step} className="flex items-center gap-2 text-xs">
                       {step.status === "pending" && (
                         <div className="w-3.5 h-3.5 rounded-full border border-slate-300 dark:border-slate-500" />

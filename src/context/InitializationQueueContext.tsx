@@ -98,6 +98,7 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
   // 执行单个任务
   const executeTask = useCallback(
     async (task: QueuedTask) => {
+      const hasSubtitle = Boolean(task.params.subtitlePath);
       // 更新任务状态为运行中
       setCurrentTask({ ...task, status: "running" });
       setInitState({
@@ -133,7 +134,7 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
             switch (payload.type) {
               case "Starting":
                 newState.initializationId = payload.initialization_id;
-                newState.total = payload.total_steps;
+                newState.total = hasSubtitle ? 6 : payload.total_steps;
                 break;
 
               case "StepStarting":
@@ -163,7 +164,9 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
                     status: "completed" as StepStatus,
                   };
                 }
-                newState.completed = prev.completed + 1;
+                if (!(hasSubtitle && payload.step === "subtitle_generation")) {
+                  newState.completed = prev.completed + 1;
+                }
                 break;
 
               case "StepSkipped":
@@ -176,11 +179,19 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
                     reason: isCheckpointRecovery ? undefined : payload.reason,
                   };
                 }
+                if (payload.step === "subtitle_generation" && payload.reason.includes("已存在字幕")) {
+                  newState.total = 6;
+                  break;
+                }
                 // 断点恢复的步骤计入已完成数
                 if (payload.reason.includes("断点恢复")) {
-                  newState.completed = prev.completed + 1;
+                  if (!(hasSubtitle && payload.step === "subtitle_generation")) {
+                    newState.completed = prev.completed + 1;
+                  }
                 } else {
-                  newState.skipped = prev.skipped + 1;
+                  if (!(hasSubtitle && payload.step === "subtitle_generation")) {
+                    newState.skipped = prev.skipped + 1;
+                  }
                 }
                 break;
 
@@ -192,15 +203,20 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
                     error: payload.error,
                   };
                 }
-                newState.failed = prev.failed + 1;
+                if (!(hasSubtitle && payload.step === "subtitle_generation")) {
+                  newState.failed = prev.failed + 1;
+                }
                 break;
 
               case "Completed":
                 newState.isInitializing = false;
                 newState.completed = payload.completed;
-                newState.skipped = payload.skipped;
+                const hideSubtitleGenerationForTotals = hasSubtitle || prev.total === 6;
+                newState.skipped = hideSubtitleGenerationForTotals
+                  ? Math.max(0, payload.skipped - 1)
+                  : payload.skipped;
                 newState.failed = payload.failed;
-                newState.total = payload.total;
+                newState.total = hideSubtitleGenerationForTotals ? 6 : payload.total;
                 // 任务完成，标记并清理
                 setCurrentTask((t) => {
                   // 调用完成回调刷新数据
