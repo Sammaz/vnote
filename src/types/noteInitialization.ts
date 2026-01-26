@@ -4,6 +4,7 @@
 
 /** 初始化步骤枚举 */
 export type InitializationStep =
+  | "subtitle_generation"
   | "questions"
   | "full_summary"
   | "chapters"
@@ -93,6 +94,7 @@ export interface InitializationState {
 
 /** 步骤信息常量 */
 export const INITIALIZATION_STEPS: Array<{ step: InitializationStep; name: string }> = [
+  { step: "subtitle_generation", name: "字幕生成" },
   { step: "questions", name: "推荐问题" },
   { step: "full_summary", name: "全文总结" },
   { step: "chapters", name: "章节生成" },
@@ -115,7 +117,7 @@ export function createInitialState(): InitializationState {
     completed: 0,
     skipped: 0,
     failed: 0,
-    total: 6,
+    total: 7,
     error: null,
   };
 }

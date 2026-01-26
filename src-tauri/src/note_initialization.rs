@@ -8,6 +8,7 @@
 //! 5. 高光笔记 (generate_highlights)
 //! 6. 闪记卡 (generate_flashcards)
 
+use crate::bcut_asr;
 use crate::chapter::ChapterData;
 use crate::chat;
 use crate::note_generation;
@@ -29,6 +30,8 @@ use tokio::sync::Mutex;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InitializationStep {
+    /// 字幕生成
+    SubtitleGeneration,
     /// 推荐问题生成
     Questions,
     /// 全文总结
@@ -47,6 +50,7 @@ impl InitializationStep {
     /// 获取步骤的显示名称
     pub fn display_name(&self) -> &'static str {
         match self {
+            Self::SubtitleGeneration => "字幕生成",
             Self::Questions => "推荐问题",
             Self::FullSummary => "全文总结",
             Self::Chapters => "章节生成",
@@ -56,21 +60,23 @@ impl InitializationStep {
         }
     }
 
-    /// 获取步骤索引（0-5）
+    /// 获取步骤索引（0-6）
     pub fn index(&self) -> usize {
         match self {
-            Self::Questions => 0,
-            Self::FullSummary => 1,
-            Self::Chapters => 2,
-            Self::SubtitleOptimization => 3,
-            Self::Highlights => 4,
-            Self::Flashcards => 5,
+            Self::SubtitleGeneration => 0,
+            Self::Questions => 1,
+            Self::FullSummary => 2,
+            Self::Chapters => 3,
+            Self::SubtitleOptimization => 4,
+            Self::Highlights => 5,
+            Self::Flashcards => 6,
         }
     }
 
     /// 获取所有步骤列表
     pub fn all() -> Vec<Self> {
         vec![
+            Self::SubtitleGeneration,
             Self::Questions,
             Self::FullSummary,
             Self::Chapters,
@@ -225,7 +231,7 @@ pub async fn start_initialization(
         &event_name,
         NoteInitializationEvent::Starting {
             initialization_id: initialization_id.clone(),
-            total_steps: 6,
+            total_steps: 7,
             steps,
         },
     );
@@ -270,6 +276,8 @@ async fn run_initialization(
 ) -> Result<(), String> {
     let db = DATABASE.get().ok_or("数据库未初始化")?;
 
+    let mut params = params;
+
     // 验证 AI 配置是否存在
     let _ai_config = db
         .get_ai_config_by_id(params.model_id)
@@ -282,7 +290,11 @@ async fn run_initialization(
         .map_err(|e| format!("获取笔记失败: {}", e))?
         .ok_or_else(|| "笔记不存在".to_string())?;
 
-    let has_subtitle = params.subtitle_path.is_some();
+    if params.subtitle_path.is_none() {
+        params.subtitle_path = note.subtitle_path.clone();
+    }
+
+    let mut has_subtitle = params.subtitle_path.is_some();
     let mut completed = 0;
     let mut skipped = 0;
     let mut failed = 0;
@@ -294,7 +306,7 @@ async fn run_initialization(
     let mut chapter_data: Option<ChapterData> = None;
 
     // 如果从步骤4开始恢复，需要从数据库加载章节数据
-    if start_step >= 3 {
+    if start_step >= 4 {
         if let Some(detailed_reading) = &note.detailed_reading {
             if let Ok(data) = serde_json::from_str::<ChapterData>(detailed_reading) {
                 chapter_data = Some(data);
@@ -399,6 +411,13 @@ async fn run_initialization(
                 );
             }
         }
+
+        if step == InitializationStep::SubtitleGeneration {
+            if let Ok(Some(updated_note)) = db.get_note_by_id(params.note_id) {
+                params.subtitle_path = updated_note.subtitle_path.clone();
+                has_subtitle = params.subtitle_path.is_some();
+            }
+        }
     }
 
     // 发送完成事件
@@ -408,7 +427,7 @@ async fn run_initialization(
             completed,
             skipped,
             failed,
-            total: 6,
+            total: 7,
         },
     );
 
@@ -427,6 +446,9 @@ async fn execute_step(
     chapter_data: &mut Option<ChapterData>,
 ) -> StepResult {
     match step {
+        InitializationStep::SubtitleGeneration => {
+            execute_subtitle_generation_step(app, event_name, params, note, abort_flag).await
+        }
         InitializationStep::Questions => {
             execute_questions_step(app, event_name, params, has_subtitle, abort_flag).await
         }
@@ -458,6 +480,58 @@ async fn execute_step(
 // ============================================================================
 // 步骤实现
 // ============================================================================
+
+/// 步骤0: 字幕生成
+async fn execute_subtitle_generation_step(
+    app: &AppHandle,
+    event_name: &str,
+    params: &InitializationParams,
+    note: &crate::db::Note,
+    abort_flag: &Arc<AtomicBool>,
+) -> StepResult {
+    if params.subtitle_path.is_some() || note.subtitle_path.is_some() {
+        return StepResult::Skipped("已存在字幕".to_string());
+    }
+
+    let _ = app.emit(
+        event_name,
+        NoteInitializationEvent::StepProgress {
+            step: InitializationStep::SubtitleGeneration,
+            message: "正在生成字幕...".to_string(),
+        },
+    );
+
+    let db = match DATABASE.get() {
+        Some(db) => db,
+        None => return StepResult::Failed("数据库未初始化".to_string()),
+    };
+
+    let subtitle_path = match bcut_asr::transcribe_video_to_srt(
+        app,
+        params.note_id,
+        &params.video_path,
+        abort_flag,
+    )
+    .await
+    {
+        Ok(path) => path,
+        Err(e) => {
+            if is_aborted(abort_flag) {
+                return StepResult::Failed("已中止".to_string());
+            }
+            return StepResult::Failed(format!("自动转录失败: {}", e));
+        }
+    };
+
+    if let Ok(Some(mut note)) = db.get_note_by_id(params.note_id) {
+        note.subtitle_path = Some(subtitle_path);
+        if let Err(e) = db.update_note(&note) {
+            return StepResult::Failed(format!("更新字幕路径失败: {}", e));
+        }
+    }
+
+    StepResult::Completed
+}
 
 /// 步骤1: 推荐问题生成
 async fn execute_questions_step(

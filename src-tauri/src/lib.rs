@@ -1,4 +1,5 @@
 mod ai_pool;
+mod bcut_asr;
 mod chat;
 mod chapter;
 mod db;
