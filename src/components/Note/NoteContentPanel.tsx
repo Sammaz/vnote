@@ -859,6 +859,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     if (!autoScroll || activeTab !== "original" || !chapterData) return;
 
     const handleVideoTimeUpdate = (e: Event) => {
+      // 如果用户刚刚点击过章节（500ms内），忽略视频时间更新带来的滚动
+      if (Date.now() - userClickTimeRef.current < 500) {
+        return;
+      }
+
       const event = e as CustomEvent<{ time: number }>;
       const currentTime = event.detail.time;
 
