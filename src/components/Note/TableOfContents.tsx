@@ -79,6 +79,7 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
   const jumpToHeader = (index: number) => {
     // Select all headers within the note content area
     // matches the component structure: .note-markdown > h1, h2, h3
+    // Use a more specific selector strategy to avoid conflicts if multiple exist (though unlikely in tabs)
     const container = document.querySelector('.note-markdown');
     if (!container) return;
 
@@ -86,24 +87,42 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
     const target = headers[index];
 
     if (target && target instanceof HTMLElement) {
-      // Find the scrollable parent container (usually the wrapper around .note-markdown)
-      // Hierarchy: .flex-1.overflow-y-auto > .note-markdown > h1
-      const scrollContainer = container.parentElement;
+      // Find the scrollable parent container
+      // Traverse up to find the element with overflow-y auto/scroll
+      let scrollContainer: HTMLElement | null = container.parentElement;
+      while (scrollContainer && scrollContainer !== document.body) {
+        const style = window.getComputedStyle(scrollContainer);
+        if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && scrollContainer.scrollHeight > scrollContainer.clientHeight) {
+          break;
+        }
+        scrollContainer = scrollContainer.parentElement;
+      }
 
-      if (scrollContainer && (scrollContainer.scrollHeight > scrollContainer.clientHeight)) {
-        // Manual scroll calculation for precise positioning
-        // offsetTop is relative to the closest positioned ancestor.
-        // If .note-markdown is static (default), offsetTop is relative to scrollContainer (if positioned) or relative to scrollContainer content.
-        // Usually: target.offsetTop is distance from top of content.
-        // We want to scroll so that this point is at say 100px from top of viewport.
-        const top = target.offsetTop - 100; // Leave 100px gap for title bar breathing room
+      // If no valid scroll container found, check if container itself is scrollable (case for EditableMarkdown)
+      if (!scrollContainer) {
+         const containerStyle = window.getComputedStyle(container as HTMLElement);
+         if ((containerStyle.overflowY === 'auto' || containerStyle.overflowY === 'scroll') && container.scrollHeight > container.clientHeight) {
+            scrollContainer = container as HTMLElement;
+         }
+      }
+
+      // Fallback to minimal scrolling logic
+      if (scrollContainer) {
+        // Calculate position relative to scroll container
+        // offsetTop is relative to offsetParent. We need to be careful.
+        // Simple approach: element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
+        const elementTop = target.getBoundingClientRect().top;
+        const containerTop = scrollContainer.getBoundingClientRect().top;
+        const offset = elementTop - containerTop + scrollContainer.scrollTop;
+
+        // Scroll to offset minus padding (e.g. 20px)
+        const top = offset - 20;
 
         scrollContainer.scrollTo({
           top: Math.max(0, top),
           behavior: 'smooth'
         });
       } else {
-        // Fallback if structure is unexpected
         target.scrollIntoView({
           behavior: 'smooth',
           block: 'start'
