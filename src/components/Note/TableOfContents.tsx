@@ -80,7 +80,6 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
   const jumpToHeader = (index: number) => {
     // Select all headers within the note content area
     // matches the component structure: .note-markdown > h1, h2, h3
-    // Use a more specific selector strategy to avoid conflicts if multiple exist (though unlikely in tabs)
     const container = document.querySelector('.note-markdown');
     if (!container) return;
 
@@ -88,30 +87,26 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
     const target = headers[index];
 
     if (target && target instanceof HTMLElement) {
-      // Find the scrollable parent container
-      // Traverse up to find the element with overflow-y auto/scroll
-      let scrollContainer: HTMLElement | null = container.parentElement;
-      while (scrollContainer && scrollContainer !== document.body) {
-        const style = window.getComputedStyle(scrollContainer);
-        if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && scrollContainer.scrollHeight > scrollContainer.clientHeight) {
-          break;
+      // First check if .note-markdown itself is the scroll container
+      const containerStyle = window.getComputedStyle(container as HTMLElement);
+      let scrollContainer: HTMLElement | null = null;
+
+      if ((containerStyle.overflowY === 'auto' || containerStyle.overflowY === 'scroll')) {
+        scrollContainer = container as HTMLElement;
+      } else {
+        // Traverse up to find the element with overflow-y auto/scroll
+        scrollContainer = container.parentElement;
+        while (scrollContainer && scrollContainer !== document.body) {
+          const style = window.getComputedStyle(scrollContainer);
+          if ((style.overflowY === 'auto' || style.overflowY === 'scroll') && scrollContainer.scrollHeight > scrollContainer.clientHeight) {
+            break;
+          }
+          scrollContainer = scrollContainer.parentElement;
         }
-        scrollContainer = scrollContainer.parentElement;
       }
 
-      // If no valid scroll container found, check if container itself is scrollable (case for EditableMarkdown)
-      if (!scrollContainer) {
-         const containerStyle = window.getComputedStyle(container as HTMLElement);
-         if ((containerStyle.overflowY === 'auto' || containerStyle.overflowY === 'scroll') && container.scrollHeight > container.clientHeight) {
-            scrollContainer = container as HTMLElement;
-         }
-      }
-
-      // Fallback to minimal scrolling logic
       if (scrollContainer) {
         // Calculate position relative to scroll container
-        // offsetTop is relative to offsetParent. We need to be careful.
-        // Simple approach: element.getBoundingClientRect().top - container.getBoundingClientRect().top + container.scrollTop
         const elementTop = target.getBoundingClientRect().top;
         const containerTop = scrollContainer.getBoundingClientRect().top;
         const offset = elementTop - containerTop + scrollContainer.scrollTop;
