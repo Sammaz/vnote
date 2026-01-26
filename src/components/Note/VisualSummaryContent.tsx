@@ -50,6 +50,9 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
   noteId,
   onDataChange,
 }, ref) {
+  // 用于生成唯一标题 ID 的计数器（必须在所有条件返回之前声明）
+  const slugCountsRef = useRef<Record<string, number>>({});
+
   // 组装 Markdown 内容
   const markdownContent = useMemo(() => {
     if (!chapterData || chapterData.chapters.length === 0) {
@@ -112,8 +115,6 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
       </div>
     );
   }
-
-  const slugCountsRef = useRef<Record<string, number>>({});
 
   // Reset slug counts before render (technically inside render phase, consistent with React patterns for this use case)
   slugCountsRef.current = {};
