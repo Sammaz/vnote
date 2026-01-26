@@ -248,9 +248,10 @@ fn build_synthesizer_prompt(video_title: &str, chapter_summaries: &str, subtitle
 格式要求 (必须严格遵守，直接在 Part 2 标题下输出卡片，不要添加额外的子标题):
 
 **Q: [核心问题]**
+
 **A:** [深度解析，2-4句话]
 
-(请生成 5-10 组，每组之间空一行)
+⚠️ 重要: Q 和 A 必须分两行输出，中间空一行！每组卡片之间空两行。
 
 ### Part 3: Tag Index
 格式: 在一行内列出所有标签，用空格分隔
