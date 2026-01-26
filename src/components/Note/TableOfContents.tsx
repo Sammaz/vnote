@@ -32,6 +32,9 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
   // Use a ref to store the latest TOC items for the observer to access
   const tocItemsRef = useRef<TOCItem[]>([]);
 
+  // Flag to temporarily disable observer updates during manual navigation
+  const isManualScrollingRef = useRef(false);
+
   // Parse markdown to generate TOC structure
   const toc = useMemo(() => {
     if (!markdown) return [];
@@ -76,6 +79,9 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
     return items;
   }, [markdown]);
 
+  // Ref to store the debounce timer for manual scrolling
+  const manualScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Robust Scroll Function based on Index
   const jumpToHeader = (index: number) => {
     // Select all headers within the note content area
@@ -87,6 +93,14 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
     const target = headers[index];
 
     if (target && target instanceof HTMLElement) {
+      // Set manual scrolling flag to prevent observer from changing activeIndex
+      isManualScrollingRef.current = true;
+
+      // Clear any existing timer
+      if (manualScrollTimerRef.current) {
+        clearTimeout(manualScrollTimerRef.current);
+      }
+
       // First check if .note-markdown itself is the scroll container
       const containerStyle = window.getComputedStyle(container as HTMLElement);
       let scrollContainer: HTMLElement | null = null;
@@ -125,7 +139,13 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
         });
       }
 
+      // Set activeIndex immediately
       setActiveIndex(index);
+
+      // Re-enable observer after scroll animation completes (debounce 800ms)
+      manualScrollTimerRef.current = setTimeout(() => {
+        isManualScrollingRef.current = false;
+      }, 800);
     }
   };
 
@@ -143,6 +163,9 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
 
       const observer = new IntersectionObserver(
         (entries) => {
+          // Skip observer updates during manual navigation (debounced)
+          if (isManualScrollingRef.current) return;
+
           entries.forEach((entry) => {
             if (entry.isIntersecting) {
               // Find which header this element corresponds to
@@ -177,6 +200,15 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
 
     return () => clearTimeout(timer);
   }, [toc]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (manualScrollTimerRef.current) {
+        clearTimeout(manualScrollTimerRef.current);
+      }
+    };
+  }, []);
 
   if (toc.length === 0) return null;
 
