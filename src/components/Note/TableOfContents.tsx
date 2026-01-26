@@ -36,7 +36,7 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
   const toc = useMemo(() => {
     if (!markdown) return [];
 
-    const lines = markdown.split("\n");
+    const lines = markdown.split(/\r?\n/);
     const items: TOCItem[] = [];
     let inCodeBlock = false;
     let globalHeaderIndex = 0;
@@ -53,7 +53,8 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
 
       // Match headers (H1-H3)
       // Regex: Start of line, optional indent, 1-3 hashes, space, content
-      const match = line.match(/^\s{0,3}(#{1,3})\s+(.+?)(?:\s+#+)?$/);
+      // Allow trailing whitespace for robustness (especially with CRLF issues)
+      const match = line.match(/^\s{0,3}(#{1,3})\s+(.+?)(?:\s+#+)?\s*$/);
 
       if (match) {
         const level = match[1].length;
