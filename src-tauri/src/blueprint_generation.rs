@@ -510,6 +510,8 @@ async fn generate_blueprint_internal(
         final_markdown.push_str("\n\n---\n\n");
     }
 
+    // 为 Part 1/2/3 添加上级目录
+    final_markdown.push_str("## 📑 附录\n\n");
     final_markdown.push_str(&synthesizer_content);
 
     let word_count = final_markdown.chars().count();
