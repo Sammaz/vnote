@@ -2876,7 +2876,7 @@ Video subtitles content:`;
           ? "p-0 overflow-hidden"
           : activeTab === "script"
           ? "p-0 overflow-hidden" // 字幕脚本使用虚拟列表，需要隐藏外层滚动
-          : isEditMode ? "p-0 overflow-y-auto" : "p-6 overflow-y-auto"
+          : isEditMode ? "p-0 overflow-y-auto overflow-x-hidden" : "p-6 overflow-y-auto overflow-x-hidden"
       )}>
         {/* 正常内容渲染 */}
         {activeTab === "summary" && (

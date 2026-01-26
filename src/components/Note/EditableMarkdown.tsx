@@ -233,7 +233,7 @@ export function EditableMarkdown({
 
   return (
     <div className="relative h-full flex flex-row group">
-      <div className="note-markdown flex-1 overflow-y-auto px-4 h-full custom-scrollbar">
+      <div className="note-markdown flex-1 overflow-y-auto overflow-x-hidden px-4 h-full custom-scrollbar">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
