@@ -132,22 +132,67 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
     return id;
   };
 
-  // Stack component for timestamp rendering (copied from EditableMarkdown to ensure consistency)
+  // Stack component for timestamp and hashtag rendering (copied from EditableMarkdown to ensure consistency)
   const renderWithTimestamp = (children: React.ReactNode[]) => {
-    const TIMESTAMP_REGEX = /\[(\d{2}:\d{2}:\d{2})\]/g;
     return children.map((child, index) => {
       if (typeof child === 'string') {
-        if (TIMESTAMP_REGEX.test(child)) {
-          const parts = child.split(TIMESTAMP_REGEX);
-          const matches = child.match(TIMESTAMP_REGEX) || [];
-          let matchIndex = 0;
-          return parts.map((part, partIndex) => {
-            if (matchIndex < matches.length && matches[matchIndex] === `[${part}]`) {
-              matchIndex++;
-              return <span key={`${index}-${partIndex}`} className="timestamp">{part}</span>;
+        // 合并正则：同时匹配时间戳和标签
+        const combinedRegex = /(\[\d{2}:\d{2}:\d{2}\])|(#[^\s]+)/g;
+
+        if (combinedRegex.test(child)) {
+          // 重置正则的 lastIndex
+          combinedRegex.lastIndex = 0;
+
+          const result: React.ReactNode[] = [];
+          let lastIndex = 0;
+          let match;
+          let partIndex = 0;
+
+          while ((match = combinedRegex.exec(child)) !== null) {
+            // 添加匹配前的普通文本
+            if (match.index > lastIndex) {
+              result.push(
+                <span key={`${index}-${partIndex++}`}>
+                  {child.slice(lastIndex, match.index)}
+                </span>
+              );
             }
-            return <span key={`${index}-${partIndex}`}>{part}</span>;
-          });
+
+            const matchedText = match[0];
+
+            if (match[1]) {
+              // 时间戳匹配 - 提取时间部分（去掉方括号）
+              const timeText = matchedText.slice(1, -1);
+              result.push(
+                <span key={`${index}-${partIndex++}`} className="timestamp">
+                  {timeText}
+                </span>
+              );
+            } else if (match[2]) {
+              // 标签匹配
+              result.push(
+                <span
+                  key={`${index}-${partIndex++}`}
+                  className="inline-flex items-center px-2 py-0.5 mx-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+                >
+                  {matchedText}
+                </span>
+              );
+            }
+
+            lastIndex = match.index + matchedText.length;
+          }
+
+          // 添加剩余的普通文本
+          if (lastIndex < child.length) {
+            result.push(
+              <span key={`${index}-${partIndex++}`}>
+                {child.slice(lastIndex)}
+              </span>
+            );
+          }
+
+          return result;
         }
       }
       return <span key={index}>{child}</span>;
