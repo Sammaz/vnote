@@ -603,20 +603,27 @@ export function VideoPlayer({
       cleanupPlayerEvents = setupPlayerEvents(player);
     };
 
-    video.addEventListener("loadedmetadata", () => {
+    const handleLoadedMetadata = () => {
+      if (!isMounted) return;
       setLoading(false);
       setVideoDuration(video.duration);
-    });
+    };
 
-    video.addEventListener("error", () => {
+    const handleVideoError = () => {
+      if (!isMounted) return;
       setError("无法加载视频文件，请检查文件路径是否正确");
       setLoading(false);
-    });
+    };
+
+    video.addEventListener("loadedmetadata", handleLoadedMetadata);
+    video.addEventListener("error", handleVideoError);
 
     setupPlayer();
 
     return () => {
       isMounted = false;
+      video.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      video.removeEventListener("error", handleVideoError);
       if (subtitleObjectUrl) {
         URL.revokeObjectURL(subtitleObjectUrl);
       }
