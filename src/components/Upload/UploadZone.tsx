@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Upload, Video, FileText, X } from "lucide-react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readDir, stat } from "@tauri-apps/plugin-fs";
 import { cn } from "../../utils/cn";
@@ -38,6 +39,9 @@ function getFileName(filePath: string): string {
 export function UploadZone() {
   const { uploadedVideo, uploadedSubtitle, setUploadedVideo, setUploadedSubtitle } = useApp();
   const [isDragOver, setIsDragOver] = useState(false);
+  const isTauri =
+    typeof window !== "undefined" &&
+    Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
 
   // 自动查找同名字幕文件
   const findMatchingSubtitle = useCallback(async (videoPath: string): Promise<UploadedFile | null> => {
@@ -156,9 +160,118 @@ export function UploadZone() {
     }
   }, [setUploadedSubtitle]);
 
+  const handleDroppedPaths = useCallback(
+    async (paths: string[]) => {
+      for (const filePath of paths) {
+        const fileName = getFileName(filePath);
+        const ext = getExtension(fileName);
+
+        if (VIDEO_EXTENSIONS.includes(ext)) {
+          try {
+            const fileInfo = await stat(filePath);
+            const videoFile: UploadedFile = {
+              name: fileName,
+              path: filePath,
+              size: fileInfo.size,
+              type: "video",
+            };
+
+            setUploadedVideo(videoFile);
+
+            const matchingSubtitle = await findMatchingSubtitle(filePath);
+            if (matchingSubtitle) {
+              setUploadedSubtitle(matchingSubtitle);
+            }
+          } catch (error) {
+            console.error("读取拖拽视频文件失败:", error);
+          }
+        } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
+          try {
+            const fileInfo = await stat(filePath);
+            setUploadedSubtitle({
+              name: fileName,
+              path: filePath,
+              size: fileInfo.size,
+              type: "subtitle",
+            });
+          } catch (error) {
+            console.error("读取拖拽字幕文件失败:", error);
+          }
+        }
+      }
+    },
+    [findMatchingSubtitle, setUploadedSubtitle, setUploadedVideo]
+  );
+
+  useEffect(() => {
+    if (!isTauri) return undefined;
+    let unlisten: (() => void) | null = null;
+
+    const windowHandle = getCurrentWindow() as unknown as {
+      onFileDropEvent?: (
+        handler: (event: { payload?: unknown }) => void
+      ) => Promise<() => void>;
+      onDragDropEvent?: (
+        handler: (event: { payload?: unknown }) => void
+      ) => Promise<() => void>;
+    };
+
+    const subscribe =
+      windowHandle.onFileDropEvent?.bind(windowHandle) ??
+      windowHandle.onDragDropEvent?.bind(windowHandle);
+    if (!subscribe) {
+      console.warn("当前 Tauri 版本不支持文件拖拽事件 API");
+      return undefined;
+    }
+
+    subscribe((event) => {
+      const payload = event.payload as {
+        type?: string;
+        paths?: string[];
+      };
+      const eventType = payload.type?.toLowerCase();
+
+      if (eventType === "hover" || eventType === "over" || eventType === "enter") {
+        setIsDragOver(true);
+        return;
+      }
+
+      if (eventType === "cancel" || eventType === "leave") {
+        setIsDragOver(false);
+        return;
+      }
+
+      if (eventType === "drop") {
+        setIsDragOver(false);
+        if (payload.paths && payload.paths.length > 0) {
+          void handleDroppedPaths(payload.paths);
+        }
+      }
+    })
+      .then((unlistenFn) => {
+        unlisten = unlistenFn;
+      })
+      .catch((error) => {
+        console.warn("注册文件拖拽事件失败:", error);
+      });
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [handleDroppedPaths, isTauri]);
+
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
     setIsDragOver(true);
   }, []);
 
@@ -173,6 +286,13 @@ export function UploadZone() {
       setIsDragOver(false);
 
       const files = Array.from(e.dataTransfer.files);
+
+      if (isTauri) {
+        const hasPath = files.some((file) => Boolean((file as File & { path?: string }).path));
+        if (!hasPath) {
+          return;
+        }
+      }
 
       for (const file of files) {
         const ext = getExtension(file.name);
@@ -212,13 +332,14 @@ export function UploadZone() {
         }
       }
     },
-    [setUploadedVideo, setUploadedSubtitle, findMatchingSubtitle]
+    [findMatchingSubtitle, isTauri, setUploadedSubtitle, setUploadedVideo]
   );
 
   const hasFiles = uploadedVideo || uploadedSubtitle;
 
   return (
     <div
+      onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
