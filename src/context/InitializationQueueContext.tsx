@@ -101,9 +101,11 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
       const hasSubtitle = Boolean(task.params.subtitlePath);
       // 更新任务状态为运行中
       setCurrentTask({ ...task, status: "running" });
+      const baseState = createInitialState();
       setInitState({
-        ...createInitialState(),
+        ...baseState,
         isInitializing: true,
+        total: hasSubtitle ? 6 : baseState.total,
       });
 
       try {
