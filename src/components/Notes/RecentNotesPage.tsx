@@ -9,7 +9,7 @@ export function RecentNotesPage() {
   // 显示所有笔记（不再限制12条，虚拟滚动可以处理大量数据）
   const recentNotes = notes;
 
-  const handleOpenNote = (noteId: number) => {
+  const handleOpenNote = (noteId: string) => {
     setSelectedNoteId(noteId);
     setCurrentView("note");
   };

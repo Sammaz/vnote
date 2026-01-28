@@ -87,7 +87,7 @@ const subtitleListArbitrary = (
  * 生成截图标记
  */
 const screenshotMarkerArbitrary = (
-  noteId: number,
+  noteId: string,
   subtitleIndex: number
 ): fc.Arbitrary<ScreenshotMarker> =>
   fc.record({
@@ -249,7 +249,7 @@ describe("Feature: visual-summary-assist-mode, Property 4: Subtitle Row Count In
           uniqueIndices.forEach((index) => {
             markers.set(index, {
               id: `marker-${index}`,
-              note_id: 1,
+              note_id: "1",
               subtitle_index: index,
               timestamp: subtitles[index]?.start_time || 0,
               screenshot_path: `/screenshots/test-${index}.png`,

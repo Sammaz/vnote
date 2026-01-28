@@ -13,7 +13,7 @@ import { TableOfContents, generateId, getTextFromChildren } from "./TableOfConte
 type TabType = "full_summary" | "detailed_reading" | "highlights" | "visual_summary" | "custom_summary" | "panoramic_blueprint";
 
 interface EditableMarkdownProps {
-  noteId: number;
+  noteId: string;
   tabType: TabType;
   content: string | null;
   isGenerating: boolean;

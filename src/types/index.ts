@@ -13,11 +13,11 @@ export interface Folder {
 
 // 笔记
 export interface Note {
-  id: number;
+  id: string;
   title: string;
   video_path: string;
   subtitle_path: string | null;
-  model_id: number | null; // AI model ID used for generating notes
+  model_id: string | null; // AI model ID used for generating notes
   full_summary: string | null;
   detailed_reading: string | ChapterData | null;  // 支持纯文本或章节数据
   highlights: string | null;
@@ -39,7 +39,7 @@ export interface CreateNoteRequest {
   title: string;
   video_path: string;
   subtitle_path: string | null;
-  model_id: number | null;
+  model_id: string | null;
 }
 
 // 应用统计
@@ -52,7 +52,7 @@ export interface AppStats {
 
 // AI 配置（与 SettingsPage 共享）
 export interface AiConfig {
-  id: number;
+  id: string;
   title: string;
   base_url: string;
   api_key: string;
@@ -97,10 +97,10 @@ export type NavigableViewType = Exclude<ViewType, "settings">;
 
 // 合集（资源库）
 export interface Collection {
-  id: number;
+  id: string;
   name: string;
   description: string | null;
-  parent_id: number | null;
+  parent_id: string | null;
   sort_order: number;
   item_count: number;  // 查询时计算
   cover_image: string | null;  // 封面图片文件名
@@ -113,14 +113,14 @@ export interface Collection {
 export interface CreateCollectionRequest {
   name: string;
   description?: string;
-  parent_id?: number;
+  parent_id?: string;
 }
 
 // 合集内容关联
 export interface CollectionItem {
-  id: number;
-  collection_id: number;
-  note_id: number;
+  id: string;
+  collection_id: string;
+  note_id: string;
   sort_order: number;
   created_at: string;
   note?: Note;  // 联表查询时填充
@@ -145,12 +145,12 @@ export type PromptCategory =
 
 // 提示词配置
 export interface PromptConfig {
-  id: number;
+  id: string;
   title: string;
   description: string | null;
   content: string;
   category: PromptCategory;
-  recommended_model_id: number | null;
+  recommended_model_id: string | null;
   sort_order: number;
   is_default: boolean;
   created_at: string;
@@ -339,8 +339,8 @@ export interface SubtitleOptimizationState {
 // ============================================================================
 
 export interface OptimizedSubtitle {
-  id: number;
-  note_id: number;
+  id: string;
+  note_id: string;
   chapter_id: string;
   optimized_text: string;
   created_at: string;
@@ -348,14 +348,14 @@ export interface OptimizedSubtitle {
 
 // 笔记 UI 状态（用于恢复页面状态）
 export interface NoteUiState {
-  note_id: number;
+  note_id: string;
   show_subtitles: boolean;
   subtitle_optimization_enabled: boolean;
 }
 
 // 字幕优化任务状态（用于恢复进行中的任务）
 export interface SubtitleOptimizationTaskState {
-  note_id: number;
+  note_id: string;
   generation_id: string;
   total: number;
   completed: number;
@@ -420,7 +420,7 @@ export const HIGHLIGHT_TYPE_LABELS: Record<HighlightType, string> = {
 // 截图标记
 export interface ScreenshotMarker {
   id: string;                    // UUID
-  note_id: number;               // 关联的笔记ID
+  note_id: string;               // 关联的笔记ID
   subtitle_index: number;        // 字幕行索引（标记在此行上方）
   timestamp: number;             // 截图时的视频时间戳
   screenshot_path: string;       // 截图文件路径

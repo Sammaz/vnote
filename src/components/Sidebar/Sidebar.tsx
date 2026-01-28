@@ -58,7 +58,7 @@ const CollectionTreeMenuItem = memo(function CollectionTreeMenuItem({
   collection: Collection;
   allCollections: Collection[];
   level: number;
-  onSelect: (id: number) => void;
+  onSelect: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const children = allCollections.filter((c) => c.parent_id === collection.id);
@@ -179,7 +179,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
     setShowMenu(!showMenu);
   };
 
-  const handleMoveToCollection = async (collectionId: number) => {
+  const handleMoveToCollection = async (collectionId: string) => {
     try {
       await addNoteToCollection(collectionId, note.id);
       setShowMenu(false);

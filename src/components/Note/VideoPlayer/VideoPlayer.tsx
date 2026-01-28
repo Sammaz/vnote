@@ -32,7 +32,7 @@ export interface VideoPlayerProps {
   subtitleUrl?: string | null;
   compact?: boolean;
   autoPlay?: boolean;
-  noteId?: number;
+  noteId?: string;
   lastPlaybackPosition?: number | null;
 }
 
@@ -64,7 +64,7 @@ export function VideoPlayer({
   // 使用 ref 存储最新值，供事件处理器使用
   const lastSavedPositionRef = useRef<number>(0);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const noteIdRef = useRef<number | undefined>(noteId);
+  const noteIdRef = useRef<string | undefined>(noteId);
   const showResumePromptRef = useRef<boolean>(false);
   const lastPlaybackPositionRef = useRef<number | null>(lastPlaybackPosition);
   const watchTimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -150,7 +150,7 @@ export function VideoPlayer({
       import("@tauri-apps/api/event").then(({ listen }) => {
         if (cancelled) return;
 
-        listen<{ note_id: number; success: boolean; mp4_path: string | null; error: string | null }>(
+        listen<{ note_id: string; success: boolean; mp4_path: string | null; error: string | null }>(
           "ts-conversion-complete",
           (event) => {
             // 只处理当前 noteId 的转换结果

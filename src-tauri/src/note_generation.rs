@@ -33,8 +33,8 @@ use std::sync::OnceLock;
 /// 笔记生成请求
 #[derive(Debug, Deserialize)]
 pub struct GenerateNoteRequest {
-    pub note_id: i64,
-    pub model_id: i64,
+    pub note_id: String,
+    pub model_id: String,
     pub options: GenerationOptions,
 }
 
@@ -946,7 +946,7 @@ async fn generate_detailed_reading_chapters(
     ai_config: &AiConfig,
     subtitle_entries: &[SubtitleEntry],
     video_path: &str,
-    note_id: i64,
+    note_id: &str,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<ChapterData, String> {
     tracing::info!("[原文细读] ========================================");
@@ -1174,13 +1174,13 @@ pub async fn generate_note(
 
     // 获取AI配置
     let ai_config = db
-        .get_ai_config_by_id(request.model_id)
+        .get_ai_config_by_id(&request.model_id)
         .map_err(|e| e.to_string())?
         .ok_or("AI模型未找到")?;
 
     // 获取笔记
     let note = db
-        .get_note_by_id(request.note_id)
+        .get_note_by_id(&request.note_id)
         .map_err(|e| e.to_string())?
         .ok_or("笔记未找到")?;
 
@@ -1308,8 +1308,8 @@ pub async fn generate_note(
                     db,
                     generation_id.clone(),
                     crate::chapter::GenerateChaptersRequest {
-                        note_id: request.note_id,
-                        model_id: request.model_id,
+                        note_id: request.note_id.clone(),
+                        model_id: request.model_id.clone(),
                         video_path: note.video_path.clone(),
                         subtitle_path: subtitle_path.clone(),
                         capture_screenshots: true,
@@ -1319,7 +1319,7 @@ pub async fn generate_note(
                         tracing::info!("[笔记生成] {:?} 生成完成", tab_type);
                         let content = serde_json::to_string(&chapter_data)
                             .map_err(|e| format!("序列化章节数据失败: {}", e))?;
-                        update_note_tab(db, request.note_id, tab_type, &content, request.model_id)?;
+                        update_note_tab(db, &request.note_id, tab_type, &content, &request.model_id)?;
                         let _ = app.emit(
                             &event_name,
                             GenerationEvent::TabCompleted {
@@ -1359,7 +1359,7 @@ pub async fn generate_note(
 
                 if result.success {
                     generated_count += 1;
-                    if let Err(e) = update_note_tab(db, request.note_id, tab_type, &result.content, request.model_id) {
+                    if let Err(e) = update_note_tab(db, &request.note_id, tab_type, &result.content, &request.model_id) {
                         tracing::info!("[笔记生成] 更新数据库失败: {}", e);
                         failed_count += 1;
                     }
@@ -1394,7 +1394,7 @@ pub async fn generate_note(
             &ai_config,
             &entries,
             &note.video_path,
-            request.note_id,
+            &request.note_id,
             &abort_flag,
         ).await {
             Ok(chapter_data) => {
@@ -1402,7 +1402,7 @@ pub async fn generate_note(
                 let content = serde_json::to_string(&chapter_data)
                     .map_err(|e| format!("序列化章节数据失败: {}", e))?;
 
-                update_note_tab(db, request.note_id, &TabType::DetailedReading, &content, request.model_id)?;
+                update_note_tab(db, &request.note_id, &TabType::DetailedReading, &content, &request.model_id)?;
 
                 let _ = app.emit(
                     &event_name,
@@ -1480,7 +1480,7 @@ pub async fn generate_note(
                     if result.success {
                         generated_count += 1;
                         // 更新数据库
-                        if let Err(e) = update_note_tab(db, request.note_id, &result.tab_type, &result.content, request.model_id) {
+                        if let Err(e) = update_note_tab(db, &request.note_id, &result.tab_type, &result.content, &request.model_id) {
                             tracing::info!("[笔记生成] 更新数据库失败: {}", e);
                             failed_count += 1;
                         }
@@ -1639,10 +1639,10 @@ fn post_process_content(tab_type: &TabType, content: &str) -> Result<String, Str
 /// 更新笔记的标签页内容到数据库
 fn update_note_tab(
     db: &Database,
-    note_id: i64,
+    note_id: &str,
     tab_type: &TabType,
     content: &str,
-    model_id: i64,
+    model_id: &str,
 ) -> Result<(), String> {
     let mut note = db
         .get_note_by_id(note_id)
@@ -1658,7 +1658,7 @@ fn update_note_tab(
     }
 
     // 同时更新 model_id，确保使用的模型被记录
-    note.model_id = Some(model_id);
+    note.model_id = Some(model_id.to_string());
 
     db.update_note(&note).map_err(|e| e.to_string())
 }
@@ -1876,15 +1876,15 @@ fn parse_chapter_content_response(response: &str) -> Result<(String, String), St
 }
 
 /// 使用辅助模式标记生成章节
-/// 
+///
 /// 该函数根据用户在辅助模式下添加的截图标记来分段生成章节，
 /// 而不是使用 AI 自动分段。
 pub async fn generate_chapters_with_markers(
     app: AppHandle,
     db: &Database,
     generation_id: String,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     video_path: String,
     subtitle_path: String,
     markers: Vec<ScreenshotMarker>,
@@ -1896,7 +1896,7 @@ pub async fn generate_chapters_with_markers(
 
     // 获取 AI 配置
     let ai_config = db
-        .get_ai_config_by_id(model_id)
+        .get_ai_config_by_id(&model_id)
         .map_err(|e| e.to_string())?
         .ok_or("AI模型未找到".to_string())?;
 

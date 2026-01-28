@@ -19,7 +19,7 @@ export function SearchPage() {
     );
   }, [notes, searchQuery]);
 
-  const handleOpenNote = (noteId: number) => {
+  const handleOpenNote = (noteId: string) => {
     setSelectedNoteId(noteId);
     setCurrentView("note");
   };

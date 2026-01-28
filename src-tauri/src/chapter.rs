@@ -68,8 +68,8 @@ pub struct ChapterData {
 /// 章节生成请求
 #[derive(Debug, Deserialize)]
 pub struct GenerateChaptersRequest {
-    pub note_id: i64,
-    pub model_id: i64,
+    pub note_id: String,
+    pub model_id: String,
     pub video_path: String,
     pub subtitle_path: String,
     pub capture_screenshots: bool,
@@ -505,11 +505,11 @@ async fn capture_chapter_screenshots(
     chapters: &mut [Chapter],
     app: &AppHandle,
     abort_flag: &Arc<AtomicBool>,
-    note_id: i64,
+    note_id: &str,
 ) -> Result<(), String> {
     // 按笔记 ID 组织截图目录：app_cache_dir/notes/{note_id}/screenshots/
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
+    let screenshots_dir = cache_dir.join("notes").join(note_id).join("screenshots");
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
     // 从视频路径提取文件名（不含扩展名）
@@ -565,7 +565,7 @@ pub async fn generate_chapters(
 
     // 获取 AI 配置
     let ai_config = _db
-        .get_ai_config_by_id(request.model_id)
+        .get_ai_config_by_id(&request.model_id)
         .map_err(|e| e.to_string())?
         .ok_or("AI模型未找到".to_string())?;
 
@@ -663,7 +663,7 @@ pub async fn generate_chapters(
             });
         }
 
-        capture_chapter_screenshots(&request.video_path, &mut chapters, &app, &abort_flag, request.note_id).await?;
+        capture_chapter_screenshots(&request.video_path, &mut chapters, &app, &abort_flag, &request.note_id).await?;
     }
 
     // 构建结果

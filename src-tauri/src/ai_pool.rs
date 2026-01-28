@@ -338,9 +338,9 @@ impl ConfigConcurrencyController {
 /// AI线程池管理器
 pub struct AiPoolManager {
     /// 每个AiConfig的HTTP客户端：config_id -> (client, timeout_secs)
-    http_clients: Mutex<HashMap<i64, (Client, u64)>>,
+    http_clients: Mutex<HashMap<String, (Client, u64)>>,
     /// 每个AiConfig的并发控制器：config_id -> controller
-    controllers: Mutex<HashMap<i64, Arc<ConfigConcurrencyController>>>,
+    controllers: Mutex<HashMap<String, Arc<ConfigConcurrencyController>>>,
     /// 所有中止标志：request_id -> abort_flag
     abort_flags: Mutex<HashMap<String, Arc<AtomicBool>>>,
     /// 运行中的任务中止句柄：request_id -> AbortHandle
@@ -359,7 +359,7 @@ impl AiPoolManager {
     }
 
     /// 获取或创建指定配置的HTTP客户端
-    async fn get_or_create_http_client(&self, config_id: i64, timeout_secs: i32) -> Client {
+    async fn get_or_create_http_client(&self, config_id: &str, timeout_secs: i32) -> Client {
         let timeout = if timeout_secs <= 0 {
             None // 0 表示不设置超时
         } else {
@@ -369,7 +369,7 @@ impl AiPoolManager {
         let mut clients = self.http_clients.lock().await;
 
         // 检查是否已有客户端且超时配置相同
-        if let Some((client, existing_timeout)) = clients.get(&config_id) {
+        if let Some((client, existing_timeout)) = clients.get(config_id) {
             let current_timeout = timeout.unwrap_or(0);
             if *existing_timeout == current_timeout {
                 return client.clone();
@@ -395,40 +395,40 @@ impl AiPoolManager {
 
         let client = builder.build().expect("Failed to create HTTP client");
         let stored_timeout = timeout.unwrap_or(0);
-        clients.insert(config_id, (client.clone(), stored_timeout));
+        clients.insert(config_id.to_string(), (client.clone(), stored_timeout));
         client
     }
 
     /// 更新HTTP客户端的超时配置
-    pub async fn update_request_timeout(&self, config_id: i64, _timeout_secs: i32) {
+    pub async fn update_request_timeout(&self, config_id: &str, _timeout_secs: i32) {
         // 移除旧的客户端，下次请求时会创建新的
         let mut clients = self.http_clients.lock().await;
-        clients.remove(&config_id);
+        clients.remove(config_id);
     }
 
     /// 确保并发控制器存在（不存在则创建）
     async fn ensure_controller(
         &self,
-        config_id: i64,
+        config_id: &str,
         concurrent_limit: i32,
         rate_limit: i32,
     ) -> Arc<ConfigConcurrencyController> {
         let mut controllers = self.controllers.lock().await;
 
-        if let Some(controller) = controllers.get(&config_id) {
+        if let Some(controller) = controllers.get(config_id) {
             controller.clone()
         } else {
             let controller = Arc::new(ConfigConcurrencyController::new(concurrent_limit, rate_limit));
-            controllers.insert(config_id, controller.clone());
+            controllers.insert(config_id.to_string(), controller.clone());
             controller
         }
     }
 
     /// 更新并发限制（动态更新，不影响正在进行的请求）
-    pub async fn update_concurrent_limit(&self, config_id: i64, new_limit: i32) -> Result<(), String> {
+    pub async fn update_concurrent_limit(&self, config_id: &str, new_limit: i32) -> Result<(), String> {
         let controllers = self.controllers.lock().await;
 
-        if let Some(controller) = controllers.get(&config_id) {
+        if let Some(controller) = controllers.get(config_id) {
             // 动态更新现有控制器的并发限制
             controller.update_concurrent_limit(new_limit).await;
             Ok(())
@@ -441,10 +441,10 @@ impl AiPoolManager {
 
     /// 更新速率限制（动态更新，不影响正在进行的请求）
     #[allow(dead_code)]
-    pub async fn update_rate_limit(&self, config_id: i64, new_limit: i32) -> Result<(), String> {
+    pub async fn update_rate_limit(&self, config_id: &str, new_limit: i32) -> Result<(), String> {
         let controllers = self.controllers.lock().await;
 
-        if let Some(controller) = controllers.get(&config_id) {
+        if let Some(controller) = controllers.get(config_id) {
             // 动态更新现有控制器的速率限制
             controller.update_rate_limit(new_limit).await;
             Ok(())
@@ -501,18 +501,18 @@ impl AiPoolManager {
 
     /// 获取状态（预留用于监控）
     #[allow(dead_code)]
-    pub async fn get_status(&self, config_id: i64) -> Option<(usize, usize)> {
+    pub async fn get_status(&self, config_id: &str) -> Option<(usize, usize)> {
         let controllers = self.controllers.lock().await;
-        controllers.get(&config_id).map(|c| c.status())
+        controllers.get(config_id).map(|c| c.status())
     }
 
     /// 获取所有状态（预留用于监控）
     #[allow(dead_code)]
-    pub async fn get_all_status(&self) -> HashMap<i64, (usize, usize)> {
+    pub async fn get_all_status(&self) -> HashMap<String, (usize, usize)> {
         let controllers = self.controllers.lock().await;
         controllers
             .iter()
-            .map(|(id, c)| (*id, c.status()))
+            .map(|(id, c)| (id.clone(), c.status()))
             .collect()
     }
 }
@@ -542,7 +542,7 @@ pub async fn execute_streaming_chat(
 
     // 获取并发控制器
     let controller = pool
-        .ensure_controller(req.config.id, req.config.concurrent_limit, req.config.rate_limit)
+        .ensure_controller(&req.config.id, req.config.concurrent_limit, req.config.rate_limit)
         .await;
 
     // 保存app和event_name的克隆用于后续发送事件
@@ -676,7 +676,7 @@ async fn execute_streaming_chat_single_attempt(
     rag_context: &Option<String>,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<(), String> {
-    let client = pool.get_or_create_http_client(req.config.id, req.config.request_timeout).await;
+    let client = pool.get_or_create_http_client(&req.config.id, req.config.request_timeout).await;
 
     // 构建消息数组
     let mut api_messages: Vec<Value> = Vec::new();
@@ -830,7 +830,7 @@ async fn execute_non_streaming_single_attempt(
     pool: &AiPoolManager,
     req: &NonStreamingRequest,
 ) -> Result<NonStreamingResponse, String> {
-    let client = pool.get_or_create_http_client(req.config.id, req.config.request_timeout).await;
+    let client = pool.get_or_create_http_client(&req.config.id, req.config.request_timeout).await;
 
     let base_url = req.config.base_url.trim_end_matches('/');
     let api_url = format!("{}/chat/completions", base_url);
@@ -887,7 +887,7 @@ pub async fn execute_non_streaming_with_abort(
 
     // 获取并发控制器
     let controller = pool
-        .ensure_controller(req.config.id, req.config.concurrent_limit, req.config.rate_limit)
+        .ensure_controller(&req.config.id, req.config.concurrent_limit, req.config.rate_limit)
         .await;
 
     // 获取许可

@@ -23,7 +23,7 @@ fn get_client() -> &'static Client {
 /// abort_flag: 可选的中止标志，如果设置则会在长时间操作时检查是否被中止
 pub async fn get_rag_context(
     subtitle_path: &str,
-    note_id: i64,
+    note_id: &str,
     query: &str,
     abort_flag: Option<&Arc<AtomicBool>>,
 ) -> Result<String, String> {
@@ -92,7 +92,7 @@ pub async fn get_rag_context(
 /// 这个函数会在获取数据库锁之前检查 abort_flag，避免死锁
 async fn ensure_indexed_with_config(
     subtitle_path: &str,
-    note_id: i64,
+    note_id: &str,
     abort_flag: Option<&Arc<AtomicBool>>,
 ) -> Result<String, String> {
     // 在获取数据库锁之前检查 abort_flag
@@ -127,7 +127,7 @@ async fn ensure_indexed_with_config(
 async fn ensure_indexed(
     embedding_config: &EmbeddingConfig,
     subtitle_path: &str,
-    note_id: i64,
+    note_id: &str,
     abort_flag: Option<&Arc<AtomicBool>>,
 ) -> Result<(), String> {
     let db = DATABASE.get().ok_or("Database not initialized")?;
@@ -216,7 +216,7 @@ fn is_indexing_timeout(started_at: &str) -> bool {
 
 /// Wait for indexing to complete
 async fn wait_for_indexing_completion(
-    note_id: i64,
+    note_id: &str,
     abort_flag: Option<&Arc<AtomicBool>>,
 ) -> Result<(), String> {
     let db = DATABASE.get().ok_or("Database not initialized")?;
@@ -258,7 +258,7 @@ async fn wait_for_indexing_completion(
 async fn perform_indexing(
     embedding_config: &EmbeddingConfig,
     subtitle_path: &str,
-    note_id: i64,
+    note_id: &str,
     abort_flag: Option<&Arc<AtomicBool>>,
 ) -> Result<(), String> {
     let db = DATABASE.get().ok_or("Database not initialized")?;
@@ -448,7 +448,7 @@ async fn generate_embeddings_batch(
 
 /// Search for similar chunks using cosine similarity
 fn search_similar_chunks(
-    note_id: i64,
+    note_id: &str,
     query_embedding: &[f32],
     top_k: usize,
 ) -> Result<Vec<SubtitleChunk>, String> {
@@ -521,7 +521,7 @@ fn bytes_to_embedding(bytes: &[u8]) -> Vec<f32> {
 }
 
 /// Clear subtitle chunks for a note (for re-indexing)
-pub fn clear_subtitle_index(note_id: i64) -> Result<(), String> {
+pub fn clear_subtitle_index(note_id: &str) -> Result<(), String> {
     let db = DATABASE.get().ok_or("Database not initialized")?;
 
     // Delete chunks

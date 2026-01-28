@@ -29,9 +29,9 @@ function CollectionTreeMenuItem({
 }: {
   collection: Collection;
   allCollections: Collection[];
-  excludeId: number;
+  excludeId: string;
   level: number;
-  onSelect: (id: number) => void;
+  onSelect: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const children = allCollections.filter((c) => c.parent_id === collection.id && c.id !== excludeId);
@@ -106,7 +106,7 @@ function CollectionNoteItem({
 }: {
   item: NoteWithDetails;
   level: number;
-  currentCollectionId: number;
+  currentCollectionId: string;
 }) {
   const {
     setSelectedNoteId,
@@ -150,7 +150,7 @@ function CollectionNoteItem({
     setShowMenu(!showMenu);
   };
 
-  const handleMoveToCollection = async (collectionId: number) => {
+  const handleMoveToCollection = async (collectionId: string) => {
     try {
       await removeNoteFromCollection(currentCollectionId, item.note_id);
       await addNoteToCollection(collectionId, item.note_id);

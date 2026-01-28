@@ -8,8 +8,8 @@ import { useApp } from "../../context/AppContext";
 import type { Collection } from "../../types";
 
 // 获取合集的所有子孙合集ID
-function getDescendantIds(collections: Collection[], parentId: number): Set<number> {
-  const descendants = new Set<number>();
+function getDescendantIds(collections: Collection[], parentId: string): Set<string> {
+  const descendants = new Set<string>();
   const queue = [parentId];
 
   while (queue.length > 0) {
@@ -28,7 +28,7 @@ function getDescendantIds(collections: Collection[], parentId: number): Set<numb
 interface CreateCollectionModalProps {
   onClose: () => void;
   editingCollection?: Collection | null;
-  defaultParentId?: number;
+  defaultParentId?: string;
 }
 
 export function CreateCollectionModal({
@@ -41,7 +41,7 @@ export function CreateCollectionModal({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [coverImage, setCoverImage] = useState<string | null>(null);
-  const [parentCollectionId, setParentCollectionId] = useState<number | null>(null);
+  const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -195,7 +195,7 @@ export function CreateCollectionModal({
                 </label>
                 <select
                   value={parentCollectionId ?? ""}
-                  onChange={(e) => setParentCollectionId(e.target.value ? Number(e.target.value) : null)}
+                  onChange={(e) => setParentCollectionId(e.target.value || null)}
                   className={cn(
                     "flex-1 px-3 py-2.5 rounded-md border transition-colors",
                     "bg-slate-50 dark:bg-neutral-800",

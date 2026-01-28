@@ -91,7 +91,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     // Prompt config state
     const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
     const [editingPromptConfig, setEditingPromptConfig] = useState<PromptConfig | null>(null);
-    const [deletingPromptConfigId, setDeletingPromptConfigId] = useState<number | null>(null);
+    const [deletingPromptConfigId, setDeletingPromptConfigId] = useState<string | null>(null);
 
     // Prompt filter state
     const [promptSearchQuery, setPromptSearchQuery] = useState("");
@@ -358,7 +358,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
     // Prompt Config handlers
     const createEmptyPromptConfig = (): PromptConfig => ({
-        id: 0,
+        id: "",
         title: "",
         description: null,
         content: "",
@@ -373,8 +373,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const savePromptConfig = async () => {
         if (!editingPromptConfig) return;
         try {
-            if (editingPromptConfig.id === 0) {
-                const newId = await invoke<number>("create_prompt_config", { config: editingPromptConfig });
+            if (editingPromptConfig.id === "") {
+                const newId = await invoke<string>("create_prompt_config", { config: editingPromptConfig });
                 setPromptConfigs([...promptConfigs, { ...editingPromptConfig, id: newId }]);
             } else {
                 await invoke("update_prompt_config", { config: editingPromptConfig });
@@ -388,7 +388,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
-    const deletePromptConfig = async (id: number) => {
+    const deletePromptConfig = async (id: string) => {
         try {
             await invoke("delete_prompt_config", { id });
             setPromptConfigs(promptConfigs.filter(c => c.id !== id));
@@ -756,7 +756,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 </button>
                                 <div>
                                     <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-                                        {editingPromptConfig.id === 0 ? "新增提示词" : "编辑提示词"}
+                                        {editingPromptConfig.id === "" ? "新增提示词" : "编辑提示词"}
                                     </h3>
                                     <p className="text-sm text-slate-500">创建自定义提示词模板</p>
                                 </div>
@@ -817,8 +817,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 <div className="flex flex-col w-full">
                                     <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">推荐模型</div>
                                     <select
-                                        value={editingPromptConfig.recommended_model_id?.toString() || ""}
-                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, recommended_model_id: e.target.value ? Number(e.target.value) : null })}
+                                        value={editingPromptConfig.recommended_model_id || ""}
+                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, recommended_model_id: e.target.value || null })}
                                         className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
                                     >
                                         <option value="">无</option>

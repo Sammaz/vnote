@@ -12,6 +12,7 @@ mod note_initialization;
 mod prompts;
 mod rag;
 pub mod settings;
+mod snowflake;
 mod subtitle;
 mod subtitle_optimizer;
 pub mod validation;
@@ -36,9 +37,9 @@ const TRAY_ID: &str = "vnote-tray";
 pub static DATABASE: OnceLock<Database> = OnceLock::new();
 
 // 高光生成防重复：跟踪正在生成高光的 note_id
-static HIGHLIGHT_GENERATING_NOTES: OnceLock<tokio::sync::Mutex<HashSet<i64>>> = OnceLock::new();
+static HIGHLIGHT_GENERATING_NOTES: OnceLock<tokio::sync::Mutex<HashSet<String>>> = OnceLock::new();
 
-fn get_highlight_generating_notes() -> &'static tokio::sync::Mutex<HashSet<i64>> {
+fn get_highlight_generating_notes() -> &'static tokio::sync::Mutex<HashSet<String>> {
     HIGHLIGHT_GENERATING_NOTES.get_or_init(|| tokio::sync::Mutex::new(HashSet::new()))
 }
 
@@ -374,7 +375,7 @@ fn get_ai_configs() -> Result<Vec<AiConfig>, String> {
 }
 
 #[tauri::command]
-fn create_ai_config(config: AiConfig) -> Result<i64, String> {
+fn create_ai_config(config: AiConfig) -> Result<String, String> {
     // 验证输入
     validation::validate_config_title(&config.title)?;
     validation::validate_url(&config.base_url)?;
@@ -401,32 +402,32 @@ async fn update_ai_config(config: AiConfig) -> Result<(), String> {
 
     // 动态更新 AI 线程池的并发限制
     crate::ai_pool::get_ai_pool_manager()
-        .update_concurrent_limit(config.id, config.concurrent_limit)
+        .update_concurrent_limit(&config.id, config.concurrent_limit)
         .await
         // 忽略控制器不存在的错误（可能是首次创建配置）
         .ok();
 
     // 动态更新 AI 线程池的超时配置
     crate::ai_pool::get_ai_pool_manager()
-        .update_request_timeout(config.id, config.request_timeout)
+        .update_request_timeout(&config.id, config.request_timeout)
         .await;
 
     Ok(())
 }
 
 #[tauri::command]
-fn delete_ai_config(id: i64) -> Result<(), String> {
-    get_db().delete_ai_config(id).map_err(|e| e.to_string())
+fn delete_ai_config(id: String) -> Result<(), String> {
+    get_db().delete_ai_config(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn set_default_ai_config(id: i64) -> Result<(), String> {
-    get_db().set_default_ai_config(id).map_err(|e| e.to_string())
+fn set_default_ai_config(id: String) -> Result<(), String> {
+    get_db().set_default_ai_config(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn unset_default_ai_config(id: i64) -> Result<(), String> {
-    get_db().unset_default_ai_config(id).map_err(|e| e.to_string())
+fn unset_default_ai_config(id: String) -> Result<(), String> {
+    get_db().unset_default_ai_config(&id).map_err(|e| e.to_string())
 }
 
 /// Test API connection for AI/Embedding/Reranker configs
@@ -601,7 +602,7 @@ async fn save_file_content(path: String, content: String) -> Result<(), String> 
 /// Event payload for TS to MP4 conversion result
 #[derive(Clone, serde::Serialize)]
 struct TsConversionResult {
-    note_id: i64,
+    note_id: String,
     success: bool,
     mp4_path: Option<String>,
     error: Option<String>,
@@ -610,8 +611,9 @@ struct TsConversionResult {
 /// Start TS to MP4 conversion in background and emit event when done
 /// This prevents GUI freezing by not blocking the IPC channel
 #[tauri::command]
-fn start_ts_conversion(app: AppHandle, ts_path: String, note_id: i64) {
+fn start_ts_conversion(app: AppHandle, ts_path: String, note_id: String) {
     // Spawn the conversion task in background and return immediately
+    let note_id_clone = note_id.clone();
     tauri::async_runtime::spawn(async move {
         // Check ffmpeg availability first
         let ffmpeg_available = match async_ffmpeg_command().arg("-version").output().await {
@@ -621,7 +623,7 @@ fn start_ts_conversion(app: AppHandle, ts_path: String, note_id: i64) {
 
         if !ffmpeg_available {
             let payload = TsConversionResult {
-                note_id,
+                note_id: note_id_clone,
                 success: false,
                 mp4_path: None,
                 error: Some("未检测到 ffmpeg。请安装 ffmpeg 以支持 TS 视频播放。".to_string()),
@@ -630,17 +632,17 @@ fn start_ts_conversion(app: AppHandle, ts_path: String, note_id: i64) {
             return;
         }
 
-        let result = convert_ts_to_mp4_internal(&app, &ts_path, note_id).await;
+        let result = convert_ts_to_mp4_internal(&app, &ts_path, &note_id_clone).await;
 
         let payload = match result {
             Ok(mp4_path) => TsConversionResult {
-                note_id,
+                note_id: note_id_clone,
                 success: true,
                 mp4_path: Some(mp4_path),
                 error: None,
             },
             Err(e) => TsConversionResult {
-                note_id,
+                note_id: note_id_clone,
                 success: false,
                 mp4_path: None,
                 error: Some(e),
@@ -653,7 +655,7 @@ fn start_ts_conversion(app: AppHandle, ts_path: String, note_id: i64) {
 }
 
 /// Internal function to perform TS to MP4 conversion
-async fn convert_ts_to_mp4_internal(app: &AppHandle, ts_path: &str, note_id: i64) -> Result<String, String> {
+async fn convert_ts_to_mp4_internal(app: &AppHandle, ts_path: &str, note_id: &str) -> Result<String, String> {
     let ts_path = Path::new(ts_path);
 
     // Verify it's a .ts file
@@ -663,7 +665,7 @@ async fn convert_ts_to_mp4_internal(app: &AppHandle, ts_path: &str, note_id: i64
 
     // Create output path in app cache directory, organized by note ID
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let note_cache_dir = cache_dir.join("notes").join(note_id.to_string());
+    let note_cache_dir = cache_dir.join("notes").join(note_id);
     tokio::fs::create_dir_all(&note_cache_dir).await.map_err(|e| e.to_string())?;
 
     // Generate output filename based on input file hash
@@ -725,8 +727,8 @@ async fn convert_ts_to_mp4_internal(app: &AppHandle, ts_path: &str, note_id: i64
 /// Returns the path to the converted MP4 file
 /// Note: For long-running conversions, prefer using start_ts_conversion with events
 #[tauri::command]
-async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: i64) -> Result<String, String> {
-    convert_ts_to_mp4_internal(&app, &ts_path, note_id).await
+async fn convert_ts_to_mp4(app: AppHandle, ts_path: String, note_id: String) -> Result<String, String> {
+    convert_ts_to_mp4_internal(&app, &ts_path, &note_id).await
 }
 
 /// Check if ffmpeg is available
@@ -785,9 +787,9 @@ async fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
 
 /// Clear chapter screenshots for a specific note
 #[tauri::command]
-async fn clear_chapter_screenshots(app: AppHandle, note_id: i64) -> Result<(), String> {
+async fn clear_chapter_screenshots(app: AppHandle, note_id: String) -> Result<(), String> {
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
+    let screenshots_dir = cache_dir.join("notes").join(&note_id).join("screenshots");
 
     if screenshots_dir.exists() {
         tokio::task::spawn_blocking(move || {
@@ -856,8 +858,8 @@ fn get_notes() -> Result<Vec<Note>, String> {
 }
 
 #[tauri::command]
-fn get_note(id: i64) -> Result<Option<Note>, String> {
-    get_db().get_note_by_id(id).map_err(|e| e.to_string())
+fn get_note(id: String) -> Result<Option<Note>, String> {
+    get_db().get_note_by_id(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -876,12 +878,13 @@ fn update_note(note: Note) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn delete_note(app: AppHandle, id: i64) -> Result<(), String> {
+async fn delete_note(app: AppHandle, id: String) -> Result<(), String> {
     let db = get_db();
 
     // Delete entire note cache directory (includes TS video cache and chapter screenshots)
+    let id_clone = id.clone();
     if let Ok(cache_dir) = app.path().app_cache_dir() {
-        let note_cache_dir = cache_dir.join("notes").join(id.to_string());
+        let note_cache_dir = cache_dir.join("notes").join(&id_clone);
         if note_cache_dir.exists() {
             tokio::task::spawn_blocking(move || {
                 let _ = std::fs::remove_dir_all(&note_cache_dir);
@@ -892,17 +895,16 @@ async fn delete_note(app: AppHandle, id: i64) -> Result<(), String> {
     }
 
     // Database operation in spawn_blocking
-    let note_id = id;
     tokio::task::spawn_blocking(move || {
-        db.delete_note(note_id).map_err(|e| e.to_string())
+        db.delete_note(&id).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
 #[tauri::command]
-fn update_playback_position(note_id: i64, position: f64) -> Result<(), String> {
-    get_db().update_playback_position(note_id, position).map_err(|e| e.to_string())
+fn update_playback_position(note_id: String, position: f64) -> Result<(), String> {
+    get_db().update_playback_position(&note_id, position).map_err(|e| e.to_string())
 }
 
 // Chat commands
@@ -918,18 +920,18 @@ async fn abort_chat(request_id: String) -> Result<(), String> {
 
 // Clear subtitle index (for re-indexing)
 #[tauri::command]
-fn clear_subtitle_index(note_id: i64) -> Result<(), String> {
-    rag::clear_subtitle_index(note_id)
+fn clear_subtitle_index(note_id: String) -> Result<(), String> {
+    rag::clear_subtitle_index(&note_id)
 }
 
 // Generate suggested questions for a note
 #[tauri::command]
-async fn generate_questions_for_note(note_id: i64) -> Result<Vec<String>, String> {
+async fn generate_questions_for_note(note_id: String) -> Result<Vec<String>, String> {
     let db = get_db();
 
     // Get note
     let note = db
-        .get_note_by_id(note_id)
+        .get_note_by_id(&note_id)
         .map_err(|e| e.to_string())?
         .ok_or("笔记未找到")?;
 
@@ -946,7 +948,7 @@ async fn generate_questions_for_note(note_id: i64) -> Result<Vec<String>, String
         None => {
             // No subtitle, save and return default
             let questions_json = serde_json::to_string(&default_questions).map_err(|e| e.to_string())?;
-            db.update_note_questions(note_id, &questions_json).map_err(|e| e.to_string())?;
+            db.update_note_questions(&note_id, &questions_json).map_err(|e| e.to_string())?;
             return Ok(default_questions);
         }
     };
@@ -955,14 +957,14 @@ async fn generate_questions_for_note(note_id: i64) -> Result<Vec<String>, String
         None => {
             // No model, save and return default
             let questions_json = serde_json::to_string(&default_questions).map_err(|e| e.to_string())?;
-            db.update_note_questions(note_id, &questions_json).map_err(|e| e.to_string())?;
+            db.update_note_questions(&note_id, &questions_json).map_err(|e| e.to_string())?;
             return Ok(default_questions);
         }
     };
 
     // Generate questions (use default on failure)
     let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let questions = chat::generate_suggested_questions(db, &subtitle_path, model_id, &abort_flag)
+    let questions = chat::generate_suggested_questions(db, &subtitle_path, &model_id, &abort_flag)
         .await
         .unwrap_or_else(|e| {
             tracing::error!("Failed to generate questions: {}", e);
@@ -971,7 +973,7 @@ async fn generate_questions_for_note(note_id: i64) -> Result<Vec<String>, String
 
     // Save to database
     let questions_json = serde_json::to_string(&questions).map_err(|e| e.to_string())?;
-    db.update_note_questions(note_id, &questions_json).map_err(|e| e.to_string())?;
+    db.update_note_questions(&note_id, &questions_json).map_err(|e| e.to_string())?;
 
     // Return questions to frontend
     Ok(questions)
@@ -984,7 +986,7 @@ fn get_embedding_configs() -> Result<Vec<EmbeddingConfig>, String> {
 }
 
 #[tauri::command]
-fn create_embedding_config(config: EmbeddingConfig) -> Result<i64, String> {
+fn create_embedding_config(config: EmbeddingConfig) -> Result<String, String> {
     // 验证输入
     validation::validate_config_title(&config.title)?;
     validation::validate_url(&config.base_url)?;
@@ -1006,18 +1008,18 @@ fn update_embedding_config(config: EmbeddingConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_embedding_config(id: i64) -> Result<(), String> {
-    get_db().delete_embedding_config(id).map_err(|e| e.to_string())
+fn delete_embedding_config(id: String) -> Result<(), String> {
+    get_db().delete_embedding_config(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn set_default_embedding_config(id: i64) -> Result<(), String> {
-    get_db().set_default_embedding_config(id).map_err(|e| e.to_string())
+fn set_default_embedding_config(id: String) -> Result<(), String> {
+    get_db().set_default_embedding_config(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn unset_default_embedding_config(id: i64) -> Result<(), String> {
-    get_db().unset_default_embedding_config(id).map_err(|e| e.to_string())
+fn unset_default_embedding_config(id: String) -> Result<(), String> {
+    get_db().unset_default_embedding_config(&id).map_err(|e| e.to_string())
 }
 
 // Reranker config commands
@@ -1027,7 +1029,7 @@ fn get_reranker_configs() -> Result<Vec<RerankerConfig>, String> {
 }
 
 #[tauri::command]
-fn create_reranker_config(config: RerankerConfig) -> Result<i64, String> {
+fn create_reranker_config(config: RerankerConfig) -> Result<String, String> {
     // 验证输入
     validation::validate_config_title(&config.title)?;
     validation::validate_url(&config.base_url)?;
@@ -1049,18 +1051,18 @@ fn update_reranker_config(config: RerankerConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_reranker_config(id: i64) -> Result<(), String> {
-    get_db().delete_reranker_config(id).map_err(|e| e.to_string())
+fn delete_reranker_config(id: String) -> Result<(), String> {
+    get_db().delete_reranker_config(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn set_default_reranker_config(id: i64) -> Result<(), String> {
-    get_db().set_default_reranker_config(id).map_err(|e| e.to_string())
+fn set_default_reranker_config(id: String) -> Result<(), String> {
+    get_db().set_default_reranker_config(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn unset_default_reranker_config(id: i64) -> Result<(), String> {
-    get_db().unset_default_reranker_config(id).map_err(|e| e.to_string())
+fn unset_default_reranker_config(id: String) -> Result<(), String> {
+    get_db().unset_default_reranker_config(&id).map_err(|e| e.to_string())
 }
 
 // Prompt config commands
@@ -1094,8 +1096,8 @@ fn update_prompt_config(config: PromptConfig) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_prompt_config(id: i64) -> Result<(), String> {
-    get_db().delete_prompt_config(id).map_err(|e| e.to_string())
+fn delete_prompt_config(id: String) -> Result<(), String> {
+    get_db().delete_prompt_config(&id).map_err(|e| e.to_string())
 }
 
 // Note generation commands
@@ -1103,8 +1105,8 @@ fn delete_prompt_config(id: i64) -> Result<(), String> {
 async fn generate_note_content(
     app: AppHandle,
     generation_id: Option<String>,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     concurrent: bool,
     regenerate: bool,
     tabs_to_generate: Vec<String>,
@@ -1132,7 +1134,7 @@ async fn generate_note_content(
 
     // 使用前端传入的 concurrent_limit，或从AI配置中获取
     let concurrent_limit = concurrent_limit.unwrap_or_else(|| {
-        if let Ok(Some(ai_config)) = get_db().get_ai_config_by_id(model_id) {
+        if let Ok(Some(ai_config)) = get_db().get_ai_config_by_id(&model_id) {
             ai_config.concurrent_limit as usize
         } else {
             5 // 默认5个
@@ -1174,14 +1176,15 @@ async fn abort_note_generation(generation_id: String) -> Result<(), String> {
 async fn generate_chapters(
     app: AppHandle,
     generation_id: Option<String>,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     video_path: String,
     subtitle_path: String,
     capture_screenshots: bool,
 ) -> Result<String, String> {
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let return_id = generation_id.clone();
+    let note_id_for_save = note_id.clone();
 
     tracing::info!("[原文细读] 开始执行, note_id={}, generation_id={}", note_id, return_id);
 
@@ -1202,11 +1205,11 @@ async fn generate_chapters(
                 let conn = get_db().connection();
                 if let Err(e) = conn.execute(
                     "UPDATE notes SET detailed_reading = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
-                    (&chapter_json, note_id),
+                    (&chapter_json, &note_id_for_save),
                 ) {
                     tracing::error!("[generate_chapters] 保存章节数据失败: {}", e);
                 } else {
-                    tracing::info!("[generate_chapters] 章节数据已保存到数据库, note_id={}", note_id);
+                    tracing::info!("[generate_chapters] 章节数据已保存到数据库, note_id={}", note_id_for_save);
                 }
             }
             Err(e) => {
@@ -1234,11 +1237,11 @@ async fn parse_subtitle_file(path: String) -> Result<Vec<subtitle::SubtitleEntry
 
 #[tauri::command]
 async fn save_chapters_to_note(
-    note_id: i64,
+    note_id: String,
     chapter_data: serde_json::Value,
 ) -> Result<(), String> {
     let mut note = get_db()
-        .get_note_by_id(note_id)
+        .get_note_by_id(&note_id)
         .map_err(|e| e.to_string())?
         .ok_or("笔记未找到".to_string())?;
 
@@ -1252,12 +1255,12 @@ async fn save_chapters_to_note(
 /// Update a specific content field of a note
 #[tauri::command]
 fn update_note_content(
-    note_id: i64,
+    note_id: String,
     tab_type: String,
     content: String,
 ) -> Result<(), String> {
     let mut note = get_db()
-        .get_note_by_id(note_id)
+        .get_note_by_id(&note_id)
         .map_err(|e| e.to_string())?
         .ok_or("笔记未找到")?;
 
@@ -1279,36 +1282,36 @@ fn update_note_content(
 
 // Optimized subtitles commands
 #[tauri::command]
-fn get_optimized_subtitles(note_id: i64) -> Result<Vec<OptimizedSubtitle>, String> {
-    get_db().get_optimized_subtitles(note_id).map_err(|e| e.to_string())
+fn get_optimized_subtitles(note_id: String) -> Result<Vec<OptimizedSubtitle>, String> {
+    get_db().get_optimized_subtitles(&note_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn save_optimized_subtitle(note_id: i64, chapter_id: String, optimized_text: String) -> Result<i64, String> {
-    get_db().save_optimized_subtitle(note_id, &chapter_id, &optimized_text).map_err(|e| e.to_string())
+fn save_optimized_subtitle(note_id: String, chapter_id: String, optimized_text: String) -> Result<String, String> {
+    get_db().save_optimized_subtitle(&note_id, &chapter_id, &optimized_text).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn delete_optimized_subtitles(note_id: i64) -> Result<(), String> {
-    get_db().delete_optimized_subtitles(note_id).map_err(|e| e.to_string())
+fn delete_optimized_subtitles(note_id: String) -> Result<(), String> {
+    get_db().delete_optimized_subtitles(&note_id).map_err(|e| e.to_string())
 }
 
 // Note UI state commands
 #[tauri::command]
-fn get_note_ui_state(note_id: i64) -> Result<Option<NoteUiState>, String> {
-    get_db().get_note_ui_state(note_id).map_err(|e| e.to_string())
+fn get_note_ui_state(note_id: String) -> Result<Option<NoteUiState>, String> {
+    get_db().get_note_ui_state(&note_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn save_note_ui_state(note_id: i64, show_subtitles: bool, subtitle_optimization_enabled: bool) -> Result<(), String> {
-    get_db().save_note_ui_state(note_id, show_subtitles, subtitle_optimization_enabled).map_err(|e| e.to_string())
+fn save_note_ui_state(note_id: String, show_subtitles: bool, subtitle_optimization_enabled: bool) -> Result<(), String> {
+    get_db().save_note_ui_state(&note_id, show_subtitles, subtitle_optimization_enabled).map_err(|e| e.to_string())
 }
 
 // Screenshot marker commands
 #[tauri::command]
 async fn save_screenshot_marker(
     app: AppHandle,
-    note_id: i64,
+    note_id: String,
     subtitle_index: i32,
     timestamp: f64,
     screenshot_data: Vec<u8>,
@@ -1317,7 +1320,7 @@ async fn save_screenshot_marker(
     let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
     let screenshots_dir = cache_dir
         .join("notes")
-        .join(note_id.to_string())
+        .join(&note_id)
         .join("assist_screenshots");
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
@@ -1350,12 +1353,12 @@ async fn save_screenshot_marker(
 
 #[tauri::command]
 async fn delete_screenshot_marker(
-    note_id: i64,
+    note_id: String,
     marker_id: String,
 ) -> Result<(), String> {
     // Delete from database and get marker data for file cleanup
     let marker = get_db()
-        .delete_screenshot_marker(note_id, &marker_id)
+        .delete_screenshot_marker(&note_id, &marker_id)
         .map_err(|e| e.to_string())?;
 
     // Delete screenshot file if marker existed
@@ -1371,9 +1374,9 @@ async fn delete_screenshot_marker(
 }
 
 #[tauri::command]
-fn get_screenshot_markers(note_id: i64) -> Result<Vec<ScreenshotMarker>, String> {
+fn get_screenshot_markers(note_id: String) -> Result<Vec<ScreenshotMarker>, String> {
     get_db()
-        .get_screenshot_markers(note_id)
+        .get_screenshot_markers(&note_id)
         .map_err(|e| e.to_string())
 }
 
@@ -1384,14 +1387,15 @@ fn get_screenshot_markers(note_id: i64) -> Result<Vec<ScreenshotMarker>, String>
 async fn generate_chapters_with_markers(
     app: AppHandle,
     generation_id: Option<String>,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     video_path: String,
     subtitle_path: String,
     markers: Vec<ScreenshotMarker>,
 ) -> Result<String, String> {
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let return_id = generation_id.clone();
+    let note_id_for_save = note_id.clone();
 
     // 在后台任务中执行
     tokio::spawn(async move {
@@ -1407,7 +1411,7 @@ async fn generate_chapters_with_markers(
         ).await {
             Ok(chapter_data) => {
                 // 保存章节数据到笔记
-                if let Err(e) = save_chapters_to_note_internal(note_id, &chapter_data) {
+                if let Err(e) = save_chapters_to_note_internal(&note_id_for_save, &chapter_data) {
                     tracing::error!("[generate_chapters_with_markers] 保存章节数据失败: {}", e);
                 }
             }
@@ -1421,7 +1425,7 @@ async fn generate_chapters_with_markers(
 }
 
 /// Internal function to save chapter data to note
-fn save_chapters_to_note_internal(note_id: i64, chapter_data: &chapter::ChapterData) -> Result<(), String> {
+fn save_chapters_to_note_internal(note_id: &str, chapter_data: &chapter::ChapterData) -> Result<(), String> {
     let mut note = get_db()
         .get_note_by_id(note_id)
         .map_err(|e| e.to_string())?
@@ -1491,8 +1495,8 @@ async fn capture_video_frame(
 async fn generate_highlights(
     app: AppHandle,
     generation_id: Option<String>,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     subtitle_path: String,
     highlight_type: String,
     total_duration: f64,
@@ -1511,11 +1515,12 @@ async fn generate_highlights(
     // 标记开始生成
     {
         let mut generating_notes = get_highlight_generating_notes().lock().await;
-        generating_notes.insert(note_id);
+        generating_notes.insert(note_id.clone());
     }
 
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let return_id = generation_id.clone();
+    let note_id_for_save = note_id.clone();
 
     // 转换高光类型
     let highlight_type = match highlight_type.as_str() {
@@ -1526,7 +1531,7 @@ async fn generate_highlights(
     };
 
     let request = GenerateHighlightsRequest {
-        _note_id: note_id,
+        _note_id: note_id.clone(),
         model_id,
         subtitle_path,
         highlight_type,
@@ -1538,7 +1543,7 @@ async fn generate_highlights(
         match highlight_generation::generate_highlights(app.clone(), get_db(), generation_id.clone(), request).await {
             Ok(highlight_data) => {
                 // 保存到数据库
-                if let Err(e) = save_highlights_to_note_internal(note_id, &highlight_data) {
+                if let Err(e) = save_highlights_to_note_internal(&note_id_for_save, &highlight_data) {
                     tracing::error!("[generate_highlights] 保存高光数据失败: {}", e);
                 }
             }
@@ -1560,9 +1565,9 @@ async fn abort_highlight_generation(generation_id: String) -> Result<(), String>
 }
 
 #[tauri::command]
-fn save_highlights_to_note(note_id: i64, highlight_data: serde_json::Value) -> Result<(), String> {
+fn save_highlights_to_note(note_id: String, highlight_data: serde_json::Value) -> Result<(), String> {
     let mut note = get_db()
-        .get_note_by_id(note_id)
+        .get_note_by_id(&note_id)
         .map_err(|e| e.to_string())?
         .ok_or("笔记未找到")?;
 
@@ -1572,7 +1577,7 @@ fn save_highlights_to_note(note_id: i64, highlight_data: serde_json::Value) -> R
     get_db().update_note(&note).map_err(|e| e.to_string())
 }
 
-fn save_highlights_to_note_internal(note_id: i64, highlight_data: &highlight_generation::HighlightData) -> Result<(), String> {
+fn save_highlights_to_note_internal(note_id: &str, highlight_data: &highlight_generation::HighlightData) -> Result<(), String> {
     let mut note = get_db()
         .get_note_by_id(note_id)
         .map_err(|e| e.to_string())?
@@ -1588,8 +1593,8 @@ fn save_highlights_to_note_internal(note_id: i64, highlight_data: &highlight_gen
 #[tauri::command]
 async fn initialize_note_data(
     app: AppHandle,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     video_path: String,
     subtitle_path: Option<String>,
     start_from_step: Option<usize>,
@@ -1619,11 +1624,11 @@ fn get_incomplete_initializations() -> Result<Vec<Note>, String> {
 #[tauri::command]
 async fn resume_note_initialization(
     app: AppHandle,
-    note_id: i64,
+    note_id: String,
 ) -> Result<String, String> {
     let db = get_db();
     let note = db
-        .get_note_by_id(note_id)
+        .get_note_by_id(&note_id)
         .map_err(|e| e.to_string())?
         .ok_or("笔记不存在")?;
 
@@ -1647,8 +1652,8 @@ fn get_collections() -> Result<Vec<Collection>, String> {
 }
 
 #[tauri::command]
-fn get_collection(id: i64) -> Result<Option<Collection>, String> {
-    get_db().get_collection_by_id(id).map_err(|e| e.to_string())
+fn get_collection(id: String) -> Result<Option<Collection>, String> {
+    get_db().get_collection_by_id(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1674,47 +1679,47 @@ fn update_collection(collection: Collection) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn update_collections_order(collection_ids: Vec<i64>) -> Result<(), String> {
+fn update_collections_order(collection_ids: Vec<String>) -> Result<(), String> {
     get_db().update_collections_order(&collection_ids).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn delete_collection(id: i64) -> Result<(), String> {
-    get_db().delete_collection(id).map_err(|e| e.to_string())
+fn delete_collection(id: String) -> Result<(), String> {
+    get_db().delete_collection(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn add_note_to_collection(collection_id: i64, note_id: i64) -> Result<(), String> {
-    get_db().add_note_to_collection(collection_id, note_id).map_err(|e| e.to_string())
+fn add_note_to_collection(collection_id: String, note_id: String) -> Result<(), String> {
+    get_db().add_note_to_collection(&collection_id, &note_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn remove_note_from_collection(collection_id: i64, note_id: i64) -> Result<(), String> {
-    get_db().remove_note_from_collection(collection_id, note_id).map_err(|e| e.to_string())
+fn remove_note_from_collection(collection_id: String, note_id: String) -> Result<(), String> {
+    get_db().remove_note_from_collection(&collection_id, &note_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_collection_items(collection_id: i64) -> Result<Vec<CollectionItem>, String> {
-    get_db().get_collection_items(collection_id).map_err(|e| e.to_string())
+fn get_collection_items(collection_id: String) -> Result<Vec<CollectionItem>, String> {
+    get_db().get_collection_items(&collection_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn update_collection_items_order(collection_id: i64, note_ids: Vec<i64>) -> Result<(), String> {
-    get_db().update_collection_items_order(collection_id, &note_ids).map_err(|e| e.to_string())
+fn update_collection_items_order(collection_id: String, note_ids: Vec<String>) -> Result<(), String> {
+    get_db().update_collection_items_order(&collection_id, &note_ids).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn update_collection_mixed_order(parent_id: i64, items: Vec<(String, i64)>) -> Result<(), String> {
-    get_db().update_collection_mixed_order(parent_id, &items).map_err(|e| e.to_string())
+fn update_collection_mixed_order(parent_id: String, items: Vec<(String, String)>) -> Result<(), String> {
+    get_db().update_collection_mixed_order(&parent_id, &items).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_collections_for_note(note_id: i64) -> Result<Vec<Collection>, String> {
-    get_db().get_collections_for_note(note_id).map_err(|e| e.to_string())
+fn get_collections_for_note(note_id: String) -> Result<Vec<Collection>, String> {
+    get_db().get_collections_for_note(&note_id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn get_all_notes_in_collections() -> Result<Vec<i64>, String> {
+fn get_all_notes_in_collections() -> Result<Vec<String>, String> {
     get_db().get_all_notes_in_collections().map_err(|e| e.to_string())
 }
 
@@ -1724,10 +1729,10 @@ fn get_all_notes_in_collections() -> Result<Vec<i64>, String> {
 
 /// 批量从合集中移除笔记
 #[tauri::command]
-fn batch_remove_notes_from_collection(collection_id: i64, note_ids: Vec<i64>) -> Result<(), String> {
+fn batch_remove_notes_from_collection(collection_id: String, note_ids: Vec<String>) -> Result<(), String> {
     let db = get_db();
     for note_id in note_ids {
-        db.remove_note_from_collection(collection_id, note_id)
+        db.remove_note_from_collection(&collection_id, &note_id)
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -1736,15 +1741,15 @@ fn batch_remove_notes_from_collection(collection_id: i64, note_ids: Vec<i64>) ->
 /// 批量移动笔记到另一个合集
 #[tauri::command]
 fn batch_move_notes_to_collection(
-    from_collection_id: i64,
-    to_collection_id: i64,
-    note_ids: Vec<i64>,
+    from_collection_id: String,
+    to_collection_id: String,
+    note_ids: Vec<String>,
 ) -> Result<(), String> {
     let db = get_db();
     for note_id in note_ids {
-        db.remove_note_from_collection(from_collection_id, note_id)
+        db.remove_note_from_collection(&from_collection_id, &note_id)
             .map_err(|e| e.to_string())?;
-        db.add_note_to_collection(to_collection_id, note_id)
+        db.add_note_to_collection(&to_collection_id, &note_id)
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -1752,19 +1757,19 @@ fn batch_move_notes_to_collection(
 
 /// 批量删除笔记
 #[tauri::command]
-fn batch_delete_notes(app: AppHandle, note_ids: Vec<i64>) -> Result<(), String> {
+fn batch_delete_notes(app: AppHandle, note_ids: Vec<String>) -> Result<(), String> {
     let db = get_db();
 
     for id in note_ids {
         // 删除笔记缓存目录
         if let Ok(cache_dir) = app.path().app_cache_dir() {
-            let note_cache_dir = cache_dir.join("notes").join(id.to_string());
+            let note_cache_dir = cache_dir.join("notes").join(&id);
             if note_cache_dir.exists() {
                 let _ = std::fs::remove_dir_all(&note_cache_dir);
             }
         }
 
-        db.delete_note(id).map_err(|e| e.to_string())?;
+        db.delete_note(&id).map_err(|e| e.to_string())?;
     }
 
     Ok(())

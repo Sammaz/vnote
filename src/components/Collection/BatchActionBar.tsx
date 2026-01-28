@@ -3,7 +3,7 @@ import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 
 interface BatchActionBarProps {
-  collectionId: number;
+  collectionId: string;
   totalCount: number;
   onMoveClick: () => void;
 }

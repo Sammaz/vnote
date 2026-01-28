@@ -29,7 +29,7 @@ MindMap.usePlugin(Export);
 MindMap.usePlugin(ExportPDF);
 
 interface MindMapEditorProps {
-  noteId: number;
+  noteId: string;
   noteTitle: string;
   initialData: string | null;
   onContentChange?: (content: string) => void;

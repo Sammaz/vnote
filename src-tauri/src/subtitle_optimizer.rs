@@ -22,7 +22,7 @@ use tokio::sync::RwLock;
 /// 字幕优化任务状态
 #[derive(Debug, Clone, Serialize)]
 pub struct SubtitleOptimizationTaskState {
-    pub note_id: i64,
+    pub note_id: String,
     pub generation_id: String,
     pub total: usize,
     pub completed: usize,
@@ -34,7 +34,7 @@ pub struct SubtitleOptimizationTaskState {
 /// 全局任务状态管理器
 struct TaskStateManager {
     /// note_id -> 任务状态
-    tasks: RwLock<HashMap<i64, SubtitleOptimizationTaskState>>,
+    tasks: RwLock<HashMap<String, SubtitleOptimizationTaskState>>,
 }
 
 impl TaskStateManager {
@@ -44,9 +44,9 @@ impl TaskStateManager {
         }
     }
 
-    async fn start_task(&self, note_id: i64, generation_id: String, total: usize, chapter_ids: Vec<String>) {
+    async fn start_task(&self, note_id: String, generation_id: String, total: usize, chapter_ids: Vec<String>) {
         let mut tasks = self.tasks.write().await;
-        tasks.insert(note_id, SubtitleOptimizationTaskState {
+        tasks.insert(note_id.clone(), SubtitleOptimizationTaskState {
             note_id,
             generation_id,
             total,
@@ -57,9 +57,9 @@ impl TaskStateManager {
         });
     }
 
-    async fn chapter_completed(&self, note_id: i64, chapter_id: &str) -> (usize, usize, usize) {
+    async fn chapter_completed(&self, note_id: &str, chapter_id: &str) -> (usize, usize, usize) {
         let mut tasks = self.tasks.write().await;
-        if let Some(state) = tasks.get_mut(&note_id) {
+        if let Some(state) = tasks.get_mut(note_id) {
             state.completed += 1;
             state.optimizing_chapter_ids.retain(|id| id != chapter_id);
             (state.completed, state.failed, state.total)
@@ -68,9 +68,9 @@ impl TaskStateManager {
         }
     }
 
-    async fn chapter_failed(&self, note_id: i64, chapter_id: &str) -> (usize, usize, usize) {
+    async fn chapter_failed(&self, note_id: &str, chapter_id: &str) -> (usize, usize, usize) {
         let mut tasks = self.tasks.write().await;
-        if let Some(state) = tasks.get_mut(&note_id) {
+        if let Some(state) = tasks.get_mut(note_id) {
             state.failed += 1;
             state.optimizing_chapter_ids.retain(|id| id != chapter_id);
             (state.completed, state.failed, state.total)
@@ -79,22 +79,22 @@ impl TaskStateManager {
         }
     }
 
-    async fn finish_task(&self, note_id: i64) {
+    async fn finish_task(&self, note_id: &str) {
         let mut tasks = self.tasks.write().await;
-        if let Some(state) = tasks.get_mut(&note_id) {
+        if let Some(state) = tasks.get_mut(note_id) {
             state.is_running = false;
             state.optimizing_chapter_ids.clear();
         }
     }
 
-    async fn remove_task(&self, note_id: i64) {
+    async fn remove_task(&self, note_id: &str) {
         let mut tasks = self.tasks.write().await;
-        tasks.remove(&note_id);
+        tasks.remove(note_id);
     }
 
-    async fn get_task(&self, note_id: i64) -> Option<SubtitleOptimizationTaskState> {
+    async fn get_task(&self, note_id: &str) -> Option<SubtitleOptimizationTaskState> {
         let tasks = self.tasks.read().await;
-        tasks.get(&note_id).cloned()
+        tasks.get(note_id).cloned()
     }
 }
 
@@ -201,7 +201,7 @@ async fn optimize_single_chapter(
 pub async fn optimize_chapters(
     app: AppHandle,
     generation_id: String,
-    note_id: i64,
+    note_id: String,
     config: AiConfig,
     chapters: Vec<ChapterSubtitleInput>,
 ) -> Result<(), String> {
@@ -212,7 +212,7 @@ pub async fn optimize_chapters(
 
     // 记录任务开始
     let chapter_ids: Vec<String> = chapters.iter().map(|c| c.chapter_id.clone()).collect();
-    task_manager.start_task(note_id, generation_id.clone(), chapters.len(), chapter_ids).await;
+    task_manager.start_task(note_id.clone(), generation_id.clone(), chapters.len(), chapter_ids).await;
 
     // 发送开始事件
     let _ = app.emit(
@@ -234,7 +234,7 @@ pub async fn optimize_chapters(
             let abort_flag = abort_flag.clone();
             let app = app.clone();
             let event_name = event_name.clone();
-            let note_id = note_id;
+            let note_id = note_id.clone();
 
             async move {
                 // 检查是否已中止
@@ -257,11 +257,11 @@ pub async fn optimize_chapters(
                 match &result {
                     Ok(optimized_text) => {
                         // 保存到数据库
-                        if let Err(e) = crate::get_db().save_optimized_subtitle(note_id, &chapter.chapter_id, optimized_text) {
+                        if let Err(e) = crate::get_db().save_optimized_subtitle(&note_id, &chapter.chapter_id, optimized_text) {
                             tracing::error!("[optimize_chapter_subtitles] 保存到数据库失败: {}", e);
                         }
 
-                        let (completed, _failed, total) = get_task_state_manager().chapter_completed(note_id, &chapter.chapter_id).await;
+                        let (completed, _failed, total) = get_task_state_manager().chapter_completed(&note_id, &chapter.chapter_id).await;
                         let _ = app.emit(
                             &event_name,
                             SubtitleOptimizationEvent::ChapterCompleted {
@@ -273,7 +273,7 @@ pub async fn optimize_chapters(
                         );
                     }
                     Err(error) => {
-                        let (completed, failed, total) = get_task_state_manager().chapter_failed(note_id, &chapter.chapter_id).await;
+                        let (completed, failed, total) = get_task_state_manager().chapter_failed(&note_id, &chapter.chapter_id).await;
                         let _ = app.emit(
                             &event_name,
                             SubtitleOptimizationEvent::ChapterFailed {
@@ -308,13 +308,13 @@ pub async fn optimize_chapters(
     }
 
     // 标记任务完成
-    task_manager.finish_task(note_id).await;
+    task_manager.finish_task(&note_id).await;
 
     // 检查是否被中止
     if abort_flag.load(std::sync::atomic::Ordering::Relaxed) {
         let _ = app.emit(&event_name, SubtitleOptimizationEvent::Aborted);
         pool.cleanup_abort_flag(&generation_id).await;
-        task_manager.remove_task(note_id).await;
+        task_manager.remove_task(&note_id).await;
         return Err("请求已取消".to_string());
     }
 
@@ -334,7 +334,7 @@ pub async fn optimize_chapters(
 pub async fn optimize_chapters_direct(
     app: AppHandle,
     generation_id: String,
-    note_id: i64,
+    note_id: String,
     config: AiConfig,
     chapters: Vec<ChapterSubtitleInput>,
 ) -> Result<(), String> {
@@ -350,13 +350,13 @@ pub async fn optimize_chapters_direct(
 pub async fn optimize_chapter_subtitles(
     app: AppHandle,
     generation_id: String,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     chapters: Vec<ChapterSubtitleInput>,
 ) -> Result<(), String> {
     // 获取 AI 配置
     let config = get_db()
-        .get_ai_config_by_id(model_id)
+        .get_ai_config_by_id(&model_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "AI配置不存在".to_string())?;
 
@@ -383,19 +383,19 @@ pub async fn optimize_chapter_subtitles(
 
 /// 获取字幕优化任务状态
 #[tauri::command]
-pub async fn get_subtitle_optimization_task_state(note_id: i64) -> Option<SubtitleOptimizationTaskState> {
-    get_task_state_manager().get_task(note_id).await
+pub async fn get_subtitle_optimization_task_state(note_id: String) -> Option<SubtitleOptimizationTaskState> {
+    get_task_state_manager().get_task(&note_id).await
 }
 
 /// 中止字幕优化
 #[tauri::command]
-pub async fn abort_subtitle_optimization(generation_id: String, note_id: i64) -> Result<(), String> {
+pub async fn abort_subtitle_optimization(generation_id: String, note_id: String) -> Result<(), String> {
     let pool = get_ai_pool_manager();
     pool.abort_request(&generation_id).await?;
-    
+
     // 清理任务状态
-    get_task_state_manager().remove_task(note_id).await;
-    
+    get_task_state_manager().remove_task(&note_id).await;
+
     Ok(())
 }
 
@@ -414,15 +414,15 @@ pub enum SingleChapterOptimizationEvent {
 pub async fn optimize_single_chapter_subtitle(
     app: AppHandle,
     generation_id: String,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     chapter_id: String,
     subtitle_text: String,
     has_bilingual: bool,
 ) -> Result<(), String> {
     // 获取 AI 配置
     let config = get_db()
-        .get_ai_config_by_id(model_id)
+        .get_ai_config_by_id(&model_id)
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "AI配置不存在".to_string())?;
 
@@ -459,7 +459,7 @@ pub async fn optimize_single_chapter_subtitle(
         match result {
             Ok(optimized_text) => {
                 // 保存到数据库
-                if let Err(e) = get_db().save_optimized_subtitle(note_id, &chapter_id, &optimized_text) {
+                if let Err(e) = get_db().save_optimized_subtitle(&note_id, &chapter_id, &optimized_text) {
                     tracing::error!("[optimize_single_chapter_subtitle] 保存到数据库失败: {}", e);
                 }
                 let _ = app.emit(

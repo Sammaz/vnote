@@ -19,8 +19,8 @@ import { SuggestedQuestionsPopover } from "./SuggestedQuestionsPopover";
 import { ResizeHandles } from "./ResizeHandles";
 
 interface ChatWindowProps {
-  noteId: number;
-  modelId: number | null;
+  noteId: string;
+  modelId: string | null;
   suggestedQuestions?: string[];
 }
 

@@ -28,9 +28,9 @@ export interface ImageData {
 }
 
 export interface ChatRequest {
-  note_id: number;
+  note_id: string;
   messages: Array<{ role: string; content: string }>;
   images?: ImageData[];
   use_rag: boolean;
-  model_id: number | null;
+  model_id: string | null;
 }

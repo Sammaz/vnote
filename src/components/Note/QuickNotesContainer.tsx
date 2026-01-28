@@ -9,7 +9,7 @@ import { MindMapEditor } from "./QuickNotes/MindMapEditor";
 import { InfiniteCanvas } from "./QuickNotes/InfiniteCanvas";
 
 interface QuickNotesContainerProps {
-  noteId: number;
+  noteId: string;
   noteTitle: string;
   initialContent: string | null;
   initialMindMapData: string | null;

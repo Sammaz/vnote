@@ -561,7 +561,7 @@ const nodeTypes: NodeTypes = {
 };
 
 interface InfiniteCanvasProps {
-  noteId: number;
+  noteId: string;
   initialData: string | null;
   onContentChange?: (content: string) => void;
   noteTitle?: string;

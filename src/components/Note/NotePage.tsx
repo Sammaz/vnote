@@ -60,7 +60,7 @@ export function NotePage() {
   const currentNote = notes.find((note) => note.id === selectedNoteId);
 
   // 当前笔记的模型ID（从笔记记录获取）
-  const [currentModelId, setCurrentModelId] = useState<number | null>(null);
+  const [currentModelId, setCurrentModelId] = useState<string | null>(null);
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false);

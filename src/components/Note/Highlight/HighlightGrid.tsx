@@ -18,9 +18,9 @@ import type {
 } from "../../../types";
 
 interface HighlightGridProps {
-  noteId: number;
+  noteId: string;
   subtitlePath: string | null;
-  modelId: number | null;
+  modelId: string | null;
   totalDuration: number;
   initialHighlightData?: HighlightData | null;
   onHighlightClick?: (highlight: HighlightSegment) => void;

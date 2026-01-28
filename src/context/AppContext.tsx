@@ -45,33 +45,33 @@ interface AppContextType {
   refreshPromptConfigs: () => Promise<void>;
   refreshNotes: () => Promise<void>;
   createNote: (req: CreateNoteRequest) => Promise<Note>;
-  deleteNote: (id: number) => Promise<void>;
-  updateNoteSuggestedQuestions: (noteId: number, questions: string[]) => void;
+  deleteNote: (id: string) => Promise<void>;
+  updateNoteSuggestedQuestions: (noteId: string, questions: string[]) => void;
 
   // 合集（资源库）
   collections: Collection[];
-  selectedCollectionId: number | null;
-  expandedCollections: Set<number>;
+  selectedCollectionId: string | null;
+  expandedCollections: Set<string>;
   refreshCollections: () => Promise<void>;
   createCollection: (req: CreateCollectionRequest) => Promise<Collection>;
   updateCollection: (collection: Collection) => Promise<void>;
-  deleteCollection: (id: number) => Promise<void>;
-  setSelectedCollection: (id: number | null) => void;
-  toggleCollectionExpand: (id: number) => void;
-  addNoteToCollection: (collectionId: number, noteId: number) => Promise<void>;
-  removeNoteFromCollection: (collectionId: number, noteId: number) => Promise<void>;
-  notesInCollections: Set<number>;
-  updateCollectionsOrder: (collectionIds: number[]) => Promise<void>;
+  deleteCollection: (id: string) => Promise<void>;
+  setSelectedCollection: (id: string | null) => void;
+  toggleCollectionExpand: (id: string) => void;
+  addNoteToCollection: (collectionId: string, noteId: string) => Promise<void>;
+  removeNoteFromCollection: (collectionId: string, noteId: string) => Promise<void>;
+  notesInCollections: Set<string>;
+  updateCollectionsOrder: (collectionIds: string[]) => Promise<void>;
 
   // 批量操作
-  batchSelection: { isSelecting: boolean; selectedNoteIds: Set<number> };
+  batchSelection: { isSelecting: boolean; selectedNoteIds: Set<string> };
   setBatchSelecting: (isSelecting: boolean) => void;
-  toggleNoteSelection: (noteId: number) => void;
-  selectAllNotes: (noteIds: number[]) => void;
+  toggleNoteSelection: (noteId: string) => void;
+  selectAllNotes: (noteIds: string[]) => void;
   clearSelection: () => void;
-  batchRemoveFromCollection: (collectionId: number, noteIds: number[]) => Promise<void>;
-  batchMoveToCollection: (fromCollectionId: number, toCollectionId: number, noteIds: number[]) => Promise<void>;
-  batchDeleteNotes: (noteIds: number[]) => Promise<void>;
+  batchRemoveFromCollection: (collectionId: string, noteIds: string[]) => Promise<void>;
+  batchMoveToCollection: (fromCollectionId: string, toCollectionId: string, noteIds: string[]) => Promise<void>;
+  batchDeleteNotes: (noteIds: string[]) => Promise<void>;
 
   // 上传状态
   uploadedVideo: UploadedFile | null;
@@ -80,8 +80,8 @@ interface AppContextType {
   setUploadedSubtitle: (file: UploadedFile | null) => void;
 
   // AI 模型选择
-  selectedModelId: number | null;
-  setSelectedModelId: (id: number | null) => void;
+  selectedModelId: string | null;
+  setSelectedModelId: (id: string | null) => void;
 
   // 生成状态
   isGenerating: boolean;
@@ -94,8 +94,8 @@ interface AppContextType {
   // 当前视图
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
-  selectedNoteId: number | null;
-  setSelectedNoteId: (id: number | null) => void;
+  selectedNoteId: string | null;
+  setSelectedNoteId: (id: string | null) => void;
 
   // 视频工具栏设置（全局）
   toolbarSettings: VideoToolbarSettings;
@@ -201,7 +201,7 @@ function AppContextBridge({ children }: { children: ReactNode }) {
     clearSelection: collectionsContext.clearSelection,
     batchRemoveFromCollection: collectionsContext.batchRemoveFromCollection,
     batchMoveToCollection: collectionsContext.batchMoveToCollection,
-    batchDeleteNotes: async (noteIds: number[]) => {
+    batchDeleteNotes: async (noteIds: string[]) => {
       await collectionsContext.batchDeleteNotes(noteIds, notesContext.refreshNotes);
     },
   }), [

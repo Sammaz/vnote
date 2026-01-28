@@ -76,8 +76,8 @@ pub enum HighlightGenerationEvent {
 /// 高光生成请求
 #[derive(Debug, Deserialize)]
 pub struct GenerateHighlightsRequest {
-    pub _note_id: i64,
-    pub model_id: i64,
+    pub _note_id: String,
+    pub model_id: String,
     pub subtitle_path: String,
     pub highlight_type: HighlightType,
     pub total_duration: f64,
@@ -433,7 +433,7 @@ pub async fn generate_highlights(
 
     // 获取 AI 配置
     let ai_config = db
-        .get_ai_config_by_id(request.model_id)
+        .get_ai_config_by_id(&request.model_id)
         .map_err(|e| e.to_string())?
         .ok_or("AI 模型未找到")?;
 
@@ -553,8 +553,8 @@ pub async fn generate_highlights_direct(
     app: AppHandle,
     db: &crate::db::Database,
     generation_id: String,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
     subtitle_path: String,
     highlight_type: String,
     total_duration: f64,
@@ -565,6 +565,7 @@ pub async fn generate_highlights_direct(
         _ => HighlightType::Default,
     };
 
+    let note_id_for_save = note_id.clone();
     let request = GenerateHighlightsRequest {
         _note_id: note_id,
         model_id,
@@ -577,7 +578,7 @@ pub async fn generate_highlights_direct(
         Ok(highlight_data) => {
             // 保存到数据库
             if let Ok(json) = serde_json::to_string(&highlight_data) {
-                if let Ok(Some(mut note)) = db.get_note_by_id(note_id) {
+                if let Ok(Some(mut note)) = db.get_note_by_id(&note_id_for_save) {
                     note.highlights = Some(json);
                     let _ = db.update_note(&note);
                 }

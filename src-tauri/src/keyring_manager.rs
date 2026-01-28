@@ -40,11 +40,10 @@ impl KeyType {
 /// # 返回
 /// - `Ok(())`: 存储成功
 /// - `Err(String)`: 存储失败，返回错误信息
-pub fn store_api_key(key_type: KeyType, config_id: i64, api_key: &str) -> Result<(), String> {
+pub fn store_api_key(key_type: KeyType, config_id: &str, api_key: &str) -> Result<(), String> {
     let service = format!("{}.{}", SERVICE_PREFIX, key_type.service_name());
-    let username = config_id.to_string();
 
-    let entry = Entry::new(&service, &username)
+    let entry = Entry::new(&service, config_id)
         .map_err(|e| format!("创建密钥链条目失败: {}", e))?;
 
     entry
@@ -63,11 +62,10 @@ pub fn store_api_key(key_type: KeyType, config_id: i64, api_key: &str) -> Result
 /// # 返回
 /// - `Ok(String)`: 获取成功，返回API密钥
 /// - `Err(String)`: 获取失败，返回错误信息
-pub fn get_api_key(key_type: KeyType, config_id: i64) -> Result<String, String> {
+pub fn get_api_key(key_type: KeyType, config_id: &str) -> Result<String, String> {
     let service = format!("{}.{}", SERVICE_PREFIX, key_type.service_name());
-    let username = config_id.to_string();
 
-    let entry = Entry::new(&service, &username)
+    let entry = Entry::new(&service, config_id)
         .map_err(|e| format!("创建密钥链条目失败: {}", e))?;
 
     entry
@@ -84,11 +82,10 @@ pub fn get_api_key(key_type: KeyType, config_id: i64) -> Result<String, String> 
 /// # 返回
 /// - `Ok(())`: 删除成功
 /// - `Err(String)`: 删除失败，返回错误信息
-pub fn delete_api_key(key_type: KeyType, config_id: i64) -> Result<(), String> {
+pub fn delete_api_key(key_type: KeyType, config_id: &str) -> Result<(), String> {
     let service = format!("{}.{}", SERVICE_PREFIX, key_type.service_name());
-    let username = config_id.to_string();
 
-    let entry = Entry::new(&service, &username)
+    let entry = Entry::new(&service, config_id)
         .map_err(|e| format!("创建密钥链条目失败: {}", e))?;
 
     entry
@@ -138,7 +135,7 @@ mod tests {
             return;
         }
 
-        let test_config_id = 999999;
+        let test_config_id = "999999";
         let test_api_key = "sk-test-1234567890";
 
         // 存储密钥
@@ -166,7 +163,7 @@ mod tests {
             return;
         }
 
-        let test_config_id = 999998;
+        let test_config_id = "999998";
         let ai_key = "sk-ai-key";
         let embedding_key = "sk-embedding-key";
         let reranker_key = "sk-reranker-key";

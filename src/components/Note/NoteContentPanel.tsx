@@ -117,7 +117,7 @@ interface NoteContentPanelProps {
   note: Note;
   onGenerationComplete?: () => void;
   aiConfigs: AiConfig[];
-  currentModelId?: number | null;
+  currentModelId?: string | null;
   promptConfigs?: PromptConfig[];
 }
 
@@ -536,7 +536,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.full_summary]);
 
   // 设置深度蓝图生成监听器
-  const setupBlueprintListener = useCallback(async (noteId: number, genId: string) => {
+  const setupBlueprintListener = useCallback(async (noteId: string, genId: string) => {
     // 避免重复监听
     const eventName = `blueprint-generation-${genId}`;
     if (activeListeners.has(eventName)) {
@@ -606,7 +606,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   }, [note.id, onGenerationComplete]);
 
   // 设置生成事件监听器
-  const setupGenerationListener = useCallback((noteId: number, genId: string) => {
+  const setupGenerationListener = useCallback((noteId: string, genId: string) => {
     // 如果已经监听过这个generationId，先清理旧的监听器
     if (activeListeners.has(genId)) {
       const oldUnlisten = activeListeners.get(genId);
@@ -782,10 +782,10 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 最后使用第一个可用模型
     if (aiConfigs.length > 0) return aiConfigs[0].id;
 
-    return 0;
+    return "";
   }, [note.model_id, aiConfigs]);
 
-  const [selectedModelId, setSelectedModelId] = useState<number>(getDefaultModelId());
+  const [selectedModelId, setSelectedModelId] = useState<string>(getDefaultModelId());
 
   // 自定义下拉框状态
   const [showModelDropdown, setShowModelDropdown] = useState(false);
@@ -921,7 +921,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 打开自定义提示词弹窗
   const openPromptDialog = () => {
     // 优先使用视频播放器右上角选择的模型，其次是笔记关联的模型，最后是第一个配置
-    setSelectedModelId(currentModelId || note.model_id || aiConfigs[0]?.id || 0);
+    setSelectedModelId(currentModelId || note.model_id || aiConfigs[0]?.id || "");
     setDialogTab("default");
     setConfigLanguage("zh");
     setConfigShowEmoji(true);
@@ -934,7 +934,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 打开自定义总结专用弹窗（只显示自定义标签页）
   const openCustomPromptDialog = () => {
-    setSelectedModelId(currentModelId || note.model_id || aiConfigs[0]?.id || 0);
+    setSelectedModelId(currentModelId || note.model_id || aiConfigs[0]?.id || "");
     setCustomPrompt("");
     setShowCustomOnlyDialog(true);
   };

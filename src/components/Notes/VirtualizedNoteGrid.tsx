@@ -15,7 +15,7 @@ const OVERSCAN = 3; // 预渲染行数
 
 interface VirtualizedNoteGridProps {
   notes: Note[];
-  onNoteClick: (noteId: number) => void;
+  onNoteClick: (noteId: string) => void;
   /** 每行列数，默认根据容器宽度自动计算 */
   columns?: number;
   /** 容器类名 */
@@ -69,7 +69,7 @@ export function VirtualizedNoteGrid({
   const virtualRows = virtualizer.getVirtualItems();
 
   // 点击处理
-  const handleClick = useCallback((noteId: number) => {
+  const handleClick = useCallback((noteId: string) => {
     onNoteClick(noteId);
   }, [onNoteClick]);
 

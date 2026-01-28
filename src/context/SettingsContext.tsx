@@ -24,8 +24,8 @@ interface SettingsContextType {
   // AI 配置
   aiConfigs: AiConfig[];
   promptConfigs: PromptConfig[];
-  selectedModelId: number | null;
-  setSelectedModelId: (id: number | null) => void;
+  selectedModelId: string | null;
+  setSelectedModelId: (id: string | null) => void;
   refreshAiConfigs: () => Promise<void>;
   refreshPromptConfigs: () => Promise<void>;
 
@@ -48,7 +48,7 @@ const SettingsContext = createContext<SettingsContextType | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [aiConfigs, setAiConfigs] = useState<AiConfig[]>([]);
   const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState<number | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
   const [stats, setStats] = useState<AppStats>(mockStats);
 
   const [toolbarSettings, setToolbarSettings] = useState<VideoToolbarSettings>({

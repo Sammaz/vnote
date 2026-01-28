@@ -63,7 +63,7 @@ const markersArbitrary = (subtitleCount: number, minMarkers: number, maxMarkers:
     .map((indices) =>
       indices.sort((a, b) => a - b).map((subtitleIndex, i) => ({
         id: `marker-${i}`,
-        note_id: 1,
+        note_id: "1",
         subtitle_index: subtitleIndex,
         timestamp: subtitleIndex * 5, // 假设每条字幕5秒
         screenshot_path: `/screenshots/marker-${i}.png`,
@@ -154,7 +154,7 @@ describe("Feature: visual-summary-assist-mode, Property 13: Chapter Segmentation
         const markers: ScreenshotMarker[] = [
           {
             id: "marker-0",
-            note_id: 1,
+            note_id: "1",
             subtitle_index: 0,
             timestamp: 0,
             screenshot_path: "/screenshots/marker-0.png",
@@ -186,7 +186,7 @@ describe("Feature: visual-summary-assist-mode, Property 13: Chapter Segmentation
           const markers: ScreenshotMarker[] = [
             {
               id: "marker-0",
-              note_id: 1,
+              note_id: "1",
               subtitle_index: markerIndex,
               timestamp: markerIndex * 5,
               screenshot_path: "/screenshots/marker-0.png",
@@ -235,7 +235,7 @@ describe("Feature: visual-summary-assist-mode, Property 14: First Segment Auto-S
               subtitles,
               markers: indices.sort((a, b) => a - b).map((idx, i) => ({
                 id: `marker-${i}`,
-                note_id: 1,
+                note_id: "1",
                 subtitle_index: idx,
                 timestamp: idx * 5,
                 screenshot_path: `/screenshots/marker-${i}.png`,
@@ -267,7 +267,7 @@ describe("Feature: visual-summary-assist-mode, Property 14: First Segment Auto-S
             .map((additionalIndices) => {
               const markerAtZero: ScreenshotMarker = {
                 id: "marker-0",
-                note_id: 1,
+                note_id: "1",
                 subtitle_index: 0,
                 timestamp: 0,
                 screenshot_path: "/screenshots/marker-at-zero.png",
@@ -277,7 +277,7 @@ describe("Feature: visual-summary-assist-mode, Property 14: First Segment Auto-S
                 .sort((a, b) => a - b)
                 .map((idx, i) => ({
                   id: `marker-${i + 1}`,
-                  note_id: 1,
+                  note_id: "1",
                   subtitle_index: idx,
                   timestamp: idx * 5,
                   screenshot_path: `/screenshots/marker-${i + 1}.png`,
@@ -366,7 +366,7 @@ describe("Feature: visual-summary-assist-mode, Property 15: User Screenshot Used
               subtitles,
               markers: indices.sort((a, b) => a - b).map((idx, i) => ({
                 id: `marker-${i}`,
-                note_id: 1,
+                note_id: "1",
                 subtitle_index: idx,
                 timestamp: idx * 5,
                 screenshot_path: `/screenshots/unique-${idx}-${i}.png`, // 唯一路径
@@ -452,7 +452,7 @@ describe("Feature: visual-summary-assist-mode, Edge Cases", () => {
     const markers: ScreenshotMarker[] = [
       {
         id: "marker-0",
-        note_id: 1,
+        note_id: "1",
         subtitle_index: 0,
         timestamp: 0,
         screenshot_path: "/screenshots/marker-0.png",
@@ -476,7 +476,7 @@ describe("Feature: visual-summary-assist-mode, Edge Cases", () => {
     const markers: ScreenshotMarker[] = [
       {
         id: "marker-0",
-        note_id: 1,
+        note_id: "1",
         subtitle_index: 0,
         timestamp: 0,
         screenshot_path: "/screenshots/marker-0.png",
@@ -484,7 +484,7 @@ describe("Feature: visual-summary-assist-mode, Edge Cases", () => {
       },
       {
         id: "marker-1",
-        note_id: 1,
+        note_id: "1",
         subtitle_index: 1,
         timestamp: 5,
         screenshot_path: "/screenshots/marker-1.png",
@@ -492,7 +492,7 @@ describe("Feature: visual-summary-assist-mode, Edge Cases", () => {
       },
       {
         id: "marker-2",
-        note_id: 1,
+        note_id: "1",
         subtitle_index: 2,
         timestamp: 10,
         screenshot_path: "/screenshots/marker-2.png",
@@ -531,7 +531,7 @@ describe("Feature: visual-summary-assist-mode, Edge Cases", () => {
     const markers: ScreenshotMarker[] = [
       {
         id: "marker-2",
-        note_id: 1,
+        note_id: "1",
         subtitle_index: 3,
         timestamp: 15,
         screenshot_path: "/screenshots/marker-2.png",
@@ -539,7 +539,7 @@ describe("Feature: visual-summary-assist-mode, Edge Cases", () => {
       },
       {
         id: "marker-0",
-        note_id: 1,
+        note_id: "1",
         subtitle_index: 1,
         timestamp: 5,
         screenshot_path: "/screenshots/marker-0.png",

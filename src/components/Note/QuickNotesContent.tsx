@@ -43,7 +43,7 @@ import { readFile } from "@tauri-apps/plugin-fs";
 import { message } from "../../utils/message";
 
 interface QuickNotesContentProps {
-  noteId: number;
+  noteId: string;
   initialContent: string | null;
   onContentChange?: (content: string) => void;
 }
@@ -598,7 +598,7 @@ export function QuickNotesContent({
   });
 
   // Handle external content updates (only when noteId changes, not on every save)
-  const prevNoteIdRef = useRef<number | null>(null);
+  const prevNoteIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!editor) return;
 

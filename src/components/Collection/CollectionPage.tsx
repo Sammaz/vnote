@@ -48,12 +48,12 @@ function SortableMixedCard({
   onToggleSelect,
 }: {
   item: MixedItem;
-  onOpenNote: (noteId: number) => void;
-  onOpenCollection: (collectionId: number) => void;
+  onOpenNote: (noteId: string) => void;
+  onOpenCollection: (collectionId: string) => void;
   onDeleteNote: (item: NoteWithDetails) => void;
   isSelecting: boolean;
   isSelected: boolean;
-  onToggleSelect: (noteId: number) => void;
+  onToggleSelect: (noteId: string) => void;
 }) {
   const {
     attributes,
@@ -299,7 +299,7 @@ export function CollectionPage() {
 
     try {
       // 构建混合排序数据
-      const orderData: [string, number][] = newItems.map((item) => {
+      const orderData: [string, string][] = newItems.map((item) => {
         if (item.type === "collection") {
           return ["collection", item.data.id];
         } else {
@@ -401,12 +401,12 @@ export function CollectionPage() {
     }
   };
 
-  const handleOpenNote = (noteId: number) => {
+  const handleOpenNote = (noteId: string) => {
     setSelectedNoteId(noteId);
     setCurrentView("note");
   };
 
-  const handleOpenChildCollection = (collectionId: number) => {
+  const handleOpenChildCollection = (collectionId: string) => {
     setSelectedCollection(collectionId);
   };
 
@@ -415,7 +415,7 @@ export function CollectionPage() {
 
   // 计算合集下所有内容（递归）
   const deleteStats = useMemo(() => {
-    const countDescendants = (parentId: number): { collections: number; notes: number } => {
+    const countDescendants = (parentId: string): { collections: number; notes: number } => {
       const children = collections.filter((c) => c.parent_id === parentId);
       let totalCollections = children.length;
       let totalNotes = children.reduce((sum, c) => sum + c.item_count, 0);

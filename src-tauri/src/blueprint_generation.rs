@@ -377,8 +377,8 @@ async fn generate_synthesizer_content(
 async fn generate_blueprint_internal(
     app: &AppHandle,
     event_name: &str,
-    note_id: i64,
-    model_id: i64,
+    note_id: &str,
+    model_id: &str,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<BlueprintData, String> {
     let db = DATABASE.get().ok_or("数据库未初始化")?;
@@ -547,8 +547,8 @@ async fn generate_blueprint_internal(
 pub async fn generate_panoramic_blueprint(
     app: AppHandle,
     generation_id: String,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
 ) -> Result<(), String> {
     let event_name = format!("blueprint-generation-{}", generation_id);
     let abort_flag = create_abort_flag(&generation_id).await;
@@ -563,8 +563,8 @@ pub async fn generate_panoramic_blueprint(
         let result = generate_blueprint_internal(
             &app_clone,
             &event_name_clone,
-            note_id,
-            model_id,
+            &note_id,
+            &model_id,
             &abort_flag,
         ).await;
 
@@ -574,7 +574,7 @@ pub async fn generate_panoramic_blueprint(
             Ok(blueprint_data) => {
                 // 保存到数据库
                 if let Some(db) = DATABASE.get() {
-                    if let Ok(Some(mut note)) = db.get_note_by_id(note_id) {
+                    if let Ok(Some(mut note)) = db.get_note_by_id(&note_id) {
                         note.panoramic_blueprint = Some(blueprint_data.content.clone());
                         let _ = db.update_note(&note);
                     }

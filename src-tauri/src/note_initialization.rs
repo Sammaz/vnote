@@ -146,8 +146,8 @@ pub enum NoteInitializationEvent {
 /// 初始化参数
 #[derive(Debug, Clone, Deserialize)]
 pub struct InitializationParams {
-    pub note_id: i64,
-    pub model_id: i64,
+    pub note_id: String,
+    pub model_id: String,
     pub video_path: String,
     pub subtitle_path: Option<String>,
     /// 从哪一步开始执行（用于断点恢复），0-5 对应 6 个步骤
@@ -280,13 +280,13 @@ async fn run_initialization(
 
     // 验证 AI 配置是否存在
     let _ai_config = db
-        .get_ai_config_by_id(params.model_id)
+        .get_ai_config_by_id(&params.model_id)
         .map_err(|e| format!("获取 AI 配置失败: {}", e))?
         .ok_or_else(|| "AI 配置不存在".to_string())?;
 
     // 获取笔记信息
     let note = db
-        .get_note_by_id(params.note_id)
+        .get_note_by_id(&params.note_id)
         .map_err(|e| format!("获取笔记失败: {}", e))?
         .ok_or_else(|| "笔记不存在".to_string())?;
 
@@ -370,7 +370,7 @@ async fn run_initialization(
                 completed += 1;
                 // 更新数据库中的 init_status
                 let new_status = (step_index + 1) as i32;
-                let _ = db.update_note_init_status(params.note_id, new_status);
+                let _ = db.update_note_init_status(&params.note_id, new_status);
 
                 let _ = app.emit(
                     event_name,
@@ -385,7 +385,7 @@ async fn run_initialization(
                 skipped += 1;
                 // 跳过也算完成该步骤，更新状态
                 let new_status = (step_index + 1) as i32;
-                let _ = db.update_note_init_status(params.note_id, new_status);
+                let _ = db.update_note_init_status(&params.note_id, new_status);
 
                 let _ = app.emit(
                     event_name,
@@ -413,7 +413,7 @@ async fn run_initialization(
         }
 
         if step == InitializationStep::SubtitleGeneration {
-            if let Ok(Some(updated_note)) = db.get_note_by_id(params.note_id) {
+            if let Ok(Some(updated_note)) = db.get_note_by_id(&params.note_id) {
                 params.subtitle_path = updated_note.subtitle_path.clone();
                 has_subtitle = params.subtitle_path.is_some();
             }
@@ -508,7 +508,7 @@ async fn execute_subtitle_generation_step(
 
     let subtitle_path = match bcut_asr::transcribe_video_to_srt(
         app,
-        params.note_id,
+        &params.note_id,
         &params.video_path,
         abort_flag,
     )
@@ -523,7 +523,7 @@ async fn execute_subtitle_generation_step(
         }
     };
 
-    if let Ok(Some(mut note)) = db.get_note_by_id(params.note_id) {
+    if let Ok(Some(mut note)) = db.get_note_by_id(&params.note_id) {
         note.subtitle_path = Some(subtitle_path);
         if let Err(e) = db.update_note(&note) {
             return StepResult::Failed(format!("更新字幕路径失败: {}", e));
@@ -559,7 +559,7 @@ async fn execute_questions_step(
     };
 
     // 获取笔记
-    let note = match db.get_note_by_id(params.note_id) {
+    let note = match db.get_note_by_id(&params.note_id) {
         Ok(Some(n)) => n,
         Ok(None) => return StepResult::Failed("笔记不存在".to_string()),
         Err(e) => return StepResult::Failed(format!("获取笔记失败: {}", e)),
@@ -577,11 +577,11 @@ async fn execute_questions_step(
     };
 
     // 生成问题
-    match chat::generate_suggested_questions(db, &subtitle_path, model_id, abort_flag).await {
+    match chat::generate_suggested_questions(db, &subtitle_path, &model_id, abort_flag).await {
         Ok(questions) => {
             // 保存到数据库
             if let Ok(questions_json) = serde_json::to_string(&questions) {
-                let _ = db.update_note_questions(params.note_id, &questions_json);
+                let _ = db.update_note_questions(&params.note_id, &questions_json);
             }
             StepResult::Completed
         }
@@ -593,7 +593,7 @@ async fn execute_questions_step(
                 "如何在实际项目中应用?".to_string(),
             ];
             if let Ok(questions_json) = serde_json::to_string(&default_questions) {
-                let _ = db.update_note_questions(params.note_id, &questions_json);
+                let _ = db.update_note_questions(&params.note_id, &questions_json);
             }
             tracing::warn!("[初始化] 问题生成失败，使用默认问题: {}", e);
             StepResult::Completed // 使用默认问题也算完成
@@ -658,8 +658,8 @@ async fn execute_full_summary_step(
 视频字幕内容："#;
 
     let request = note_generation::GenerateNoteRequest {
-        note_id: params.note_id,
-        model_id: params.model_id,
+        note_id: params.note_id.clone(),
+        model_id: params.model_id.clone(),
         options: note_generation::GenerationOptions {
             concurrent: true,
             tabs_to_generate: vec![note_generation::TabType::FullSummary],
@@ -717,8 +717,8 @@ async fn execute_chapters_step(
     let generation_id = format!("init-chapters-{}", uuid::Uuid::new_v4());
 
     let request = crate::chapter::GenerateChaptersRequest {
-        note_id: params.note_id,
-        model_id: params.model_id,
+        note_id: params.note_id.clone(),
+        model_id: params.model_id.clone(),
         video_path: params.video_path.clone(),
         subtitle_path,
         capture_screenshots: true,
@@ -735,7 +735,7 @@ async fn execute_chapters_step(
         Ok(data) => {
             // 保存章节数据到 detailed_reading 字段
             if let Ok(chapter_json) = serde_json::to_string(&data) {
-                if let Ok(Some(mut note)) = db.get_note_by_id(params.note_id) {
+                if let Ok(Some(mut note)) = db.get_note_by_id(&params.note_id) {
                     note.detailed_reading = Some(chapter_json);
                     let _ = db.update_note(&note);
                 }
@@ -791,7 +791,7 @@ async fn execute_subtitle_optimization_step(
     };
 
     // 获取 AI 配置
-    let config = match db.get_ai_config_by_id(params.model_id) {
+    let config = match db.get_ai_config_by_id(&params.model_id) {
         Ok(Some(c)) => c,
         Ok(None) => return StepResult::Failed("AI配置不存在".to_string()),
         Err(e) => return StepResult::Failed(format!("获取AI配置失败: {}", e)),
@@ -861,7 +861,7 @@ async fn execute_subtitle_optimization_step(
     match crate::subtitle_optimizer::optimize_chapters_direct(
         app.clone(),
         generation_id,
-        params.note_id,
+        params.note_id.clone(),
         config,
         chapter_inputs,
     )
@@ -918,8 +918,8 @@ async fn execute_highlights_step(
         app.clone(),
         db,
         generation_id,
-        params.note_id,
-        params.model_id,
+        params.note_id.clone(),
+        params.model_id.clone(),
         subtitle_path,
         "default".to_string(),
         total_duration,
@@ -962,8 +962,8 @@ async fn execute_flashcards_step(
     match crate::flashcard_generation::generate_flashcards_direct(
         app.clone(),
         generation_id,
-        params.note_id,
-        params.model_id,
+        params.note_id.clone(),
+        params.model_id.clone(),
     )
     .await
     {

@@ -231,8 +231,8 @@ fn parse_flashcards_response(response: &str) -> Result<Vec<FlashcardItem>, Strin
 pub async fn generate_flashcards(
     app: AppHandle,
     generation_id: String,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
 ) -> Result<(), String> {
     let event_name = format!("flashcard-generation-{}", generation_id);
 
@@ -251,8 +251,8 @@ pub async fn generate_flashcards(
         let result = generate_flashcards_internal(
             &app_clone,
             &event_name_clone,
-            note_id,
-            model_id,
+            &note_id,
+            &model_id,
             &abort_flag,
         ).await;
 
@@ -263,7 +263,7 @@ pub async fn generate_flashcards(
             Ok(flashcard_data) => {
                 // 保存到数据库
                 if let Some(db) = DATABASE.get() {
-                    if let Ok(Some(mut note)) = db.get_note_by_id(note_id) {
+                    if let Ok(Some(mut note)) = db.get_note_by_id(&note_id) {
                         note.flashcards = Some(serde_json::to_string(&flashcard_data).unwrap_or_default());
                         let _ = db.update_note(&note);
                     }
@@ -293,8 +293,8 @@ pub async fn generate_flashcards(
 async fn generate_flashcards_internal(
     app: &AppHandle,
     event_name: &str,
-    note_id: i64,
-    model_id: i64,
+    note_id: &str,
+    model_id: &str,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<FlashcardData, String> {
     // 获取数据库
@@ -472,8 +472,8 @@ async fn generate_flashcards_internal(
 pub async fn generate_flashcards_direct(
     app: AppHandle,
     generation_id: String,
-    note_id: i64,
-    model_id: i64,
+    note_id: String,
+    model_id: String,
 ) -> Result<(), String> {
     let event_name = format!("flashcard-generation-{}", generation_id);
 
@@ -486,8 +486,8 @@ pub async fn generate_flashcards_direct(
     let result = generate_flashcards_internal(
         &app,
         &event_name,
-        note_id,
-        model_id,
+        &note_id,
+        &model_id,
         &abort_flag,
     ).await;
 
@@ -498,7 +498,7 @@ pub async fn generate_flashcards_direct(
         Ok(flashcard_data) => {
             // 保存到数据库
             if let Some(db) = DATABASE.get() {
-                if let Ok(Some(mut note)) = db.get_note_by_id(note_id) {
+                if let Ok(Some(mut note)) = db.get_note_by_id(&note_id) {
                     note.flashcards = Some(serde_json::to_string(&flashcard_data).unwrap_or_default());
                     let _ = db.update_note(&note);
                 }

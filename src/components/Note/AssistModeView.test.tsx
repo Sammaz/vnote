@@ -70,7 +70,7 @@ const subtitleListArbitrary = (
  * 生成截图标记
  */
 const createMarker = (
-  noteId: number,
+  noteId: string,
   subtitleIndex: number,
   timestamp: number
 ): ScreenshotMarker => ({
@@ -102,7 +102,7 @@ function setupMockInvoke(subtitles: SubtitleEntry[], markers: ScreenshotMarker[]
     if (command === "save_screenshot_marker") {
       const subtitleIndex = args?.subtitleIndex as number;
       const timestamp = args?.timestamp as number;
-      const noteId = args?.noteId as number;
+      const noteId = args?.noteId as string;
       const newMarker: ScreenshotMarker = {
         id: `new-marker-${subtitleIndex}-${Date.now()}`,
         note_id: noteId,
@@ -130,13 +130,13 @@ async function renderAssistModeView(
   subtitles: SubtitleEntry[],
   markers: ScreenshotMarker[] = [],
   options: {
-    noteId?: number;
+    noteId?: string;
     subtitlePath?: string | null;
     videoPath?: string;
   } = {}
 ) {
   const {
-    noteId = 1,
+    noteId = "1",
     subtitlePath = "/path/to/subtitle.srt",
     videoPath = "/path/to/video.mp4",
   } = options;
@@ -378,7 +378,7 @@ describe("Feature: visual-summary-assist-mode, Property 9: Screenshot Display Af
           if (subtitles.length === 0) return;
 
           const markerIndex = rawMarkerIndex % subtitles.length;
-          const marker = createMarker(1, markerIndex, subtitles[markerIndex].start_time);
+          const marker = createMarker("1", markerIndex, subtitles[markerIndex].start_time);
 
           const { container, unmount } = await renderAssistModeView(subtitles, [marker]);
 
@@ -414,8 +414,8 @@ describe("Feature: visual-summary-assist-mode, Property 9: Screenshot Display Af
     ];
 
     const markers: ScreenshotMarker[] = [
-      createMarker(1, 0, 0),
-      createMarker(1, 2, 20),
+      createMarker("1", 0, 0),
+      createMarker("1", 2, 20),
     ];
 
     const { container } = await renderAssistModeView(subtitles, markers);
@@ -474,7 +474,7 @@ describe("Feature: visual-summary-assist-mode, Property 9: Screenshot Display Af
       { index: 0, start_time: 65, end_time: 75, text: "Test subtitle" },
     ];
 
-    const marker = createMarker(1, 0, 65);
+    const marker = createMarker("1", 0, 65);
     const { container } = await renderAssistModeView(subtitles, [marker]);
 
     const screenshotImage = container.querySelector("img");
@@ -514,7 +514,7 @@ describe("Feature: visual-summary-assist-mode, Property 11: Marker Removal", () 
           if (subtitles.length === 0) return;
 
           const markerIndex = rawMarkerIndex % subtitles.length;
-          const marker = createMarker(1, markerIndex, subtitles[markerIndex].start_time);
+          const marker = createMarker("1", markerIndex, subtitles[markerIndex].start_time);
 
           const { container, unmount } = await renderAssistModeView(subtitles, [marker]);
 
@@ -556,8 +556,8 @@ describe("Feature: visual-summary-assist-mode, Property 11: Marker Removal", () 
     ];
 
     const markers: ScreenshotMarker[] = [
-      { ...createMarker(1, 0, 0), id: "marker-0" },
-      { ...createMarker(1, 2, 20), id: "marker-2" },
+      { ...createMarker("1", 0, 0), id: "marker-0" },
+      { ...createMarker("1", 2, 20), id: "marker-2" },
     ];
 
     const { container } = await renderAssistModeView(subtitles, markers);
@@ -593,14 +593,14 @@ describe("Feature: visual-summary-assist-mode, Property 11: Marker Removal", () 
 
     const marker: ScreenshotMarker = {
       id: "test-marker-id-123",
-      note_id: 42,
+      note_id: "42",
       subtitle_index: 0,
       timestamp: 0,
       screenshot_path: "/screenshots/test.png",
       created_at: new Date().toISOString(),
     };
 
-    await renderAssistModeView(subtitles, [marker], { noteId: 42 });
+    await renderAssistModeView(subtitles, [marker], { noteId: "42" });
 
     const deleteButton = screen.getByText("删除截图");
     await act(async () => {
@@ -608,7 +608,7 @@ describe("Feature: visual-summary-assist-mode, Property 11: Marker Removal", () 
     });
 
     expect(mockInvoke).toHaveBeenCalledWith("delete_screenshot_marker", {
-      noteId: 42,
+      noteId: "42",
       markerId: "test-marker-id-123",
     });
   });
@@ -623,8 +623,8 @@ describe("Feature: visual-summary-assist-mode, Property 11: Marker Removal", () 
     ];
 
     const markers: ScreenshotMarker[] = [
-      { ...createMarker(1, 0, 0), id: "marker-0" },
-      { ...createMarker(1, 1, 10), id: "marker-1" },
+      { ...createMarker("1", 0, 0), id: "marker-0" },
+      { ...createMarker("1", 1, 10), id: "marker-1" },
     ];
 
     const { container } = await renderAssistModeView(subtitles, markers);
@@ -677,7 +677,7 @@ describe("AssistModeView Edge Cases", () => {
 
     render(
       <AssistModeView
-        noteId={1}
+        noteId={"1"}
         subtitlePath="/path/to/subtitle.srt"
         videoPath="/path/to/video.mp4"
         onRegenerateChapters={vi.fn()}
@@ -698,7 +698,7 @@ describe("AssistModeView Edge Cases", () => {
 
     render(
       <AssistModeView
-        noteId={1}
+        noteId={"1"}
         subtitlePath={null}
         videoPath="/path/to/video.mp4"
         onRegenerateChapters={vi.fn()}
@@ -721,7 +721,7 @@ describe("AssistModeView Edge Cases", () => {
 
     render(
       <AssistModeView
-        noteId={1}
+        noteId={"1"}
         subtitlePath="/path/to/subtitle.srt"
         videoPath=""
         onRegenerateChapters={vi.fn()}

@@ -25,7 +25,7 @@ import type { SubtitleEntry, ScreenshotMarker } from "../../types";
  * AssistModeView 组件属性
  */
 export interface AssistModeViewProps {
-  noteId: number;
+  noteId: string;
   subtitlePath: string | null;
   videoPath: string;
   onRegenerateChapters: (markers: ScreenshotMarker[]) => void;

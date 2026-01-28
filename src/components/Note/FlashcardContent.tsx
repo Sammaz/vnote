@@ -19,10 +19,10 @@ import type { FlashcardData, FlashcardGenerationEvent } from "../../types";
 import { FLASHCARD_DIFFICULTY_LABELS } from "../../types";
 
 interface FlashcardContentProps {
-  noteId: number;
+  noteId: string;
   noteName: string;
   subtitlePath: string | null;
-  modelId: number | null;
+  modelId: string | null;
   flashcardData: FlashcardData | null;
   isGenerating: boolean;
   onGenerationComplete?: () => void;
@@ -208,7 +208,7 @@ export function FlashcardContent({
   // Listen for external regenerate event
   useEffect(() => {
     const handleRegenerateEvent = (e: Event) => {
-      const customEvent = e as CustomEvent<{ noteId: number }>;
+      const customEvent = e as CustomEvent<{ noteId: string }>;
       if (customEvent.detail.noteId === noteId) {
         handleGenerate();
       }
@@ -220,7 +220,7 @@ export function FlashcardContent({
   // Listen for external download CSV event
   useEffect(() => {
     const handleDownloadEvent = (e: Event) => {
-      const customEvent = e as CustomEvent<{ noteId: number }>;
+      const customEvent = e as CustomEvent<{ noteId: string }>;
       if (customEvent.detail.noteId === noteId) {
         handleDownloadCSV();
       }

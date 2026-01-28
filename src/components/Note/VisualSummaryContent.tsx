@@ -31,7 +31,7 @@ interface VisualSummaryContentProps {
   /** 已保存的思维导图数据（JSON 字符串） */
   savedMindMapData?: string | null;
   /** 笔记 ID（用于思维导图自动保存） */
-  noteId?: number;
+  noteId?: string;
   /** 数据变更回调（保存成功后调用，用于刷新笔记状态） */
   onDataChange?: () => void;
 }

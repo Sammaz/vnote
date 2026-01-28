@@ -6,8 +6,8 @@ import { useApp } from "../../context/AppContext";
 import type { Collection } from "../../types";
 
 interface MoveToCollectionModalProps {
-  fromCollectionId: number;
-  noteIds: number[];
+  fromCollectionId: string;
+  noteIds: string[];
   onClose: () => void;
   onSuccess?: () => void;
 }
@@ -22,9 +22,9 @@ function CollectionTreeItem({
 }: {
   collection: Collection;
   allCollections: Collection[];
-  excludeId: number;
+  excludeId: string;
   level: number;
-  onSelect: (id: number) => void;
+  onSelect: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const children = allCollections.filter((c) => c.parent_id === collection.id && c.id !== excludeId);
@@ -98,7 +98,7 @@ export function MoveToCollectionModal({
   // 获取顶级合集（排除当前合集）
   const rootCollections = collections.filter((c) => c.parent_id === null && c.id !== fromCollectionId);
 
-  const handleMove = async (toCollectionId: number) => {
+  const handleMove = async (toCollectionId: string) => {
     try {
       await batchMoveToCollection(fromCollectionId, toCollectionId, noteIds);
       onSuccess?.();

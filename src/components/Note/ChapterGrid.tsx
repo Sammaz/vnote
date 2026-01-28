@@ -8,14 +8,14 @@ import { cn } from "../../utils/cn";
 import { setChapterGenerating } from "../../utils/noteGenerationState";
 
 interface ChapterGridProps {
-  noteId: number;
+  noteId: string;
   videoPath: string;
   subtitlePath: string | null;
   chapterData: ChapterData | null;
   isGenerating: boolean;
   onChapterClick?: (chapter: Chapter) => void;
   onGenerationComplete?: () => void;
-  modelId: number | null;
+  modelId: string | null;
   showToolbar?: boolean; // 是否显示内置工具栏
   currentChapterId?: string | null; // 当前播放的章节ID
   showSubtitles?: boolean; // 是否显示字幕（由父组件控制）

@@ -24,9 +24,9 @@ import {
 
 /** 初始化任务参数 */
 export interface InitializationTaskParams {
-  noteId: number;
+  noteId: string;
   noteTitle: string;
-  modelId: number;
+  modelId: string;
   videoPath: string;
   subtitlePath: string | null;
   startFromStep?: number; // 用于断点恢复
@@ -55,7 +55,7 @@ interface InitializationQueueContextType {
   /** 从队列移除任务 */
   removeFromQueue: (taskId: string) => void;
   /** 根据笔记ID移除任务（从队列移除，如果正在运行则中止） */
-  removeNoteFromQueue: (noteId: number) => Promise<void>;
+  removeNoteFromQueue: (noteId: string) => Promise<void>;
   /** 中止当前任务 */
   abortCurrent: () => Promise<void>;
   /** 清空队列 */
@@ -68,7 +68,7 @@ const InitializationQueueContext = createContext<InitializationQueueContextType 
 
 interface InitializationQueueProviderProps {
   children: ReactNode;
-  onTaskCompleted?: (noteId: number) => void;
+  onTaskCompleted?: (noteId: string) => void;
 }
 
 export function InitializationQueueProvider({ children, onTaskCompleted }: InitializationQueueProviderProps) {
@@ -330,7 +330,7 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
   }, []);
 
   // 根据笔记ID移除任务（从队列移除，如果正在运行则中止）
-  const removeNoteFromQueue = useCallback(async (noteId: number) => {
+  const removeNoteFromQueue = useCallback(async (noteId: string) => {
     // 1. 从等待队列中移除该笔记的所有任务
     setQueue((prev) => prev.filter((t) => t.params.noteId !== noteId));
 
@@ -362,11 +362,11 @@ export function InitializationQueueProvider({ children, onTaskCompleted }: Initi
     const checkIncompleteInitializations = async () => {
       try {
         interface IncompleteNote {
-          id: number;
+          id: string;
           title: string;
           video_path: string;
           subtitle_path: string | null;
-          model_id: number | null;
+          model_id: string | null;
           init_status: number;
         }
 

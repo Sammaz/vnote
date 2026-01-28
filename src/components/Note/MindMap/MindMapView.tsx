@@ -66,7 +66,7 @@ interface MindMapViewProps {
   /** 原始字幕数据 */
   originalSubtitles?: SubtitleEntry[];
   /** 笔记 ID（用于自动保存） */
-  noteId?: number;
+  noteId?: string;
   /** 数据变更回调（保存成功后调用，用于刷新笔记状态） */
   onDataChange?: () => void;
 }

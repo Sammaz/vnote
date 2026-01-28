@@ -5,7 +5,7 @@ import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 
 interface AddNotesToCollectionModalProps {
-  collectionId: number;
+  collectionId: string;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -16,7 +16,7 @@ export function AddNotesToCollectionModal({
   onSuccess,
 }: AddNotesToCollectionModalProps) {
   const { notes, addNoteToCollection, notesInCollections } = useApp();
-  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<number>>(new Set());
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -34,7 +34,7 @@ export function AddNotesToCollectionModal({
     );
   }, [availableNotes, searchQuery]);
 
-  const toggleNoteSelection = (noteId: number) => {
+  const toggleNoteSelection = (noteId: string) => {
     setSelectedNoteIds((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(noteId)) {

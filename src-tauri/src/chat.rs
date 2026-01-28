@@ -19,11 +19,11 @@ pub struct ImageData {
 
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
-    pub note_id: i64,
+    pub note_id: String,
     pub messages: Vec<ChatMessage>,
     pub images: Option<Vec<ImageData>>,
     pub use_rag: bool,
-    pub model_id: Option<i64>,
+    pub model_id: Option<String>,
 }
 
 /// Start a streaming chat request
@@ -44,13 +44,13 @@ pub async fn chat_stream(
     // Get AI config
     let model_id = request.model_id.ok_or("No model selected")?;
     let ai_config = db
-        .get_ai_config_by_id(model_id)
+        .get_ai_config_by_id(&model_id)
         .map_err(|e| e.to_string())?
         .ok_or("AI config not found")?;
 
     // Get note info (for RAG) - only need subtitle_path, not the full RAG context
     let subtitle_path = if request.use_rag {
-        let note_result = db.get_note_by_id(request.note_id);
+        let note_result = db.get_note_by_id(&request.note_id);
         let note = note_result.map_err(|e| e.to_string())?;
         if let Some(ref note) = note {
             note.subtitle_path.clone()
@@ -106,7 +106,7 @@ pub async fn chat_stream(
             if let Some(ref path) = subtitle_path {
                 let context = rag::get_rag_context(
                     path,
-                    note_id_for_rag,
+                    &note_id_for_rag,
                     &rag_query,
                     Some(&abort_flag), // 传入 abort_flag
                 ).await.unwrap_or_default();
@@ -145,7 +145,7 @@ pub async fn abort_chat_stream(request_id: String) -> Result<(), String> {
 pub async fn generate_suggested_questions(
     db: &Database,
     subtitle_path: &str,
-    model_id: i64,
+    model_id: &str,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<Vec<String>, String> {
     // 1. Get AI config

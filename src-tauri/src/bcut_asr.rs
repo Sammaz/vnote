@@ -291,17 +291,17 @@ fn build_srt_from_result(result_json: &serde_json::Value) -> Result<String, Stri
     Ok(lines.join("\n"))
 }
 
-fn build_subtitle_dir(app: &AppHandle, note_id: i64) -> Result<PathBuf, String> {
+fn build_subtitle_dir(app: &AppHandle, note_id: &str) -> Result<PathBuf, String> {
     let cache_dir = app
         .path()
         .app_cache_dir()
         .map_err(|e| e.to_string())?;
-    Ok(cache_dir.join("notes").join(note_id.to_string()).join("subtitle"))
+    Ok(cache_dir.join("notes").join(note_id).join("subtitle"))
 }
 
 pub async fn transcribe_video_to_srt(
     app: &AppHandle,
-    note_id: i64,
+    note_id: &str,
     video_path: &str,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<String, String> {

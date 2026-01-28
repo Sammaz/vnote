@@ -11,8 +11,8 @@ interface NotesContextType {
   notes: Note[];
   refreshNotes: () => Promise<void>;
   createNote: (req: CreateNoteRequest) => Promise<Note>;
-  deleteNote: (id: number) => Promise<void>;
-  updateNoteSuggestedQuestions: (noteId: number, questions: string[]) => void;
+  deleteNote: (id: string) => Promise<void>;
+  updateNoteSuggestedQuestions: (noteId: string, questions: string[]) => void;
 
   // 生成状态
   isGenerating: boolean;
@@ -25,8 +25,8 @@ interface NotesContextType {
   // 视图
   currentView: ViewType;
   setCurrentView: (view: ViewType) => void;
-  selectedNoteId: number | null;
-  setSelectedNoteId: (id: number | null) => void;
+  selectedNoteId: string | null;
+  setSelectedNoteId: (id: string | null) => void;
 
   // 统计更新回调
   updateStats: (notesList: Note[]) => void;
@@ -38,7 +38,7 @@ interface NotesProviderProps {
   children: ReactNode;
   onStatsUpdate?: (stats: Partial<AppStats>) => void;
   /** 删除笔记前的回调（用于清理初始化队列等） */
-  onBeforeNoteDelete?: (noteId: number) => Promise<void>;
+  onBeforeNoteDelete?: (noteId: string) => Promise<void>;
 }
 
 export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: NotesProviderProps) {
@@ -46,7 +46,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
   const [isGenerating, setIsGenerating] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [currentView, setCurrentView] = useState<ViewType>("home");
-  const [selectedNoteId, setSelectedNoteId] = useState<number | null>(null);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
 
   // 更新统计
   const updateStats = useCallback((notesList: Note[]) => {
@@ -96,7 +96,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
   }, [refreshNotes]);
 
   // 删除笔记
-  const deleteNote = useCallback(async (id: number): Promise<void> => {
+  const deleteNote = useCallback(async (id: string): Promise<void> => {
     // 先调用删除前回调（清理初始化队列等）
     if (onBeforeNoteDelete) {
       await onBeforeNoteDelete(id);
@@ -143,7 +143,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
   }, [refreshNotes, selectedNoteId, onBeforeNoteDelete]);
 
   // 更新笔记的建议问题
-  const updateNoteSuggestedQuestions = useCallback((noteId: number, questions: string[]) => {
+  const updateNoteSuggestedQuestions = useCallback((noteId: string, questions: string[]) => {
     setNotes(prev => prev.map(note =>
       note.id === noteId
         ? { ...note, suggested_questions: JSON.stringify(questions) }

@@ -19,13 +19,13 @@ interface NoteGenerationState {
 }
 
 // 全局存储每个笔记的生成状态
-const noteGenerationStates = new Map<number, NoteGenerationState>();
+const noteGenerationStates = new Map<string, NoteGenerationState>();
 
 // 全局事件监听器管理（避免重复监听同一个generationId）
 export const activeListeners = new Map<string, () => void>();
 
 // 获取或初始化笔记的生成状态
-export function getNoteGenerationState(noteId: number): NoteGenerationState {
+export function getNoteGenerationState(noteId: string): NoteGenerationState {
   if (!noteGenerationStates.has(noteId)) {
     noteGenerationStates.set(noteId, {
       isGenerating: false,
@@ -46,13 +46,13 @@ export function getNoteGenerationState(noteId: number): NoteGenerationState {
 }
 
 // 设置笔记的生成状态
-export function setNoteGenerationState(noteId: number, updates: Partial<NoteGenerationState>) {
+export function setNoteGenerationState(noteId: string, updates: Partial<NoteGenerationState>) {
   const state = getNoteGenerationState(noteId);
   Object.assign(state, updates);
 }
 
 // 清理笔记的生成状态
-export function clearNoteGenerationState(noteId: number) {
+export function clearNoteGenerationState(noteId: string) {
   const state = noteGenerationStates.get(noteId);
   if (state) {
     // 清理所有活动的事件监听器（遍历 activeGenerationIds）
@@ -79,46 +79,46 @@ export function clearNoteGenerationState(noteId: number) {
 }
 
 // 判断笔记是否正在生成中
-export function isNoteGenerating(noteId: number): boolean {
+export function isNoteGenerating(noteId: string): boolean {
   return getNoteGenerationState(noteId).isGenerating;
 }
 
 // 全局追踪已尝试自动生成的笔记ID（避免重复触发）
-export const attemptedAutoGenerateNoteIds = new Set<number>();
+export const attemptedAutoGenerateNoteIds = new Set<string>();
 
 // 设置章节生成状态
-export function setChapterGenerating(noteId: number, isGenerating: boolean) {
+export function setChapterGenerating(noteId: string, isGenerating: boolean) {
   setNoteGenerationState(noteId, { isGeneratingChapters: isGenerating });
 }
 
 // 获取章节生成状态
-export function isChapterGenerating(noteId: number): boolean {
+export function isChapterGenerating(noteId: string): boolean {
   return getNoteGenerationState(noteId).isGeneratingChapters;
 }
 
 // 设置首次自动生成流程状态
-export function setInitialAutoGeneration(noteId: number, isInitial: boolean) {
+export function setInitialAutoGeneration(noteId: string, isInitial: boolean) {
   setNoteGenerationState(noteId, { isInitialAutoGeneration: isInitial });
 }
 
 // 获取首次自动生成流程状态
-export function isInitialAutoGeneration(noteId: number): boolean {
+export function isInitialAutoGeneration(noteId: string): boolean {
   return getNoteGenerationState(noteId).isInitialAutoGeneration;
 }
 
 // 注册一个活动的 generation_id
-export function registerActiveGenerationId(noteId: number, generationId: string) {
+export function registerActiveGenerationId(noteId: string, generationId: string) {
   const state = getNoteGenerationState(noteId);
   state.activeGenerationIds.add(generationId);
 }
 
 // 注销一个活动的 generation_id
-export function unregisterActiveGenerationId(noteId: number, generationId: string) {
+export function unregisterActiveGenerationId(noteId: string, generationId: string) {
   const state = getNoteGenerationState(noteId);
   state.activeGenerationIds.delete(generationId);
 }
 
 // 获取笔记所有活动的 generation_id
-export function getActiveGenerationIds(noteId: number): string[] {
+export function getActiveGenerationIds(noteId: string): string[] {
   return Array.from(getNoteGenerationState(noteId).activeGenerationIds);
 }

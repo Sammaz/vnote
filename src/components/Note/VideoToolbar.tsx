@@ -12,8 +12,8 @@ import { useApp } from "../../context/AppContext";
 import type { AiConfig } from "../../types";
 
 interface VideoToolbarProps {
-  currentModelId: number | null;
-  onModelChange: (modelId: number) => void;
+  currentModelId: string | null;
+  onModelChange: (modelId: string) => void;
 }
 
 interface TooltipButtonProps {
@@ -52,8 +52,8 @@ function TooltipButton({ icon, tooltip, onClick, active }: TooltipButtonProps) {
 
 interface ModelSelectorProps {
   models: AiConfig[];
-  currentModelId: number | null;
-  onModelChange: (modelId: number) => void;
+  currentModelId: string | null;
+  onModelChange: (modelId: string) => void;
 }
 
 function ModelSelector({ models, currentModelId, onModelChange }: ModelSelectorProps) {
