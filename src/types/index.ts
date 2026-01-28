@@ -64,6 +64,28 @@ export interface AiConfig {
   rate_limit: number; // 速率限制（每分钟请求次数），0表示不限制，范围0-1000，默认60
 }
 
+// Embedding 配置
+export interface EmbeddingConfig {
+  id: string;
+  title: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+  sort_order: number;
+  is_default: boolean;
+}
+
+// Reranker 配置
+export interface RerankerConfig {
+  id: string;
+  title: string;
+  base_url: string;
+  api_key: string;
+  model: string;
+  sort_order: number;
+  is_default: boolean;
+}
+
 // 上传文件信息
 export interface UploadedFile {
   name: string;

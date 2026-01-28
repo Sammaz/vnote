@@ -14,8 +14,8 @@ import {
 } from "../types/noteInitialization";
 
 export interface UseNoteInitializationParams {
-  noteId: number;
-  modelId: number;
+  noteId: string;
+  modelId: string;
   videoPath: string;
   subtitlePath: string | null;
 }

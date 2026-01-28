@@ -4,45 +4,12 @@ import {
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useApp } from "./context/AppContext";
-import type { PromptCategory, PromptConfig } from "./types";
+import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptCategory, PromptConfig } from "./types";
 
 interface SettingsPageProps {
     currentTheme: "light" | "dark";
     onThemeChange: (theme: "light" | "dark") => void;
     onClose: () => void;
-}
-
-interface AiConfig {
-    id: number;
-    title: string;
-    base_url: string;
-    api_key: string;
-    model: string;
-    sort_order: number;
-    is_default: boolean;
-    concurrent_limit: number;
-    request_timeout: number;
-    rate_limit: number;
-}
-
-interface EmbeddingConfig {
-    id: number;
-    title: string;
-    base_url: string;
-    api_key: string;
-    model: string;
-    sort_order: number;
-    is_default: boolean;
-}
-
-interface RerankerConfig {
-    id: number;
-    title: string;
-    base_url: string;
-    api_key: string;
-    model: string;
-    sort_order: number;
-    is_default: boolean;
 }
 
 type SettingsTab = "general" | "model" | "prompt";
@@ -66,17 +33,17 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     // AI config state
     const [aiConfigs, setAiConfigs] = useState<AiConfig[]>([]);
     const [editingAiConfig, setEditingAiConfig] = useState<AiConfig | null>(null);
-    const [deletingAiConfigId, setDeletingAiConfigId] = useState<number | null>(null);
+    const [deletingAiConfigId, setDeletingAiConfigId] = useState<string | null>(null);
 
     // Embedding config state
     const [embeddingConfigs, setEmbeddingConfigs] = useState<EmbeddingConfig[]>([]);
     const [editingEmbeddingConfig, setEditingEmbeddingConfig] = useState<EmbeddingConfig | null>(null);
-    const [deletingEmbeddingConfigId, setDeletingEmbeddingConfigId] = useState<number | null>(null);
+    const [deletingEmbeddingConfigId, setDeletingEmbeddingConfigId] = useState<string | null>(null);
 
     // Reranker config state
     const [rerankerConfigs, setRerankerConfigs] = useState<RerankerConfig[]>([]);
     const [editingRerankerConfig, setEditingRerankerConfig] = useState<RerankerConfig | null>(null);
-    const [deletingRerankerConfigId, setDeletingRerankerConfigId] = useState<number | null>(null);
+    const [deletingRerankerConfigId, setDeletingRerankerConfigId] = useState<string | null>(null);
 
     // Shared editing state
     const [editingType, setEditingType] = useState<EditingType>(null);
@@ -167,7 +134,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
     // AI Config handlers
     const createEmptyAiConfig = (): AiConfig => ({
-        id: 0,
+        id: "",
         title: "",
         base_url: "",
         api_key: "",
@@ -182,8 +149,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const saveAiConfig = async () => {
         if (!editingAiConfig) return;
         try {
-            if (editingAiConfig.id === 0) {
-                const newId = await invoke<number>("create_ai_config", { config: editingAiConfig });
+            if (editingAiConfig.id === "") {
+                const newId = await invoke<string>("create_ai_config", { config: editingAiConfig });
                 setAiConfigs([...aiConfigs, { ...editingAiConfig, id: newId }]);
             } else {
                 await invoke("update_ai_config", { config: editingAiConfig });
@@ -196,7 +163,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
-    const deleteAiConfig = async (id: number) => {
+    const deleteAiConfig = async (id: string) => {
         try {
             await invoke("delete_ai_config", { id });
             setAiConfigs(aiConfigs.filter(c => c.id !== id));
@@ -207,7 +174,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
-    const toggleDefaultAiConfig = async (id: number, currentIsDefault: boolean) => {
+    const toggleDefaultAiConfig = async (id: string, currentIsDefault: boolean) => {
         try {
             if (currentIsDefault) {
                 await invoke("unset_default_ai_config", { id });
@@ -224,7 +191,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
     // Embedding Config handlers
     const createEmptyEmbeddingConfig = (): EmbeddingConfig => ({
-        id: 0,
+        id: "",
         title: "",
         base_url: "",
         api_key: "",
@@ -236,8 +203,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const saveEmbeddingConfig = async () => {
         if (!editingEmbeddingConfig) return;
         try {
-            if (editingEmbeddingConfig.id === 0) {
-                const newId = await invoke<number>("create_embedding_config", { config: editingEmbeddingConfig });
+            if (editingEmbeddingConfig.id === "") {
+                const newId = await invoke<string>("create_embedding_config", { config: editingEmbeddingConfig });
                 // First config is auto-set as default by backend
                 const isFirst = embeddingConfigs.length === 0;
                 setEmbeddingConfigs([...embeddingConfigs, { ...editingEmbeddingConfig, id: newId, is_default: isFirst }]);
@@ -251,7 +218,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
-    const deleteEmbeddingConfig = async (id: number) => {
+    const deleteEmbeddingConfig = async (id: string) => {
         try {
             const deletingConfig = embeddingConfigs.find(c => c.id === id);
             await invoke("delete_embedding_config", { id });
@@ -268,7 +235,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
-    const toggleDefaultEmbeddingConfig = async (id: number, currentIsDefault: boolean) => {
+    const toggleDefaultEmbeddingConfig = async (id: string, currentIsDefault: boolean) => {
         try {
             if (currentIsDefault) {
                 // If it's the only config, don't allow unsetting
@@ -291,7 +258,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
     // Reranker Config handlers
     const createEmptyRerankerConfig = (): RerankerConfig => ({
-        id: 0,
+        id: "",
         title: "",
         base_url: "",
         api_key: "",
@@ -303,8 +270,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const saveRerankerConfig = async () => {
         if (!editingRerankerConfig) return;
         try {
-            if (editingRerankerConfig.id === 0) {
-                const newId = await invoke<number>("create_reranker_config", { config: editingRerankerConfig });
+            if (editingRerankerConfig.id === "") {
+                const newId = await invoke<string>("create_reranker_config", { config: editingRerankerConfig });
                 // First config is auto-set as default by backend
                 const isFirst = rerankerConfigs.length === 0;
                 setRerankerConfigs([...rerankerConfigs, { ...editingRerankerConfig, id: newId, is_default: isFirst }]);
@@ -318,7 +285,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
-    const deleteRerankerConfig = async (id: number) => {
+    const deleteRerankerConfig = async (id: string) => {
         try {
             const deletingConfig = rerankerConfigs.find(c => c.id === id);
             await invoke("delete_reranker_config", { id });
@@ -335,7 +302,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         }
     };
 
-    const toggleDefaultRerankerConfig = async (id: number, currentIsDefault: boolean) => {
+    const toggleDefaultRerankerConfig = async (id: string, currentIsDefault: boolean) => {
         try {
             if (currentIsDefault) {
                 // If it's the only config, don't allow unsetting
@@ -516,7 +483,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
     const getEditorTitle = () => {
         const config = getCurrentEditingConfig();
-        const isNew = config?.id === 0;
+        const isNew = config?.id === "";
         if (editingType === "ai") return isNew ? "新增对话模型" : "编辑对话模型";
         if (editingType === "embedding") return isNew ? "新增 Embedding 模型" : "编辑 Embedding 模型";
         if (editingType === "reranker") return isNew ? "新增 Reranker 模型" : "编辑 Reranker 模型";
@@ -548,7 +515,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         onDelete,
         onToggleDefault
     }: {
-        config: { id: number; title: string; model: string; base_url: string; is_default: boolean };
+        config: { id: string; title: string; model: string; base_url: string; is_default: boolean };
         icon: typeof Bot;
         onEdit: () => void;
         onDelete: () => void;

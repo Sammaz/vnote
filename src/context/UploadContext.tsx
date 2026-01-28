@@ -7,8 +7,8 @@ import type { UploadedFile } from "../types";
 
 /** 待初始化参数 */
 export interface PendingInitializationParams {
-  noteId: number;
-  modelId: number;
+  noteId: string;
+  modelId: string;
   videoPath: string;
   subtitlePath: string | null;
 }
