@@ -7,6 +7,9 @@ use std::path::PathBuf;
 
 use crate::snowflake;
 
+/// API 密钥已迁移到系统密钥环的占位符
+pub const API_KEY_MIGRATED_PLACEHOLDER: &str = "***MIGRATED***";
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiConfig {
     pub id: String,
@@ -653,7 +656,7 @@ impl Database {
                 &config_id,
             ).unwrap_or_else(|_| {
                 // If keyring fails, check if we need to migrate from database
-                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
                     // Try to migrate to keyring
                     let _ = crate::keyring_manager::store_api_key(
                         crate::keyring_manager::KeyType::AiConfig,
@@ -687,7 +690,7 @@ impl Database {
 
         // Store API key to keyring, use placeholder in database
         let db_api_key = if crate::keyring_manager::is_keyring_available() {
-            "***MIGRATED***"
+            API_KEY_MIGRATED_PLACEHOLDER
         } else {
             &config.api_key
         };
@@ -714,7 +717,7 @@ impl Database {
 
         // Store API key to keyring, use placeholder in database
         let db_api_key = if crate::keyring_manager::is_keyring_available() {
-            "***MIGRATED***"
+            API_KEY_MIGRATED_PLACEHOLDER
         } else {
             &config.api_key
         };
@@ -1058,7 +1061,7 @@ impl Database {
                 &config_id,
             ).unwrap_or_else(|_| {
                 // If keyring fails, check if we need to migrate from database
-                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
                     // Try to migrate to keyring
                     let _ = crate::keyring_manager::store_api_key(
                         crate::keyring_manager::KeyType::AiConfig,
@@ -1204,7 +1207,7 @@ impl Database {
                 crate::keyring_manager::KeyType::EmbeddingConfig,
                 &config_id,
             ).unwrap_or_else(|_| {
-                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
                     let _ = crate::keyring_manager::store_api_key(
                         crate::keyring_manager::KeyType::EmbeddingConfig,
                         &config_id,
@@ -1245,7 +1248,7 @@ impl Database {
                 crate::keyring_manager::KeyType::EmbeddingConfig,
                 &config_id,
             ).unwrap_or_else(|_| {
-                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
                     let _ = crate::keyring_manager::store_api_key(
                         crate::keyring_manager::KeyType::EmbeddingConfig,
                         &config_id,
@@ -1283,7 +1286,7 @@ impl Database {
                         &config_id,
                     ).unwrap_or_else(|_| {
                         // If keyring fails, check if we need to migrate from database
-                        if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                        if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
                             // Try to migrate to keyring
                             let _ = crate::keyring_manager::store_api_key(
                                 crate::keyring_manager::KeyType::EmbeddingConfig,
@@ -1328,7 +1331,7 @@ impl Database {
 
         // Store API key to keyring, use placeholder in database
         let db_api_key = if crate::keyring_manager::is_keyring_available() {
-            "***MIGRATED***"
+            API_KEY_MIGRATED_PLACEHOLDER
         } else {
             &config.api_key
         };
@@ -1355,7 +1358,7 @@ impl Database {
 
         // Store API key to keyring, use placeholder in database
         let db_api_key = if crate::keyring_manager::is_keyring_available() {
-            "***MIGRATED***"
+            API_KEY_MIGRATED_PLACEHOLDER
         } else {
             &config.api_key
         };
@@ -1431,7 +1434,7 @@ impl Database {
                 crate::keyring_manager::KeyType::RerankerConfig,
                 &config_id,
             ).unwrap_or_else(|_| {
-                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
                     let _ = crate::keyring_manager::store_api_key(
                         crate::keyring_manager::KeyType::RerankerConfig,
                         &config_id,
@@ -1472,7 +1475,7 @@ impl Database {
                 crate::keyring_manager::KeyType::RerankerConfig,
                 &config_id,
             ).unwrap_or_else(|_| {
-                if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
                     let _ = crate::keyring_manager::store_api_key(
                         crate::keyring_manager::KeyType::RerankerConfig,
                         &config_id,
@@ -1510,7 +1513,7 @@ impl Database {
                         &config_id,
                     ).unwrap_or_else(|_| {
                         // If keyring fails, check if we need to migrate from database
-                        if !db_api_key.is_empty() && db_api_key != "***MIGRATED***" {
+                        if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
                             // Try to migrate to keyring
                             let _ = crate::keyring_manager::store_api_key(
                                 crate::keyring_manager::KeyType::RerankerConfig,
@@ -1555,7 +1558,7 @@ impl Database {
 
         // Store API key to keyring, use placeholder in database
         let db_api_key = if crate::keyring_manager::is_keyring_available() {
-            "***MIGRATED***"
+            API_KEY_MIGRATED_PLACEHOLDER
         } else {
             &config.api_key
         };
@@ -1582,7 +1585,7 @@ impl Database {
 
         // Store API key to keyring, use placeholder in database
         let db_api_key = if crate::keyring_manager::is_keyring_available() {
-            "***MIGRATED***"
+            API_KEY_MIGRATED_PLACEHOLDER
         } else {
             &config.api_key
         };

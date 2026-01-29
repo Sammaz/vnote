@@ -911,8 +911,11 @@ async fn execute_highlights_step(
 
     let generation_id = format!("init-highlights-{}", uuid::Uuid::new_v4());
 
-    // 使用传入的时长参数，默认 3600 秒
-    let total_duration = 3600.0;
+    // 从字幕文件获取视频时长（最后一条字幕的结束时间）
+    let total_duration = crate::subtitle::parse_subtitle_file(&subtitle_path)
+        .ok()
+        .and_then(|entries| entries.last().map(|e| e.end_time))
+        .unwrap_or(3600.0);
 
     match crate::highlight_generation::generate_highlights_direct(
         app.clone(),

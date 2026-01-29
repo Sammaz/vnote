@@ -603,7 +603,7 @@ async fn generate_full_summary_layered(
                     Ok((summary, chunk_index))
                 }
                 Err(e) => {
-                    tracing::info!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
+                    tracing::warn!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
                     Err(e)
                 }
             }
@@ -1330,7 +1330,7 @@ pub async fn generate_note(
                         generated_count += 1;
                     }
                     Err(e) => {
-                        tracing::info!("[笔记生成] {:?} 生成失败: {}", tab_type, e);
+                        tracing::warn!("[笔记生成] {:?} 生成失败: {}", tab_type, e);
                         let _ = app.emit(
                             &event_name,
                             GenerationEvent::TabError {
@@ -1360,7 +1360,7 @@ pub async fn generate_note(
                 if result.success {
                     generated_count += 1;
                     if let Err(e) = update_note_tab(db, &request.note_id, tab_type, &result.content, &request.model_id) {
-                        tracing::info!("[笔记生成] 更新数据库失败: {}", e);
+                        tracing::error!("[笔记生成] 更新数据库失败: {}", e);
                         failed_count += 1;
                     }
                 } else {
@@ -1446,7 +1446,7 @@ pub async fn generate_note(
                 let _permit = match semaphore.acquire().await {
                     Ok(permit) => permit,
                     Err(e) => {
-                        tracing::info!("[笔记生成] 获取信号量失败: {}", e);
+                        tracing::error!("[笔记生成] 获取信号量失败: {}", e);
                         return TabResult {
                             tab_type,
                             content: String::new(),
@@ -1481,7 +1481,7 @@ pub async fn generate_note(
                         generated_count += 1;
                         // 更新数据库
                         if let Err(e) = update_note_tab(db, &request.note_id, &result.tab_type, &result.content, &request.model_id) {
-                            tracing::info!("[笔记生成] 更新数据库失败: {}", e);
+                            tracing::error!("[笔记生成] 更新数据库失败: {}", e);
                             failed_count += 1;
                         }
                     } else {
@@ -1490,7 +1490,7 @@ pub async fn generate_note(
                 }
                 Err(e) => {
                     // 任务 panic 或被取消，记录错误但继续处理其他任务
-                    tracing::info!("[笔记生成] 任务执行异常: {}", e);
+                    tracing::error!("[笔记生成] 任务执行异常: {}", e);
                     failed_count += 1;
                 }
             }

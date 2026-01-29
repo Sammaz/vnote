@@ -398,7 +398,7 @@ async fn generate_flashcards_internal(
                     Ok((cards, chunk_idx))
                 }
                 Err(e) => {
-                    tracing::info!("[闪记卡] 段 {}/{}: 解析失败 - {}", chunk_idx + 1, total_chunks, e);
+                    tracing::warn!("[闪记卡] 段 {}/{}: 解析失败 - {}", chunk_idx + 1, total_chunks, e);
                     // 解析失败时返回空数组，不中断整个流程
                     Ok((Vec::new(), chunk_idx))
                 }
@@ -421,11 +421,11 @@ async fn generate_flashcards_internal(
                 if e == "已中止" {
                     return Err("已中止".to_string());
                 }
-                tracing::info!("[闪记卡] 任务失败: {}", e);
+                tracing::error!("[闪记卡] 任务失败: {}", e);
                 has_error = true;
             }
             Err(e) => {
-                tracing::info!("[闪记卡] 任务执行错误: {}", e);
+                tracing::error!("[闪记卡] 任务执行错误: {}", e);
                 has_error = true;
             }
         }

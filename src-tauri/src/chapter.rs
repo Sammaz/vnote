@@ -317,13 +317,13 @@ async fn analyze_subtitle_for_chapters(
                             Ok((chunk_idx, chunk.start_index, chunk.end_index, chapters))
                         }
                         Err(e) => {
-                            tracing::info!("[章节生成] 第 {} 段解析失败: {}", chunk_idx + 1, e);
+                            tracing::warn!("[章节生成] 第 {} 段解析失败: {}", chunk_idx + 1, e);
                             Ok((chunk_idx, chunk.start_index, chunk.end_index, Vec::new()))
                         }
                     }
                 }
                 Err(e) => {
-                    tracing::info!("[章节生成] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
+                    tracing::error!("[章节生成] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
                     Ok((chunk_idx, chunk.start_index, chunk.end_index, Vec::new()))
                 }
             };
@@ -357,7 +357,7 @@ async fn analyze_subtitle_for_chapters(
                 // 其他错误继续处理
             }
             Err(e) => {
-                tracing::info!("[章节生成] 任务执行出错: {}", e);
+                tracing::error!("[章节生成] 任务执行出错: {}", e);
                 // 继续处理其他任务
             }
         }
