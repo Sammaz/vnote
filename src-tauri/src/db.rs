@@ -2339,7 +2339,7 @@ mod tests {
             let marker_id = uuid::Uuid::new_v4().to_string();
             let marker = ScreenshotMarker {
                 id: marker_id.clone(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index,
                 timestamp,
                 screenshot_path: screenshot_path.clone(),
@@ -2350,7 +2350,7 @@ mod tests {
             db.save_screenshot_marker(&marker).expect("Failed to save marker");
 
             // Retrieve markers for the note
-            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
 
             // Verify exactly one marker exists
             prop_assert_eq!(markers.len(), 1, "Expected exactly one marker");
@@ -2359,7 +2359,7 @@ mod tests {
             
             // Verify data integrity
             prop_assert_eq!(&retrieved.id, &marker_id, "Marker ID mismatch");
-            prop_assert_eq!(retrieved.note_id, note_id, "Note ID mismatch");
+            prop_assert_eq!(&retrieved.note_id, &note_id, "Note ID mismatch");
             prop_assert_eq!(retrieved.subtitle_index, subtitle_index, "Subtitle index mismatch");
             prop_assert!((retrieved.timestamp - timestamp).abs() < 0.001, "Timestamp mismatch");
             prop_assert_eq!(&retrieved.screenshot_path, &screenshot_path, "Screenshot path mismatch");
@@ -2379,7 +2379,7 @@ mod tests {
             let marker_id = uuid::Uuid::new_v4().to_string();
             let marker = ScreenshotMarker {
                 id: marker_id.clone(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index,
                 timestamp,
                 screenshot_path,
@@ -2390,16 +2390,16 @@ mod tests {
             db.save_screenshot_marker(&marker).expect("Failed to save marker");
 
             // Verify marker exists
-            let markers_before = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers_before = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
             prop_assert_eq!(markers_before.len(), 1, "Marker should exist before deletion");
 
             // Delete the marker
-            let deleted = db.delete_screenshot_marker(note_id, &marker_id)
+            let deleted = db.delete_screenshot_marker(&note_id, &marker_id)
                 .expect("Failed to delete marker");
             prop_assert!(deleted.is_some(), "Delete should return the deleted marker");
 
             // Verify marker no longer exists
-            let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers_after = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
             prop_assert_eq!(markers_after.len(), 0, "Marker should not exist after deletion");
         }
 
@@ -2421,7 +2421,7 @@ mod tests {
             for &idx in &indices_vec {
                 let marker = ScreenshotMarker {
                     id: uuid::Uuid::new_v4().to_string(),
-                    note_id,
+                    note_id: note_id.clone(),
                     subtitle_index: idx,
                     timestamp: idx as f64 * 1.5,
                     screenshot_path: format!("/screenshots/marker_{}.png", idx),
@@ -2431,7 +2431,7 @@ mod tests {
             }
 
             // Retrieve all markers
-            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
 
             // Verify count matches
             prop_assert_eq!(markers.len(), expected_count, "Marker count mismatch");
@@ -2458,7 +2458,7 @@ mod tests {
             for idx in indices {
                 let marker = ScreenshotMarker {
                     id: uuid::Uuid::new_v4().to_string(),
-                    note_id,
+                    note_id: note_id.clone(),
                     subtitle_index: idx,
                     timestamp: idx as f64,
                     screenshot_path: format!("/screenshots/marker_{}.png", idx),
@@ -2468,7 +2468,7 @@ mod tests {
             }
 
             // Retrieve markers
-            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
 
             // Verify ordering
             for i in 1..markers.len() {
@@ -2495,7 +2495,7 @@ mod tests {
             // Save first marker
             let marker1 = ScreenshotMarker {
                 id: uuid::Uuid::new_v4().to_string(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index,
                 timestamp: timestamp1,
                 screenshot_path: path1,
@@ -2507,7 +2507,7 @@ mod tests {
             let marker2_id = uuid::Uuid::new_v4().to_string();
             let marker2 = ScreenshotMarker {
                 id: marker2_id.clone(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index,
                 timestamp: timestamp2,
                 screenshot_path: path2.clone(),
@@ -2516,7 +2516,7 @@ mod tests {
             db.save_screenshot_marker(&marker2).expect("Failed to save second marker");
 
             // Retrieve markers
-            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
 
             // Should only have one marker (the second one replaced the first)
             prop_assert_eq!(markers.len(), 1, "Should have exactly one marker after update");
@@ -2538,7 +2538,7 @@ mod tests {
         let (db, _temp_dir) = create_test_db();
         let note_id = create_test_note(&db);
 
-        let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert!(markers.is_empty(), "New note should have no markers");
     }
 
@@ -2547,7 +2547,7 @@ mod tests {
         let (db, _temp_dir) = create_test_db();
         let note_id = create_test_note(&db);
 
-        let result = db.delete_screenshot_marker(note_id, "nonexistent-id")
+        let result = db.delete_screenshot_marker(&note_id, "nonexistent-id")
             .expect("Delete should not fail");
         assert!(result.is_none(), "Deleting nonexistent marker should return None");
     }
@@ -2561,7 +2561,7 @@ mod tests {
         for i in 0..5 {
             let marker = ScreenshotMarker {
                 id: uuid::Uuid::new_v4().to_string(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index: i,
                 timestamp: i as f64 * 10.0,
                 screenshot_path: format!("/screenshots/marker_{}.png", i),
@@ -2571,15 +2571,15 @@ mod tests {
         }
 
         // Verify markers exist
-        let markers_before = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let markers_before = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert_eq!(markers_before.len(), 5, "Should have 5 markers");
 
         // Delete all markers
-        let deleted = db.delete_all_screenshot_markers(note_id).expect("Failed to delete all markers");
+        let deleted = db.delete_all_screenshot_markers(&note_id).expect("Failed to delete all markers");
         assert_eq!(deleted.len(), 5, "Should return 5 deleted markers");
 
         // Verify no markers remain
-        let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let markers_after = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert!(markers_after.is_empty(), "Should have no markers after delete all");
     }
 
@@ -2592,7 +2592,7 @@ mod tests {
         // Add marker to note 1
         let marker1 = ScreenshotMarker {
             id: uuid::Uuid::new_v4().to_string(),
-            note_id: note_id_1,
+            note_id: note_id_1.clone(),
             subtitle_index: 0,
             timestamp: 10.0,
             screenshot_path: "/screenshots/note1_marker.png".to_string(),
@@ -2603,7 +2603,7 @@ mod tests {
         // Add marker to note 2
         let marker2 = ScreenshotMarker {
             id: uuid::Uuid::new_v4().to_string(),
-            note_id: note_id_2,
+            note_id: note_id_2.clone(),
             subtitle_index: 0,
             timestamp: 20.0,
             screenshot_path: "/screenshots/note2_marker.png".to_string(),
@@ -2612,8 +2612,8 @@ mod tests {
         db.save_screenshot_marker(&marker2).expect("Failed to save marker");
 
         // Verify each note only sees its own markers
-        let markers_1 = db.get_screenshot_markers(note_id_1).expect("Failed to get markers");
-        let markers_2 = db.get_screenshot_markers(note_id_2).expect("Failed to get markers");
+        let markers_1 = db.get_screenshot_markers(&note_id_1).expect("Failed to get markers");
+        let markers_2 = db.get_screenshot_markers(&note_id_2).expect("Failed to get markers");
 
         assert_eq!(markers_1.len(), 1, "Note 1 should have 1 marker");
         assert_eq!(markers_2.len(), 1, "Note 2 should have 1 marker");
@@ -2630,7 +2630,7 @@ mod tests {
         for i in 0..3 {
             let marker = ScreenshotMarker {
                 id: uuid::Uuid::new_v4().to_string(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index: i,
                 timestamp: i as f64 * 10.0,
                 screenshot_path: format!("/screenshots/marker_{}.png", i),
@@ -2640,14 +2640,14 @@ mod tests {
         }
 
         // Verify markers exist
-        let markers_before = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let markers_before = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert_eq!(markers_before.len(), 3, "Should have 3 markers");
 
         // Delete the note
-        db.delete_note(note_id).expect("Failed to delete note");
+        db.delete_note(&note_id).expect("Failed to delete note");
 
         // Verify markers are cascade deleted
-        let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let markers_after = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert!(markers_after.is_empty(), "Markers should be cascade deleted with note");
     }
 
@@ -2686,7 +2686,7 @@ mod tests {
             let marker_id = uuid::Uuid::new_v4().to_string();
             let marker = ScreenshotMarker {
                 id: marker_id.clone(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index,
                 timestamp,
                 screenshot_path: screenshot_path.clone(),
@@ -2697,7 +2697,7 @@ mod tests {
             db.save_screenshot_marker(&marker).expect("Failed to save marker");
 
             // Retrieve and verify the path is correctly recorded
-            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
             prop_assert_eq!(markers.len(), 1, "Should have exactly one marker");
             prop_assert_eq!(
                 &markers[0].screenshot_path, 
@@ -2723,7 +2723,7 @@ mod tests {
             let marker_id = uuid::Uuid::new_v4().to_string();
             let marker = ScreenshotMarker {
                 id: marker_id.clone(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index,
                 timestamp,
                 screenshot_path: screenshot_path.clone(),
@@ -2734,7 +2734,7 @@ mod tests {
             db.save_screenshot_marker(&marker).expect("Failed to save marker");
 
             // Delete the marker and verify the returned data contains the path
-            let deleted = db.delete_screenshot_marker(note_id, &marker_id)
+            let deleted = db.delete_screenshot_marker(&note_id, &marker_id)
                 .expect("Failed to delete marker");
             
             prop_assert!(deleted.is_some(), "Delete should return the deleted marker");
@@ -2763,7 +2763,7 @@ mod tests {
             for (i, path) in paths.iter().enumerate() {
                 let marker = ScreenshotMarker {
                     id: uuid::Uuid::new_v4().to_string(),
-                    note_id,
+                    note_id: note_id.clone(),
                     subtitle_index: i as i32,
                     timestamp: i as f64 * 10.0,
                     screenshot_path: path.clone(),
@@ -2774,7 +2774,7 @@ mod tests {
             }
 
             // Delete all markers and verify all paths are returned
-            let deleted = db.delete_all_screenshot_markers(note_id)
+            let deleted = db.delete_all_screenshot_markers(&note_id)
                 .expect("Failed to delete all markers");
 
             // Allow duplicate paths if markers are distinct (e.g. two markers pointing to same file)
@@ -2808,7 +2808,7 @@ mod tests {
                 let marker_id = uuid::Uuid::new_v4().to_string();
                 let marker = ScreenshotMarker {
                     id: marker_id.clone(),
-                    note_id,
+                    note_id: note_id.clone(),
                     subtitle_index: *idx,
                     timestamp: *idx as f64,
                     screenshot_path: format!("/screenshots/user_marker_{}.png", idx),
@@ -2824,7 +2824,7 @@ mod tests {
                 let marker_id = uuid::Uuid::new_v4().to_string();
                 let marker = ScreenshotMarker {
                     id: marker_id.clone(),
-                    note_id,
+                    note_id: note_id.clone(),
                     subtitle_index: *idx,
                     timestamp: *idx as f64,
                     screenshot_path: format!("/screenshots/auto_marker_{}.png", idx),
@@ -2837,12 +2837,12 @@ mod tests {
             // Simulate chapter regeneration: delete only auto-generated markers
             // (In real implementation, this would be done by tracking which markers are user-added)
             for auto_id in &auto_marker_ids {
-                db.delete_screenshot_marker(note_id, auto_id)
+                db.delete_screenshot_marker(&note_id, auto_id)
                     .expect("Failed to delete auto marker");
             }
 
             // Verify user markers are preserved
-            let remaining_markers = db.get_screenshot_markers(note_id)
+            let remaining_markers = db.get_screenshot_markers(&note_id)
                 .expect("Failed to get markers");
             
             prop_assert_eq!(
@@ -2882,7 +2882,7 @@ mod tests {
         let special_path = "/screenshots/视频截图 2024-01-15 10:30:45.png".to_string();
         let marker = ScreenshotMarker {
             id: uuid::Uuid::new_v4().to_string(),
-            note_id,
+            note_id: note_id.clone(),
             subtitle_index: 0,
             timestamp: 10.0,
             screenshot_path: special_path.clone(),
@@ -2891,7 +2891,7 @@ mod tests {
 
         db.save_screenshot_marker(&marker).expect("Failed to save marker");
 
-        let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0].screenshot_path, special_path, "Special characters in path should be preserved");
     }
@@ -2905,7 +2905,7 @@ mod tests {
         let long_path = format!("/screenshots/{}/marker.png", "a".repeat(500));
         let marker = ScreenshotMarker {
             id: uuid::Uuid::new_v4().to_string(),
-            note_id,
+            note_id: note_id.clone(),
             subtitle_index: 0,
             timestamp: 10.0,
             screenshot_path: long_path.clone(),
@@ -2914,7 +2914,7 @@ mod tests {
 
         db.save_screenshot_marker(&marker).expect("Failed to save marker");
 
-        let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert_eq!(markers.len(), 1);
         assert_eq!(markers[0].screenshot_path, long_path, "Long path should be preserved");
     }
@@ -2936,7 +2936,7 @@ mod tests {
             let marker_id = uuid::Uuid::new_v4().to_string();
             let marker = ScreenshotMarker {
                 id: marker_id.clone(),
-                note_id,
+                note_id: note_id.clone(),
                 subtitle_index: i as i32,
                 timestamp: i as f64 * 10.0,
                 screenshot_path: path.to_string(),
@@ -2947,7 +2947,7 @@ mod tests {
         }
 
         // Delete the middle marker and verify correct path is returned
-        let deleted = db.delete_screenshot_marker(note_id, &marker_ids[1])
+        let deleted = db.delete_screenshot_marker(&note_id, &marker_ids[1])
             .expect("Failed to delete marker");
         
         assert!(deleted.is_some());
@@ -2958,7 +2958,7 @@ mod tests {
         );
 
         // Verify other markers still exist with correct paths
-        let remaining = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let remaining = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert_eq!(remaining.len(), 2);
         assert_eq!(remaining[0].screenshot_path, "/screenshots/first.png");
         assert_eq!(remaining[1].screenshot_path, "/screenshots/third.png");
@@ -2970,7 +2970,7 @@ mod tests {
         let note_id = create_test_note(&db);
 
         // Delete all markers from a note with no markers
-        let deleted = db.delete_all_screenshot_markers(note_id)
+        let deleted = db.delete_all_screenshot_markers(&note_id)
             .expect("Failed to delete all markers");
         
         assert!(deleted.is_empty(), "Deleting from empty should return empty vec");
@@ -2985,7 +2985,7 @@ mod tests {
         let original_path = "/screenshots/original.png".to_string();
         let marker = ScreenshotMarker {
             id: uuid::Uuid::new_v4().to_string(),
-            note_id,
+            note_id: note_id.clone(),
             subtitle_index: 5,
             timestamp: 50.0,
             screenshot_path: original_path.clone(),
@@ -2997,7 +2997,7 @@ mod tests {
         let new_path = "/screenshots/updated.png".to_string();
         let updated_marker = ScreenshotMarker {
             id: uuid::Uuid::new_v4().to_string(),
-            note_id,
+            note_id: note_id.clone(),
             subtitle_index: 5, // Same index
             timestamp: 55.0,
             screenshot_path: new_path.clone(),
@@ -3006,7 +3006,7 @@ mod tests {
         db.save_screenshot_marker(&updated_marker).expect("Failed to save updated marker");
 
         // Verify only the new path exists
-        let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+        let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
         assert_eq!(markers.len(), 1);
         assert_eq!(
             markers[0].screenshot_path, 
@@ -3048,7 +3048,7 @@ mod tests {
             for i in 0..marker_count {
                 let marker = ScreenshotMarker {
                     id: uuid::Uuid::new_v4().to_string(),
-                    note_id,
+                    note_id: note_id.clone(),
                     subtitle_index: i as i32,
                     timestamp: i as f64 * 10.0,
                     screenshot_path: format!("/screenshots/marker_{}.png", i),
@@ -3058,7 +3058,7 @@ mod tests {
             }
 
             // Verify markers exist before deletion
-            let markers_before = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers_before = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
             prop_assert_eq!(
                 markers_before.len(), 
                 marker_count, 
@@ -3066,10 +3066,10 @@ mod tests {
             );
 
             // Delete the note
-            db.delete_note(note_id).expect("Failed to delete note");
+            db.delete_note(&note_id).expect("Failed to delete note");
 
             // Verify all markers are cascade deleted
-            let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers_after = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
             prop_assert!(
                 markers_after.is_empty(), 
                 "All markers should be cascade deleted with note, but found {} markers", 
@@ -3095,7 +3095,7 @@ mod tests {
             for i in 0..note1_marker_count {
                 let marker = ScreenshotMarker {
                     id: uuid::Uuid::new_v4().to_string(),
-                    note_id: note_id_1,
+                    note_id: note_id_1.clone(),
                     subtitle_index: i as i32,
                     timestamp: i as f64 * 10.0,
                     screenshot_path: format!("/screenshots/note1_marker_{}.png", i),
@@ -3108,7 +3108,7 @@ mod tests {
             for i in 0..note2_marker_count {
                 let marker = ScreenshotMarker {
                     id: uuid::Uuid::new_v4().to_string(),
-                    note_id: note_id_2,
+                    note_id: note_id_2.clone(),
                     subtitle_index: i as i32,
                     timestamp: i as f64 * 10.0,
                     screenshot_path: format!("/screenshots/note2_marker_{}.png", i),
@@ -3118,17 +3118,17 @@ mod tests {
             }
 
             // Delete note 1
-            db.delete_note(note_id_1).expect("Failed to delete note 1");
+            db.delete_note(&note_id_1).expect("Failed to delete note 1");
 
             // Verify note 1's markers are deleted
-            let note1_markers = db.get_screenshot_markers(note_id_1).expect("Failed to get markers");
+            let note1_markers = db.get_screenshot_markers(&note_id_1).expect("Failed to get markers");
             prop_assert!(
                 note1_markers.is_empty(), 
                 "Note 1's markers should be deleted"
             );
 
             // Verify note 2's markers are preserved
-            let note2_markers = db.get_screenshot_markers(note_id_2).expect("Failed to get markers");
+            let note2_markers = db.get_screenshot_markers(&note_id_2).expect("Failed to get markers");
             prop_assert_eq!(
                 note2_markers.len(), 
                 note2_marker_count, 
@@ -3161,7 +3161,7 @@ mod tests {
             for (i, path) in paths.iter().enumerate() {
                 let marker = ScreenshotMarker {
                     id: uuid::Uuid::new_v4().to_string(),
-                    note_id,
+                    note_id: note_id.clone(),
                     subtitle_index: i as i32,
                     timestamp: i as f64 * 10.0,
                     screenshot_path: path.clone(),
@@ -3172,7 +3172,7 @@ mod tests {
             }
 
             // Retrieve markers before deletion (for file cleanup)
-            let markers = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
             let retrieved_paths: std::collections::HashSet<String> = 
                 markers.iter().map(|m| m.screenshot_path.clone()).collect();
 
@@ -3183,10 +3183,10 @@ mod tests {
             );
 
             // Now delete the note
-            db.delete_note(note_id).expect("Failed to delete note");
+            db.delete_note(&note_id).expect("Failed to delete note");
 
             // Verify markers are gone
-            let markers_after = db.get_screenshot_markers(note_id).expect("Failed to get markers");
+            let markers_after = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
             prop_assert!(markers_after.is_empty(), "Markers should be deleted with note");
         }
     }
