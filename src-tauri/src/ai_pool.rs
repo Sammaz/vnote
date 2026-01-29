@@ -1078,12 +1078,12 @@ mod tests {
     #[tokio::test]
     async fn test_ensure_controller() {
         let manager = AiPoolManager::new();
-        
+
         // 创建控制器
-        let controller1 = manager.ensure_controller(1, 5, 60).await;
-        
+        let controller1 = manager.ensure_controller("1", 5, 60).await;
+
         // 再次获取同一个控制器
-        let controller2 = manager.ensure_controller(1, 10, 120).await;
+        let controller2 = manager.ensure_controller("1", 10, 120).await;
         
         // 应该是同一个控制器（使用第一次的配置）
         assert!(Arc::ptr_eq(&controller1, &controller2));
