@@ -30,6 +30,8 @@ interface VisualSummaryContentProps {
   noteTitle?: string;
   /** 已保存的思维导图数据（JSON 字符串） */
   savedMindMapData?: string | null;
+  /** 已保存的 Markdown 编辑内容（用户编辑后保存的内容） */
+  savedMarkdownContent?: string | null;
   /** 笔记 ID（用于思维导图自动保存） */
   noteId?: string;
   /** 数据变更回调（保存成功后调用，用于刷新笔记状态） */
@@ -47,14 +49,20 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
   viewMode = "markdown",
   noteTitle = "思维导图",
   savedMindMapData,
+  savedMarkdownContent,
   noteId,
   onDataChange,
 }, ref) {
   // 用于生成唯一标题 ID 的计数器（必须在所有条件返回之前声明）
   const slugCountsRef = useRef<Record<string, number>>({});
 
-  // 组装 Markdown 内容
+  // 组装 Markdown 内容（优先使用已保存的编辑内容）
   const markdownContent = useMemo(() => {
+    // 优先使用已保存的用户编辑内容
+    if (savedMarkdownContent) {
+      return savedMarkdownContent;
+    }
+    // 否则动态生成
     if (!chapterData || chapterData.chapters.length === 0) {
       return "";
     }
@@ -64,7 +72,7 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
       originalSubtitles,
       showTimestamp,
     });
-  }, [chapterData, optimizedSubtitles, originalSubtitles, showTimestamp]);
+  }, [savedMarkdownContent, chapterData, optimizedSubtitles, originalSubtitles, showTimestamp]);
 
   // 当进入编辑模式且 editContent 为空时，初始化内容
   useEffect(() => {

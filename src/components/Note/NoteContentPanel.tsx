@@ -337,6 +337,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           if (data.succeeded === 0 && data.failed > 0) {
             message.error("所有章节字幕优化失败");
             setSubtitleOptimizationEnabled(false);
+          } else {
+            // 字幕优化成功，清除已保存的视觉化总结编辑内容
+            clearSavedVisualMarkdown();
           }
           // 刷新笔记数据以确保视觉化总结能正确显示
           onGenerationComplete?.();
@@ -462,6 +465,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [visualViewMode, setVisualViewMode] = useState<VisualViewMode>("markdown");
   const [showMindMapExportMenu, setShowMindMapExportMenu] = useState(false);
   const mindMapExportMenuRef = useRef<HTMLDivElement>(null);
+  // 标记视觉化总结 Markdown 是否已被清除（用于在数据刷新前立即显示动态生成内容）
+  const [visualMarkdownCleared, setVisualMarkdownCleared] = useState(false);
 
   // 从全局状态同步组件state
   const syncStateFromGlobal = useCallback(() => {
@@ -534,6 +539,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 当笔记内容更新时，触发重新渲染
     forceUpdate({});
   }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.full_summary]);
+
+  // 当 note.visual_summary 变化时，重置清除标记
+  useEffect(() => {
+    setVisualMarkdownCleared(false);
+  }, [note.visual_summary]);
 
   // 设置深度蓝图生成监听器
   const setupBlueprintListener = useCallback(async (noteId: string, genId: string) => {
@@ -1009,7 +1019,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   };
 
-  // 获取视觉化总结的 Markdown 内容
+  // 获取视觉化总结的 Markdown 内容（动态生成）
   const getVisualSummaryContent = useCallback((): string => {
     if (!chapterData || chapterData.chapters.length === 0) {
       return "";
@@ -1021,6 +1031,40 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       showTimestamp: showVisualTimestamp,
     });
   }, [chapterData, optimizedSubtitles, subtitleEntries, showVisualTimestamp]);
+
+  // 获取已保存的视觉化总结 Markdown（区分思维导图 JSON）
+  const getSavedVisualMarkdown = useCallback((): string | null => {
+    // 如果已标记为清除，返回 null（在数据刷新前立即显示动态生成内容）
+    if (visualMarkdownCleared) return null;
+    if (!note.visual_summary) return null;
+    // 如果是 JSON 格式（思维导图数据），返回 null
+    if (note.visual_summary.trim().startsWith('{')) {
+      try {
+        JSON.parse(note.visual_summary);
+        return null; // 是有效 JSON，说明是思维导图数据
+      } catch {
+        // 解析失败，可能是 Markdown
+      }
+    }
+    return note.visual_summary;
+  }, [note.visual_summary, visualMarkdownCleared]);
+
+  // 清除已保存的视觉化总结 Markdown（重新生成时调用）
+  const clearSavedVisualMarkdown = useCallback(async () => {
+    // 立即标记为已清除，确保 UI 立即显示动态生成内容
+    setVisualMarkdownCleared(true);
+    // 只有当存在已保存的 Markdown 内容时才清除数据库
+    if (!note.visual_summary || note.visual_summary.trim().startsWith('{')) return;
+    try {
+      await invoke("update_note_content", {
+        noteId: note.id,
+        tabType: "visual_summary",
+        content: "",
+      });
+    } catch (error) {
+      console.error("清除视觉化总结失败:", error);
+    }
+  }, [note.id, note.visual_summary]);
 
   // 视觉化总结复制
   const handleVisualCopy = async () => {
@@ -1143,11 +1187,28 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showMindMapExportMenu]);
 
-  // 进入视觉化总结编辑模式时初始化内容
-  const handleVisualEditToggle = () => {
+  // 视觉化总结编辑模式切换（进入时初始化内容，退出时保存）
+  const handleVisualEditToggle = async () => {
     if (!isVisualEditMode) {
-      // 进入编辑模式，初始化内容
-      setVisualEditContent(getVisualSummaryContent());
+      // 进入编辑模式，优先使用已保存的编辑内容
+      const savedMarkdown = getSavedVisualMarkdown();
+      setVisualEditContent(savedMarkdown || getVisualSummaryContent());
+    } else {
+      // 退出编辑模式，保存内容
+      const generatedContent = getVisualSummaryContent();
+      if (visualEditContent && visualEditContent !== generatedContent) {
+        try {
+          await invoke("update_note_content", {
+            noteId: note.id,
+            tabType: "visual_summary",
+            content: visualEditContent,
+          });
+          onGenerationComplete?.();
+        } catch (error) {
+          console.error("保存视觉化总结失败:", error);
+          message.error("保存失败");
+        }
+      }
     }
     setIsVisualEditMode(!isVisualEditMode);
   };
@@ -1192,6 +1253,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               break;
             case "Completed":
               setAssistModeProgress({ current: markers.length, total: markers.length, message: "生成完成!" });
+              // 清除已保存的视觉化总结编辑内容
+              clearSavedVisualMarkdown();
               // 刷新笔记数据
               onGenerationComplete?.();
               message.success("章节生成完成");
@@ -2469,6 +2532,8 @@ Video subtitles content:`;
                   } catch (err) {
                     console.error("[NoteContentPanel] 清除截图缓存失败:", err);
                   }
+                  // 清除已保存的视觉化总结编辑内容
+                  clearSavedVisualMarkdown();
                   // 重新生成章节
                   chapterGridRef.current?.generateChapters();
                 }
@@ -3023,6 +3088,7 @@ Video subtitles content:`;
             viewMode={visualViewMode}
             noteTitle={note.title}
             savedMindMapData={note.visual_summary}
+            savedMarkdownContent={getSavedVisualMarkdown()}
             noteId={note.id}
             onDataChange={onGenerationComplete}
           />
