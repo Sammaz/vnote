@@ -1072,7 +1072,7 @@ fn get_prompt_configs() -> Result<Vec<PromptConfig>, String> {
 }
 
 #[tauri::command]
-fn create_prompt_config(config: PromptConfig) -> Result<i64, String> {
+fn create_prompt_config(config: PromptConfig) -> Result<String, String> {
     // 验证输入
     validation::validate_config_title(&config.title)?;
     if let Some(ref desc) = config.description {

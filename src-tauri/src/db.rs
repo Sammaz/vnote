@@ -1673,12 +1673,14 @@ impl Database {
         configs.collect()
     }
 
-    pub fn create_prompt_config(&self, config: &PromptConfig) -> SqliteResult<i64> {
+    pub fn create_prompt_config(&self, config: &PromptConfig) -> SqliteResult<String> {
         let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
         conn.execute(
-            "INSERT INTO prompt_configs (title, description, content, category, recommended_model_id, sort_order, is_default)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO prompt_configs (id, title, description, content, category, recommended_model_id, sort_order, is_default)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             (
+                &new_id,
                 &config.title,
                 &config.description,
                 &config.content,
@@ -1688,7 +1690,7 @@ impl Database {
                 config.is_default as i32
             ),
         )?;
-        Ok(conn.last_insert_rowid())
+        Ok(new_id)
     }
 
     pub fn update_prompt_config(&self, config: &PromptConfig) -> SqliteResult<()> {
