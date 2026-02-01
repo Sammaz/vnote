@@ -638,6 +638,23 @@
   background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
 }
 
+/* 章节标题时间范围样式 */
+.note-markdown .timestamp-range {
+  font-size: 0.85em;
+  color: #64748b;
+  margin-left: 0.25em;
+}
+
+.dark .note-markdown .timestamp-range {
+  color: #94a3b8;
+}
+
+/* 隐藏时间戳模式 */
+.note-markdown.hide-timestamps .timestamp,
+.note-markdown.hide-timestamps .timestamp-range {
+  display: none;
+}
+
 /* 段落 */
 .note-markdown p {
   margin: 0.6em 0;

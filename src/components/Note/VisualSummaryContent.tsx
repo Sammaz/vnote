@@ -144,8 +144,11 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
   const renderWithTimestamp = (children: React.ReactNode[]) => {
     return children.map((child, index) => {
       if (typeof child === 'string') {
-        // 合并正则：同时匹配时间戳和标签
-        const combinedRegex = /(\[\d{2}:\d{2}:\d{2}\])|(#[^\s]+)/g;
+        // 合并正则：同时匹配时间戳、章节时间范围和标签
+        // match[1]: 时间戳 [00:01:30]
+        // match[2]: 章节时间范围 (0:00 - 1:30) 或 (0:00:00 - 1:30:00)
+        // match[3]: 标签 #tag
+        const combinedRegex = /(\[\d{2}:\d{2}:\d{2}\])|(\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\))|(#[^\s]+)/g;
 
         if (combinedRegex.test(child)) {
           // 重置正则的 lastIndex
@@ -177,6 +180,13 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
                 </span>
               );
             } else if (match[2]) {
+              // 章节时间范围匹配 (0:00 - 1:30)
+              result.push(
+                <span key={`${index}-${partIndex++}`} className="timestamp-range">
+                  {matchedText}
+                </span>
+              );
+            } else if (match[3]) {
               // 标签匹配
               result.push(
                 <span
@@ -211,7 +221,7 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
   return (
     <div className="relative h-full flex flex-row group">
       <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 py-2 custom-scrollbar">
-        <div className="note-markdown">
+        <div className={`note-markdown${showTimestamp ? '' : ' hide-timestamps'}`}>
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={{
