@@ -1684,8 +1684,34 @@ fn update_collections_order(collection_ids: Vec<String>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn delete_collection(id: String) -> Result<(), String> {
-    get_db().delete_collection(&id).map_err(|e| e.to_string())
+async fn delete_collection(app: AppHandle, id: String) -> Result<(), String> {
+    let db = get_db();
+
+    // Get all note IDs in this collection and its sub-collections
+    let note_ids = db.get_all_note_ids_in_collection_tree(&id).map_err(|e| e.to_string())?;
+
+    // Delete cache directories for all notes
+    if let Ok(cache_dir) = app.path().app_cache_dir() {
+        for note_id in &note_ids {
+            let note_cache_dir = cache_dir.join("notes").join(note_id);
+            if note_cache_dir.exists() {
+                let dir_to_delete = note_cache_dir.clone();
+                tokio::task::spawn_blocking(move || {
+                    let _ = std::fs::remove_dir_all(&dir_to_delete);
+                })
+                .await
+                .map_err(|e| format!("Task join error: {}", e))?;
+            }
+        }
+    }
+
+    // Delete all notes from database
+    for note_id in &note_ids {
+        db.delete_note(note_id).map_err(|e| e.to_string())?;
+    }
+
+    // Delete the collection (cascade will handle collection_items)
+    db.delete_collection(&id).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

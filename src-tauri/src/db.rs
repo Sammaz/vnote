@@ -2264,6 +2264,35 @@ impl Database {
         let note_ids = stmt.query_map([], |row| row.get(0))?;
         note_ids.collect()
     }
+
+    /// Get all note IDs in a collection and its sub-collections (recursive)
+    pub fn get_all_note_ids_in_collection_tree(&self, collection_id: &str) -> SqliteResult<Vec<String>> {
+        let conn = self.connection();
+        let mut all_note_ids = Vec::new();
+
+        // Get note IDs directly in this collection
+        let mut stmt = conn.prepare(
+            "SELECT note_id FROM collection_items WHERE collection_id = ?1"
+        )?;
+        let note_ids: Vec<String> = stmt.query_map([collection_id], |row| row.get(0))?
+            .collect::<SqliteResult<Vec<_>>>()?;
+        all_note_ids.extend(note_ids);
+
+        // Get child collection IDs
+        let mut child_stmt = conn.prepare(
+            "SELECT id FROM collections WHERE parent_id = ?1"
+        )?;
+        let child_ids: Vec<String> = child_stmt.query_map([collection_id], |row| row.get(0))?
+            .collect::<SqliteResult<Vec<_>>>()?;
+
+        // Recursively get notes from child collections
+        for child_id in child_ids {
+            let child_notes = self.get_all_note_ids_in_collection_tree(&child_id)?;
+            all_note_ids.extend(child_notes);
+        }
+
+        Ok(all_note_ids)
+    }
 }
 
 
