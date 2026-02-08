@@ -497,6 +497,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
     setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
 
+    // 重置高光笔记、闪记卡、章节的生成状态（每个笔记独立）
+    setHighlightIsGenerating(false);
+    setFlashcardIsGenerating(false);
+    setChapterIsGenerating(globalState.isGeneratingChapters);
+
     // 重置或恢复深度蓝图生成状态（每个笔记独立）
     // 如果该笔记之前正在生成深度蓝图，则恢复其进度
     if (globalState.blueprintIsGenerating) {
