@@ -9,6 +9,8 @@ interface NoteGenerationState {
   completedTabs: Set<string>;
   failedTabs: Map<string, string>;
   isGeneratingChapters: boolean; // 是否正在生成章节（原文细读）
+  isGeneratingHighlights: boolean; // 是否正在生成高光笔记
+  isGeneratingFlashcards: boolean; // 是否正在生成闪记卡
   isInitialAutoGeneration: boolean; // 是否正在进行首次自动生成流程
   // 跟踪该笔记所有正在运行的 generation_id（用于删除时中止所有任务）
   activeGenerationIds: Set<string>;
@@ -35,6 +37,8 @@ export function getNoteGenerationState(noteId: string): NoteGenerationState {
       completedTabs: new Set(),
       failedTabs: new Map(),
       isGeneratingChapters: false,
+      isGeneratingHighlights: false,
+      isGeneratingFlashcards: false,
       isInitialAutoGeneration: false,
       activeGenerationIds: new Set(),
       blueprintIsGenerating: false,
@@ -94,6 +98,16 @@ export function setChapterGenerating(noteId: string, isGenerating: boolean) {
 // 获取章节生成状态
 export function isChapterGenerating(noteId: string): boolean {
   return getNoteGenerationState(noteId).isGeneratingChapters;
+}
+
+// 设置高光笔记生成状态
+export function setHighlightGenerating(noteId: string, isGenerating: boolean) {
+  setNoteGenerationState(noteId, { isGeneratingHighlights: isGenerating });
+}
+
+// 设置闪记卡生成状态
+export function setFlashcardGenerating(noteId: string, isGenerating: boolean) {
+  setNoteGenerationState(noteId, { isGeneratingFlashcards: isGenerating });
 }
 
 // 设置首次自动生成流程状态

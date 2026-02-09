@@ -51,6 +51,8 @@ import {
   activeListeners,
   registerActiveGenerationId,
   unregisterActiveGenerationId,
+  setHighlightGenerating,
+  setFlashcardGenerating,
 } from "../../utils/noteGenerationState";
 import type { ChapterGenerationEvent } from "../../types";
 
@@ -497,9 +499,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
     setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
 
-    // 重置高光笔记、闪记卡、章节的生成状态（每个笔记独立）
-    setHighlightIsGenerating(false);
-    setFlashcardIsGenerating(false);
+    // 从全局状态恢复高光笔记、闪记卡、章节的生成状态（每个笔记独立）
+    setHighlightIsGenerating(globalState.isGeneratingHighlights);
+    setFlashcardIsGenerating(globalState.isGeneratingFlashcards);
     setChapterIsGenerating(globalState.isGeneratingChapters);
 
     // 重置或恢复深度蓝图生成状态（每个笔记独立）
@@ -1336,6 +1338,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     setHighlightIsGenerating(true);
+    setHighlightGenerating(note.id, true);
     try {
       const generationId = await invoke<string>("generate_highlights", {
         noteId: note.id,
@@ -1354,12 +1357,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         const data = event.payload;
         if (data.status === "AllCompleted") {
           setHighlightIsGenerating(false);
+          setHighlightGenerating(note.id, false);
           // 注销 generation_id
           unregisterActiveGenerationId(note.id, generationId);
           onGenerationComplete?.();
           unlisten();
         } else if (data.status === "Aborted") {
           setHighlightIsGenerating(false);
+          setHighlightGenerating(note.id, false);
           // 注销 generation_id
           unregisterActiveGenerationId(note.id, generationId);
           unlisten();
@@ -1368,6 +1373,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     } catch (error) {
       console.error("[generateHighlightsDirectly] 生成失败:", error);
       setHighlightIsGenerating(false);
+      setHighlightGenerating(note.id, false);
     }
   }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
@@ -1502,6 +1508,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
       // 设置生成状态（让标签页显示闪烁动画）
       setFlashcardIsGenerating(true);
+      setFlashcardGenerating(note.id, true);
 
       // 注册 generation_id 以便删除时可以中止
       registerActiveGenerationId(note.id, generationId);
@@ -1516,6 +1523,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               onGenerationComplete?.();
               // 清除生成状态
               setFlashcardIsGenerating(false);
+              setFlashcardGenerating(note.id, false);
               // 注销 generation_id
               unregisterActiveGenerationId(note.id, generationId);
                   unlisten();
@@ -1524,6 +1532,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             case "Aborted":
               // 清除生成状态
               setFlashcardIsGenerating(false);
+              setFlashcardGenerating(note.id, false);
               // 注销 generation_id
               unregisterActiveGenerationId(note.id, generationId);
                   unlisten();
@@ -1542,6 +1551,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       console.error("[generateFlashcardsDirectly] 生成失败:", error);
       // 清除生成状态
       setFlashcardIsGenerating(false);
+      setFlashcardGenerating(note.id, false);
     }
   }, [note.id, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete, flashcardIsGenerating]);
 
@@ -1769,6 +1779,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     setHighlightIsGenerating(true);
+    setHighlightGenerating(note.id, true);
     try {
       const generationId = await invoke<string>("generate_highlights", {
         noteId: note.id,
@@ -1784,10 +1795,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         const data = event.payload;
         if (data.status === "AllCompleted") {
           setHighlightIsGenerating(false);
+          setHighlightGenerating(note.id, false);
           onGenerationComplete?.();
           unlisten();
         } else if (data.status === "Aborted") {
           setHighlightIsGenerating(false);
+          setHighlightGenerating(note.id, false);
           unlisten();
         }
       });
@@ -1795,6 +1808,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       console.error("[NoteContentPanel] 高光笔记生成失败:", error);
       message.error(`生成失败: ${error}`);
       setHighlightIsGenerating(false);
+      setHighlightGenerating(note.id, false);
     }
   }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
