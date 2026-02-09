@@ -124,10 +124,12 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showCollectionSubmenu, setShowCollectionSubmenu] = useState(false);
+  const [submenuAlignBottom, setSubmenuAlignBottom] = useState(false);
   const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLDivElement>(null);
+  const collectionMenuRef = useRef<HTMLDivElement>(null);
   const isSelected = selectedNoteId === note.id;
 
   // 点击外部关闭菜单
@@ -247,8 +249,16 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
 
           {/* 移动到合集 */}
           <div
+            ref={collectionMenuRef}
             className="relative"
-            onMouseEnter={() => setShowCollectionSubmenu(true)}
+            onMouseEnter={() => {
+              if (collectionMenuRef.current) {
+                const rect = collectionMenuRef.current.getBoundingClientRect();
+                const submenuMaxHeight = 256; // max-h-64 = 256px
+                setSubmenuAlignBottom(rect.top + submenuMaxHeight > window.innerHeight);
+              }
+              setShowCollectionSubmenu(true);
+            }}
             onMouseLeave={() => setShowCollectionSubmenu(false)}
           >
             <button
@@ -263,7 +273,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
 
             {/* 合集子菜单 - 树形展示 */}
             {showCollectionSubmenu && (
-              <div className="absolute left-full top-0 ml-1 w-48 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg max-h-64 overflow-y-auto">
+              <div className={`absolute left-full ${submenuAlignBottom ? 'bottom-0' : 'top-0'} ml-1 w-48 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg max-h-64 overflow-y-auto`}>
                 {collections.filter((c) => c.parent_id === null).map((collection) => (
                   <CollectionTreeMenuItem
                     key={collection.id}
