@@ -20,9 +20,11 @@ export function AddNotesToCollectionModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
-  // 过滤出未添加到任何合集的笔记
+  // 过滤出未添加到任何合集的笔记，按创建时间升序排列（旧的在前）
   const availableNotes = useMemo(() => {
-    return notes.filter((note) => !notesInCollections.has(note.id));
+    return notes
+      .filter((note) => !notesInCollections.has(note.id))
+      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
   }, [notes, notesInCollections]);
 
   // 搜索过滤
