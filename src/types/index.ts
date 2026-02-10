@@ -94,6 +94,12 @@ export interface UploadedFile {
   type: "video" | "subtitle";
 }
 
+// 批量上传视频项
+export interface UploadedVideoItem {
+  video: UploadedFile;
+  subtitle: UploadedFile | null;
+}
+
 // 侧边栏状态
 export interface SidebarState {
   collapsed: boolean;

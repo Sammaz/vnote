@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { Upload, Video, FileText, X } from "lucide-react";
+import { Upload, Video, FileText, X, RefreshCw } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readDir, stat } from "@tauri-apps/plugin-fs";
 import { cn } from "../../utils/cn";
-import { useApp } from "../../context/AppContext";
-import type { UploadedFile } from "../../types";
+import { useUpload } from "../../context/UploadContext";
+import type { UploadedFile, UploadedVideoItem } from "../../types";
 
 // 字幕格式优先级（越靠前优先级越高）
 const SUBTITLE_PRIORITY = ["ass", "srt", "vtt", "ssa"];
@@ -37,7 +37,7 @@ function getFileName(filePath: string): string {
 }
 
 export function UploadZone() {
-  const { uploadedVideo, uploadedSubtitle, setUploadedVideo, setUploadedSubtitle } = useApp();
+  const { uploadedItems, addUploadedItems, removeUploadedItem, updateItemSubtitle } = useUpload();
   const [isDragOver, setIsDragOver] = useState(false);
   const isTauri =
     typeof window !== "undefined" &&
@@ -96,11 +96,28 @@ export function UploadZone() {
     }
   }, []);
 
-  // 处理选择视频文件
+  // 将视频路径列表转换为 UploadedVideoItem 数组（自动匹配字幕）
+  const buildVideoItems = useCallback(async (videoPaths: string[]): Promise<UploadedVideoItem[]> => {
+    const items: UploadedVideoItem[] = [];
+    for (const filePath of videoPaths) {
+      try {
+        const fileName = getFileName(filePath);
+        const fileInfo = await stat(filePath);
+        const video: UploadedFile = { name: fileName, path: filePath, size: fileInfo.size, type: "video" };
+        const subtitle = await findMatchingSubtitle(filePath);
+        items.push({ video, subtitle });
+      } catch (error) {
+        console.error("读取视频文件失败:", error);
+      }
+    }
+    return items;
+  }, [findMatchingSubtitle]);
+
+  // 处理选择视频文件（支持多选）
   const handleSelectVideo = useCallback(async () => {
     try {
       const selected = await open({
-        multiple: false,
+        multiple: true,
         filters: [{
           name: "视频文件",
           extensions: VIDEO_EXTENSIONS,
@@ -108,32 +125,19 @@ export function UploadZone() {
       });
 
       if (selected) {
-        const filePath = selected as string;
-        const fileName = getFileName(filePath);
-        const fileInfo = await stat(filePath);
-
-        const videoFile: UploadedFile = {
-          name: fileName,
-          path: filePath,
-          size: fileInfo.size,
-          type: "video",
-        };
-
-        setUploadedVideo(videoFile);
-
-        // 自动查找字幕文件
-        const matchingSubtitle = await findMatchingSubtitle(filePath);
-        if (matchingSubtitle) {
-          setUploadedSubtitle(matchingSubtitle);
+        const paths = Array.isArray(selected) ? selected : [selected];
+        const items = await buildVideoItems(paths);
+        if (items.length > 0) {
+          addUploadedItems(items);
         }
       }
     } catch (error) {
       console.error("选择视频文件失败:", error);
     }
-  }, [setUploadedVideo, setUploadedSubtitle, findMatchingSubtitle]);
+  }, [addUploadedItems, buildVideoItems]);
 
-  // 处理选择字幕文件
-  const handleSelectSubtitle = useCallback(async () => {
+  // 处理替换某项的字幕文件
+  const handleSelectSubtitle = useCallback(async (index: number) => {
     try {
       const selected = await open({
         multiple: false,
@@ -148,7 +152,7 @@ export function UploadZone() {
         const fileName = getFileName(filePath);
         const fileInfo = await stat(filePath);
 
-        setUploadedSubtitle({
+        updateItemSubtitle(index, {
           name: fileName,
           path: filePath,
           size: fileInfo.size,
@@ -158,49 +162,29 @@ export function UploadZone() {
     } catch (error) {
       console.error("选择字幕文件失败:", error);
     }
-  }, [setUploadedSubtitle]);
+  }, [updateItemSubtitle]);
 
   const handleDroppedPaths = useCallback(
     async (paths: string[]) => {
+      const videoPaths: string[] = [];
+
       for (const filePath of paths) {
         const fileName = getFileName(filePath);
         const ext = getExtension(fileName);
 
         if (VIDEO_EXTENSIONS.includes(ext)) {
-          try {
-            const fileInfo = await stat(filePath);
-            const videoFile: UploadedFile = {
-              name: fileName,
-              path: filePath,
-              size: fileInfo.size,
-              type: "video",
-            };
+          videoPaths.push(filePath);
+        }
+      }
 
-            setUploadedVideo(videoFile);
-
-            const matchingSubtitle = await findMatchingSubtitle(filePath);
-            if (matchingSubtitle) {
-              setUploadedSubtitle(matchingSubtitle);
-            }
-          } catch (error) {
-            console.error("读取拖拽视频文件失败:", error);
-          }
-        } else if (SUBTITLE_EXTENSIONS.includes(ext)) {
-          try {
-            const fileInfo = await stat(filePath);
-            setUploadedSubtitle({
-              name: fileName,
-              path: filePath,
-              size: fileInfo.size,
-              type: "subtitle",
-            });
-          } catch (error) {
-            console.error("读取拖拽字幕文件失败:", error);
-          }
+      if (videoPaths.length > 0) {
+        const items = await buildVideoItems(videoPaths);
+        if (items.length > 0) {
+          addUploadedItems(items);
         }
       }
     },
-    [findMatchingSubtitle, setUploadedSubtitle, setUploadedVideo]
+    [addUploadedItems, buildVideoItems]
   );
 
   useEffect(() => {
@@ -294,48 +278,28 @@ export function UploadZone() {
         }
       }
 
+      const videoPaths: string[] = [];
+
       for (const file of files) {
         const ext = getExtension(file.name);
 
-        // 视频文件
         if (VIDEO_EXTENSIONS.includes(ext)) {
-          // 注意：拖放的文件没有完整路径，只能使用 File 对象的基本信息
-          // 在 Tauri 中拖放文件会有特殊处理
           const filePath = (file as File & { path?: string }).path || file.name;
-
-          const videoFile: UploadedFile = {
-            name: file.name,
-            path: filePath,
-            size: file.size,
-            type: "video",
-          };
-          setUploadedVideo(videoFile);
-
-          // 如果有完整路径，尝试自动查找字幕
-          if (filePath !== file.name) {
-            const matchingSubtitle = await findMatchingSubtitle(filePath);
-            if (matchingSubtitle) {
-              setUploadedSubtitle(matchingSubtitle);
-            }
-          }
+          videoPaths.push(filePath);
         }
-        // 字幕文件
-        else if (SUBTITLE_EXTENSIONS.includes(ext)) {
-          const filePath = (file as File & { path?: string }).path || file.name;
+      }
 
-          setUploadedSubtitle({
-            name: file.name,
-            path: filePath,
-            size: file.size,
-            type: "subtitle",
-          });
+      if (videoPaths.length > 0) {
+        const items = await buildVideoItems(videoPaths);
+        if (items.length > 0) {
+          addUploadedItems(items);
         }
       }
     },
-    [findMatchingSubtitle, isTauri, setUploadedSubtitle, setUploadedVideo]
+    [addUploadedItems, buildVideoItems, isTauri]
   );
 
-  const hasFiles = uploadedVideo || uploadedSubtitle;
+  const hasFiles = uploadedItems.length > 0;
 
   return (
     <div
@@ -351,91 +315,22 @@ export function UploadZone() {
       )}
     >
       {!hasFiles ? (
-        <>
-          <div className="flex justify-center mb-4">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center">
-              <Upload className="w-8 h-8 text-blue-400" />
-            </div>
-          </div>
-          <h3 className="text-lg font-medium text-slate-700 dark:text-slate-200 mb-2">
-            拖拽视频和字幕文件到这里
-          </h3>
-          <p className="text-sm text-slate-500 mb-4">
-            支持 MP4, MKV, AVI, TS 等视频格式 · SRT, VTT, ASS 字幕格式
-          </p>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleSelectVideo();
-            }}
-            className={cn(
-              "inline-flex items-center gap-2 px-4 py-2 rounded-lg",
-              "bg-slate-100 dark:bg-vnote-hover border border-slate-200 dark:border-vnote-border",
-              "text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:hover:border-slate-600",
-              "transition-all duration-200 cursor-pointer"
-            )}
-          >
-            <Upload className="w-4 h-4" />
-            选择文件
-          </button>
-        </>
+        <UploadPlaceholder onSelectVideo={handleSelectVideo} />
       ) : (
         <div className="space-y-3">
-          {/* 已上传的视频 */}
-          {uploadedVideo && (
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-                <Video className="w-5 h-5 text-blue-400" />
-              </div>
-              <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
-                  {uploadedVideo.name}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {(uploadedVideo.size / 1024 / 1024).toFixed(2)} MB
-                </p>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setUploadedVideo(null);
-                }}
-                className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-vnote-hover text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )}
+          {uploadedItems.map((item, index) => (
+            <UploadedItemRow
+              key={item.video.path}
+              item={item}
+              index={index}
+              onRemove={removeUploadedItem}
+              onReplaceSubtitle={handleSelectSubtitle}
+            />
+          ))}
 
-          {/* 已上传的字幕 */}
-          {uploadedSubtitle && (
-            <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border">
-              <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center flex-shrink-0">
-                <FileText className="w-5 h-5 text-green-400" />
-              </div>
-              <div className="flex-1 min-w-0 text-left">
-                <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
-                  {uploadedSubtitle.name}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {(uploadedSubtitle.size / 1024).toFixed(2)} KB
-                </p>
-              </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setUploadedSubtitle(null);
-                }}
-                className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-vnote-hover text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )}
-
-          {/* 添加更多文件 */}
+          {/* 添加更多视频 */}
           <button
-            onClick={!uploadedVideo ? handleSelectVideo : handleSelectSubtitle}
+            onClick={handleSelectVideo}
             className={cn(
               "w-full flex items-center justify-center gap-2 p-3 rounded-lg",
               "border border-dashed border-slate-300 dark:border-vnote-border",
@@ -444,10 +339,101 @@ export function UploadZone() {
             )}
           >
             <Upload className="w-4 h-4" />
-            {!uploadedVideo ? "添加视频" : !uploadedSubtitle ? "添加字幕（可选）" : "替换字幕"}
+            添加更多视频
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+/** 空状态占位 */
+function UploadPlaceholder({ onSelectVideo }: { onSelectVideo: () => void }) {
+  return (
+    <>
+      <div className="flex justify-center mb-4">
+        <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center">
+          <Upload className="w-8 h-8 text-blue-400" />
+        </div>
+      </div>
+      <h3 className="text-lg font-medium text-slate-700 dark:text-slate-200 mb-2">
+        拖拽视频文件到这里
+      </h3>
+      <p className="text-sm text-slate-500 mb-4">
+        支持多个视频同时上传 · MP4, MKV, AVI, TS 等格式 · 自动匹配同名字幕
+      </p>
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelectVideo();
+        }}
+        className={cn(
+          "inline-flex items-center gap-2 px-4 py-2 rounded-lg",
+          "bg-slate-100 dark:bg-vnote-hover border border-slate-200 dark:border-vnote-border",
+          "text-sm text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:hover:border-slate-600",
+          "transition-all duration-200 cursor-pointer"
+        )}
+      >
+        <Upload className="w-4 h-4" />
+        选择文件
+      </button>
+    </>
+  );
+}
+
+/** 单个已上传视频项 */
+function UploadedItemRow({
+  item,
+  index,
+  onRemove,
+  onReplaceSubtitle,
+}: {
+  item: UploadedVideoItem;
+  index: number;
+  onRemove: (index: number) => void;
+  onReplaceSubtitle: (index: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border">
+      <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+        <Video className="w-5 h-5 text-blue-400" />
+      </div>
+      <div className="flex-1 min-w-0 text-left">
+        <p className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
+          {item.video.name}
+        </p>
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <span>{(item.video.size / 1024 / 1024).toFixed(2)} MB</span>
+          {item.subtitle && (
+            <>
+              <span>·</span>
+              <FileText className="w-3 h-3 text-green-400 inline" />
+              <span className="truncate max-w-[120px]">{item.subtitle.name}</span>
+            </>
+          )}
+        </div>
+      </div>
+      {/* 替换字幕 */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onReplaceSubtitle(index);
+        }}
+        title={item.subtitle ? "替换字幕" : "添加字幕"}
+        className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-vnote-hover text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
+      >
+        <RefreshCw className="w-4 h-4" />
+      </button>
+      {/* 删除 */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(index);
+        }}
+        className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-vnote-hover text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
+      >
+        <X className="w-4 h-4" />
+      </button>
     </div>
   );
 }

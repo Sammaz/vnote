@@ -19,6 +19,7 @@ import type {
   AiConfig,
   SidebarState,
   UploadedFile,
+  UploadedVideoItem,
   CreateNoteRequest,
   VideoToolbarSettings,
   PromptConfig,
@@ -74,10 +75,11 @@ interface AppContextType {
   batchDeleteNotes: (noteIds: string[]) => Promise<void>;
 
   // 上传状态
-  uploadedVideo: UploadedFile | null;
-  uploadedSubtitle: UploadedFile | null;
-  setUploadedVideo: (file: UploadedFile | null) => void;
-  setUploadedSubtitle: (file: UploadedFile | null) => void;
+  uploadedItems: UploadedVideoItem[];
+  addUploadedItems: (items: UploadedVideoItem[]) => void;
+  removeUploadedItem: (index: number) => void;
+  updateItemSubtitle: (index: number, subtitle: UploadedFile | null) => void;
+  clearUploads: () => void;
 
   // AI 模型选择
   selectedModelId: string | null;
@@ -171,10 +173,11 @@ function AppContextBridge({ children }: { children: ReactNode }) {
     addWatchTime: settingsContext.addWatchTime,
 
     // 上传
-    uploadedVideo: uploadContext.uploadedVideo,
-    uploadedSubtitle: uploadContext.uploadedSubtitle,
-    setUploadedVideo: uploadContext.setUploadedVideo,
-    setUploadedSubtitle: uploadContext.setUploadedSubtitle,
+    uploadedItems: uploadContext.uploadedItems,
+    addUploadedItems: uploadContext.addUploadedItems,
+    removeUploadedItem: uploadContext.removeUploadedItem,
+    updateItemSubtitle: uploadContext.updateItemSubtitle,
+    clearUploads: uploadContext.clearUploads,
     pendingInitialization: uploadContext.pendingInitialization,
     setPendingInitialization: uploadContext.setPendingInitialization,
 

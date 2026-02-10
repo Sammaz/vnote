@@ -1,6 +1,7 @@
 import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useUpload } from "../../context/UploadContext";
 import { useInitializationQueue } from "../../context/InitializationQueueContext";
 
 // 获取文件名（不含扩展名）
@@ -11,56 +12,61 @@ function getBaseName(filename: string): string {
 
 export function GenerateButton() {
   const {
-    uploadedVideo,
-    uploadedSubtitle,
     isGenerating,
     setIsGenerating,
     selectedModelId,
     createNote,
-    setUploadedVideo,
-    setUploadedSubtitle,
     setCurrentView,
     setSelectedNoteId,
   } = useApp();
 
+  const { uploadedItems, clearUploads } = useUpload();
   const { addToQueue } = useInitializationQueue();
 
-  const canGenerate = uploadedVideo && selectedModelId && !isGenerating;
+  const itemCount = uploadedItems.length;
+  const canGenerate = itemCount > 0 && selectedModelId && !isGenerating;
 
   const handleGenerate = async () => {
-    if (!canGenerate || !uploadedVideo) return;
+    if (!canGenerate) return;
 
     setIsGenerating(true);
 
     try {
-      // 创建笔记，标题为视频文件名（不含扩展名）
-      const noteTitle = getBaseName(uploadedVideo.name);
+      let firstNoteId: string | null = null;
 
-      const newNote = await createNote({
-        title: noteTitle,
-        video_path: uploadedVideo.path,
-        subtitle_path: uploadedSubtitle?.path || null,
-        model_id: selectedModelId,
-      });
+      for (const item of uploadedItems) {
+        const noteTitle = getBaseName(item.video.name);
 
-      // 添加到初始化队列（替代 setPendingInitialization）
-      addToQueue({
-        noteId: newNote.id,
-        noteTitle: noteTitle,
-        modelId: selectedModelId,
-        videoPath: uploadedVideo.path,
-        subtitlePath: uploadedSubtitle?.path || null,
-      });
+        const newNote = await createNote({
+          title: noteTitle,
+          video_path: item.video.path,
+          subtitle_path: item.subtitle?.path || null,
+          model_id: selectedModelId,
+        });
+
+        addToQueue({
+          noteId: newNote.id,
+          noteTitle: noteTitle,
+          modelId: selectedModelId,
+          videoPath: item.video.path,
+          subtitlePath: item.subtitle?.path || null,
+        });
+
+        if (!firstNoteId) {
+          firstNoteId = newNote.id;
+        }
+      }
 
       // 清空上传状态
-      setUploadedVideo(null);
-      setUploadedSubtitle(null);
+      clearUploads();
 
-      // 跳转到笔记页面
-      setSelectedNoteId(newNote.id);
-      setCurrentView("note");
+      // 跳转到第一个笔记
+      if (firstNoteId) {
+        setSelectedNoteId(firstNoteId);
+        setCurrentView("note");
+      }
     } catch (error) {
-      console.error("Failed to create note:", error);
+      console.error("Failed to create notes:", error);
     } finally {
       setIsGenerating(false);
     }
@@ -86,7 +92,7 @@ export function GenerateButton() {
       ) : (
         <>
           <Sparkles className="w-5 h-5" />
-          <span>一键生成笔记</span>
+          <span>{itemCount > 1 ? `批量生成 ${itemCount} 个笔记` : "一键生成笔记"}</span>
         </>
       )}
     </button>
