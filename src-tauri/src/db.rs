@@ -831,7 +831,7 @@ impl Database {
                     highlights, visual_summary, custom_summary, flashcards, panoramic_blueprint, quick_notes, quick_notes_mindmap,
                     quick_notes_canvas, suggested_questions, last_playback_position,
                     created_at, updated_at
-             FROM notes ORDER BY created_at DESC"
+             FROM notes ORDER BY created_at DESC, rowid DESC"
         )?;
 
         let notes = stmt.query_map([], |row| {
@@ -1013,7 +1013,7 @@ impl Database {
                     highlights, visual_summary, custom_summary, flashcards, panoramic_blueprint, quick_notes, quick_notes_mindmap,
                     quick_notes_canvas, suggested_questions, last_playback_position,
                     created_at, updated_at
-             FROM notes WHERE init_status < 6 AND model_id IS NOT NULL ORDER BY created_at ASC"
+             FROM notes WHERE init_status < 6 AND model_id IS NOT NULL ORDER BY created_at ASC, rowid ASC"
         )?;
 
         let notes = stmt.query_map([], |row| {
