@@ -372,10 +372,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 切换笔记时从数据库加载 UI 状态和优化后的字幕，并恢复进行中的任务
   useEffect(() => {
     setOptimizedSubtitlesLoaded(false);
+    // 切换笔记时清除待保存标志，防止旧笔记的标志影响新笔记
+    pendingVisualSummarySaveRef.current = false;
+    let stale = false;
     const loadSavedState = async () => {
       try {
         // 加载 UI 状态
         const uiState = await invoke<NoteUiState | null>("get_note_ui_state", { noteId: note.id });
+        if (stale) return;
         if (uiState) {
           setShowChapterSubtitles(uiState.show_subtitles);
           setSubtitleOptimizationEnabled(uiState.subtitle_optimization_enabled);
@@ -386,6 +390,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
         // 加载优化后的字幕缓存
         const savedSubtitles = await invoke<OptimizedSubtitle[]>("get_optimized_subtitles", { noteId: note.id });
+        if (stale) return;
         if (savedSubtitles && savedSubtitles.length > 0) {
           const subtitleMap = new Map<string, string>();
           savedSubtitles.forEach(s => subtitleMap.set(s.chapter_id, s.optimized_text));
@@ -396,6 +401,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
         // 检查是否有进行中的字幕优化任务
         const taskState = await invoke<SubtitleOptimizationTaskState | null>("get_subtitle_optimization_task_state", { noteId: note.id });
+        if (stale) return;
         if (taskState && taskState.is_running) {
           // 恢复进行中的任务状态
           subtitleOptimizationIdRef.current = taskState.generation_id;
@@ -410,6 +416,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
           // 重新订阅事件
           await setupSubtitleOptimizationListener(taskState.generation_id);
+          if (stale) return;
         } else {
           // 没有进行中的任务，重置临时状态
           setSubtitleOptimizing(false);
@@ -420,6 +427,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         }
         setOptimizedSubtitlesLoaded(true);
       } catch (error) {
+        if (stale) return;
         console.error("[NoteContentPanel] 加载保存的状态失败:", error);
         setShowChapterSubtitles(false);
         setSubtitleOptimizationEnabled(false);
@@ -435,8 +443,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     loadSavedState();
 
-    // 清理函数
+    // 清理函数：笔记切换时标记当前异步操作已过期
     return () => {
+      stale = true;
       if (subtitleOptimizationUnlistenRef.current) {
         subtitleOptimizationUnlistenRef.current();
         subtitleOptimizationUnlistenRef.current = null;
