@@ -189,6 +189,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [subtitleOptimizing, setSubtitleOptimizing] = useState(false);
   const [subtitleOptimizationProgress, setSubtitleOptimizationProgress] = useState<{ current: number; total: number } | null>(null);
   const [optimizedSubtitles, setOptimizedSubtitles] = useState<Map<string, string>>(new Map());
+  // 标记优化字幕是否已从数据库加载完成（防止迁移保存时的竞态条件）
+  const [optimizedSubtitlesLoaded, setOptimizedSubtitlesLoaded] = useState(false);
   const [optimizingChapterIds, setOptimizingChapterIds] = useState<Set<string>>(new Set());
   const [failedChapterIds, setFailedChapterIds] = useState<Set<string>>(new Set());
   const subtitleOptimizationIdRef = useRef<string | null>(null);
@@ -369,6 +371,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 切换笔记时从数据库加载 UI 状态和优化后的字幕，并恢复进行中的任务
   useEffect(() => {
+    setOptimizedSubtitlesLoaded(false);
     const loadSavedState = async () => {
       try {
         // 加载 UI 状态
@@ -415,6 +418,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           setFailedChapterIds(new Set());
           subtitleOptimizationIdRef.current = null;
         }
+        setOptimizedSubtitlesLoaded(true);
       } catch (error) {
         console.error("[NoteContentPanel] 加载保存的状态失败:", error);
         setShowChapterSubtitles(false);
@@ -425,6 +429,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         setOptimizingChapterIds(new Set());
         setFailedChapterIds(new Set());
         subtitleOptimizationIdRef.current = null;
+        setOptimizedSubtitlesLoaded(true);
       }
     };
 
@@ -1100,13 +1105,15 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   }, [chapterData, optimizedSubtitles, saveAssembledVisualMarkdown, onGenerationComplete]);
 
   // 迁移兼容：已有章节但从未保存过 visual_summary 的旧笔记，自动保存
+  // 必须等待 optimizedSubtitles 从数据库加载完成，否则会回退到原始字幕
   useEffect(() => {
+    if (!optimizedSubtitlesLoaded) return;
     if (chapterData && chapterData.chapters.length > 0 && !note.visual_summary) {
       saveAssembledVisualMarkdown().then(() => {
         onGenerationComplete?.();
       });
     }
-  }, [note.id, chapterData, note.visual_summary, saveAssembledVisualMarkdown, onGenerationComplete]);
+  }, [note.id, chapterData, note.visual_summary, optimizedSubtitlesLoaded, saveAssembledVisualMarkdown, onGenerationComplete]);
 
   // 视觉化总结复制
   const handleVisualCopy = async () => {
