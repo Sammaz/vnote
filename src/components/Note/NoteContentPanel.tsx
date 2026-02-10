@@ -340,8 +340,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             message.error("所有章节字幕优化失败");
             setSubtitleOptimizationEnabled(false);
           } else {
-            // 字幕优化成功，清除已保存的视觉化总结编辑内容
-            clearSavedVisualMarkdown();
+            // 字幕优化成功，标记待保存视觉化总结
+            pendingVisualSummarySaveRef.current = true;
           }
           // 刷新笔记数据以确保视觉化总结能正确显示
           onGenerationComplete?.();
@@ -467,8 +467,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [visualViewMode, setVisualViewMode] = useState<VisualViewMode>("markdown");
   const [showMindMapExportMenu, setShowMindMapExportMenu] = useState(false);
   const mindMapExportMenuRef = useRef<HTMLDivElement>(null);
-  // 标记视觉化总结 Markdown 是否已被清除（用于在数据刷新前立即显示动态生成内容）
-  const [visualMarkdownCleared, setVisualMarkdownCleared] = useState(false);
+  // 标记"需要在状态更新后保存视觉化总结到数据库"
+  const pendingVisualSummarySaveRef = useRef<boolean>(false);
 
   // 从全局状态同步组件state
   const syncStateFromGlobal = useCallback(() => {
@@ -546,11 +546,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 当笔记内容更新时，触发重新渲染
     forceUpdate({});
   }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.full_summary]);
-
-  // 当 note.visual_summary 变化时，重置清除标记
-  useEffect(() => {
-    setVisualMarkdownCleared(false);
-  }, [note.visual_summary]);
 
   // 设置深度蓝图生成监听器
   const setupBlueprintListener = useCallback(async (noteId: string, genId: string) => {
@@ -1041,8 +1036,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 获取已保存的视觉化总结 Markdown（区分思维导图 JSON）
   const getSavedVisualMarkdown = useCallback((): string | null => {
-    // 如果已标记为清除，返回 null（在数据刷新前立即显示动态生成内容）
-    if (visualMarkdownCleared) return null;
     if (!note.visual_summary) return null;
     // 如果是 JSON 格式（思维导图数据），返回 null
     if (note.visual_summary.trim().startsWith('{')) {
@@ -1054,24 +1047,56 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       }
     }
     return note.visual_summary;
-  }, [note.visual_summary, visualMarkdownCleared]);
+  }, [note.visual_summary]);
 
-  // 清除已保存的视觉化总结 Markdown（重新生成时调用）
-  const clearSavedVisualMarkdown = useCallback(async () => {
-    // 立即标记为已清除，确保 UI 立即显示动态生成内容
-    setVisualMarkdownCleared(true);
-    // 只有当存在已保存的 Markdown 内容时才清除数据库
-    if (!note.visual_summary || note.visual_summary.trim().startsWith('{')) return;
+  // 组装视觉化总结 Markdown 并保存到数据库
+  const saveAssembledVisualMarkdown = useCallback(async () => {
+    if (!chapterData || chapterData.chapters.length === 0) return;
+    // 保护思维导图数据：如果当前 visual_summary 是有效 JSON，跳过保存
+    if (note.visual_summary && note.visual_summary.trim().startsWith('{')) {
+      try {
+        JSON.parse(note.visual_summary);
+        return; // 是思维导图 JSON，不覆盖
+      } catch {
+        // 不是有效 JSON，继续保存
+      }
+    }
+    // 组装 Markdown（showTimestamp 固定为 true，显隐由 CSS 控制）
+    const content = assembleChapterMarkdown({
+      chapters: chapterData.chapters,
+      optimizedSubtitles,
+      originalSubtitles: subtitleEntries,
+      showTimestamp: true,
+    });
+    if (!content) return;
     try {
       await invoke("update_note_content", {
         noteId: note.id,
         tabType: "visual_summary",
-        content: "",
+        content,
       });
     } catch (error) {
-      console.error("清除视觉化总结失败:", error);
+      console.error("保存视觉化总结失败:", error);
     }
-  }, [note.id, note.visual_summary]);
+  }, [note.id, note.visual_summary, chapterData, optimizedSubtitles, subtitleEntries]);
+
+  // 当 chapterData/optimizedSubtitles 更新后，如果有待保存标志，执行保存
+  useEffect(() => {
+    if (!pendingVisualSummarySaveRef.current) return;
+    pendingVisualSummarySaveRef.current = false;
+    saveAssembledVisualMarkdown().then(() => {
+      onGenerationComplete?.();
+    });
+  }, [chapterData, optimizedSubtitles, saveAssembledVisualMarkdown, onGenerationComplete]);
+
+  // 迁移兼容：已有章节但从未保存过 visual_summary 的旧笔记，自动保存
+  useEffect(() => {
+    if (chapterData && chapterData.chapters.length > 0 && !note.visual_summary) {
+      saveAssembledVisualMarkdown().then(() => {
+        onGenerationComplete?.();
+      });
+    }
+  }, [note.id, chapterData, note.visual_summary, saveAssembledVisualMarkdown, onGenerationComplete]);
 
   // 视觉化总结复制
   const handleVisualCopy = async () => {
@@ -1260,8 +1285,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               break;
             case "Completed":
               setAssistModeProgress({ current: markers.length, total: markers.length, message: "生成完成!" });
-              // 清除已保存的视觉化总结编辑内容
-              clearSavedVisualMarkdown();
+              // 标记待保存视觉化总结
+              pendingVisualSummarySaveRef.current = true;
               // 刷新笔记数据
               onGenerationComplete?.();
               message.success("章节生成完成");
@@ -1814,6 +1839,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 章节生成完成后的回调
   const handleChapterGenerationComplete = useCallback(() => {
+    // 标记待保存视觉化总结
+    pendingVisualSummarySaveRef.current = true;
     // 刷新笔记数据
     onGenerationComplete?.();
   }, [onGenerationComplete]);
@@ -1919,6 +1946,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             newSet.delete(chapterId);
             return newSet;
           });
+          // 标记待保存视觉化总结
+          pendingVisualSummarySaveRef.current = true;
           message.success("字幕优化完成");
           unlisten();
           break;
@@ -2551,8 +2580,8 @@ Video subtitles content:`;
                   } catch (err) {
                     console.error("[NoteContentPanel] 清除截图缓存失败:", err);
                   }
-                  // 清除已保存的视觉化总结编辑内容
-                  clearSavedVisualMarkdown();
+                  // 标记待保存视觉化总结
+                  pendingVisualSummarySaveRef.current = true;
                   // 重新生成章节
                   chapterGridRef.current?.generateChapters();
                 }

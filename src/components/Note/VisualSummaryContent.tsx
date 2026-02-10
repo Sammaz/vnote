@@ -9,7 +9,6 @@ import { BarChart3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChapterData, SubtitleEntry } from "../../types";
-import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 import { MindMapView, type MindMapViewRef } from "./MindMap";
 import { TableOfContents, generateId, getTextFromChildren } from "./TableOfContents";
 
@@ -56,23 +55,10 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
   // 用于生成唯一标题 ID 的计数器（必须在所有条件返回之前声明）
   const slugCountsRef = useRef<Record<string, number>>({});
 
-  // 组装 Markdown 内容（优先使用已保存的编辑内容）
+  // 从数据库字段读取 Markdown 内容（不再动态组装）
   const markdownContent = useMemo(() => {
-    // 优先使用已保存的用户编辑内容
-    if (savedMarkdownContent) {
-      return savedMarkdownContent;
-    }
-    // 否则动态生成
-    if (!chapterData || chapterData.chapters.length === 0) {
-      return "";
-    }
-    return assembleChapterMarkdown({
-      chapters: chapterData.chapters,
-      optimizedSubtitles,
-      originalSubtitles,
-      showTimestamp,
-    });
-  }, [savedMarkdownContent, chapterData, optimizedSubtitles, originalSubtitles, showTimestamp]);
+    return savedMarkdownContent || "";
+  }, [savedMarkdownContent]);
 
   // 当进入编辑模式且 editContent 为空时，初始化内容
   useEffect(() => {
@@ -81,8 +67,20 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
     }
   }, [isEditMode, editContent, markdownContent, onEditContentChange]);
 
-  // 空状态：无章节数据
-  if (!chapterData || chapterData.chapters.length === 0) {
+  // 空状态：按视图模式分别判断
+  if (viewMode === "markdown" && !markdownContent) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-8 text-slate-400">
+        <BarChart3 className="w-16 h-16 mb-4 opacity-50" />
+        <p className="text-lg mb-2">暂无视觉总结内容</p>
+        <p className="text-sm text-center max-w-md">
+          请先在「原文细读」标签页生成章节内容，然后返回此页面查看视觉化总结
+        </p>
+      </div>
+    );
+  }
+
+  if (viewMode === "mindmap" && (!chapterData || chapterData.chapters.length === 0)) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 text-slate-400">
         <BarChart3 className="w-16 h-16 mb-4 opacity-50" />
