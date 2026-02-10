@@ -160,6 +160,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 章节相关状态
   const [chapterData, setChapterData] = useState<ChapterData | null>(null);
+  // 记录 chapterData 所属的笔记 ID，防止笔记切换时的竞态条件
+  const chapterDataNoteIdRef = useRef<string | null>(null);
 
   // 章节下拉框状态
   const [showChapterDropdown, setShowChapterDropdown] = useState(false);
@@ -224,23 +226,29 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           // 检查是否是 ChapterData 格式
           if (parsed && parsed.chapters && Array.isArray(parsed.chapters)) {
             setChapterData(parsed);
+            chapterDataNoteIdRef.current = note.id;
           } else {
             setChapterData(null);
+            chapterDataNoteIdRef.current = null;
           }
         } catch (e) {
           // 不是 JSON，保持为普通文本模式
           setChapterData(null);
+          chapterDataNoteIdRef.current = null;
         }
       } else if (typeof note.detailed_reading === "object" && note.detailed_reading.chapters) {
         // 已经是 ChapterData 对象
         setChapterData(note.detailed_reading);
+        chapterDataNoteIdRef.current = note.id;
       } else {
         setChapterData(null);
+        chapterDataNoteIdRef.current = null;
       }
     } else {
       setChapterData(null);
+      chapterDataNoteIdRef.current = null;
     }
-  }, [note.detailed_reading]);
+  }, [note.id, note.detailed_reading]);
 
   // 加载字幕数据（用于字幕优化）
   useEffect(() => {
@@ -1052,6 +1060,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 组装视觉化总结 Markdown 并保存到数据库
   const saveAssembledVisualMarkdown = useCallback(async () => {
     if (!chapterData || chapterData.chapters.length === 0) return;
+    // 防止笔记切换时的竞态条件：确保 chapterData 属于当前笔记
+    if (chapterDataNoteIdRef.current !== note.id) return;
     // 保护思维导图数据：如果当前 visual_summary 是有效 JSON，跳过保存
     if (note.visual_summary && note.visual_summary.trim().startsWith('{')) {
       try {
@@ -3255,7 +3265,7 @@ Video subtitles content:`;
                 {note.model_id ? (
                   <button
                     onClick={generatePanoramicBlueprint}
-                    disabled={blueprintIsGenerating}
+                    disabled={blueprintIsGenerating || !note.subtitle_path}
                     className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                   >
                     {blueprintIsGenerating ? (
@@ -3270,6 +3280,11 @@ Video subtitles content:`;
                 ) : (
                   <p className="text-sm text-red-500 dark:text-red-400">
                     请先在视频播放器右上角选择AI模型
+                  </p>
+                )}
+                {!note.subtitle_path && note.model_id && (
+                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
+                    请先上传字幕文件
                   </p>
                 )}
               </div>
