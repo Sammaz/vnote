@@ -18,6 +18,7 @@ import { useApp } from "../../context/AppContext";
 import { useInitializationQueue } from "../../context/InitializationQueueContext";
 import { CollectionSection } from "../Collection";
 import { CreateCollectionModal } from "../Collection/CreateCollectionModal";
+import { GlobalSearchModal } from "../Notes/GlobalSearchModal";
 import type { Note, Collection } from "../../types";
 import logoImg from "../../assets/logo.png";
 
@@ -324,6 +325,7 @@ export function Sidebar() {
   const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, notesInCollections } = useApp();
   const { collapsed } = sidebar;
   const [isHovered, setIsHovered] = useState(false);
+  const [showSearchModal, setShowSearchModal] = useState(false);
 
   // 过滤掉已添加到合集的笔记
   const filteredNotes = notes.filter((note) => !notesInCollections.has(note.id));
@@ -349,6 +351,7 @@ export function Sidebar() {
   };
 
   return (
+    <>
     <aside
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
@@ -409,13 +412,9 @@ export function Sidebar() {
         <NavItem
           icon={<Search className="w-5 h-5" />}
           label="全局搜索"
-          active={currentView === "search"}
+          active={showSearchModal}
           collapsed={collapsed}
-          onClick={() => {
-            setCurrentView("search");
-            setSelectedFolder(null);
-            setSelectedNoteId(null);
-          }}
+          onClick={() => setShowSearchModal(true)}
         />
       </nav>
 
@@ -478,5 +477,9 @@ export function Sidebar() {
         )}
       </div>
     </aside>
+
+    {/* 全局搜索弹框 */}
+    <GlobalSearchModal open={showSearchModal} onClose={() => setShowSearchModal(false)} />
+    </>
   );
 }

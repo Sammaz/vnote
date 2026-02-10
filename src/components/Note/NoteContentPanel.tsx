@@ -3185,6 +3185,7 @@ Video subtitles content:`;
         )}
         {activeTab === "flashcard" && (
           <FlashcardContent
+            key={note.id}
             noteId={note.id}
             noteName={note.title}
             subtitlePath={note.subtitle_path}

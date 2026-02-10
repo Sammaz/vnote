@@ -17,7 +17,6 @@ import "./index.css";
 const NotePage = lazy(() => import("./components/Note").then(m => ({ default: m.NotePage })));
 const CollectionPage = lazy(() => import("./components/Collection").then(m => ({ default: m.CollectionPage })));
 const RecentNotesPage = lazy(() => import("./components/Notes").then(m => ({ default: m.RecentNotesPage })));
-const SearchPage = lazy(() => import("./components/Notes").then(m => ({ default: m.SearchPage })));
 
 // 加载占位组件
 function PageLoadingFallback() {
@@ -237,11 +236,6 @@ function AppContent() {
           {!isSettingsView && currentView === VIEW_TYPES.RECENT_NOTES && (
             <Suspense fallback={<PageLoadingFallback />}>
               <RecentNotesPage />
-            </Suspense>
-          )}
-          {!isSettingsView && currentView === VIEW_TYPES.SEARCH && (
-            <Suspense fallback={<PageLoadingFallback />}>
-              <SearchPage />
             </Suspense>
           )}
           {!isSettingsView && currentView === VIEW_TYPES.HOME && (
