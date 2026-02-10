@@ -195,6 +195,7 @@ export function NotePage() {
   const notePanel = (
     <div className="min-w-0" style={{ width: `${rightWidth}%` }}>
       <NoteContentPanel
+        key={currentNote.id}
         note={currentNote}
         onGenerationComplete={refreshNotes}
         aiConfigs={aiConfigs}
