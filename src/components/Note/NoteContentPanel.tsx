@@ -1115,13 +1115,33 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 迁移兼容：已有章节但从未保存过 visual_summary 的旧笔记，自动保存
   // 必须等待 optimizedSubtitles 从数据库加载完成，否则会回退到原始字幕
+  // 注意：队列完成后 refreshNotes 会更新 note.detailed_reading（触发 chapterData 解析），
+  // 但 loadSavedState 只依赖 note.id 不会重新执行，导致 optimizedSubtitles 可能是空 Map。
+  // 因此这里需要重新从数据库加载优化字幕，确保用最新数据组装 markdown。
   useEffect(() => {
     if (!optimizedSubtitlesLoaded) return;
-    if (chapterData && chapterData.chapters.length > 0 && !note.visual_summary) {
-      saveAssembledVisualMarkdown().then(() => {
-        onGenerationComplete?.();
-      });
-    }
+    if (!(chapterData && chapterData.chapters.length > 0 && !note.visual_summary)) return;
+    let cancelled = false;
+    (async () => {
+      // 重新从数据库加载优化字幕，防止队列完成后 optimizedSubtitles 仍为空 Map
+      const savedSubtitles = await invoke<OptimizedSubtitle[]>(
+        "get_optimized_subtitles", { noteId: note.id }
+      );
+      if (cancelled) return;
+      if (savedSubtitles && savedSubtitles.length > 0) {
+        const freshMap = new Map<string, string>();
+        savedSubtitles.forEach(s => freshMap.set(s.chapter_id, s.optimized_text));
+        setOptimizedSubtitles(freshMap);
+        // 字幕状态更新后，由 pendingVisualSummarySaveRef 机制触发保存
+        pendingVisualSummarySaveRef.current = true;
+      } else {
+        // 没有优化字幕，直接用原始字幕组装保存
+        saveAssembledVisualMarkdown().then(() => {
+          onGenerationComplete?.();
+        });
+      }
+    })();
+    return () => { cancelled = true; };
   }, [note.id, chapterData, note.visual_summary, optimizedSubtitlesLoaded, saveAssembledVisualMarkdown, onGenerationComplete]);
 
   // 视觉化总结复制
