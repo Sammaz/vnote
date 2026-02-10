@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { X, FolderPlus, ListPlus, Image } from "lucide-react";
+import { X, FolderPlus, ListPlus, Image, ChevronDown, ChevronRight, Library, ChevronsUpDown } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
@@ -25,6 +25,82 @@ function getDescendantIds(collections: Collection[], parentId: string): Set<stri
   return descendants;
 }
 
+// 树形合集选择项组件
+function ParentCollectionTreeItem({
+  collection,
+  allCollections,
+  excludeIds,
+  level,
+  selectedId,
+  onSelect,
+}: {
+  collection: Collection;
+  allCollections: Collection[];
+  excludeIds: Set<string>;
+  level: number;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const children = allCollections.filter(
+    (c) => c.parent_id === collection.id && !excludeIds.has(c.id)
+  );
+  const hasChildren = children.length > 0;
+  const isSelected = selectedId === collection.id;
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => onSelect(collection.id)}
+        className={cn(
+          "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors cursor-pointer",
+          isSelected
+            ? "bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400"
+            : "text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-neutral-800"
+        )}
+        style={{ paddingLeft: `${12 + level * 16}px` }}
+      >
+        <span
+          onClick={(e) => {
+            e.stopPropagation();
+            if (hasChildren) setExpanded(!expanded);
+          }}
+          className={cn(
+            "w-4 h-4 flex items-center justify-center flex-shrink-0",
+            hasChildren && "hover:bg-slate-200 dark:hover:bg-neutral-700 rounded cursor-pointer"
+          )}
+        >
+          {hasChildren && (
+            expanded ? (
+              <ChevronDown className="w-3 h-3 text-slate-400" />
+            ) : (
+              <ChevronRight className="w-3 h-3 text-slate-400" />
+            )
+          )}
+        </span>
+        <Library className="w-4 h-4 flex-shrink-0 text-slate-400" />
+        <span className="truncate">{collection.name}</span>
+      </button>
+      {hasChildren && expanded && (
+        <div>
+          {children.map((child) => (
+            <ParentCollectionTreeItem
+              key={child.id}
+              collection={child}
+              allCollections={allCollections}
+              excludeIds={excludeIds}
+              level={level + 1}
+              selectedId={selectedId}
+              onSelect={onSelect}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface CreateCollectionModalProps {
   onClose: () => void;
   editingCollection?: Collection | null;
@@ -44,6 +120,8 @@ export function CreateCollectionModal({
   const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showParentDropdown, setShowParentDropdown] = useState(false);
+  const parentDropdownRef = useRef<HTMLDivElement>(null);
 
   const isEditing = !!editingCollection;
 
@@ -57,16 +135,41 @@ export function CreateCollectionModal({
     }
   }, [editingCollection]);
 
-  // 编辑模式下可选的父合集列表（排除自己和所有子孙合集）
-  const availableParentCollections = useMemo(() => {
-    if (!isEditing || !editingCollection) {
-      return collections;
-    }
-    const descendantIds = getDescendantIds(collections, editingCollection.id);
-    return collections.filter(
-      (c) => c.id !== editingCollection.id && !descendantIds.has(c.id)
-    );
+  // 编辑模式下需要排除的合集ID集合（自己和所有子孙合集）
+  const excludeIds = useMemo(() => {
+    if (!isEditing || !editingCollection) return new Set<string>();
+    const descendants = getDescendantIds(collections, editingCollection.id);
+    descendants.add(editingCollection.id);
+    return descendants;
   }, [collections, isEditing, editingCollection]);
+
+  // 可选的合集列表
+  const availableCollections = useMemo(() => {
+    return collections.filter((c) => !excludeIds.has(c.id));
+  }, [collections, excludeIds]);
+
+  // 顶级合集（用于树形渲染的根节点）
+  const rootCollections = useMemo(() => {
+    return availableCollections.filter((c) => c.parent_id === null || excludeIds.has(c.parent_id));
+  }, [availableCollections, excludeIds]);
+
+  // 点击外部关闭下拉
+  useEffect(() => {
+    if (!showParentDropdown) return;
+    function handleClickOutside(event: MouseEvent) {
+      if (parentDropdownRef.current && !parentDropdownRef.current.contains(event.target as Node)) {
+        setShowParentDropdown(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showParentDropdown]);
+
+  // 获取选中合集的名称
+  const selectedParentName = useMemo(() => {
+    if (!parentCollectionId) return null;
+    return collections.find((c) => c.id === parentCollectionId)?.name ?? null;
+  }, [parentCollectionId, collections]);
 
   const handleSelectCover = async () => {
     try {
@@ -193,24 +296,62 @@ export function CreateCollectionModal({
                 <label className="w-12 flex-shrink-0 text-sm text-slate-600 dark:text-neutral-400 pt-2.5">
                   父合集
                 </label>
-                <select
-                  value={parentCollectionId ?? ""}
-                  onChange={(e) => setParentCollectionId(e.target.value || null)}
-                  className={cn(
-                    "flex-1 px-3 py-2.5 rounded-md border transition-colors",
-                    "bg-slate-50 dark:bg-neutral-800",
-                    "border-slate-200 dark:border-neutral-700",
-                    "focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20",
-                    "text-slate-800 dark:text-slate-200 text-sm"
+                <div className="flex-1 relative" ref={parentDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowParentDropdown(!showParentDropdown)}
+                    className={cn(
+                      "w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors cursor-pointer",
+                      "bg-slate-50 dark:bg-neutral-800",
+                      "border-slate-200 dark:border-neutral-700",
+                      "text-sm",
+                      showParentDropdown && "border-blue-500 dark:border-blue-400 ring-1 ring-blue-500/20"
+                    )}
+                  >
+                    <span className={cn(
+                      "truncate",
+                      selectedParentName
+                        ? "text-slate-800 dark:text-slate-200"
+                        : "text-slate-400 dark:text-neutral-500"
+                    )}>
+                      {selectedParentName ?? "无（顶级合集）"}
+                    </span>
+                    <ChevronsUpDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                  </button>
+                  {showParentDropdown && (
+                    <div className="absolute z-10 mt-1 w-full max-h-52 overflow-y-auto bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setParentCollectionId(null);
+                          setShowParentDropdown(false);
+                        }}
+                        className={cn(
+                          "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors cursor-pointer",
+                          !parentCollectionId
+                            ? "bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400"
+                            : "text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-neutral-800"
+                        )}
+                      >
+                        无（顶级合集）
+                      </button>
+                      {rootCollections.map((c) => (
+                        <ParentCollectionTreeItem
+                          key={c.id}
+                          collection={c}
+                          allCollections={availableCollections}
+                          excludeIds={excludeIds}
+                          level={0}
+                          selectedId={parentCollectionId}
+                          onSelect={(id) => {
+                            setParentCollectionId(id);
+                            setShowParentDropdown(false);
+                          }}
+                        />
+                      ))}
+                    </div>
                   )}
-                >
-                  <option value="">无（顶级合集）</option>
-                  {(isEditing ? availableParentCollections : collections).map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+                </div>
               </div>
             )}
 
