@@ -456,7 +456,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
           </div>
 
           {/* 预览内容 */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5">
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 text-slate-700 dark:text-slate-300">
             {!selectedNote ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500">
                 <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-vnote-surface flex items-center justify-center mb-4">
