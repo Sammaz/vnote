@@ -63,6 +63,15 @@ pub struct CreateNoteRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UpdateNoteMetadataRequest {
+    pub id: String,
+    pub title: String,
+    pub video_path: String,
+    pub subtitle_path: Option<String>,
+    pub model_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SubtitleChunk {
     pub id: String,
     pub note_id: String,
@@ -966,6 +975,15 @@ impl Database {
                 &note.last_playback_position,
                 note.id,
             ],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_note_metadata(&self, req: &UpdateNoteMetadataRequest) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "UPDATE notes SET title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4, updated_at = datetime('now', 'localtime') WHERE id = ?5",
+            rusqlite::params![&req.title, &req.video_path, &req.subtitle_path, &req.model_id, &req.id],
         )?;
         Ok(())
     }

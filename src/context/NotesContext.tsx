@@ -4,13 +4,14 @@
  */
 import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { Note, CreateNoteRequest, ViewType, AppStats } from "../types";
+import type { Note, CreateNoteRequest, UpdateNoteMetadataRequest, ViewType, AppStats } from "../types";
 import { getNoteGenerationState, getActiveGenerationIds, clearNoteGenerationState } from "../utils/noteGenerationState";
 
 interface NotesContextType {
   notes: Note[];
   refreshNotes: () => Promise<void>;
   createNote: (req: CreateNoteRequest) => Promise<Note>;
+  updateNote: (req: UpdateNoteMetadataRequest) => Promise<void>;
   deleteNote: (id: string) => Promise<void>;
   updateNoteSuggestedQuestions: (noteId: string, questions: string[]) => void;
 
@@ -95,6 +96,12 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
     return newNote;
   }, [refreshNotes]);
 
+  // 更新笔记元数据
+  const updateNote = useCallback(async (req: UpdateNoteMetadataRequest): Promise<void> => {
+    await invoke("update_note_metadata", { req });
+    await refreshNotes();
+  }, [refreshNotes]);
+
   // 删除笔记
   const deleteNote = useCallback(async (id: string): Promise<void> => {
     // 先调用删除前回调（清理初始化队列等）
@@ -160,6 +167,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
     notes,
     refreshNotes,
     createNote,
+    updateNote,
     deleteNote,
     updateNoteSuggestedQuestions,
     isGenerating,
@@ -175,6 +183,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
     notes,
     refreshNotes,
     createNote,
+    updateNote,
     deleteNote,
     updateNoteSuggestedQuestions,
     isGenerating,

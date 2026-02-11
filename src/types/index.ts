@@ -42,6 +42,15 @@ export interface CreateNoteRequest {
   model_id: string | null;
 }
 
+// 更新笔记元数据请求
+export interface UpdateNoteMetadataRequest {
+  id: string;
+  title: string;
+  video_path: string;
+  subtitle_path: string | null;
+  model_id: string | null;
+}
+
 // 应用统计
 export interface AppStats {
   totalNotes: number;

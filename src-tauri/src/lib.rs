@@ -19,7 +19,7 @@ pub mod validation;
 mod keyring_manager;
 
 use chat::ChatRequest;
-use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker};
+use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest};
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -875,6 +875,12 @@ fn update_note(note: Note) -> Result<(), String> {
     // 验证输入
     validation::validate_title(&note.title)?;
     get_db().update_note(&note).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_note_metadata(req: UpdateNoteMetadataRequest) -> Result<(), String> {
+    validation::validate_title(&req.title)?;
+    get_db().update_note_metadata(&req).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1883,6 +1889,7 @@ pub fn run() {
             get_note,
             create_note,
             update_note,
+            update_note_metadata,
             delete_note,
             update_playback_position,
             update_note_content,

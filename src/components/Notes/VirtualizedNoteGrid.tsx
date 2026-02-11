@@ -9,13 +9,14 @@ import type { Note } from "../../types";
 import { NoteCard } from "./NoteCard";
 
 // 常量定义
-const CARD_HEIGHT = 220; // 卡片高度 (aspect-video + 信息区域)
 const GAP = 16; // 网格间距
 const OVERSCAN = 3; // 预渲染行数
 
 interface VirtualizedNoteGridProps {
   notes: Note[];
   onNoteClick: (noteId: string) => void;
+  onNoteEdit?: (note: Note) => void;
+  onNoteDelete?: (noteId: string) => void;
   /** 每行列数，默认根据容器宽度自动计算 */
   columns?: number;
   /** 容器类名 */
@@ -40,6 +41,8 @@ function useResponsiveColumns(containerRef: React.RefObject<HTMLDivElement | nul
 export function VirtualizedNoteGrid({
   notes,
   onNoteClick,
+  onNoteEdit,
+  onNoteDelete,
   columns: fixedColumns,
   className = "",
 }: VirtualizedNoteGridProps) {
@@ -58,11 +61,21 @@ export function VirtualizedNoteGrid({
     return result;
   }, [notes, columns]);
 
-  // 虚拟化配置
+  // 根据容器宽度动态估算行高: aspect-video(9/16 * 列宽) + 信息区(~68px) + gap
+  const estimateRowSize = useCallback(() => {
+    const containerWidth = parentRef.current?.clientWidth ?? 800;
+    const availableWidth = containerWidth - 32; // px-4 * 2
+    const colWidth = (availableWidth - GAP * (columns - 1)) / columns;
+    const videoHeight = colWidth * 9 / 16;
+    return videoHeight + 68 + GAP;
+  }, [columns]);
+
+  // 虚拟化配置 - 使用动态测量
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => CARD_HEIGHT + GAP,
+    estimateSize: estimateRowSize,
+    measureElement: (el) => el.getBoundingClientRect().height + GAP,
     overscan: OVERSCAN,
   });
 
@@ -84,6 +97,8 @@ export function VirtualizedNoteGrid({
               key={note.id}
               note={note}
               onClick={() => handleClick(note.id)}
+              onEdit={onNoteEdit ? () => onNoteEdit(note) : undefined}
+              onDelete={onNoteDelete ? () => onNoteDelete(note.id) : undefined}
             />
           ))}
         </div>
@@ -108,14 +123,15 @@ export function VirtualizedNoteGrid({
           return (
             <div
               key={virtualRow.key}
+              ref={virtualizer.measureElement}
+              data-index={virtualRow.index}
               className="absolute top-0 left-0 w-full px-4"
               style={{
-                height: `${virtualRow.size}px`,
                 transform: `translateY(${virtualRow.start}px)`,
               }}
             >
               <div
-                className="grid gap-4 h-full"
+                className="grid gap-4"
                 style={{
                   gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
                 }}
@@ -125,6 +141,8 @@ export function VirtualizedNoteGrid({
                     key={note.id}
                     note={note}
                     onClick={() => handleClick(note.id)}
+                    onEdit={onNoteEdit ? () => onNoteEdit(note) : undefined}
+                    onDelete={onNoteDelete ? () => onNoteDelete(note.id) : undefined}
                   />
                 ))}
               </div>

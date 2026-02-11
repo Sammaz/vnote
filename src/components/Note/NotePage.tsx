@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Pencil } from "lucide-react";
 import { VideoPlayer } from "./VideoPlayer";
 import { ChatWindow } from "./ChatWindow";
 import { NoteContentPanel } from "./NoteContentPanel";
 import { VideoToolbar } from "./VideoToolbar";
+import { EditNoteModal } from "../Notes/EditNoteModal";
 import { useApp } from "../../context/AppContext";
 import { useInitializationQueue } from "../../context/InitializationQueueContext";
 
@@ -61,6 +63,7 @@ export function NotePage() {
 
   // 当前笔记的模型ID（从笔记记录获取）
   const [currentModelId, setCurrentModelId] = useState<string | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false);
@@ -172,10 +175,17 @@ export function NotePage() {
           />
 
           {/* 视频信息 */}
-          <div className="mt-3 px-1">
-            <h1 className="text-base font-semibold text-slate-800 dark:text-slate-100 line-clamp-2">
+          <div className="mt-3 px-1 flex items-center gap-2">
+            <h1 className="text-base font-semibold text-slate-800 dark:text-slate-100 line-clamp-2 flex-1">
               {currentNote.title}
             </h1>
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="flex-shrink-0 p-1.5 rounded-md text-slate-400 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+              title="编辑笔记"
+            >
+              <Pencil className="w-4 h-4" />
+            </button>
           </div>
         </div>
       )}
@@ -206,20 +216,26 @@ export function NotePage() {
   );
 
   return (
-    <div ref={containerRef} className="relative flex-1 flex gap-0 p-4 overflow-hidden">
-      {layoutSwapped ? (
-        <>
-          {notePanel}
-          <Resizer onDrag={handleResize} isDragging={isDragging} />
-          {videoPanel}
-        </>
-      ) : (
-        <>
-          {videoPanel}
-          <Resizer onDrag={handleResize} isDragging={isDragging} />
-          {notePanel}
-        </>
+    <>
+      <div ref={containerRef} className="relative flex-1 flex gap-0 p-4 overflow-hidden">
+        {layoutSwapped ? (
+          <>
+            {notePanel}
+            <Resizer onDrag={handleResize} isDragging={isDragging} />
+            {videoPanel}
+          </>
+        ) : (
+          <>
+            {videoPanel}
+            <Resizer onDrag={handleResize} isDragging={isDragging} />
+            {notePanel}
+          </>
+        )}
+      </div>
+
+      {showEditModal && currentNote && (
+        <EditNoteModal note={currentNote} onClose={() => setShowEditModal(false)} />
       )}
-    </div>
+    </>
   );
 }

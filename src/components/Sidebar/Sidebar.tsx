@@ -8,6 +8,7 @@ import {
   Video,
   MoreHorizontal,
   Trash2,
+  Edit3,
   FolderPlus,
   Library,
   ChevronRight,
@@ -18,6 +19,7 @@ import { useApp } from "../../context/AppContext";
 import { useInitializationQueue } from "../../context/InitializationQueueContext";
 import { CollectionSection } from "../Collection";
 import { CreateCollectionModal } from "../Collection/CreateCollectionModal";
+import { EditNoteModal } from "../Notes/EditNoteModal";
 import { GlobalSearchModal } from "../Notes/GlobalSearchModal";
 import type { Note, Collection } from "../../types";
 import logoImg from "../../assets/logo.png";
@@ -127,6 +129,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
   const [showCollectionSubmenu, setShowCollectionSubmenu] = useState(false);
   const [submenuAlignBottom, setSubmenuAlignBottom] = useState(false);
   const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false);
+  const [showEditNoteModal, setShowEditNoteModal] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
   const menuTriggerRef = useRef<HTMLDivElement>(null);
@@ -301,6 +304,20 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
           <div className="my-1 border-t border-slate-100 dark:border-neutral-700" />
 
           <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(false);
+              setShowEditNoteModal(true);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            <span>编辑笔记</span>
+          </button>
+
+          <div className="my-1 border-t border-slate-100 dark:border-neutral-700" />
+
+          <button
             onClick={handleDelete}
             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
           >
@@ -316,6 +333,11 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
         <CreateCollectionModal
           onClose={() => setShowCreateCollectionModal(false)}
         />
+      )}
+
+      {/* 编辑笔记弹窗 */}
+      {showEditNoteModal && (
+        <EditNoteModal note={note} onClose={() => setShowEditNoteModal(false)} />
       )}
     </>
   );

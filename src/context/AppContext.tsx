@@ -21,6 +21,7 @@ import type {
   UploadedFile,
   UploadedVideoItem,
   CreateNoteRequest,
+  UpdateNoteMetadataRequest,
   VideoToolbarSettings,
   PromptConfig,
   Collection,
@@ -46,6 +47,7 @@ interface AppContextType {
   refreshPromptConfigs: () => Promise<void>;
   refreshNotes: () => Promise<void>;
   createNote: (req: CreateNoteRequest) => Promise<Note>;
+  updateNote: (req: UpdateNoteMetadataRequest) => Promise<void>;
   deleteNote: (id: string) => Promise<void>;
   updateNoteSuggestedQuestions: (noteId: string, questions: string[]) => void;
 
@@ -145,6 +147,7 @@ function AppContextBridge({ children }: { children: ReactNode }) {
     notes: notesContext.notes,
     refreshNotes: notesContext.refreshNotes,
     createNote: notesContext.createNote,
+    updateNote: notesContext.updateNote,
     deleteNote: notesContext.deleteNote,
     updateNoteSuggestedQuestions: notesContext.updateNoteSuggestedQuestions,
     isGenerating: notesContext.isGenerating,
