@@ -84,6 +84,27 @@ pub struct SubtitleChunk {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeChunk {
+    pub id: String,
+    pub note_id: String,
+    pub chunk_index: i32,
+    pub content: String,
+    pub embedding: Option<Vec<u8>>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeIndexStatus {
+    pub note_id: String,
+    pub status: String,
+    pub chunk_count: i32,
+    pub content_hash: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EmbeddingConfig {
     pub id: String,
     pub title: String,
@@ -645,6 +666,45 @@ impl Database {
             [],
         )?;
 
+        // Knowledge base chunks table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS knowledge_chunks (
+                id TEXT PRIMARY KEY,
+                note_id TEXT NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                embedding BLOB,
+                created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_note ON knowledge_chunks(note_id)",
+            [],
+        )?;
+
+        // Knowledge base index status table
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS knowledge_index_status (
+                note_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL CHECK(status IN ('indexing', 'completed', 'failed')),
+                chunk_count INTEGER NOT NULL DEFAULT 0,
+                content_hash TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                error_message TEXT,
+                FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_knowledge_index_status_status ON knowledge_index_status(status)",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -761,6 +821,35 @@ impl Database {
         let conn = self.connection();
         conn.execute("UPDATE ai_configs SET is_default = 0 WHERE id = ?1", [id])?;
         Ok(())
+    }
+
+    pub fn get_default_ai_config(&self) -> SqliteResult<Option<AiConfig>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit
+             FROM ai_configs WHERE is_default = 1 LIMIT 1"
+        )?;
+        let result = stmt.query_row([], |row| {
+            let config_id: String = row.get(0)?;
+            let db_api_key: String = row.get(3)?;
+            let api_key = crate::keyring_manager::get_api_key(
+                crate::keyring_manager::KeyType::AiConfig,
+                &config_id,
+            ).unwrap_or(db_api_key);
+            Ok(AiConfig {
+                id: config_id,
+                title: row.get(1)?,
+                base_url: row.get(2)?,
+                api_key,
+                model: row.get(4)?,
+                sort_order: row.get(5)?,
+                is_default: row.get::<_, i64>(6)? != 0,
+                concurrent_limit: row.get(7)?,
+                request_timeout: row.get(8)?,
+                rate_limit: row.get(9)?,
+            })
+        }).optional()?;
+        Ok(result)
     }
 
     pub fn delete_ai_config(&self, id: &str) -> SqliteResult<()> {
@@ -2310,6 +2399,156 @@ impl Database {
         }
 
         Ok(all_note_ids)
+    }
+
+    // ========================================================================
+    // Knowledge Base CRUD
+    // ========================================================================
+
+    pub fn get_knowledge_chunks(&self, note_id: &str) -> SqliteResult<Vec<KnowledgeChunk>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, chunk_index, content, embedding, created_at
+             FROM knowledge_chunks WHERE note_id = ?1 ORDER BY chunk_index"
+        )?;
+        let chunks = stmt.query_map([note_id], |row| {
+            Ok(KnowledgeChunk {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                chunk_index: row.get(2)?,
+                content: row.get(3)?,
+                embedding: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        chunks.collect()
+    }
+
+    pub fn get_all_knowledge_chunks_with_embeddings(&self) -> SqliteResult<Vec<KnowledgeChunk>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, chunk_index, content, embedding, created_at
+             FROM knowledge_chunks WHERE embedding IS NOT NULL ORDER BY note_id, chunk_index"
+        )?;
+        let chunks = stmt.query_map([], |row| {
+            Ok(KnowledgeChunk {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                chunk_index: row.get(2)?,
+                content: row.get(3)?,
+                embedding: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        chunks.collect()
+    }
+
+    pub fn create_knowledge_chunk(
+        &self,
+        note_id: &str,
+        chunk_index: i32,
+        content: &str,
+        embedding: Option<&[u8]>,
+    ) -> SqliteResult<()> {
+        let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
+        conn.execute(
+            "INSERT INTO knowledge_chunks (id, note_id, chunk_index, content, embedding)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![new_id, note_id, chunk_index, content, embedding],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_knowledge_chunks(&self, note_id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("DELETE FROM knowledge_chunks WHERE note_id = ?1", [note_id])?;
+        Ok(())
+    }
+
+    pub fn get_knowledge_index_status(&self, note_id: &str) -> SqliteResult<Option<KnowledgeIndexStatus>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT note_id, status, chunk_count, content_hash, started_at, completed_at, error_message
+             FROM knowledge_index_status WHERE note_id = ?1"
+        )?;
+        let result = stmt.query_row([note_id], |row| {
+            Ok(KnowledgeIndexStatus {
+                note_id: row.get(0)?,
+                status: row.get(1)?,
+                chunk_count: row.get(2)?,
+                content_hash: row.get(3)?,
+                started_at: row.get(4)?,
+                completed_at: row.get(5)?,
+                error_message: row.get(6)?,
+            })
+        }).optional()?;
+        Ok(result)
+    }
+
+    pub fn get_all_knowledge_index_statuses(&self) -> SqliteResult<Vec<KnowledgeIndexStatus>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT note_id, status, chunk_count, content_hash, started_at, completed_at, error_message
+             FROM knowledge_index_status"
+        )?;
+        let statuses = stmt.query_map([], |row| {
+            Ok(KnowledgeIndexStatus {
+                note_id: row.get(0)?,
+                status: row.get(1)?,
+                chunk_count: row.get(2)?,
+                content_hash: row.get(3)?,
+                started_at: row.get(4)?,
+                completed_at: row.get(5)?,
+                error_message: row.get(6)?,
+            })
+        })?;
+        statuses.collect()
+    }
+
+    pub fn set_knowledge_index_status(
+        &self,
+        note_id: &str,
+        status: &str,
+        chunk_count: i32,
+        content_hash: Option<&str>,
+        error_message: Option<&str>,
+    ) -> SqliteResult<()> {
+        let conn = self.connection();
+        if status == "indexing" {
+            conn.execute(
+                "INSERT OR REPLACE INTO knowledge_index_status (note_id, status, chunk_count, content_hash, started_at, completed_at, error_message)
+                 VALUES (?1, ?2, 0, ?3, datetime('now', 'localtime'), NULL, NULL)",
+                rusqlite::params![note_id, status, content_hash],
+            )?;
+        } else if status == "completed" {
+            conn.execute(
+                "UPDATE knowledge_index_status
+                 SET status = ?2, chunk_count = ?3, content_hash = ?4, completed_at = datetime('now', 'localtime'), error_message = NULL
+                 WHERE note_id = ?1",
+                rusqlite::params![note_id, status, chunk_count, content_hash],
+            )?;
+        } else if status == "failed" {
+            conn.execute(
+                "UPDATE knowledge_index_status
+                 SET status = ?2, completed_at = datetime('now', 'localtime'), error_message = ?3
+                 WHERE note_id = ?1",
+                rusqlite::params![note_id, status, error_message],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_knowledge_index_status(&self, note_id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("DELETE FROM knowledge_index_status WHERE note_id = ?1", [note_id])?;
+        Ok(())
+    }
+
+    pub fn count_knowledge_chunks(&self) -> SqliteResult<i32> {
+        let conn = self.connection();
+        let count: i32 = conn.query_row("SELECT COUNT(*) FROM knowledge_chunks", [], |row| row.get(0))?;
+        Ok(count)
     }
 }
 

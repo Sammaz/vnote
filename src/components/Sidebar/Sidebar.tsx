@@ -13,6 +13,7 @@ import {
   Library,
   ChevronRight,
   ChevronDown,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
@@ -22,6 +23,7 @@ import { CreateCollectionModal } from "../Collection/CreateCollectionModal";
 import { EditNoteModal } from "../Notes/EditNoteModal";
 import { GlobalSearchModal } from "../Notes/GlobalSearchModal";
 import type { Note, Collection } from "../../types";
+import { VIEW_TYPES } from "../../types";
 import logoImg from "../../assets/logo.png";
 
 interface NavItemProps {
@@ -437,6 +439,17 @@ export function Sidebar() {
           active={showSearchModal}
           collapsed={collapsed}
           onClick={() => setShowSearchModal(true)}
+        />
+        <NavItem
+          icon={<BookOpen className="w-5 h-5" />}
+          label="知识库"
+          active={currentView === VIEW_TYPES.KNOWLEDGE_BASE}
+          collapsed={collapsed}
+          onClick={() => {
+            setCurrentView(VIEW_TYPES.KNOWLEDGE_BASE);
+            setSelectedFolder(null);
+            setSelectedNoteId(null);
+          }}
         />
       </nav>
 

@@ -117,7 +117,7 @@ export interface SidebarState {
 }
 
 // 视图类型
-export type ViewType = "home" | "settings" | "note" | "collection" | "recent-notes";
+export type ViewType = "home" | "settings" | "note" | "collection" | "recent-notes" | "knowledge-base";
 
 // 视图类型常量（避免魔法字符串）
 export const VIEW_TYPES = {
@@ -126,6 +126,7 @@ export const VIEW_TYPES = {
   NOTE: "note",
   COLLECTION: "collection",
   RECENT_NOTES: "recent-notes",
+  KNOWLEDGE_BASE: "knowledge-base",
 } as const;
 
 // 可返回的视图类型（排除 settings，用于 previousView 状态）

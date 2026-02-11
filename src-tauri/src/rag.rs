@@ -314,7 +314,7 @@ async fn perform_indexing(
 }
 
 /// Create chunks from subtitle entries
-fn create_chunks(
+pub fn create_chunks(
     entries: &[SubtitleEntry],
     target_chars: usize,
     overlap_chars: usize,
@@ -381,7 +381,7 @@ fn create_chunks(
 }
 
 /// Generate embedding for a single text
-async fn generate_embedding(embedding_config: &EmbeddingConfig, text: &str) -> Result<Vec<f32>, String> {
+pub async fn generate_embedding(embedding_config: &EmbeddingConfig, text: &str) -> Result<Vec<f32>, String> {
     let embeddings = generate_embeddings_batch(embedding_config, &[text]).await?;
     embeddings
         .into_iter()
@@ -390,7 +390,7 @@ async fn generate_embedding(embedding_config: &EmbeddingConfig, text: &str) -> R
 }
 
 /// Generate embeddings for multiple texts
-async fn generate_embeddings_batch(
+pub async fn generate_embeddings_batch(
     embedding_config: &EmbeddingConfig,
     texts: &[&str],
 ) -> Result<Vec<Vec<f32>>, String> {
@@ -482,7 +482,7 @@ fn search_similar_chunks(
 }
 
 /// Calculate cosine similarity between two vectors
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     if a.len() != b.len() || a.is_empty() {
         return 0.0;
     }
@@ -499,7 +499,7 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
 }
 
 /// Convert embedding vector to bytes
-fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
+pub fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
     embedding
         .iter()
         .flat_map(|f| f.to_le_bytes())
@@ -507,7 +507,7 @@ fn embedding_to_bytes(embedding: &[f32]) -> Vec<u8> {
 }
 
 /// Convert bytes to embedding vector
-fn bytes_to_embedding(bytes: &[u8]) -> Vec<f32> {
+pub fn bytes_to_embedding(bytes: &[u8]) -> Vec<f32> {
     bytes
         .chunks(4)
         .filter_map(|chunk| {
@@ -536,7 +536,7 @@ pub fn clear_subtitle_index(note_id: &str) -> Result<(), String> {
 }
 
 /// Rerank chunks using a reranker API
-async fn rerank_chunks(
+pub async fn rerank_chunks(
     config: &RerankerConfig,
     query: &str,
     chunks: Vec<SubtitleChunk>,

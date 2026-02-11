@@ -11,6 +11,7 @@ mod note_generation;
 mod note_initialization;
 mod prompts;
 mod rag;
+mod knowledge_base;
 pub mod settings;
 mod snowflake;
 mod subtitle;
@@ -1964,6 +1965,16 @@ pub fn run() {
             batch_remove_notes_from_collection,
             batch_move_notes_to_collection,
             batch_delete_notes,
+            // Knowledge base commands
+            knowledge_base::knowledge_base_index_note,
+            knowledge_base::knowledge_base_index_all_notes,
+            knowledge_base::knowledge_base_remove_index,
+            knowledge_base::knowledge_base_get_index_status,
+            knowledge_base::knowledge_base_abort_indexing,
+            knowledge_base::knowledge_base_search,
+            knowledge_base::knowledge_base_chat,
+            knowledge_base::knowledge_base_abort_chat,
+            knowledge_base::knowledge_base_get_stats,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
