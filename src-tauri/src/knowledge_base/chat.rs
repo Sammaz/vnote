@@ -96,13 +96,20 @@ pub async fn chat(
     };
 
     // Build messages for API call
+    let custom_prompt = request.system_prompt.as_deref().unwrap_or("").trim();
+    let extra_instruction = if custom_prompt.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n用户附加指令：\n{}", custom_prompt)
+    };
+
     let system_prompt = format!(
         "你是一个知识库助手，基于用户的视频笔记知识库回答问题。\n\
         以下是从知识库中检索到的相关内容：\n\n\
         {}\n\n\
         请基于以上知识库内容回答用户的问题。如果知识库中没有相关信息，请如实告知。\n\
-        回答时请引用来源（如 [来源1]），帮助用户追溯信息出处。",
-        context
+        回答时请引用来源（如 [来源1]），帮助用户追溯信息出处。{}",
+        context, extra_instruction
     );
 
     let mut api_messages = vec![serde_json::json!({

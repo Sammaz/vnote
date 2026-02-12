@@ -33,6 +33,7 @@ pub struct KnowledgeBaseStats {
 pub struct KnowledgeChatRequest {
     pub messages: Vec<ChatMessage>,
     pub model_id: Option<String>,
+    pub system_prompt: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -31,6 +31,7 @@ export interface KnowledgeBaseStats {
 export interface KnowledgeChatRequest {
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   model_id?: string;
+  system_prompt?: string;
 }
 
 // RAG 对话流式事件
