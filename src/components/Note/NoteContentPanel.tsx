@@ -1274,7 +1274,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     } else {
       // 退出编辑模式，保存内容
       const generatedContent = getVisualSummaryContent();
-      if (visualEditContent && visualEditContent !== generatedContent) {
+      const savedMarkdown = getSavedVisualMarkdown();
+      const originalContent = savedMarkdown || generatedContent;
+      if (visualEditContent && visualEditContent !== originalContent) {
         try {
           await invoke("update_note_content", {
             noteId: note.id,
