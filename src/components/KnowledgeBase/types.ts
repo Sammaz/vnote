@@ -16,6 +16,7 @@ export interface KnowledgeIndexStatus {
   has_visual_summary: boolean;
   completed_at: string | null;
   error_message: string | null;
+  needs_reindex: boolean;
 }
 
 // 知识库统计

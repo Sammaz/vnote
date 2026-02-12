@@ -87,6 +87,16 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
     }
   }, []);
 
+  const handleIndexOutdated = useCallback(async () => {
+    try {
+      const taskId = await invoke<string>("knowledge_base_index_outdated_notes");
+      setIndexingTaskId(taskId);
+      setIndexProgress({ completed: 0, failed: 0, total: 0 });
+    } catch (e) {
+      console.error("Failed to start outdated indexing:", e);
+    }
+  }, []);
+
   const handleAbortIndexing = useCallback(async () => {
     if (!indexingTaskId) return;
     try {
@@ -137,6 +147,13 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
   const indexedCount = notesWithSummary.filter(
     (s) => s.status === "completed"
   ).length;
+  const outdatedCount = notesWithSummary.filter((s) => s.needs_reindex).length;
+  const unindexedCount = notesWithSummary.filter(
+    (s) => s.status === "none" || s.status === "failed"
+  ).length;
+  // Show "更新索引" when all notes are indexed but some are outdated
+  const allIndexed = notesWithSummary.length > 0 && unindexedCount === 0;
+  const showUpdateButton = allIndexed && outdatedCount > 0;
 
   return (
     <div className="flex flex-col h-full p-6">
@@ -155,6 +172,13 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
               className="px-3 py-1.5 text-xs font-medium rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors cursor-pointer"
             >
               中止索引
+            </button>
+          ) : showUpdateButton ? (
+            <button
+              onClick={handleIndexOutdated}
+              className="px-3 py-1.5 text-xs font-medium rounded-lg bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors cursor-pointer"
+            >
+              更新索引 ({outdatedCount})
             </button>
           ) : (
             <button
@@ -254,6 +278,9 @@ function NoteIndexRow({
     if (isIndexing) {
       return <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />;
     }
+    if (item.needs_reindex) {
+      return <AlertCircle className="w-4 h-4 text-amber-500" />;
+    }
     switch (item.status) {
       case "completed":
         return <CheckCircle2 className="w-4 h-4 text-green-500" />;
@@ -268,6 +295,9 @@ function NoteIndexRow({
 
   const statusLabel = () => {
     if (isIndexing) return "索引中...";
+    if (item.needs_reindex) {
+      return `内容已更新，需重新索引 (${item.chunk_count} 分块)`;
+    }
     switch (item.status) {
       case "completed":
         return `已索引 (${item.chunk_count} 分块)`;
@@ -288,14 +318,17 @@ function NoteIndexRow({
           <div className="text-sm text-slate-700 dark:text-slate-200 truncate">
             {item.note_title}
           </div>
-          <div className="text-xs text-slate-400 truncate">
+          <div className={cn(
+            "text-xs truncate",
+            item.needs_reindex && !isIndexing ? "text-amber-500" : "text-slate-400"
+          )}>
             {statusLabel()}
           </div>
         </div>
       </div>
       <div className={cn(
         "flex items-center gap-1 transition-opacity",
-        isIndexing ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        isIndexing || item.needs_reindex ? "opacity-100" : "opacity-0 group-hover:opacity-100"
       )}>
         <button
           onClick={() => onIndex(item.note_id)}

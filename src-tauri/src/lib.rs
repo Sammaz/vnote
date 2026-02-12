@@ -1968,6 +1968,7 @@ pub fn run() {
             // Knowledge base commands
             knowledge_base::knowledge_base_index_note,
             knowledge_base::knowledge_base_index_all_notes,
+            knowledge_base::knowledge_base_index_outdated_notes,
             knowledge_base::knowledge_base_remove_index,
             knowledge_base::knowledge_base_get_index_status,
             knowledge_base::knowledge_base_abort_indexing,

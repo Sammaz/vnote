@@ -18,6 +18,7 @@ pub struct KnowledgeIndexStatusResponse {
     pub has_visual_summary: bool,
     pub completed_at: Option<String>,
     pub error_message: Option<String>,
+    pub needs_reindex: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
