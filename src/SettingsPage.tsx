@@ -151,7 +151,9 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         try {
             if (editingAiConfig.id === "") {
                 const newId = await invoke<string>("create_ai_config", { config: editingAiConfig });
-                setAiConfigs([...aiConfigs, { ...editingAiConfig, id: newId }]);
+                // First config is auto-set as default by backend
+                const isFirst = aiConfigs.length === 0;
+                setAiConfigs([...aiConfigs, { ...editingAiConfig, id: newId, is_default: isFirst }]);
             } else {
                 await invoke("update_ai_config", { config: editingAiConfig });
                 setAiConfigs(aiConfigs.map(c => c.id === editingAiConfig.id ? editingAiConfig : c));
@@ -165,8 +167,15 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
     const deleteAiConfig = async (id: string) => {
         try {
+            const deletingConfig = aiConfigs.find(c => c.id === id);
             await invoke("delete_ai_config", { id });
-            setAiConfigs(aiConfigs.filter(c => c.id !== id));
+
+            const remaining = aiConfigs.filter(c => c.id !== id);
+            // If deleted config was default and there are remaining configs, first one becomes default
+            if (deletingConfig?.is_default && remaining.length > 0) {
+                remaining[0].is_default = true;
+            }
+            setAiConfigs(remaining);
             setDeletingAiConfigId(null);
             await refreshAiConfigs();
         } catch (error) {
@@ -177,8 +186,15 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const toggleDefaultAiConfig = async (id: string, currentIsDefault: boolean) => {
         try {
             if (currentIsDefault) {
-                await invoke("unset_default_ai_config", { id });
-                setAiConfigs(aiConfigs.map(c => c.id === id ? { ...c, is_default: false } : c));
+                // If it's the only config, don't allow unsetting
+                if (aiConfigs.length <= 1) return;
+
+                // Find the first other config to set as default
+                const otherConfig = aiConfigs.find(c => c.id !== id);
+                if (otherConfig) {
+                    await invoke("set_default_ai_config", { id: otherConfig.id });
+                    setAiConfigs(aiConfigs.map(c => ({ ...c, is_default: c.id === otherConfig.id })));
+                }
             } else {
                 await invoke("set_default_ai_config", { id });
                 setAiConfigs(aiConfigs.map(c => ({ ...c, is_default: c.id === id })));

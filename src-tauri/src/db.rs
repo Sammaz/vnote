@@ -757,6 +757,14 @@ impl Database {
         let conn = self.connection();
         let new_id = snowflake::generate_id_string();
 
+        // Check if this is the first config - auto-set as default
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM ai_configs",
+            [],
+            |row| row.get(0),
+        )?;
+        let is_default = if count == 0 { 1 } else { config.is_default as i32 };
+
         // Store API key to keyring, use placeholder in database
         let db_api_key = if crate::keyring_manager::is_keyring_available() {
             API_KEY_MIGRATED_PLACEHOLDER
@@ -766,7 +774,7 @@ impl Database {
 
         conn.execute(
             "INSERT INTO ai_configs (id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            (&new_id, &config.title, &config.base_url, db_api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout, config.rate_limit),
+            (&new_id, &config.title, &config.base_url, db_api_key, &config.model, config.sort_order, is_default, config.concurrent_limit, config.request_timeout, config.rate_limit),
         )?;
 
         // Store API key to keyring
