@@ -7,6 +7,8 @@ import {
   Trash2,
   ScrollText,
   Bot,
+  Paperclip,
+  X,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -16,6 +18,7 @@ import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import type {
   KnowledgeChatEvent,
+  KnowledgeChatImageData,
   KnowledgeChatRequest,
   KnowledgeSearchResult,
 } from "./types";
@@ -24,7 +27,16 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   sources?: KnowledgeSearchResult[];
+  imageUrls?: string[];
 }
+
+interface UploadedImage {
+  id: string;
+  file: File;
+  previewUrl: string;
+}
+
+const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp,image/svg+xml,image/bmp,image/tiff,image/heic,image/heif,image/avif";
 
 export function KnowledgeBaseChat() {
   const { aiConfigs, promptConfigs, selectedModelId } = useApp();
@@ -45,6 +57,10 @@ export function KnowledgeBaseChat() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const promptDropdownRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Image upload state
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
 
   // Sync global selectedModelId as initial value
   useEffect(() => {
@@ -151,17 +167,77 @@ export function KnowledgeBaseChat() {
   const qaPromptConfigs = promptConfigs.filter((c) => c.category === "qa");
   const activePrompt = qaPromptConfigs.find((c) => c.id === selectedPromptId);
 
+  // Image handlers
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newImages: UploadedImage[] = [];
+    Array.from(files).forEach((file) => {
+      if (file.type.startsWith("image/")) {
+        const previewUrl = URL.createObjectURL(file);
+        newImages.push({
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          file,
+          previewUrl,
+        });
+      }
+    });
+
+    setUploadedImages((prev) => [...prev, ...newImages]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleRemoveImage = (imageId: string) => {
+    setUploadedImages((prev) => {
+      const imageToRemove = prev.find((img) => img.id === imageId);
+      if (imageToRemove) {
+        URL.revokeObjectURL(imageToRemove.previewUrl);
+      }
+      return prev.filter((img) => img.id !== imageId);
+    });
+  };
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleSend = useCallback(async () => {
     const text = input.trim();
-    if (!text || streaming) return;
+    if ((!text && uploadedImages.length === 0) || streaming) return;
+
+    // Capture image preview URLs for display in user message
+    const currentImageUrls = uploadedImages.map((img) => img.previewUrl);
+
+    // Convert images to base64 before clearing
+    let imageDataArray: KnowledgeChatImageData[] | undefined;
+    if (uploadedImages.length > 0) {
+      imageDataArray = await Promise.all(
+        uploadedImages.map(async (img) => ({
+          data: await fileToBase64(img.file),
+        }))
+      );
+    }
 
     setInput("");
+    setUploadedImages([]);
     setStreaming(true);
 
-    const userMsg: ChatMessage = { role: "user", content: text };
+    const userMsg: ChatMessage = {
+      role: "user",
+      content: text,
+      imageUrls: currentImageUrls.length > 0 ? currentImageUrls : undefined,
+    };
     setMessages((prev) => [...prev, userMsg]);
 
-    const apiMessages = [...messages, userMsg].map((m) => ({
+    const apiMessages = [...messages, { role: userMsg.role, content: userMsg.content }].map((m) => ({
       role: m.role,
       content: m.content,
     }));
@@ -171,6 +247,7 @@ export function KnowledgeBaseChat() {
         messages: apiMessages,
         model_id: localModelId || undefined,
         system_prompt: activePrompt?.content || undefined,
+        images: imageDataArray,
       };
       const rid = await invoke<string>("knowledge_base_chat", { request });
       setRequestId(rid);
@@ -181,7 +258,7 @@ export function KnowledgeBaseChat() {
         { role: "assistant", content: `错误: ${e}` },
       ]);
     }
-  }, [input, streaming, messages, localModelId, activePrompt]);
+  }, [input, streaming, messages, localModelId, activePrompt, uploadedImages]);
 
   const handleAbort = useCallback(async () => {
     if (requestId) {
@@ -197,7 +274,9 @@ export function KnowledgeBaseChat() {
     if (streaming) return;
     setMessages([]);
     setStatusText(null);
-  }, [streaming]);
+    uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    setUploadedImages([]);
+  }, [streaming, uploadedImages]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -241,7 +320,38 @@ export function KnowledgeBaseChat() {
 
       {/* Input Area */}
       <div className="p-4 border-t border-slate-200 dark:border-neutral-700">
+        {/* Hidden file input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED_IMAGE_TYPES}
+          multiple
+          onChange={handleFileSelect}
+          className="hidden"
+        />
+
         <div className="rounded-xl border border-slate-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-400 transition-shadow">
+          {/* Image preview */}
+          {uploadedImages.length > 0 && (
+            <div className="px-4 pt-3 flex flex-wrap gap-2">
+              {uploadedImages.map((image) => (
+                <div key={image.id} className="relative group">
+                  <img
+                    src={image.previewUrl}
+                    alt="预览"
+                    className="w-16 h-16 object-cover rounded-lg border border-slate-200 dark:border-neutral-600"
+                  />
+                  <button
+                    onClick={() => handleRemoveImage(image.id)}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors cursor-pointer"
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Textarea */}
           <textarea
             ref={inputRef}
@@ -256,6 +366,15 @@ export function KnowledgeBaseChat() {
           {/* Toolbar */}
           <div className="flex items-center justify-between px-3 py-2">
             <div className="flex items-center gap-1">
+              {/* Attach Image */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-neutral-700 rounded-lg transition-colors cursor-pointer border border-transparent"
+                title="上传图片"
+              >
+                <Paperclip className="w-3.5 h-3.5" />
+              </button>
+
               {/* Model Selector */}
               <div ref={modelDropdownRef} className="relative">
                 <button
@@ -416,10 +535,10 @@ export function KnowledgeBaseChat() {
               ) : (
                 <button
                   onClick={handleSend}
-                  disabled={!input.trim()}
+                  disabled={!input.trim() && uploadedImages.length === 0}
                   className={cn(
                     "w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer",
-                    input.trim()
+                    input.trim() || uploadedImages.length > 0
                       ? "bg-blue-500 hover:bg-blue-600 text-white"
                       : "bg-slate-100 dark:bg-neutral-700 text-slate-400 cursor-not-allowed"
                   )}
@@ -493,6 +612,18 @@ function MessageBubble({
         {/* Message content */}
         {isUser ? (
           <div className="text-sm whitespace-pre-wrap leading-relaxed">
+            {message.imageUrls && message.imageUrls.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {message.imageUrls.map((url, idx) => (
+                  <img
+                    key={idx}
+                    src={url}
+                    alt="附件"
+                    className="w-16 h-16 object-cover rounded-lg border border-white/20"
+                  />
+                ))}
+              </div>
+            )}
             {message.content}
           </div>
         ) : message.content ? (

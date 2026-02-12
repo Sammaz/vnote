@@ -34,12 +34,18 @@ pub struct KnowledgeChatRequest {
     pub messages: Vec<ChatMessage>,
     pub model_id: Option<String>,
     pub system_prompt: Option<String>,
+    pub images: Option<Vec<KnowledgeChatImageData>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeChatImageData {
+    pub data: String, // Base64 encoded with data URL prefix
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -27,11 +27,17 @@ export interface KnowledgeBaseStats {
   notes_with_summary: number;
 }
 
+// RAG 对话图片数据
+export interface KnowledgeChatImageData {
+  data: string; // Base64 encoded with data URL prefix
+}
+
 // RAG 对话请求
 export interface KnowledgeChatRequest {
   messages: Array<{ role: "user" | "assistant"; content: string }>;
   model_id?: string;
   system_prompt?: string;
+  images?: KnowledgeChatImageData[];
 }
 
 // RAG 对话流式事件

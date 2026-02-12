@@ -118,7 +118,36 @@ pub async fn chat(
     })];
 
     // Add conversation history
-    for msg in &request.messages {
+    for (i, msg) in request.messages.iter().enumerate() {
+        let is_last_user_message = i == request.messages.len() - 1 && msg.role == "user";
+
+        // Check if this is the last user message and has images
+        if is_last_user_message {
+            if let Some(ref images) = request.images {
+                if !images.is_empty() {
+                    let mut content: Vec<serde_json::Value> = vec![serde_json::json!({
+                        "type": "text",
+                        "text": msg.content
+                    })];
+
+                    for img in images {
+                        content.push(serde_json::json!({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": img.data
+                            }
+                        }));
+                    }
+
+                    api_messages.push(serde_json::json!({
+                        "role": "user",
+                        "content": content
+                    }));
+                    continue;
+                }
+            }
+        }
+
         api_messages.push(serde_json::json!({
             "role": msg.role,
             "content": msg.content
