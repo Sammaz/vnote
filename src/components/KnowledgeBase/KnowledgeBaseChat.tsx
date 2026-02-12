@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import {
   Send,
   Square,
@@ -9,6 +10,11 @@ import {
   Bot,
   Paperclip,
   X,
+  Copy,
+  Check,
+  Pencil,
+  RefreshCw,
+  Save,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -24,10 +30,15 @@ import type {
 } from "./types";
 
 interface ChatMessage {
+  id: string;
   role: "user" | "assistant";
   content: string;
   sources?: KnowledgeSearchResult[];
   imageUrls?: string[];
+}
+
+function generateMessageId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
 interface UploadedImage {
@@ -112,7 +123,7 @@ export function KnowledgeBaseChat() {
           setStatusText(null);
           setMessages((prev) => [
             ...prev,
-            { role: "assistant", content: "", sources: data.sources },
+            { id: generateMessageId(), role: "assistant", content: "", sources: data.sources },
           ]);
           break;
         case "Streaming":
@@ -231,6 +242,7 @@ export function KnowledgeBaseChat() {
     setStreaming(true);
 
     const userMsg: ChatMessage = {
+      id: generateMessageId(),
       role: "user",
       content: text,
       imageUrls: currentImageUrls.length > 0 ? currentImageUrls : undefined,
@@ -255,7 +267,7 @@ export function KnowledgeBaseChat() {
       setStreaming(false);
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `错误: ${e}` },
+        { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
       ]);
     }
   }, [input, streaming, messages, localModelId, activePrompt, uploadedImages]);
@@ -277,6 +289,85 @@ export function KnowledgeBaseChat() {
     uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     setUploadedImages([]);
   }, [streaming, uploadedImages]);
+
+  const handleCopyMessage = useCallback((content: string) => {
+    navigator.clipboard.writeText(content);
+  }, []);
+
+  const handleEditMessage = useCallback(async (msgId: string, newContent: string, imageUrls?: string[]) => {
+    if (streaming) return;
+
+    const msgIndex = messages.findIndex((m) => m.id === msgId);
+    if (msgIndex === -1) return;
+
+    const editedMsg: ChatMessage = { ...messages[msgIndex], content: newContent, imageUrls: imageUrls ?? messages[msgIndex].imageUrls };
+    const truncated = [...messages.slice(0, msgIndex), editedMsg];
+    setMessages(truncated);
+
+    setStreaming(true);
+    const apiMessages = truncated.map((m) => ({ role: m.role, content: m.content }));
+    try {
+      const request: KnowledgeChatRequest = {
+        messages: apiMessages,
+        model_id: localModelId || undefined,
+        system_prompt: activePrompt?.content || undefined,
+      };
+      const rid = await invoke<string>("knowledge_base_chat", { request });
+      setRequestId(rid);
+    } catch (e) {
+      setStreaming(false);
+      setMessages((prev) => [
+        ...prev,
+        { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
+      ]);
+    }
+  }, [streaming, messages, localModelId, activePrompt]);
+
+  const handleSaveEditMessage = useCallback((msgId: string, newContent: string, imageUrls?: string[]) => {
+    if (streaming) return;
+    setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, content: newContent, imageUrls: imageUrls ?? m.imageUrls } : m));
+  }, [streaming]);
+
+  const handleDeleteMessage = useCallback((msgId: string) => {
+    if (streaming) return;
+    setMessages((prev) => {
+      const idx = prev.findIndex((m) => m.id === msgId);
+      if (idx === -1) return prev;
+      const next = prev[idx + 1];
+      if (next && next.role === "assistant") {
+        return [...prev.slice(0, idx), ...prev.slice(idx + 2)];
+      }
+      return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
+    });
+  }, [streaming]);
+
+  const handleRegenerateMessage = useCallback(async (msgId: string) => {
+    if (streaming) return;
+
+    const msgIndex = messages.findIndex((m) => m.id === msgId);
+    if (msgIndex === -1) return;
+
+    const truncated = messages.slice(0, msgIndex + 1);
+    setMessages(truncated);
+
+    setStreaming(true);
+    const apiMessages = truncated.map((m) => ({ role: m.role, content: m.content }));
+    try {
+      const request: KnowledgeChatRequest = {
+        messages: apiMessages,
+        model_id: localModelId || undefined,
+        system_prompt: activePrompt?.content || undefined,
+      };
+      const rid = await invoke<string>("knowledge_base_chat", { request });
+      setRequestId(rid);
+    } catch (e) {
+      setStreaming(false);
+      setMessages((prev) => [
+        ...prev,
+        { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
+      ]);
+    }
+  }, [streaming, messages, localModelId, activePrompt]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -305,7 +396,17 @@ export function KnowledgeBaseChat() {
         )}
 
         {messages.map((msg, i) => (
-          <MessageBubble key={i} message={msg} streaming={streaming} isLast={i === messages.length - 1} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            streaming={streaming}
+            isLast={i === messages.length - 1}
+            onCopy={handleCopyMessage}
+            onEdit={handleEditMessage}
+            onSaveEdit={handleSaveEditMessage}
+            onDelete={handleDeleteMessage}
+            onRegenerate={handleRegenerateMessage}
+          />
         ))}
 
         {statusText && (
@@ -555,93 +656,349 @@ export function KnowledgeBaseChat() {
   );
 }
 
+function ActionButton({ icon, tooltip, onClick }: { icon: React.ReactNode; tooltip: string; onClick: () => void }) {
+  const [showTooltip, setShowTooltip] = useState(false);
+  return (
+    <div className="relative">
+      <button
+        onClick={onClick}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        className="w-6 h-6 flex items-center justify-center rounded text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-neutral-600 transition-colors cursor-pointer"
+      >
+        {icon}
+      </button>
+      {showTooltip && (
+        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-xs text-white bg-slate-800 dark:bg-neutral-600 rounded whitespace-nowrap pointer-events-none z-10">
+          {tooltip}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({
   message,
   streaming,
   isLast,
+  onCopy,
+  onEdit,
+  onSaveEdit,
+  onDelete,
+  onRegenerate,
 }: {
   message: ChatMessage;
   streaming: boolean;
   isLast: boolean;
+  onCopy: (content: string) => void;
+  onEdit: (msgId: string, newContent: string, imageUrls?: string[]) => void;
+  onSaveEdit: (msgId: string, newContent: string, imageUrls?: string[]) => void;
+  onDelete: (msgId: string) => void;
+  onRegenerate: (msgId: string) => void;
 }) {
   const isUser = message.role === "user";
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editContent, setEditContent] = useState(message.content);
+  const [editImages, setEditImages] = useState<UploadedImage[]>([]);
+  const [editExistingImageUrls, setEditExistingImageUrls] = useState<string[]>([]);
+  const [copied, setCopied] = useState(false);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleCopy = () => {
+    onCopy(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const getEditImageUrls = () => [...editExistingImageUrls, ...editImages.map((img) => img.previewUrl)];
+
+  const handleConfirmEdit = () => {
+    const trimmed = editContent.trim();
+    const urls = getEditImageUrls();
+    if (!trimmed && urls.length === 0) return;
+    setIsEditing(false);
+    cleanupEditImages();
+    onEdit(message.id, trimmed, urls.length > 0 ? urls : undefined);
+  };
+
+  const handleSaveOnly = () => {
+    const trimmed = editContent.trim();
+    const urls = getEditImageUrls();
+    if (!trimmed && urls.length === 0) return;
+    setIsEditing(false);
+    cleanupEditImages();
+    onSaveEdit(message.id, trimmed, urls.length > 0 ? urls : undefined);
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+    setEditContent(message.content);
+    setEditExistingImageUrls([]);
+    cleanupEditImages();
+  };
+
+  const handleEditFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const newImages: UploadedImage[] = [];
+    Array.from(files).forEach((file) => {
+      if (file.type.startsWith("image/")) {
+        const previewUrl = URL.createObjectURL(file);
+        newImages.push({
+          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          file,
+          previewUrl,
+        });
+      }
+    });
+    setEditImages((prev) => [...prev, ...newImages]);
+    if (editFileInputRef.current) editFileInputRef.current.value = "";
+  };
+
+  const handleRemoveEditImage = (imageId: string) => {
+    setEditImages((prev) => {
+      const img = prev.find((i) => i.id === imageId);
+      if (img) URL.revokeObjectURL(img.previewUrl);
+      return prev.filter((i) => i.id !== imageId);
+    });
+  };
+
+  const cleanupEditImages = () => {
+    editImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    setEditImages([]);
+  };
+
+  const showActions = isUser && !streaming && !isEditing;
 
   return (
-    <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "")}>
-      {/* Avatar */}
-      <div
-        className={cn(
-          "w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0",
-          isUser
-            ? "bg-gradient-to-br from-blue-500 to-purple-500"
-            : "bg-gradient-to-br from-orange-400 to-orange-500"
-        )}
-      >
-        <span className="text-white text-[10px] font-medium">
-          {isUser ? "我" : "AI"}
-        </span>
-      </div>
-
-      {/* Content */}
-      <div
-        className={cn(
-          "max-w-[80%] rounded-xl px-4 py-3",
-          isUser
-            ? "bg-blue-500 text-white rounded-tr-sm"
-            : "bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 text-slate-700 dark:text-slate-200 rounded-tl-sm"
-        )}
-      >
-        {/* Sources */}
-        {!isUser && message.sources && message.sources.length > 0 && (
-          <div className="mb-2 pb-2 border-b border-slate-100 dark:border-neutral-700">
-            <div className="text-xs text-slate-400 mb-1">引用来源:</div>
-            <div className="flex flex-wrap gap-1">
-              {message.sources.map((s, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-xs text-blue-600 dark:text-blue-400"
-                >
-                  <FileText className="w-3 h-3" />
-                  {s.note_title}
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Message content */}
-        {isUser ? (
-          <div className="text-sm whitespace-pre-wrap leading-relaxed">
-            {message.imageUrls && message.imageUrls.length > 0 && (
-              <div className="mb-2 flex flex-wrap gap-1.5">
-                {message.imageUrls.map((url, idx) => (
-                  <img
-                    key={idx}
-                    src={url}
-                    alt="附件"
-                    className="w-16 h-16 object-cover rounded-lg border border-white/20"
-                  />
+    <>
+      {/* Edit mode - full-width standalone editor */}
+      {isUser && isEditing ? (
+        <div className="w-full">
+          <input
+            ref={editFileInputRef}
+            type="file"
+            accept={ACCEPTED_IMAGE_TYPES}
+            multiple
+            onChange={handleEditFileSelect}
+            className="hidden"
+          />
+          <div className="bg-slate-100 dark:bg-neutral-800 rounded-2xl border border-slate-200 dark:border-neutral-700 overflow-hidden">
+            {/* Image previews - existing + newly uploaded */}
+            {(editExistingImageUrls.length > 0 || editImages.length > 0) && (
+              <div className="px-4 pt-3 flex flex-wrap gap-2">
+                {editExistingImageUrls.map((url, idx) => (
+                  <div key={`existing-${idx}`} className="relative group/img">
+                    <img
+                      src={url}
+                      alt="预览"
+                      className="w-16 h-16 object-cover rounded-lg border border-slate-200 dark:border-neutral-600"
+                    />
+                    <button
+                      onClick={() => setEditExistingImageUrls((prev) => prev.filter((_, i) => i !== idx))}
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors cursor-pointer"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                ))}
+                {editImages.map((image) => (
+                  <div key={image.id} className="relative group/img">
+                    <img
+                      src={image.previewUrl}
+                      alt="预览"
+                      className="w-16 h-16 object-cover rounded-lg border border-slate-200 dark:border-neutral-600"
+                    />
+                    <button
+                      onClick={() => handleRemoveEditImage(image.id)}
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors cursor-pointer"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
                 ))}
               </div>
             )}
-            {message.content}
+            <textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              className="w-full bg-transparent text-slate-800 dark:text-slate-100 text-sm px-4 pt-3 pb-2 resize-none focus:outline-none min-h-[60px]"
+              rows={3}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  handleConfirmEdit();
+                }
+                if (e.key === "Escape") handleCancelEdit();
+              }}
+            />
+            <div className="flex items-center justify-between px-3 py-2 border-t border-slate-200/60 dark:border-neutral-700/60">
+              <button
+                onClick={() => editFileInputRef.current?.click()}
+                className="p-1.5 rounded-lg text-slate-400 dark:text-neutral-500 hover:text-slate-600 dark:hover:text-neutral-300 hover:bg-slate-200/60 dark:hover:bg-neutral-700/60 transition-colors cursor-pointer"
+                title="附件"
+              >
+                <Paperclip className="w-4 h-4" />
+              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={handleCancelEdit}
+                  className="p-1.5 rounded-lg text-slate-400 dark:text-neutral-500 hover:text-slate-600 dark:hover:text-neutral-300 hover:bg-slate-200/60 dark:hover:bg-neutral-700/60 transition-colors cursor-pointer"
+                  title="取消"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleSaveOnly}
+                  className="p-1.5 rounded-lg text-slate-400 dark:text-neutral-500 hover:text-slate-600 dark:hover:text-neutral-300 hover:bg-slate-200/60 dark:hover:bg-neutral-700/60 transition-colors cursor-pointer"
+                  title="保存"
+                >
+                  <Save className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleConfirmEdit}
+                  className="p-1.5 rounded-lg text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer"
+                  title="发送"
+                >
+                  <Send className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
           </div>
-        ) : message.content ? (
-          <div className="text-sm leading-relaxed chat-markdown">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {message.content}
-            </ReactMarkdown>
+        </div>
+      ) : (
+        <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "")}>
+          {/* Avatar */}
+          <div
+            className={cn(
+              "w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0",
+              isUser
+                ? "bg-gradient-to-br from-blue-500 to-purple-500"
+                : "bg-gradient-to-br from-orange-400 to-orange-500"
+            )}
+          >
+            <span className="text-white text-[10px] font-medium">
+              {isUser ? "我" : "AI"}
+            </span>
           </div>
-        ) : streaming && isLast ? (
-          <div className="flex items-center gap-1 py-1">
-            <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-            <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-            <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" />
+
+          {/* Content wrapper with group for hover */}
+          <div className={cn("max-w-[80%] group", isUser ? "flex flex-col items-end" : "flex flex-col items-start")}>
+            {/* Bubble */}
+            <div
+              className={cn(
+                "rounded-xl px-4 py-3",
+                isUser
+                  ? "bg-slate-200 dark:bg-neutral-700 text-slate-800 dark:text-slate-100 rounded-tr-sm"
+                  : "bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 text-slate-700 dark:text-slate-200 rounded-tl-sm"
+              )}
+            >
+              {/* Sources */}
+              {!isUser && message.sources && message.sources.length > 0 && (
+                <div className="mb-2 pb-2 border-b border-slate-100 dark:border-neutral-700">
+                  <div className="text-xs text-slate-400 mb-1">引用来源:</div>
+                  <div className="flex flex-wrap gap-1">
+                    {message.sources.map((s, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-xs text-blue-600 dark:text-blue-400"
+                      >
+                        <FileText className="w-3 h-3" />
+                        {s.note_title}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Message content */}
+              {isUser ? (
+                <div className="text-sm whitespace-pre-wrap leading-relaxed">
+                  {message.imageUrls && message.imageUrls.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1.5">
+                      {message.imageUrls.map((url, idx) => (
+                        <img
+                          key={idx}
+                          src={url}
+                          alt="附件"
+                          className="w-16 h-16 object-cover rounded-lg border border-slate-300 dark:border-neutral-600"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {message.content}
+                </div>
+              ) : message.content ? (
+                <div className="text-sm leading-relaxed chat-markdown">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              ) : streaming && isLast ? (
+                <div className="flex items-center gap-1 py-1">
+                  <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                  <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                  <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" />
+                </div>
+              ) : (
+                <span className="text-sm text-slate-400 italic">生成中...</span>
+              )}
+            </div>
+
+            {/* Action buttons - below bubble, only for user messages */}
+            {showActions && (
+              <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <ActionButton icon={<RefreshCw className="w-3.5 h-3.5" />} tooltip="重新生成" onClick={() => onRegenerate(message.id)} />
+                <ActionButton icon={<Pencil className="w-3.5 h-3.5" />} tooltip="编辑" onClick={() => { setIsEditing(true); setEditContent(message.content); setEditExistingImageUrls(message.imageUrls ?? []); }} />
+                <ActionButton
+                  icon={copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+                  tooltip={copied ? "已复制" : "复制"}
+                  onClick={handleCopy}
+                />
+                <ActionButton icon={<Trash2 className="w-3.5 h-3.5" />} tooltip="删除" onClick={() => setShowDeleteConfirm(true)} />
+              </div>
+            )}
           </div>
-        ) : (
-          <span className="text-sm text-slate-400 italic">生成中...</span>
-        )}
-      </div>
-    </div>
+
+          {/* Delete confirm dialog */}
+          {showDeleteConfirm && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowDeleteConfirm(false)}
+          />
+          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
+            <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+              确定要删除这条消息吗？
+            </h3>
+            <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">
+              删除后，对应的 AI 回复也会一并移除，且无法撤销。
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 rounded-md transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  onDelete(message.id);
+                }}
+                className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-200 dark:bg-neutral-700 hover:bg-slate-300 dark:hover:bg-neutral-600 rounded-md transition-colors cursor-pointer"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body
+          )}
+        </div>
+      )}
+    </>
   );
 }
