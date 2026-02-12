@@ -302,9 +302,6 @@ export function KnowledgeBaseChat() {
                           <div className="font-medium truncate">
                             {config.title}
                           </div>
-                          <div className="text-slate-400 dark:text-slate-500 truncate mt-0.5">
-                            {config.model}
-                          </div>
                         </button>
                       ))
                     )}
