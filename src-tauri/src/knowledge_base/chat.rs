@@ -71,11 +71,9 @@ pub async fn chat(
     } else {
         search_results
             .iter()
-            .enumerate()
-            .map(|(i, r)| {
+            .map(|r| {
                 format!(
-                    "[来源{}] 笔记: {}\n{}",
-                    i + 1,
+                    "笔记「{}」:\n{}",
                     r.note_title,
                     r.content
                 )
