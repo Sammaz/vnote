@@ -1287,6 +1287,85 @@ fn update_note_content(
     get_db().update_note(&note).map_err(|e| e.to_string())
 }
 
+/// Assemble visual_summary markdown for a note from detailed_reading + optimized subtitles + original subtitles.
+/// Returns Ok(true) if saved, Ok(false) if skipped (already has visual_summary or no chapter data).
+pub fn assemble_and_save_visual_summary(db: &Database, note: &mut Note) -> Result<bool, String> {
+    // Skip if already has visual_summary
+    if note.visual_summary.as_ref().map_or(false, |s| !s.trim().is_empty()) {
+        return Ok(false);
+    }
+    // Parse detailed_reading
+    let dr = match &note.detailed_reading {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => return Ok(false),
+    };
+    let chapter_data: chapter::ChapterData = serde_json::from_str(dr).map_err(|e| e.to_string())?;
+    if chapter_data.chapters.is_empty() {
+        return Ok(false);
+    }
+    // Load optimized subtitles
+    let opt_subs = db.get_optimized_subtitles(&note.id).unwrap_or_default();
+    let opt_map: std::collections::HashMap<String, String> = opt_subs
+        .into_iter()
+        .map(|s| (s.chapter_id, s.optimized_text))
+        .collect();
+    // Load original subtitles
+    let original_subs = note.subtitle_path.as_ref()
+        .and_then(|p| subtitle::parse_subtitle_file(p).ok())
+        .unwrap_or_default();
+    // Assemble markdown
+    let mut sections = Vec::new();
+    for ch in &chapter_data.chapters {
+        let level = ch.level.unwrap_or(1).max(1).min(6) as usize;
+        let heading = "#".repeat(level);
+        let time_range = format!("{} - {}", format_seconds(ch.start_time), format_seconds(ch.end_time));
+        let mut lines = vec![
+            format!("{} {} ({})", heading, ch.title, time_range),
+            String::new(),
+        ];
+        // Subtitle content: prefer optimized, fallback to original
+        let subtitle_content = if let Some(opt) = opt_map.get(&ch.id) {
+            opt.clone()
+        } else {
+            original_subs.iter()
+                .filter(|sub| sub.start_time >= ch.start_time && sub.start_time < ch.end_time)
+                .map(|sub| sub.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        if !subtitle_content.trim().is_empty() {
+            lines.push(subtitle_content);
+            lines.push(String::new());
+        }
+        lines.push("---".to_string());
+        lines.push(String::new());
+        sections.push(lines.join("\n"));
+    }
+    let mut result = sections.join("");
+    if result.ends_with("---\n\n") {
+        result.truncate(result.len() - 5);
+    }
+    let result = result.trim().to_string();
+    if result.is_empty() {
+        return Ok(false);
+    }
+    note.visual_summary = Some(result);
+    db.update_note(note).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+fn format_seconds(seconds: f64) -> String {
+    let total = seconds as u64;
+    let h = total / 3600;
+    let m = (total % 3600) / 60;
+    let s = total % 60;
+    if h > 0 {
+        format!("{}:{:02}:{:02}", h, m, s)
+    } else {
+        format!("{}:{:02}", m, s)
+    }
+}
+
 // Optimized subtitles commands
 #[tauri::command]
 fn get_optimized_subtitles(note_id: String) -> Result<Vec<OptimizedSubtitle>, String> {
@@ -1972,6 +2051,7 @@ pub fn run() {
             knowledge_base::knowledge_base_remove_index,
             knowledge_base::knowledge_base_get_index_status,
             knowledge_base::knowledge_base_abort_indexing,
+            knowledge_base::knowledge_base_backfill_visual_summaries,
             knowledge_base::knowledge_base_search,
             knowledge_base::knowledge_base_chat,
             knowledge_base::knowledge_base_abort_chat,

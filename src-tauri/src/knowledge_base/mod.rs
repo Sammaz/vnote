@@ -262,6 +262,28 @@ pub fn knowledge_base_get_index_status() -> Result<Vec<KnowledgeIndexStatusRespo
     Ok(results)
 }
 
+/// Backfill visual_summary for notes that have detailed_reading but no visual_summary
+#[tauri::command]
+pub fn knowledge_base_backfill_visual_summaries() -> Result<i32, String> {
+    let db = get_db();
+    let mut notes = db.get_all_notes().map_err(|e| e.to_string())?;
+    let mut count = 0;
+    for note in &mut notes {
+        if note.visual_summary.as_ref().map_or(true, |s| s.trim().is_empty())
+            && note.detailed_reading.as_ref().map_or(false, |s| !s.trim().is_empty())
+        {
+            match crate::assemble_and_save_visual_summary(db, note) {
+                Ok(true) => count += 1,
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!("[knowledge_base] backfill visual_summary failed for {}: {}", note.id, e);
+                }
+            }
+        }
+    }
+    Ok(count)
+}
+
 /// Abort indexing task
 #[tauri::command]
 pub async fn knowledge_base_abort_indexing(task_id: String) -> Result<(), String> {

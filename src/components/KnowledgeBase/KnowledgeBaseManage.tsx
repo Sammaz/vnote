@@ -31,6 +31,8 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
 
   const loadStatuses = useCallback(async () => {
     try {
+      // Backfill visual_summary for notes that have detailed_reading but no visual_summary
+      await invoke<number>("knowledge_base_backfill_visual_summaries");
       const res = await invoke<KnowledgeIndexStatus[]>(
         "knowledge_base_get_index_status"
       );

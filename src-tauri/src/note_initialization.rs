@@ -867,7 +867,13 @@ async fn execute_subtitle_optimization_step(
     )
     .await
     {
-        Ok(_) => StepResult::Completed,
+        Ok(_) => {
+            // After subtitle optimization, assemble and save visual_summary
+            if let Ok(Some(mut note)) = db.get_note_by_id(&params.note_id) {
+                let _ = crate::assemble_and_save_visual_summary(db, &mut note);
+            }
+            StepResult::Completed
+        }
         Err(e) => {
             if is_aborted(abort_flag) {
                 StepResult::Failed("已中止".to_string())
