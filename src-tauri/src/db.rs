@@ -37,7 +37,7 @@ pub struct Note {
     pub video_path: String,
     pub subtitle_path: Option<String>,
     pub model_id: Option<String>, // AI model ID used for generating notes
-    pub init_status: i32, // Initialization status: 0=not started, 1-6=step completed, 6=fully initialized
+    pub init_status: i32, // Initialization status: 0=not started, 1-6=step completed, 7=fully initialized
     pub full_summary: Option<String>,
     pub detailed_reading: Option<String>,
     pub highlights: Option<String>,
@@ -1119,8 +1119,8 @@ impl Database {
         Ok(())
     }
 
-    /// Get notes with incomplete initialization (init_status < 6 and has model_id)
-    /// This includes notes that haven't started (status=0) and notes in progress (status=1-5)
+    /// Get notes with incomplete initialization (init_status < 7 and has model_id)
+    /// This includes notes that haven't started (status=0) and notes in progress (status=1-6)
     pub fn get_incomplete_notes(&self) -> SqliteResult<Vec<Note>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
@@ -1128,7 +1128,7 @@ impl Database {
                     highlights, visual_summary, custom_summary, flashcards, panoramic_blueprint, quick_notes, quick_notes_mindmap,
                     quick_notes_canvas, suggested_questions, last_playback_position,
                     created_at, updated_at
-             FROM notes WHERE init_status < 6 AND model_id IS NOT NULL ORDER BY created_at ASC, rowid ASC"
+             FROM notes WHERE init_status < 7 AND model_id IS NOT NULL ORDER BY created_at ASC, rowid ASC"
         )?;
 
         let notes = stmt.query_map([], |row| {
