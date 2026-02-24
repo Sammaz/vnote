@@ -120,7 +120,7 @@ export function AddNotesToCollectionModal({
 
         {/* 全选 */}
         {filteredNotes.length > 0 && (
-          <label onClick={toggleSelectAll} className="mx-6 mt-3 flex items-center gap-2 cursor-pointer text-sm text-slate-500 dark:text-neutral-400 hover:text-slate-700 dark:hover:text-neutral-300 transition-colors">
+          <label onClick={toggleSelectAll} className="mx-6 mt-3 mb-1 pb-3 border-b border-slate-200 dark:border-neutral-700 flex items-center gap-2 cursor-pointer text-sm text-slate-500 dark:text-neutral-400 hover:text-slate-700 dark:hover:text-neutral-300 transition-colors">
             <div className={cn("w-4 h-4 rounded border-2 flex items-center justify-center transition-colors", isAllSelected ? "bg-blue-500 border-blue-500" : "border-slate-300 dark:border-neutral-600")}>
               {isAllSelected && <Check className="w-2.5 h-2.5 text-white" />}
             </div>
