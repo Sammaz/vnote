@@ -250,7 +250,9 @@ pub fn knowledge_base_get_index_status() -> Result<Vec<KnowledgeIndexStatusRespo
         results.push(KnowledgeIndexStatusResponse {
             note_id: note.id.clone(),
             note_title: note.title.clone(),
-            status: status_info.map(|s| s.status.clone()).unwrap_or_else(|| "none".to_string()),
+            status: status_info.map(|s| {
+                if s.status == "indexing" { "none".to_string() } else { s.status.clone() }
+            }).unwrap_or_else(|| "none".to_string()),
             chunk_count: status_info.map(|s| s.chunk_count).unwrap_or(0),
             has_visual_summary: has_vs,
             completed_at: status_info.and_then(|s| s.completed_at.clone()),
