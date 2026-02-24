@@ -19,6 +19,7 @@ pub struct KnowledgeIndexStatusResponse {
     pub completed_at: Option<String>,
     pub error_message: Option<String>,
     pub needs_reindex: bool,
+    pub init_completed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

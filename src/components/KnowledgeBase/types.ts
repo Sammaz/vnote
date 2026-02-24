@@ -17,6 +17,7 @@ export interface KnowledgeIndexStatus {
   completed_at: string | null;
   error_message: string | null;
   needs_reindex: boolean;
+  init_completed: boolean;
 }
 
 // 知识库统计
@@ -52,6 +53,7 @@ export type KnowledgeChatEvent =
 // 索引进度事件
 export type KnowledgeIndexEvent =
   | { status: "Started"; total: number }
-  | { status: "Progress"; completed: number; failed: number; total: number; note_title: string }
+  | { status: "Indexing"; note_id: string }
+  | { status: "Progress"; completed: number; failed: number; total: number; note_title: string; note_id: string }
   | { status: "Completed"; completed: number; failed: number; total: number }
   | { status: "Aborted" };

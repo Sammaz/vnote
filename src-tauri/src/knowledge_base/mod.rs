@@ -72,6 +72,11 @@ pub async fn knowledge_base_index_all_notes(app: AppHandle) -> Result<String, St
                 continue;
             }
 
+            let _ = app.emit(
+                &format!("knowledge-index-{}", task_id_clone),
+                serde_json::json!({ "status": "Indexing", "note_id": note.id }),
+            );
+
             match indexing::index_note(&note.id, Some(&abort_flag)).await {
                 Ok(()) => completed += 1,
                 Err(e) => {
@@ -87,7 +92,8 @@ pub async fn knowledge_base_index_all_notes(app: AppHandle) -> Result<String, St
                     "completed": completed,
                     "failed": failed,
                     "total": total,
-                    "note_title": note.title
+                    "note_title": note.title,
+                    "note_id": note.id
                 }),
             );
         }
@@ -168,6 +174,11 @@ pub async fn knowledge_base_index_outdated_notes(app: AppHandle) -> Result<Strin
                 break;
             }
 
+            let _ = app.emit(
+                &format!("knowledge-index-{}", task_id_clone),
+                serde_json::json!({ "status": "Indexing", "note_id": note.id }),
+            );
+
             match indexing::index_note(&note.id, Some(&abort_flag)).await {
                 Ok(()) => completed += 1,
                 Err(e) => {
@@ -183,7 +194,8 @@ pub async fn knowledge_base_index_outdated_notes(app: AppHandle) -> Result<Strin
                     "completed": completed,
                     "failed": failed,
                     "total": total,
-                    "note_title": note.title
+                    "note_title": note.title,
+                    "note_id": note.id
                 }),
             );
         }
@@ -258,6 +270,7 @@ pub fn knowledge_base_get_index_status() -> Result<Vec<KnowledgeIndexStatusRespo
             completed_at: status_info.and_then(|s| s.completed_at.clone()),
             error_message: status_info.and_then(|s| s.error_message.clone()),
             needs_reindex,
+            init_completed: note.init_status == 7 || note.model_id.is_none(),
         });
     }
 

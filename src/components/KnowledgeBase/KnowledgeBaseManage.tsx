@@ -56,7 +56,20 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
     const unlisten = listen<KnowledgeIndexEvent>(eventName, (event) => {
       const data = event.payload;
       switch (data.status) {
+        case "Indexing":
+          setIndexingNoteIds((prev) => new Set(prev).add(data.note_id));
+          break;
         case "Progress":
+          setIndexingNoteIds((prev) => {
+            const next = new Set(prev);
+            next.delete(data.note_id);
+            return next;
+          });
+          setStatuses((prev) =>
+            prev.map((s) =>
+              s.note_id === data.note_id ? { ...s, status: "completed" as const } : s
+            )
+          );
           setIndexProgress({
             completed: data.completed,
             failed: data.failed,
@@ -68,6 +81,7 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
         case "Aborted":
           setIndexingTaskId(null);
           setIndexProgress(null);
+          setIndexingNoteIds(new Set());
           loadStatuses();
           onStatsChange();
           break;
@@ -144,8 +158,8 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
     [loadStatuses, onStatsChange]
   );
 
-  // Filter: only notes with visual_summary
-  const notesWithSummary = statuses.filter((s) => s.has_visual_summary);
+  // Filter: only notes with visual_summary and completed initialization
+  const notesWithSummary = statuses.filter((s) => s.has_visual_summary && s.init_completed);
   const indexedCount = notesWithSummary.filter(
     (s) => s.status === "completed"
   ).length;
