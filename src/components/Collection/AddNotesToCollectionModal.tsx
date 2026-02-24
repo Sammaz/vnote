@@ -22,7 +22,7 @@ export function AddNotesToCollectionModal({
 
   // 过滤出未添加到任何合集的笔记，保持后端返回的稳定排序（created_at DESC, rowid DESC）
   const availableNotes = useMemo(() => {
-    return notes.filter((note) => !notesInCollections.has(note.id));
+    return notes.filter((note) => !notesInCollections.has(note.id)).reverse();
   }, [notes, notesInCollections]);
 
   // 搜索过滤
@@ -46,13 +46,21 @@ export function AddNotesToCollectionModal({
     });
   };
 
+  const isAllSelected = filteredNotes.length > 0 && filteredNotes.every((n) => selectedNoteIds.has(n.id));
+
+  const toggleSelectAll = () => {
+    setSelectedNoteIds(isAllSelected ? new Set() : new Set(filteredNotes.map((n) => n.id)));
+  };
+
   const handleSubmit = async () => {
     if (selectedNoteIds.size === 0) return;
 
     setIsSubmitting(true);
     try {
-      for (const noteId of selectedNoteIds) {
-        await addNoteToCollection(collectionId, noteId);
+      for (const note of filteredNotes) {
+        if (selectedNoteIds.has(note.id)) {
+          await addNoteToCollection(collectionId, note.id);
+        }
       }
       onSuccess();
       onClose();
@@ -109,6 +117,16 @@ export function AddNotesToCollectionModal({
             />
           </div>
         </div>
+
+        {/* 全选 */}
+        {filteredNotes.length > 0 && (
+          <label onClick={toggleSelectAll} className="mx-6 mt-3 flex items-center gap-2 cursor-pointer text-sm text-slate-500 dark:text-neutral-400 hover:text-slate-700 dark:hover:text-neutral-300 transition-colors">
+            <div className={cn("w-4 h-4 rounded border-2 flex items-center justify-center transition-colors", isAllSelected ? "bg-blue-500 border-blue-500" : "border-slate-300 dark:border-neutral-600")}>
+              {isAllSelected && <Check className="w-2.5 h-2.5 text-white" />}
+            </div>
+            全选
+          </label>
+        )}
 
         {/* 笔记列表 */}
         <div className="flex-1 overflow-y-auto px-6">
