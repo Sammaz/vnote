@@ -10,7 +10,8 @@ import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
 import { InitializationQueuePanel } from "./components/Note/InitializationQueuePanel";
 import { cn } from "./utils/cn";
-import { VIEW_TYPES, type NavigableViewType } from "./types";
+import { VIEW_TYPES, type NavigableViewType, type SubtitleEntry, type OptimizedSubtitle, parseDetailedReading } from "./types";
+import { assembleChapterMarkdown } from "./utils/markdownAssembler";
 import "./index.css";
 
 // 代码分割 - 懒加载大型组件
@@ -260,9 +261,27 @@ function AppContent() {
 function InitializationQueueWrapper({ children }: { children: React.ReactNode }) {
   const { refreshNotes } = useApp();
 
-  const handleTaskCompleted = useCallback(() => {
-    // 任务完成后刷新笔记列表
+  const handleTaskCompleted = useCallback(async (noteId: string) => {
     refreshNotes();
+    try {
+      const note = await invoke<{ id: string; subtitle_path: string | null; detailed_reading: string | null; visual_summary: string | null }>("get_note", { id: noteId });
+      if (!note || note.visual_summary || !note.subtitle_path || !note.detailed_reading) return;
+      const chapterData = parseDetailedReading(note.detailed_reading);
+      if (!chapterData || chapterData.chapters.length === 0) return;
+
+      const savedSubtitles = await invoke<OptimizedSubtitle[]>("get_optimized_subtitles", { noteId });
+      const optimizedSubtitles = new Map<string, string>();
+      savedSubtitles?.forEach(s => optimizedSubtitles.set(s.chapter_id, s.optimized_text));
+
+      const subtitleEntries = await invoke<SubtitleEntry[]>("parse_subtitle_file", { path: note.subtitle_path });
+      const content = assembleChapterMarkdown({ chapters: chapterData.chapters, optimizedSubtitles, originalSubtitles: subtitleEntries, showTimestamp: true });
+      if (!content) return;
+
+      await invoke("update_note_content", { noteId, tabType: "visual_summary", content });
+      refreshNotes();
+    } catch (error) {
+      console.error("[InitializationQueue] 保存 visual_summary 失败:", error);
+    }
   }, [refreshNotes]);
 
   return (
