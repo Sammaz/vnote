@@ -71,7 +71,8 @@ pub async fn search(
     // Apply reranking if configured
     let reranker_config = db.get_default_reranker_config().map_err(|e| e.to_string())?;
     if let Some(config) = reranker_config {
-        results = rerank_knowledge_results(&config, query, results, top_k).await?;
+        let rerank_k = SettingsManager::get_int(keys::RAG_RERANK_K, defaults::RAG_RERANK_K);
+        results = rerank_knowledge_results(&config, query, results, rerank_k).await?;
     }
 
     Ok(results)

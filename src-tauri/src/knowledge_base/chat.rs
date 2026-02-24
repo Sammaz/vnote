@@ -49,7 +49,7 @@ pub async fn chat(
     );
 
     // Search for relevant context
-    let search_results = search::search(&user_message, Some(5)).await?;
+    let search_results = search::search(&user_message, None).await?;
 
     if abort_flag.load(Ordering::Relaxed) {
         let _ = app.emit(&event_name, KnowledgeChatEvent::Aborted);
@@ -104,11 +104,14 @@ pub async fn chat(
     };
 
     let system_prompt = format!(
-        "你是一个知识库助手，基于用户的视频笔记知识库回答问题。\n\
+        "你是一个专业的知识库助手，基于用户的视频笔记知识库回答问题。\n\n\
         以下是从知识库中检索到的相关内容：\n\n\
         {}\n\n\
-        请基于以上知识库内容回答用户的问题。如果知识库中没有相关信息，请如实告知。\n\
-        回答时请引用来源（如 [来源1]），帮助用户追溯信息出处。{}",
+        回答要求：\n\
+        1. **全面性**：充分利用所有相关来源，给出详尽、完整的回答，不要过于简短。\n\
+        2. **结构化**：使用标题、列表、分段等 Markdown 格式组织回答，使内容清晰易读。\n\
+        3. **忠于原文**：基于知识库内容作答，不要编造知识库中不存在的信息。\n\
+        4. **坦诚不足**：如果知识库中没有足够的信息来完整回答问题，请明确指出哪些部分缺乏依据。{}",
         context, extra_instruction
     );
 
