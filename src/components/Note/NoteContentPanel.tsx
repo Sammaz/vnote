@@ -2049,6 +2049,75 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   }, [chapterData, currentModelId, note.model_id, note.id, note.subtitle_path, subtitleEntries, optimizingChapterIds]);
 
+  // 根据配置生成动态提示词（Markdown 格式）
+  const generateDynamicPrompt = useCallback((): string => {
+    const isEnglish = configLanguage === "en";
+    const showEmoji = configShowEmoji;
+    const emojiExample = showEmoji ? "🔥 " : "";
+    const emojiExample2 = showEmoji ? "💡 " : "";
+    const timestampExample = configShowTimestamp ? " [00:01:23]" : "";
+
+    if (isEnglish) {
+      // 英文提示词
+      return `You are a professional video content analyst. Analyze the following video subtitles and generate a structured summary.
+
+Output Requirements:
+1. Use Markdown format (do not use code block markers)
+2. Must output ALL content in English
+3. Use natural, coherent paragraph-style writing. Do NOT use line-by-line listing or fragmented one-sentence-per-line style.
+4. Follow this exact format:
+
+# Summary
+Summarize the video's topic, core arguments, and key conclusions in 3-5 coherent sentences (each sentence no more than ${configSentenceLength} words). Write as a complete natural paragraph.
+
+# Key Highlights
+Extract the most important ${configHighlightCount} key points/highlights${configShowTimestamp ? ", and add the video timestamp (format: [00:01:23]) after each highlight title" : ""}${configShowEmoji ? ", and add an appropriate emoji symbol before each highlight title" : ""}
+
+## ${emojiExample}Highlight Title 1${timestampExample}
+Describe in 3-5 sentences: what this highlight covers, why it matters, and what practical significance or insight it offers. Write as a natural paragraph, not a bullet list.
+
+## ${emojiExample2}Highlight Title 2
+Describe in 3-5 sentences: what this highlight covers, why it matters, and what practical significance or insight it offers. Write as a natural paragraph, not a bullet list.
+
+(Continue with ${configHighlightCount} highlights)
+
+# Key Terms
+- **Term 1**: Explanation
+- **Term 2**: Explanation
+
+Video subtitles content:`;
+    } else {
+      // 中文提示词
+      return `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
+
+输出要求：
+1. 使用 Markdown 格式输出（不要使用代码块标记）
+2. 必须使用中文输出所有内容
+3. 使用自然连贯的段落式写作，禁止逐行罗列或一行一句的碎片化风格
+4. 严格按照以下格式输出：
+
+# 摘要
+用3-5句连贯的话概括视频的主题、核心论点和关键结论，每句话不超过${configSentenceLength}字，写成一个完整的自然段落。
+
+# 核心亮点
+提取最重要的${configHighlightCount}个知识点/亮点${configShowEmoji ? "，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）" : ""}${configShowTimestamp ? "，并在每个亮点标题后标注该亮点对应的视频时间戳（格式如 [00:01:23]）" : ""}
+
+## ${emojiExample}亮点标题1${timestampExample}
+用3-5句话展开描述：这个亮点讲了什么、为什么重要、有什么实际意义或启发。写成自然段落，不要逐条罗列。
+
+## ${emojiExample2}亮点标题2
+用3-5句话展开描述：这个亮点讲了什么、为什么重要、有什么实际意义或启发。写成自然段落，不要逐条罗列。
+
+（继续提取${configHighlightCount}个亮点）
+
+# 关键术语
+- **术语1**：解释
+- **术语2**：解释
+
+视频字幕内容：`;
+    }
+  }, [configLanguage, configShowEmoji, configShowTimestamp, configHighlightCount, configSentenceLength]);
+
   // 使用默认配置直接生成全文总结（空状态下的按钮使用）
   const handleGenerateFullSummaryWithDefaults = useCallback(async () => {
     // 获取有效的模型ID
@@ -2065,33 +2134,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       return;
     }
 
-    // 使用默认配置生成提示词（中文、显示Emoji、不显示时间戳、5个要点、30字句子）
-    const defaultPrompt = `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
-
-输出要求：
-1. 使用 Markdown 格式输出（不要使用代码块标记）
-2. 必须使用中文输出所有内容
-3. 严格按照以下格式输出：
-
-# 摘要
-摘要段落，概括视频核心内容，每句话不超过30字
-
-# 核心亮点
-提取最重要的5个知识点/亮点，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）
-
-## 🔥 亮点标题1
-详细描述该亮点的内容
-
-## 💡 亮点标题2
-详细描述该亮点的内容
-
-（继续提取5个亮点）
-
-# 关键术语
-- **术语1**：解释
-- **术语2**：解释
-
-视频字幕内容：`;
+    // 使用默认配置标签页的当前配置生成提示词
+    const defaultPrompt = generateDynamicPrompt();
 
     try {
       const id = crypto.randomUUID();
@@ -2132,74 +2176,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setRegeneratingTabs(currentTabs as Set<TabType>);
       message.error(`生成失败: ${error}`);
     }
-  }, [note.id, note.model_id, currentModelId, aiConfigs, setupGenerationListener]);
-
-  // 根据配置生成动态提示词（Markdown 格式）
-  const generateDynamicPrompt = useCallback((): string => {
-    const isEnglish = configLanguage === "en";
-    const showEmoji = configShowEmoji;
-    const emojiExample = showEmoji ? "🔥 " : "";
-    const emojiExample2 = showEmoji ? "💡 " : "";
-    const timestampExample = configShowTimestamp ? " [00:01:23]" : "";
-
-    if (isEnglish) {
-      // 英文提示词
-      return `You are a professional video content analyst. Analyze the following video subtitles and generate a structured summary.
-
-Output Requirements:
-1. Use Markdown format (do not use code block markers)
-2. Must output ALL content in English
-3. Follow this exact format:
-
-# Summary
-A summary paragraph describing the core content of the video, each sentence no more than ${configSentenceLength} words
-
-# Key Highlights
-Extract the most important ${configHighlightCount} key points/highlights${configShowTimestamp ? ", and add the video timestamp (format: [00:01:23]) after each highlight title" : ""}${configShowEmoji ? ", and add an appropriate emoji symbol before each highlight title" : ""}
-
-## ${emojiExample}Highlight Title 1${timestampExample}
-Detailed description of this highlight
-
-## ${emojiExample2}Highlight Title 2
-Detailed description of this highlight
-
-(Continue with ${configHighlightCount} highlights)
-
-# Key Terms
-- **Term 1**: Explanation
-- **Term 2**: Explanation
-
-Video subtitles content:`;
-    } else {
-      // 中文提示词
-      return `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
-
-输出要求：
-1. 使用 Markdown 格式输出（不要使用代码块标记）
-2. 必须使用中文输出所有内容
-3. 严格按照以下格式输出：
-
-# 摘要
-摘要段落，概括视频核心内容，每句话不超过${configSentenceLength}字
-
-# 核心亮点
-提取最重要的${configHighlightCount}个知识点/亮点${configShowEmoji ? "，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）" : ""}${configShowTimestamp ? "，并在每个亮点标题后标注该亮点对应的视频时间戳（格式如 [00:01:23]）" : ""}
-
-## ${emojiExample}亮点标题1${timestampExample}
-详细描述该亮点的内容
-
-## ${emojiExample2}亮点标题2
-详细描述该亮点的内容
-
-（继续提取${configHighlightCount}个亮点）
-
-# 关键术语
-- **术语1**：解释
-- **术语2**：解释
-
-视频字幕内容：`;
-    }
-  }, [configLanguage, configShowEmoji, configShowTimestamp, configHighlightCount, configSentenceLength]);
+  }, [note.id, note.model_id, currentModelId, aiConfigs, setupGenerationListener, generateDynamicPrompt]);
 
   // 执行生成（弹框中的重新生成）
   const handleCustomGenerate = async () => {
