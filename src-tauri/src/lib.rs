@@ -1924,8 +1924,11 @@ pub fn run() {
 
             DATABASE.set(db).expect("Database already initialized");
 
-            // 设置窗口大小为屏幕的90%
+            // 设置窗口图标和大小
             if let Some(window) = app.get_webview_window("main") {
+                if let Ok(icon) = Image::from_bytes(TRAY_ICON) {
+                    let _ = window.set_icon(icon);
+                }
                 let (width, height) = if let Some(monitor) = window.primary_monitor().ok().flatten() {
                     let screen_size = monitor.size();
                     let scale_factor = monitor.scale_factor();
