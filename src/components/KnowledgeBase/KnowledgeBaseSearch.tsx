@@ -20,7 +20,6 @@ export function KnowledgeBaseSearch() {
     try {
       const res = await invoke<KnowledgeSearchResult[]>("knowledge_base_search", {
         query: q,
-        topK: 10,
       });
       setResults(res);
     } catch (e) {

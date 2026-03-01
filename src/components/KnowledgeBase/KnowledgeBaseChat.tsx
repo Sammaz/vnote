@@ -57,6 +57,7 @@ export function KnowledgeBaseChat() {
   const [streaming, setStreaming] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState<string | null>(null);
+  const [thinkingStage, setThinkingStage] = useState<"searching" | "thinking" | null>(null);
 
   // Model & prompt selection
   const [localModelId, setLocalModelId] = useState<string | null>(null);
@@ -117,16 +118,26 @@ export function KnowledgeBaseChat() {
 
       switch (data.status) {
         case "Searching":
+          setThinkingStage("searching");
           setStatusText(data.message);
           break;
         case "ContextFound":
+          setThinkingStage("thinking");
           setStatusText(null);
-          setMessages((prev) => [
-            ...prev,
-            { id: generateMessageId(), role: "assistant", content: "", sources: data.sources },
-          ]);
+          setMessages((prev) => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last && last.role === "assistant") {
+              updated[updated.length - 1] = {
+                ...last,
+                sources: data.sources,
+              };
+            }
+            return updated;
+          });
           break;
         case "Streaming":
+          setThinkingStage(null);
           currentContent += data.content;
           setMessages((prev) => {
             const updated = [...prev];
@@ -144,11 +155,13 @@ export function KnowledgeBaseChat() {
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
+          setThinkingStage(null);
           break;
         case "Error":
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
+          setThinkingStage(null);
           setMessages((prev) => {
             const updated = [...prev];
             const last = updated[updated.length - 1];
@@ -165,6 +178,7 @@ export function KnowledgeBaseChat() {
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
+          setThinkingStage(null);
           break;
       }
     });
@@ -240,6 +254,7 @@ export function KnowledgeBaseChat() {
     setInput("");
     setUploadedImages([]);
     setStreaming(true);
+    setThinkingStage("searching");
 
     const userMsg: ChatMessage = {
       id: generateMessageId(),
@@ -247,7 +262,12 @@ export function KnowledgeBaseChat() {
       content: text,
       imageUrls: currentImageUrls.length > 0 ? currentImageUrls : undefined,
     };
-    setMessages((prev) => [...prev, userMsg]);
+    const assistantMsg: ChatMessage = {
+      id: generateMessageId(),
+      role: "assistant",
+      content: "",
+    };
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
 
     const apiMessages = [...messages, { role: userMsg.role, content: userMsg.content }].map((m) => ({
       role: m.role,
@@ -265,6 +285,7 @@ export function KnowledgeBaseChat() {
       setRequestId(rid);
     } catch (e) {
       setStreaming(false);
+      setThinkingStage(null);
       setMessages((prev) => [
         ...prev,
         { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
@@ -280,6 +301,7 @@ export function KnowledgeBaseChat() {
         console.error("Failed to abort chat:", e);
       }
     }
+    setThinkingStage(null);
   }, [requestId]);
 
   const handleClearChat = useCallback(() => {
@@ -301,11 +323,13 @@ export function KnowledgeBaseChat() {
     if (msgIndex === -1) return;
 
     const editedMsg: ChatMessage = { ...messages[msgIndex], content: newContent, imageUrls: imageUrls ?? messages[msgIndex].imageUrls };
-    const truncated = [...messages.slice(0, msgIndex), editedMsg];
+    const assistantMsg: ChatMessage = { id: generateMessageId(), role: "assistant", content: "" };
+    const truncated = [...messages.slice(0, msgIndex), editedMsg, assistantMsg];
     setMessages(truncated);
 
     setStreaming(true);
-    const apiMessages = truncated.map((m) => ({ role: m.role, content: m.content }));
+    setThinkingStage("searching");
+    const apiMessages = [...messages.slice(0, msgIndex), editedMsg].map((m) => ({ role: m.role, content: m.content }));
     try {
       const request: KnowledgeChatRequest = {
         messages: apiMessages,
@@ -316,6 +340,7 @@ export function KnowledgeBaseChat() {
       setRequestId(rid);
     } catch (e) {
       setStreaming(false);
+      setThinkingStage(null);
       setMessages((prev) => [
         ...prev,
         { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
@@ -348,9 +373,11 @@ export function KnowledgeBaseChat() {
     if (msgIndex === -1) return;
 
     const truncated = messages.slice(0, msgIndex + 1);
-    setMessages(truncated);
+    const assistantMsg: ChatMessage = { id: generateMessageId(), role: "assistant", content: "" };
+    setMessages([...truncated, assistantMsg]);
 
     setStreaming(true);
+    setThinkingStage("searching");
     const apiMessages = truncated.map((m) => ({ role: m.role, content: m.content }));
     try {
       const request: KnowledgeChatRequest = {
@@ -362,6 +389,7 @@ export function KnowledgeBaseChat() {
       setRequestId(rid);
     } catch (e) {
       setStreaming(false);
+      setThinkingStage(null);
       setMessages((prev) => [
         ...prev,
         { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
@@ -400,6 +428,7 @@ export function KnowledgeBaseChat() {
             key={msg.id}
             message={msg}
             streaming={streaming}
+            thinkingStage={thinkingStage}
             isLast={i === messages.length - 1}
             onCopy={handleCopyMessage}
             onEdit={handleEditMessage}
@@ -680,6 +709,7 @@ function ActionButton({ icon, tooltip, onClick }: { icon: React.ReactNode; toolt
 function MessageBubble({
   message,
   streaming,
+  thinkingStage,
   isLast,
   onCopy,
   onEdit,
@@ -689,6 +719,7 @@ function MessageBubble({
 }: {
   message: ChatMessage;
   streaming: boolean;
+  thinkingStage: "searching" | "thinking" | null;
   isLast: boolean;
   onCopy: (content: string) => void;
   onEdit: (msgId: string, newContent: string, imageUrls?: string[]) => void;
@@ -937,10 +968,15 @@ function MessageBubble({
                   </ReactMarkdown>
                 </div>
               ) : streaming && isLast ? (
-                <div className="flex items-center gap-1 py-1">
-                  <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                  <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                  <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" />
+                <div className="flex items-center gap-2 py-1 text-slate-500 dark:text-slate-400">
+                  <div className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                    <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                    <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" />
+                  </div>
+                  <span className="text-xs animate-pulse">
+                    {thinkingStage === "searching" ? "检索中..." : "思考中..."}
+                  </span>
                 </div>
               ) : (
                 <span className="text-sm text-slate-400 italic">生成中...</span>

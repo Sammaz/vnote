@@ -58,6 +58,7 @@ pub mod keys {
     pub const RAG_CHUNK_OVERLAP: &str = "rag.chunk.overlap";
     pub const RAG_TOP_K: &str = "rag.search.top_k";
     pub const RAG_RERANK_K: &str = "rag.search.rerank_k";
+    pub const RAG_SIMILARITY_THRESHOLD: &str = "rag.search.similarity_threshold";
     pub const RAG_BATCH_SIZE: &str = "rag.embedding.batch_size";
     pub const RAG_TIMEOUT_CLIENT: &str = "rag.timeout.client";
     pub const RAG_TIMEOUT_INDEXING: &str = "rag.timeout.indexing";
@@ -79,10 +80,11 @@ pub mod defaults {
     pub const AI_TIMEOUT_ACQUIRE: u64 = 300;
 
     // RAG
-    pub const RAG_CHUNK_SIZE: usize = 500;
-    pub const RAG_CHUNK_OVERLAP: usize = 50;
-    pub const RAG_TOP_K: usize = 10;
-    pub const RAG_RERANK_K: usize = 5;
+    pub const RAG_CHUNK_SIZE: usize = 800;
+    pub const RAG_CHUNK_OVERLAP: usize = 160;
+    pub const RAG_TOP_K: usize = 30;
+    pub const RAG_RERANK_K: usize = 8;
+    pub const RAG_SIMILARITY_THRESHOLD: f32 = 0.25;
     pub const RAG_BATCH_SIZE: usize = 50;
     pub const RAG_TIMEOUT_CLIENT: u64 = 120;
     pub const RAG_TIMEOUT_INDEXING: u64 = 600;

@@ -1,12 +1,12 @@
 use crate::DATABASE;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
 use super::search;
-use super::types::{KnowledgeChatEvent, KnowledgeChatRequest};
+use super::types::{KnowledgeChatEvent, KnowledgeChatRequest, KnowledgeSearchResult};
 
 static CHAT_ABORT_FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
 
@@ -48,8 +48,35 @@ pub async fn chat(
         },
     );
 
-    // Search for relevant context
-    let search_results = search::search(&user_message, None).await?;
+    // Get AI config early (needed for query expansion)
+    let ai_config = if let Some(ref model_id) = request.model_id {
+        db.get_ai_config_by_id(model_id)
+            .map_err(|e| e.to_string())?
+            .ok_or("指定的 AI 模型不存在")?
+    } else {
+        db.get_default_ai_config()
+            .map_err(|e| e.to_string())?
+            .ok_or("未配置默认 AI 模型，请在设置中配置")?
+    };
+
+    // Expand query for better recall
+    let expanded = expand_query(&ai_config, &user_message).await;
+    let mut queries = vec![user_message.clone()];
+    queries.extend(expanded);
+
+    // Multi-query search and merge
+    let mut all_results: Vec<KnowledgeSearchResult> = Vec::new();
+    let mut seen_chunks: HashSet<String> = HashSet::new();
+    for q in &queries {
+        if let Ok(results) = search::search(q, None).await {
+            for r in results {
+                if seen_chunks.insert(r.chunk_id.clone()) {
+                    all_results.push(r);
+                }
+            }
+        }
+    }
+    let search_results = all_results;
 
     if abort_flag.load(Ordering::Relaxed) {
         let _ = app.emit(&event_name, KnowledgeChatEvent::Aborted);
@@ -80,17 +107,6 @@ pub async fn chat(
             })
             .collect::<Vec<_>>()
             .join("\n\n---\n\n")
-    };
-
-    // Get AI config
-    let ai_config = if let Some(ref model_id) = request.model_id {
-        db.get_ai_config_by_id(model_id)
-            .map_err(|e| e.to_string())?
-            .ok_or("指定的 AI 模型不存在")?
-    } else {
-        db.get_default_ai_config()
-            .map_err(|e| e.to_string())?
-            .ok_or("未配置默认 AI 模型，请在设置中配置")?
     };
 
     // Build messages for API call
@@ -267,4 +283,57 @@ pub async fn abort_chat(request_id: &str) -> Result<(), String> {
 async fn cleanup_abort_flag(request_id: &str) {
     let mut flags = get_abort_flags().lock().await;
     flags.remove(request_id);
+}
+
+/// Use LLM to generate 2 expanded queries for better recall
+async fn expand_query(ai_config: &crate::db::AiConfig, query: &str) -> Vec<String> {
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    let base_url = ai_config.base_url.trim_end_matches('/');
+    let api_url = format!("{}/chat/completions", base_url);
+
+    let body = serde_json::json!({
+        "model": ai_config.model,
+        "messages": [{
+            "role": "system",
+            "content": "你是查询扩展助手。给定用户查询，生成2个不同角度的搜索查询来帮助检索相关文档。每行一个查询，不要编号，不要解释。"
+        }, {
+            "role": "user",
+            "content": query
+        }],
+        "temperature": 0.7,
+        "max_tokens": 150
+    });
+
+    let response = match client
+        .post(&api_url)
+        .header("Content-Type", "application/json")
+        .header("Authorization", format!("Bearer {}", ai_config.api_key))
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => r,
+        _ => return vec![],
+    };
+
+    let json: serde_json::Value = match response.json().await {
+        Ok(j) => j,
+        Err(_) => return vec![],
+    };
+
+    json["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or("")
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .take(2)
+        .collect()
 }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::db::KnowledgeChunk;
 use crate::rag::{bytes_to_embedding, cosine_similarity, generate_embedding};
 use crate::settings::{defaults, keys, SettingsManager};
@@ -5,23 +7,138 @@ use crate::DATABASE;
 
 use super::types::KnowledgeSearchResult;
 
-/// Search knowledge base using semantic similarity
+/// Tokenize text for BM25: CJK single chars + lowercase English words
+fn tokenize(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut word = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            word.push(ch.to_ascii_lowercase());
+        } else {
+            if !word.is_empty() {
+                tokens.push(std::mem::take(&mut word));
+            }
+            if ch >= '\u{4E00}' && ch <= '\u{9FFF}'
+                || ch >= '\u{3400}' && ch <= '\u{4DBF}'
+                || ch >= '\u{F900}' && ch <= '\u{FAFF}'
+            {
+                tokens.push(ch.to_string());
+            }
+        }
+    }
+    if !word.is_empty() {
+        tokens.push(word);
+    }
+    tokens
+}
+
+/// BM25 scoring for a query against a set of documents
+fn bm25_search(query: &str, chunks: &[KnowledgeChunk], top_k: usize) -> Vec<(f32, usize)> {
+    let query_tokens = tokenize(query);
+    if query_tokens.is_empty() {
+        return vec![];
+    }
+
+    let n = chunks.len() as f32;
+    let k1: f32 = 1.2;
+    let b: f32 = 0.75;
+
+    // Precompute doc tokens and lengths
+    let doc_tokens: Vec<Vec<String>> = chunks.iter().map(|c| tokenize(&c.content)).collect();
+    let avg_dl: f32 = doc_tokens.iter().map(|t| t.len() as f32).sum::<f32>() / n;
+
+    // Document frequency for query terms
+    let mut df: HashMap<&str, u32> = HashMap::new();
+    for qt in &query_tokens {
+        let count = doc_tokens
+            .iter()
+            .filter(|dt| dt.iter().any(|t| t == qt))
+            .count() as u32;
+        df.insert(qt.as_str(), count);
+    }
+
+    // Score each document
+    let mut scored: Vec<(f32, usize)> = doc_tokens
+        .iter()
+        .enumerate()
+        .map(|(i, dt)| {
+            let dl = dt.len() as f32;
+            let mut score: f32 = 0.0;
+            // Term frequency map
+            let mut tf_map: HashMap<&str, u32> = HashMap::new();
+            for t in dt {
+                *tf_map.entry(t.as_str()).or_default() += 1;
+            }
+            for qt in &query_tokens {
+                let tf = *tf_map.get(qt.as_str()).unwrap_or(&0) as f32;
+                let doc_freq = *df.get(qt.as_str()).unwrap_or(&0) as f32;
+                if tf > 0.0 && doc_freq > 0.0 {
+                    let idf = ((n - doc_freq + 0.5) / (doc_freq + 0.5) + 1.0).ln();
+                    let tf_norm = (tf * (k1 + 1.0)) / (tf + k1 * (1.0 - b + b * dl / avg_dl));
+                    score += idf * tf_norm;
+                }
+            }
+            (score, i)
+        })
+        .filter(|(s, _)| *s > 0.0)
+        .collect();
+
+    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    scored.truncate(top_k);
+    scored
+}
+
+/// Reciprocal Rank Fusion: merge two ranked lists by chunk index
+fn rrf_merge(
+    vec_ranked: &[(f32, usize)],
+    bm25_ranked: &[(f32, usize)],
+    top_k: usize,
+) -> Vec<usize> {
+    let k: f32 = 60.0;
+    let mut scores: HashMap<usize, f32> = HashMap::new();
+    for (rank, &(_, idx)) in vec_ranked.iter().enumerate() {
+        *scores.entry(idx).or_default() += 1.0 / (k + rank as f32 + 1.0);
+    }
+    for (rank, &(_, idx)) in bm25_ranked.iter().enumerate() {
+        *scores.entry(idx).or_default() += 1.0 / (k + rank as f32 + 1.0);
+    }
+    let mut fused: Vec<(usize, f32)> = scores.into_iter().collect();
+    fused.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    fused.truncate(top_k);
+    fused.into_iter().map(|(idx, _)| idx).collect()
+}
+
+/// Deduplicate: keep at most max_per_note chunks per note
+fn deduplicate_results(results: Vec<KnowledgeSearchResult>, max_per_note: usize) -> Vec<KnowledgeSearchResult> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    results
+        .into_iter()
+        .filter(|r| {
+            let count = counts.entry(r.note_id.clone()).or_default();
+            if *count < max_per_note {
+                *count += 1;
+                true
+            } else {
+                false
+            }
+        })
+        .collect()
+}
+
+/// Search knowledge base using hybrid vector + BM25 search
 pub async fn search(
     query: &str,
     top_k: Option<i32>,
 ) -> Result<Vec<KnowledgeSearchResult>, String> {
     let db = DATABASE.get().ok_or("Database not initialized")?;
 
-    // Get embedding config
     let embedding_config = db
         .get_default_embedding_config()
         .map_err(|e| e.to_string())?
         .ok_or("Embedding 模型未配置，请在设置中配置 Embedding 模型并设为默认")?;
 
-    // Generate query embedding
     let query_embedding = generate_embedding(&embedding_config, query).await?;
 
-    // Load all chunks with embeddings
     let chunks = db
         .get_all_knowledge_chunks_with_embeddings()
         .map_err(|e| e.to_string())?;
@@ -34,24 +151,42 @@ pub async fn search(
         SettingsManager::get_int(keys::RAG_TOP_K, defaults::RAG_TOP_K) as i32
     }) as usize;
 
-    // Calculate similarities
-    let mut scored: Vec<(f32, &KnowledgeChunk)> = chunks
+    let threshold =
+        SettingsManager::get_float(keys::RAG_SIMILARITY_THRESHOLD, defaults::RAG_SIMILARITY_THRESHOLD);
+
+    // Vector search with similarity threshold
+    let mut vec_scored: Vec<(f32, usize)> = chunks
         .iter()
-        .filter_map(|chunk| {
+        .enumerate()
+        .filter_map(|(i, chunk)| {
             let emb_bytes = chunk.embedding.as_ref()?;
             let embedding = bytes_to_embedding(emb_bytes);
             let score = cosine_similarity(&query_embedding, &embedding);
-            Some((score, chunk))
+            if score >= threshold {
+                Some((score, i))
+            } else {
+                None
+            }
         })
         .collect();
 
-    // Sort descending
-    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    scored.truncate(top_k);
+    vec_scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    vec_scored.truncate(top_k);
 
-    // Build results with note titles
+    // BM25 search
+    let bm25_scored = bm25_search(query, &chunks, top_k);
+
+    // RRF merge
+    let merged_indices = rrf_merge(&vec_scored, &bm25_scored, top_k);
+
+    // Build results
     let mut results = Vec::new();
-    for (score, chunk) in scored {
+    // Create a score lookup from vector search for display
+    let vec_score_map: HashMap<usize, f32> = vec_scored.into_iter().map(|(s, i)| (i, s)).collect();
+
+    for idx in merged_indices {
+        let chunk = &chunks[idx];
+        let score = vec_score_map.get(&idx).copied().unwrap_or(0.0);
         let note_title = db
             .get_note_by_id(&chunk.note_id)
             .ok()
@@ -68,12 +203,15 @@ pub async fn search(
         });
     }
 
-    // Apply reranking if configured
+    // Rerank if configured
     let reranker_config = db.get_default_reranker_config().map_err(|e| e.to_string())?;
     if let Some(config) = reranker_config {
         let rerank_k = SettingsManager::get_int(keys::RAG_RERANK_K, defaults::RAG_RERANK_K);
         results = rerank_knowledge_results(&config, query, results, rerank_k).await?;
     }
+
+    // Deduplicate: max 3 chunks per note
+    results = deduplicate_results(results, 3);
 
     Ok(results)
 }
@@ -116,7 +254,6 @@ async fn rerank_knowledge_results(
         .map_err(|e| format!("Rerank request failed: {}", e))?;
 
     if !response.status().is_success() {
-        // Fallback to original order
         return Ok(results);
     }
 
