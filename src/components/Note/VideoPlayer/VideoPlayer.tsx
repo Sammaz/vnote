@@ -618,14 +618,19 @@ export function VideoPlayer({
     // Stall recovery mechanism
     let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
     let stallRetryCount = 0;
+    const MAX_STALL_RETRIES = 10;
 
     const attemptStallRecovery = () => {
       if (video.paused || video.ended) return;
       stallRetryCount++;
-      if (stallRetryCount > 3) {
-        // After 3 retries, nudge currentTime to force a re-fetch (simulates manual seek)
+      if (stallRetryCount > MAX_STALL_RETRIES) {
+        // Give up after too many retries to avoid request storms
+        console.warn("[VideoPlayer] Stall recovery exhausted, stopping retries");
+        return;
+      }
+      if (stallRetryCount > 3 && stallRetryCount % 4 === 0) {
+        // Every 4th retry, nudge currentTime to force a re-fetch
         video.currentTime = video.currentTime + 0.01;
-        stallRetryCount = 0;
       } else {
         video.play().catch(() => {});
       }

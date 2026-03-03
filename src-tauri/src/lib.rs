@@ -2069,9 +2069,13 @@ pub fn run() {
                         responder.respond(resp);
                     }
                 } else {
-                    // No Range header — return 200 with Accept-Ranges to guide browser
-                    let length = (file_size as usize).min(MAX_CHUNK);
-                    let mut buf = vec![0u8; length];
+                    // No Range header — treat as requesting from the beginning,
+                    // return 206 so Content-Length matches actual body and
+                    // Content-Range informs browser of total file size.
+                    let end = (MAX_CHUNK as u64 - 1).min(file_size.saturating_sub(1));
+                    let length = end + 1;
+
+                    let mut buf = vec![0u8; length as usize];
                     let bytes_read = match file.read(&mut buf) {
                         Ok(n) => n,
                         Err(_) => {
@@ -2083,11 +2087,16 @@ pub fn run() {
                         }
                     };
                     buf.truncate(bytes_read);
+                    let actual_end = bytes_read as u64 - 1;
 
-                    let resp = cors_response!(StatusCode::OK)
+                    let resp = cors_response!(StatusCode::PARTIAL_CONTENT)
                         .header("Content-Type", mime)
                         .header("Accept-Ranges", "bytes")
-                        .header("Content-Length", file_size.to_string())
+                        .header("Content-Length", bytes_read.to_string())
+                        .header(
+                            "Content-Range",
+                            format!("bytes 0-{}/{}", actual_end, file_size),
+                        )
                         .body(buf)
                         .unwrap();
                     responder.respond(resp);
