@@ -13,9 +13,6 @@ use std::io::{Read, Seek, SeekFrom};
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 
-/// Max chunk size per response: 2 MB (keep-alive makes small chunks cheap).
-const MAX_CHUNK: u64 = 2 * 1024 * 1024;
-
 /// Stream read buffer size: 64 KB.
 const STREAM_BUF: usize = 64 * 1024;
 
@@ -160,7 +157,7 @@ async fn handle_video(
 
         match parse_range_header(range_val, file_size) {
             Some((start, requested_end)) => {
-                let end = requested_end.min(start + MAX_CHUNK - 1).min(file_size - 1);
+                let end = requested_end.min(file_size - 1);
                 let length = end - start + 1;
 
                 common_headers.insert(header::CONTENT_LENGTH, length.into());
