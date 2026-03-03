@@ -22,6 +22,9 @@ import {
   VIDEO_STALL_PROGRESS_EPSILON,
   VIDEO_STALL_RECOVERY_MAX_RETRIES,
   VIDEO_STALL_RECOVERY_COOLDOWN_MS,
+  VIDEO_STALL_HARD_RECOVERY_TRIGGER_COUNT,
+  VIDEO_STALL_SOFT_SEEK_OFFSET,
+  VIDEO_STALL_MIN_BUFFERED_AHEAD,
 } from "./constants";
 import {
   convertSrtToVtt,
@@ -560,6 +563,7 @@ export function VideoPlayer({
     let stallRecoveryRetryCount = 0;
     let lastStallRecoveryAt = 0;
     let stallCheckStartTime = 0;
+    let stallSoftFailureCount = 0;
     let stallRecoveryReadyHandler: (() => void) | null = null;
 
     const clearStallCheck = () => {
@@ -655,6 +659,19 @@ export function VideoPlayer({
       cleanupPlayerEvents = setupPlayerEvents(player);
     };
 
+    const getBufferedAhead = () => {
+      const currentTime = video.currentTime;
+      const ranges = video.buffered;
+      for (let i = 0; i < ranges.length; i++) {
+        const start = ranges.start(i);
+        const end = ranges.end(i);
+        if (currentTime >= start && currentTime <= end) {
+          return end - currentTime;
+        }
+      }
+      return 0;
+    };
+
     const maybeRecoverFromStall = () => {
       if (!isMounted) return;
       const player = playerRef.current;
@@ -664,35 +681,86 @@ export function VideoPlayer({
       if (stallRecoveryRetryCount >= VIDEO_STALL_RECOVERY_MAX_RETRIES) return;
       if (now - lastStallRecoveryAt < VIDEO_STALL_RECOVERY_COOLDOWN_MS) return;
 
-      const resumeTime = video.currentTime;
+      const beforeRecoveryTime = video.currentTime;
+      const wasPaused = video.paused;
+
       lastStallRecoveryAt = now;
       stallRecoveryRetryCount += 1;
-      clearStallRecoveryReadyHandler();
 
-      stallRecoveryReadyHandler = () => {
+      try {
+        const currentDuration = Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY;
+        const maxSeek = Math.max(currentDuration - 0.1, 0);
+        const targetTime = Math.max(
+          Math.min(beforeRecoveryTime + VIDEO_STALL_SOFT_SEEK_OFFSET, maxSeek),
+          0
+        );
+        video.currentTime = targetTime;
+      } catch (seekErr) {
+        console.warn("Failed to nudge playback position after stall:", seekErr);
+      }
+
+      void video.play().catch(() => {});
+
+      setTimeout(() => {
         if (!isMounted) return;
-        clearStallRecoveryReadyHandler();
-        try {
-          const clampedTime = Number.isFinite(video.duration)
-            ? Math.min(resumeTime, Math.max(video.duration - 0.1, 0))
-            : resumeTime;
-          video.currentTime = Math.max(clampedTime, 0);
-        } catch (seekErr) {
-          console.warn("Failed to restore playback position after stall recovery:", seekErr);
-        }
-        void video.play().catch(() => {});
-      };
+        if (wasPaused || video.paused || video.ended) return;
 
-      video.addEventListener("canplay", stallRecoveryReadyHandler, { once: true });
-      video.addEventListener("loadedmetadata", stallRecoveryReadyHandler, { once: true });
-      video.load();
+        const advancedAfterRecovery = video.currentTime - beforeRecoveryTime;
+        if (advancedAfterRecovery > VIDEO_STALL_PROGRESS_EPSILON) {
+          stallSoftFailureCount = 0;
+          return;
+        }
+
+        stallSoftFailureCount += 1;
+        if (stallSoftFailureCount < VIDEO_STALL_HARD_RECOVERY_TRIGGER_COUNT) {
+          return;
+        }
+
+        stallSoftFailureCount = 0;
+        const resumeTime = video.currentTime;
+        clearStallRecoveryReadyHandler();
+
+        stallRecoveryReadyHandler = () => {
+          if (!isMounted) return;
+          clearStallRecoveryReadyHandler();
+          try {
+            const currentDuration = Number.isFinite(video.duration)
+              ? video.duration
+              : Number.POSITIVE_INFINITY;
+            const maxSeek = Math.max(currentDuration - 0.1, 0);
+            const targetTime = Math.max(Math.min(resumeTime, maxSeek), 0);
+            video.currentTime = targetTime;
+          } catch (seekErr) {
+            console.warn("Failed to restore playback position after hard stall recovery:", seekErr);
+          }
+          void video.play().catch(() => {});
+        };
+
+        video.addEventListener("canplay", stallRecoveryReadyHandler, { once: true });
+        video.addEventListener("loadedmetadata", stallRecoveryReadyHandler, { once: true });
+
+        void (async () => {
+          try {
+            await attachVideoSource(true);
+            if (!isMounted) return;
+            video.load();
+          } catch (refreshErr) {
+            clearStallRecoveryReadyHandler();
+            console.error("Failed to refresh video source after stall hard recovery:", refreshErr);
+          }
+        })();
+      }, 1000);
     };
 
     const startStallCheck = () => {
       if (!isMounted) return;
       clearStallCheck();
 
-      if (!playerRef.current?.playing || video.paused || video.ended) {
+      if (!playerRef.current?.playing || video.paused || video.ended || video.seeking || !Number.isFinite(video.currentTime)) {
+        return;
+      }
+
+      if (getBufferedAhead() >= VIDEO_STALL_MIN_BUFFERED_AHEAD) {
         return;
       }
 
@@ -700,7 +768,7 @@ export function VideoPlayer({
       stallCheckTimeout = setTimeout(() => {
         stallCheckTimeout = null;
         if (!isMounted) return;
-        if (!playerRef.current?.playing || video.paused || video.ended) return;
+        if (!playerRef.current?.playing || video.paused || video.ended || video.seeking || !Number.isFinite(video.currentTime)) return;
 
         const advanced = video.currentTime - stallCheckStartTime;
         if (advanced <= VIDEO_STALL_PROGRESS_EPSILON) {
@@ -755,6 +823,7 @@ export function VideoPlayer({
     video.addEventListener("playing", clearStallState);
     video.addEventListener("canplay", clearStallState);
     video.addEventListener("progress", clearStallState);
+    video.addEventListener("seeking", clearStallState);
 
     setupPlayer();
 
