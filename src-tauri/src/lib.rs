@@ -30,7 +30,9 @@ use std::sync::OnceLock;
 use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::http::{Response as HttpResponse, StatusCode};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+use std::io::{Read as IoRead, Seek, SeekFrom};
 
 const TRAY_ICON: &[u8] = include_bytes!("../icons/icon.png");
 static TRAY_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -1893,6 +1895,51 @@ fn batch_delete_notes(app: AppHandle, note_ids: Vec<String>) -> Result<(), Strin
     Ok(())
 }
 
+/// Return MIME type for a video file based on its extension.
+fn get_video_mime_type(path: &str) -> &'static str {
+    match path.rsplit('.').next().map(|e| e.to_ascii_lowercase()).as_deref() {
+        Some("mp4") | Some("m4v") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("ogg") | Some("ogv") => "video/ogg",
+        Some("mov") => "video/quicktime",
+        Some("avi") => "video/x-msvideo",
+        Some("mkv") => "video/x-matroska",
+        Some("ts") | Some("m2ts") => "video/mp2t",
+        Some("flv") => "video/x-flv",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Parse an HTTP Range header value against the given file size.
+/// Supports formats: `bytes=0-499`, `bytes=500-`, `bytes=-500`.
+fn parse_range_header(range: &str, file_size: u64) -> Option<(u64, u64)> {
+    let range = range.strip_prefix("bytes=")?;
+    if let Some(suffix) = range.strip_prefix('-') {
+        // bytes=-500  →  last 500 bytes
+        let len: u64 = suffix.parse().ok()?;
+        if len == 0 || len > file_size {
+            return None;
+        }
+        Some((file_size - len, file_size - 1))
+    } else if let Some(start_str) = range.strip_suffix('-') {
+        // bytes=500-  →  from 500 to end
+        let start: u64 = start_str.parse().ok()?;
+        if start >= file_size {
+            return None;
+        }
+        Some((start, file_size - 1))
+    } else {
+        // bytes=0-499
+        let mut parts = range.splitn(2, '-');
+        let start: u64 = parts.next()?.parse().ok()?;
+        let end: u64 = parts.next()?.parse().ok()?;
+        if start > end || start >= file_size {
+            return None;
+        }
+        Some((start, end.min(file_size - 1)))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1905,6 +1952,148 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .register_asynchronous_uri_scheme_protocol("stream", |_ctx, request, responder| {
+            std::thread::spawn(move || {
+                const MAX_CHUNK: usize = 2 * 1024 * 1024; // 2 MB
+
+                // Helper: build response with CORS headers pre-applied
+                macro_rules! cors_response {
+                    ($status:expr) => {
+                        HttpResponse::builder()
+                            .status($status)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .header("Access-Control-Allow-Headers", "Range")
+                            .header("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges")
+                    };
+                }
+
+                // Handle CORS preflight
+                if request.method().as_str().eq_ignore_ascii_case("OPTIONS") {
+                    let resp = cors_response!(StatusCode::NO_CONTENT)
+                        .header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
+                        .body(Vec::new())
+                        .unwrap();
+                    responder.respond(resp);
+                    return;
+                }
+
+                let url = request.uri().to_string();
+                // http://stream.localhost/<encoded_path> (Windows WebView2 format)
+                let encoded_path = url
+                    .strip_prefix("http://stream.localhost/")
+                    .or_else(|| url.strip_prefix("stream://localhost/"))
+                    .unwrap_or("");
+
+                let file_path = match urlencoding::decode(encoded_path) {
+                    Ok(p) => p.into_owned(),
+                    Err(_) => {
+                        let resp = cors_response!(StatusCode::BAD_REQUEST)
+                            .body(b"Invalid URL encoding".to_vec())
+                            .unwrap();
+                        responder.respond(resp);
+                        return;
+                    }
+                };
+
+                let mut file = match std::fs::File::open(&file_path) {
+                    Ok(f) => f,
+                    Err(_) => {
+                        let resp = cors_response!(StatusCode::NOT_FOUND)
+                            .body(format!("File not found: {}", file_path).into_bytes())
+                            .unwrap();
+                        responder.respond(resp);
+                        return;
+                    }
+                };
+
+                let file_size = match file.metadata() {
+                    Ok(m) => m.len(),
+                    Err(_) => {
+                        let resp = cors_response!(StatusCode::INTERNAL_SERVER_ERROR)
+                            .body(b"Cannot read file metadata".to_vec())
+                            .unwrap();
+                        responder.respond(resp);
+                        return;
+                    }
+                };
+
+                let mime = get_video_mime_type(&file_path);
+
+                // Check for Range header
+                let range_header = request
+                    .headers()
+                    .get("range")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.to_string());
+
+                if let Some(ref range_val) = range_header {
+                    if let Some((start, end)) = parse_range_header(range_val, file_size) {
+                        // Clamp chunk size
+                        let end = end.min(start + MAX_CHUNK as u64 - 1).min(file_size - 1);
+                        let length = end - start + 1;
+
+                        if file.seek(SeekFrom::Start(start)).is_err() {
+                            let resp = cors_response!(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(b"Seek failed".to_vec())
+                                .unwrap();
+                            responder.respond(resp);
+                            return;
+                        }
+
+                        let mut buf = vec![0u8; length as usize];
+                        if let Err(_) = file.read_exact(&mut buf) {
+                            let resp = cors_response!(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(b"Read failed".to_vec())
+                                .unwrap();
+                            responder.respond(resp);
+                            return;
+                        }
+
+                        let resp = cors_response!(StatusCode::PARTIAL_CONTENT)
+                            .header("Content-Type", mime)
+                            .header("Accept-Ranges", "bytes")
+                            .header("Content-Length", length.to_string())
+                            .header(
+                                "Content-Range",
+                                format!("bytes {}-{}/{}", start, end, file_size),
+                            )
+                            .body(buf)
+                            .unwrap();
+                        responder.respond(resp);
+                    } else {
+                        // Invalid range
+                        let resp = cors_response!(StatusCode::RANGE_NOT_SATISFIABLE)
+                            .header("Content-Range", format!("bytes */{}", file_size))
+                            .body(b"Range Not Satisfiable".to_vec())
+                            .unwrap();
+                        responder.respond(resp);
+                    }
+                } else {
+                    // No Range header — return 200 with Accept-Ranges to guide browser
+                    let length = (file_size as usize).min(MAX_CHUNK);
+                    let mut buf = vec![0u8; length];
+                    let bytes_read = match file.read(&mut buf) {
+                        Ok(n) => n,
+                        Err(_) => {
+                            let resp = cors_response!(StatusCode::INTERNAL_SERVER_ERROR)
+                                .body(b"Read failed".to_vec())
+                                .unwrap();
+                            responder.respond(resp);
+                            return;
+                        }
+                    };
+                    buf.truncate(bytes_read);
+
+                    let resp = cors_response!(StatusCode::OK)
+                        .header("Content-Type", mime)
+                        .header("Accept-Ranges", "bytes")
+                        .header("Content-Length", file_size.to_string())
+                        .body(buf)
+                        .unwrap();
+                    responder.respond(resp);
+                }
+            });
+        })
         .setup(|app| {
             // Initialize database
             let app_data_dir = app

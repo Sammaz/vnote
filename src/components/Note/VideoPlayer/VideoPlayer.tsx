@@ -25,7 +25,7 @@ import {
   isTsFormat,
   getSubtitleType,
 } from "./subtitleUtils";
-import { getVideoMimeType } from "./videoUtils";
+import { getVideoMimeType, toStreamUrl } from "./videoUtils";
 
 export interface VideoPlayerProps {
   videoUrl: string;
@@ -254,7 +254,7 @@ export function VideoPlayer({
 
     // 创建 video 元素
     const video = document.createElement("video");
-    video.preload = "auto";
+    video.preload = "metadata";
     video.playsInline = true;
     video.autoplay = autoPlay;
 
@@ -549,7 +549,7 @@ export function VideoPlayer({
     };
 
     video.crossOrigin = "anonymous";
-    const videoSrc = convertFileSrc(actualVideoUrl);
+    const videoSrc = toStreamUrl(actualVideoUrl);
     const source = document.createElement("source");
     source.src = videoSrc;
     source.type = getVideoMimeType(actualVideoUrl);
