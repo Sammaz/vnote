@@ -5505,6 +5505,7 @@ dependencies = [
  "chrono",
  "directories",
  "futures",
+ "http-range",
  "keyring",
  "proptest",
  "r2d2",

@@ -18,12 +18,6 @@ import {
   RESUME_THRESHOLD_START,
   RESUME_THRESHOLD_END,
   PLYR_I18N,
-  VIDEO_STALL_DETECT_WINDOW_MS,
-  VIDEO_STALL_PROGRESS_EPSILON,
-  VIDEO_STALL_RECOVERY_MAX_RETRIES,
-  VIDEO_STALL_RECOVERY_COOLDOWN_MS,
-  VIDEO_STALL_HARD_RECOVERY_TRIGGER_COUNT,
-  VIDEO_STALL_SOFT_SEEK_OFFSET,
 } from "./constants";
 import {
   convertSrtToVtt,
@@ -31,7 +25,7 @@ import {
   isTsFormat,
   getSubtitleType,
 } from "./subtitleUtils";
-import { getVideoMimeType, toStreamUrl, getVideoServerInfo } from "./videoUtils";
+import { getVideoMimeType, toStreamUrl } from "./videoUtils";
 
 export interface VideoPlayerProps {
   videoUrl: string;
@@ -557,33 +551,9 @@ export function VideoPlayer({
     video.crossOrigin = "anonymous";
 
     let subtitleObjectUrl: string | null = null;
-    let hasRefreshedServerInfoAfterError = false;
-    let stallCheckTimeout: ReturnType<typeof setTimeout> | null = null;
-    let stallRecoveryRetryCount = 0;
-    let lastStallRecoveryAt = 0;
-    let stallCheckStartTime = 0;
-    let stallSoftFailureCount = 0;
-    let stallRecoveryReadyHandler: (() => void) | null = null;
 
-    const clearStallCheck = () => {
-      if (stallCheckTimeout) {
-        clearTimeout(stallCheckTimeout);
-        stallCheckTimeout = null;
-      }
-      stallCheckStartTime = 0;
-    };
-
-    const clearStallRecoveryReadyHandler = () => {
-      if (!stallRecoveryReadyHandler) return;
-      video.removeEventListener("canplay", stallRecoveryReadyHandler);
-      video.removeEventListener("loadedmetadata", stallRecoveryReadyHandler);
-      stallRecoveryReadyHandler = null;
-    };
-
-    const attachVideoSource = async (forceRefresh = false) => {
-      const { port, token } = await getVideoServerInfo(forceRefresh);
-      if (!isMounted) return;
-      const videoSrc = toStreamUrl(actualVideoUrl, port, token);
+    const attachVideoSource = () => {
+      const videoSrc = toStreamUrl(actualVideoUrl);
       const source = document.createElement("source");
       source.src = videoSrc;
       source.type = getVideoMimeType(actualVideoUrl);
@@ -595,21 +565,8 @@ export function VideoPlayer({
     };
 
     const setupPlayer = async () => {
-      // Fetch video server info and set the video source
-      try {
-        await attachVideoSource();
-      } catch (err) {
-        console.error("Failed to get video server info:", err);
-        try {
-          await attachVideoSource(true);
-        } catch (refreshErr) {
-          console.error("Failed to refresh video server info:", refreshErr);
-          if (!isMounted) return;
-          setError("无法连接视频服务器");
-          setLoading(false);
-          return;
-        }
-      }
+      // Set the video source via custom protocol
+      attachVideoSource();
 
       if (isSrtSubtitle && subtitleUrl) {
         try {
@@ -658,141 +615,6 @@ export function VideoPlayer({
       cleanupPlayerEvents = setupPlayerEvents(player);
     };
 
-    const getBufferedAhead = () => {
-      const currentTime = video.currentTime;
-      const ranges = video.buffered;
-      for (let i = 0; i < ranges.length; i++) {
-        const start = ranges.start(i);
-        const end = ranges.end(i);
-        if (currentTime >= start && currentTime <= end) {
-          return end - currentTime;
-        }
-      }
-      return 0;
-    };
-
-    const maybeRecoverFromStall = () => {
-      if (!isMounted) return;
-      const player = playerRef.current;
-      if (!player || !player.playing || video.paused || video.ended) return;
-
-      const now = Date.now();
-      if (stallRecoveryRetryCount >= VIDEO_STALL_RECOVERY_MAX_RETRIES) return;
-      if (now - lastStallRecoveryAt < VIDEO_STALL_RECOVERY_COOLDOWN_MS) return;
-
-      const beforeRecoveryTime = video.currentTime;
-      const wasPaused = video.paused;
-
-      lastStallRecoveryAt = now;
-      stallRecoveryRetryCount += 1;
-
-      try {
-        const currentDuration = Number.isFinite(video.duration) ? video.duration : Number.POSITIVE_INFINITY;
-        const maxSeek = Math.max(currentDuration - 0.1, 0);
-        const targetTime = Math.max(
-          Math.min(beforeRecoveryTime + VIDEO_STALL_SOFT_SEEK_OFFSET, maxSeek),
-          0
-        );
-        video.currentTime = targetTime;
-      } catch (seekErr) {
-        console.warn("Failed to nudge playback position after stall:", seekErr);
-      }
-
-      void video.play().catch(() => {});
-
-      setTimeout(() => {
-        if (!isMounted) return;
-        if (wasPaused || video.paused || video.ended) return;
-
-        const advancedAfterRecovery = video.currentTime - beforeRecoveryTime;
-        if (advancedAfterRecovery > VIDEO_STALL_PROGRESS_EPSILON) {
-          stallSoftFailureCount = 0;
-          stallRecoveryRetryCount = 0;
-          return;
-        }
-
-        const bufferedAheadAfterRecovery = getBufferedAhead();
-        if (bufferedAheadAfterRecovery > VIDEO_STALL_PROGRESS_EPSILON) {
-          stallSoftFailureCount = 0;
-          stallRecoveryRetryCount = 0;
-          return;
-        }
-
-        stallSoftFailureCount += 1;
-        if (stallSoftFailureCount < VIDEO_STALL_HARD_RECOVERY_TRIGGER_COUNT) {
-          return;
-        }
-
-        stallSoftFailureCount = 0;
-        const resumeTime = video.currentTime;
-        clearStallRecoveryReadyHandler();
-
-        stallRecoveryReadyHandler = () => {
-          if (!isMounted) return;
-          clearStallRecoveryReadyHandler();
-          try {
-            const currentDuration = Number.isFinite(video.duration)
-              ? video.duration
-              : Number.POSITIVE_INFINITY;
-            const maxSeek = Math.max(currentDuration - 0.1, 0);
-            const targetTime = Math.max(Math.min(resumeTime, maxSeek), 0);
-            video.currentTime = targetTime;
-          } catch (seekErr) {
-            console.warn("Failed to restore playback position after hard stall recovery:", seekErr);
-          }
-          void video.play().catch(() => {});
-        };
-
-        video.addEventListener("canplay", stallRecoveryReadyHandler, { once: true });
-        video.addEventListener("loadedmetadata", stallRecoveryReadyHandler, { once: true });
-
-        void (async () => {
-          try {
-            await attachVideoSource(true);
-            if (!isMounted) return;
-            video.load();
-          } catch (refreshErr) {
-            clearStallRecoveryReadyHandler();
-            console.error("Failed to refresh video source after stall hard recovery:", refreshErr);
-          }
-        })();
-      }, 1000);
-    };
-
-    const startStallCheck = () => {
-      if (!isMounted) return;
-      clearStallCheck();
-
-      if (!playerRef.current?.playing || video.paused || video.ended || video.seeking || !Number.isFinite(video.currentTime)) {
-        return;
-      }
-
-      const bufferedAhead = getBufferedAhead();
-      if (bufferedAhead > VIDEO_STALL_PROGRESS_EPSILON) {
-        stallRecoveryRetryCount = 0;
-        stallSoftFailureCount = 0;
-        return;
-      }
-
-      stallCheckStartTime = video.currentTime;
-      stallCheckTimeout = setTimeout(() => {
-        stallCheckTimeout = null;
-        if (!isMounted) return;
-        if (!playerRef.current?.playing || video.paused || video.ended || video.seeking || !Number.isFinite(video.currentTime)) return;
-
-        const advanced = video.currentTime - stallCheckStartTime;
-        if (advanced <= VIDEO_STALL_PROGRESS_EPSILON) {
-          maybeRecoverFromStall();
-        }
-      }, VIDEO_STALL_DETECT_WINDOW_MS);
-    };
-
-    const clearStallState = () => {
-      clearStallCheck();
-      stallRecoveryRetryCount = 0;
-      stallSoftFailureCount = 0;
-    };
-
     const handleLoadedMetadata = () => {
       if (!isMounted) return;
       setLoading(false);
@@ -801,55 +623,19 @@ export function VideoPlayer({
 
     const handleVideoError = () => {
       if (!isMounted) return;
-
-      if (!hasRefreshedServerInfoAfterError) {
-        hasRefreshedServerInfoAfterError = true;
-        void (async () => {
-          try {
-            await attachVideoSource(true);
-            if (!isMounted) return;
-            video.load();
-            if (!video.paused && !video.ended) {
-              void video.play().catch(() => {});
-            }
-            return;
-          } catch (refreshErr) {
-            console.error("Failed to recover video source after error:", refreshErr);
-          }
-
-          if (!isMounted) return;
-          setError("无法加载视频文件，请检查文件路径是否正确");
-          setLoading(false);
-        })();
-        return;
-      }
-
       setError("无法加载视频文件，请检查文件路径是否正确");
       setLoading(false);
     };
 
     video.addEventListener("loadedmetadata", handleLoadedMetadata);
     video.addEventListener("error", handleVideoError);
-    video.addEventListener("waiting", startStallCheck);
-    video.addEventListener("stalled", startStallCheck);
-    video.addEventListener("playing", clearStallState);
-    video.addEventListener("canplay", clearStallState);
-    video.addEventListener("progress", clearStallState);
-    video.addEventListener("seeking", clearStallState);
 
     setupPlayer();
 
     return () => {
       isMounted = false;
-      clearStallCheck();
-      clearStallRecoveryReadyHandler();
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("error", handleVideoError);
-      video.removeEventListener("waiting", startStallCheck);
-      video.removeEventListener("stalled", startStallCheck);
-      video.removeEventListener("playing", clearStallState);
-      video.removeEventListener("canplay", clearStallState);
-      video.removeEventListener("progress", clearStallState);
       if (subtitleObjectUrl) {
         URL.revokeObjectURL(subtitleObjectUrl);
       }

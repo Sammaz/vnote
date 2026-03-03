@@ -39,7 +39,6 @@ const TRAY_ICON: &[u8] = include_bytes!("../icons/icon.png");
 static TRAY_ENABLED: AtomicBool = AtomicBool::new(false);
 const TRAY_ID: &str = "vnote-tray";
 pub static DATABASE: OnceLock<Database> = OnceLock::new();
-static VIDEO_SERVER: OnceLock<video_server::VideoServerInfo> = OnceLock::new();
 
 // 高光生成防重复：跟踪正在生成高光的 note_id
 static HIGHLIGHT_GENERATING_NOTES: OnceLock<tokio::sync::Mutex<HashSet<String>>> = OnceLock::new();
@@ -365,14 +364,6 @@ fn update_tray_enabled(app: AppHandle, enabled: bool) -> Result<(), String> {
 #[tauri::command]
 fn get_tray_enabled() -> bool {
     TRAY_ENABLED.load(Ordering::SeqCst)
-}
-
-#[tauri::command]
-fn get_video_server_info() -> Result<(u16, String), String> {
-    let info = VIDEO_SERVER
-        .get()
-        .ok_or_else(|| "Video server not started".to_string())?;
-    Ok((info.port, info.access_token.clone()))
 }
 
 #[tauri::command]
@@ -1932,11 +1923,8 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .register_uri_scheme_protocol("video-stream", video_server::handle_video_protocol)
         .setup(|app| {
-            // Start local HTTP video server
-            let server_info = video_server::start_video_server();
-            VIDEO_SERVER.set(server_info).expect("Video server already initialized");
-
             // Initialize database
             let app_data_dir = app
                 .path()
@@ -1986,7 +1974,6 @@ pub fn run() {
             update_tray_enabled,
             get_tray_enabled,
             show_window,
-            get_video_server_info,
             get_ai_configs,
             create_ai_config,
             update_ai_config,

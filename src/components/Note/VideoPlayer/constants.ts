@@ -17,14 +17,6 @@ export const ASS_BASE_MARGIN_V = 20; // 底部字幕边距
 export const ASS_LINE_HEIGHT = 45; // 每行字幕的高度间隔
 export const ASS_MIN_MARGIN_GAP = 30; // 最小边距差距
 
-// 视频卡顿自愈参数
-export const VIDEO_STALL_DETECT_WINDOW_MS = 6000;
-export const VIDEO_STALL_PROGRESS_EPSILON = 0.05;
-export const VIDEO_STALL_RECOVERY_MAX_RETRIES = 2;
-export const VIDEO_STALL_RECOVERY_COOLDOWN_MS = 8000;
-export const VIDEO_STALL_HARD_RECOVERY_TRIGGER_COUNT = 1;
-export const VIDEO_STALL_SOFT_SEEK_OFFSET = 0.08;
-
 // 视频扩展名到 MIME 类型的映射
 export const VIDEO_MIME_TYPES: Record<string, string> = {
   mp4: "video/mp4",

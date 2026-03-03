@@ -2,7 +2,6 @@
  * 视频相关工具函数
  */
 
-import { invoke } from "@tauri-apps/api/core";
 import { VIDEO_MIME_TYPES } from "./constants";
 
 /**
@@ -13,35 +12,10 @@ export function getVideoMimeType(filePath: string): string {
   return VIDEO_MIME_TYPES[ext] || "video/mp4";
 }
 
-// Lazy-cached video server info
-let cachedServerInfo: { port: number; token: string } | null = null;
-
 /**
- * 获取本地视频服务器的端口和 access_token（带懒缓存）
+ * 将本地文件路径转换为 video-stream 自定义协议 URL
  */
-export async function getVideoServerInfo(forceRefresh = false): Promise<{
-  port: number;
-  token: string;
-}> {
-  if (forceRefresh) {
-    cachedServerInfo = null;
-  }
-  if (cachedServerInfo) return cachedServerInfo;
-  const [port, token] = await invoke<[number, string]>(
-    "get_video_server_info"
-  );
-  cachedServerInfo = { port, token };
-  return cachedServerInfo;
-}
-
-/**
- * 将本地文件路径转换为 localhost HTTP 视频服务器 URL
- */
-export function toStreamUrl(
-  filePath: string,
-  port: number,
-  token: string
-): string {
+export function toStreamUrl(filePath: string): string {
   // Normalize backslashes to forward slashes
   const normalized = filePath.replace(/\\/g, "/");
   // Encode each segment but preserve /
@@ -49,5 +23,5 @@ export function toStreamUrl(
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
-  return `http://127.0.0.1:${port}/${encoded}?access_token=${token}`;
+  return `http://video-stream.localhost/${encoded}`;
 }
