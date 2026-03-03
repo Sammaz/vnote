@@ -25,7 +25,7 @@ import {
   isTsFormat,
   getSubtitleType,
 } from "./subtitleUtils";
-import { getVideoMimeType, toStreamUrl } from "./videoUtils";
+import { getVideoMimeType, toStreamUrl, getVideoServerInfo } from "./videoUtils";
 
 export interface VideoPlayerProps {
   videoUrl: string;
@@ -549,15 +549,26 @@ export function VideoPlayer({
     };
 
     video.crossOrigin = "anonymous";
-    const videoSrc = toStreamUrl(actualVideoUrl);
-    const source = document.createElement("source");
-    source.src = videoSrc;
-    source.type = getVideoMimeType(actualVideoUrl);
-    video.appendChild(source);
 
     let subtitleObjectUrl: string | null = null;
 
     const setupPlayer = async () => {
+      // Fetch video server info and set the video source
+      try {
+        const { port, token } = await getVideoServerInfo();
+        if (!isMounted) return;
+        const videoSrc = toStreamUrl(actualVideoUrl, port, token);
+        const source = document.createElement("source");
+        source.src = videoSrc;
+        source.type = getVideoMimeType(actualVideoUrl);
+        video.appendChild(source);
+      } catch (err) {
+        console.error("Failed to get video server info:", err);
+        if (!isMounted) return;
+        setError("无法连接视频服务器");
+        setLoading(false);
+        return;
+      }
       if (isSrtSubtitle && subtitleUrl) {
         try {
           const srtContent = await invoke<string>("read_file_content", { path: subtitleUrl });
