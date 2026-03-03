@@ -24,7 +24,6 @@ import {
   VIDEO_STALL_RECOVERY_COOLDOWN_MS,
   VIDEO_STALL_HARD_RECOVERY_TRIGGER_COUNT,
   VIDEO_STALL_SOFT_SEEK_OFFSET,
-  VIDEO_STALL_MIN_BUFFERED_AHEAD,
 } from "./constants";
 import {
   convertSrtToVtt,
@@ -708,6 +707,14 @@ export function VideoPlayer({
         const advancedAfterRecovery = video.currentTime - beforeRecoveryTime;
         if (advancedAfterRecovery > VIDEO_STALL_PROGRESS_EPSILON) {
           stallSoftFailureCount = 0;
+          stallRecoveryRetryCount = 0;
+          return;
+        }
+
+        const bufferedAheadAfterRecovery = getBufferedAhead();
+        if (bufferedAheadAfterRecovery > VIDEO_STALL_PROGRESS_EPSILON) {
+          stallSoftFailureCount = 0;
+          stallRecoveryRetryCount = 0;
           return;
         }
 
@@ -760,7 +767,10 @@ export function VideoPlayer({
         return;
       }
 
-      if (getBufferedAhead() >= VIDEO_STALL_MIN_BUFFERED_AHEAD) {
+      const bufferedAhead = getBufferedAhead();
+      if (bufferedAhead > VIDEO_STALL_PROGRESS_EPSILON) {
+        stallRecoveryRetryCount = 0;
+        stallSoftFailureCount = 0;
         return;
       }
 
@@ -779,6 +789,8 @@ export function VideoPlayer({
 
     const clearStallState = () => {
       clearStallCheck();
+      stallRecoveryRetryCount = 0;
+      stallSoftFailureCount = 0;
     };
 
     const handleLoadedMetadata = () => {
