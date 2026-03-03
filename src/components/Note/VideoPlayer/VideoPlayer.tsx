@@ -254,7 +254,7 @@ export function VideoPlayer({
 
     // 创建 video 元素
     const video = document.createElement("video");
-    video.preload = "metadata";
+    video.preload = "auto";
     video.playsInline = true;
     video.autoplay = autoPlay;
 
@@ -615,15 +615,58 @@ export function VideoPlayer({
       setLoading(false);
     };
 
+    // Stall recovery mechanism
+    let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    let stallRetryCount = 0;
+
+    const attemptStallRecovery = () => {
+      if (video.paused || video.ended) return;
+      stallRetryCount++;
+      if (stallRetryCount > 3) {
+        // After 3 retries, nudge currentTime to force a re-fetch (simulates manual seek)
+        video.currentTime = video.currentTime + 0.01;
+        stallRetryCount = 0;
+      } else {
+        video.play().catch(() => {});
+      }
+    };
+
+    const handleStalled = () => {
+      if (video.paused || video.ended) return;
+      if (stallRecoveryTimer) clearTimeout(stallRecoveryTimer);
+      stallRecoveryTimer = setTimeout(attemptStallRecovery, 2000);
+    };
+
+    const handleWaiting = () => {
+      if (video.paused || video.ended) return;
+      if (stallRecoveryTimer) clearTimeout(stallRecoveryTimer);
+      stallRecoveryTimer = setTimeout(attemptStallRecovery, 1500);
+    };
+
+    const handlePlaying = () => {
+      if (stallRecoveryTimer) {
+        clearTimeout(stallRecoveryTimer);
+        stallRecoveryTimer = null;
+      }
+      stallRetryCount = 0;
+    };
+
     video.addEventListener("loadedmetadata", handleLoadedMetadata);
     video.addEventListener("error", handleVideoError);
+    video.addEventListener("stalled", handleStalled);
+    video.addEventListener("waiting", handleWaiting);
+    video.addEventListener("playing", handlePlaying);
 
     setupPlayer();
 
     return () => {
       isMounted = false;
+      if (stallRecoveryTimer) clearTimeout(stallRecoveryTimer);
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("error", handleVideoError);
+      video.removeEventListener("stalled", handleStalled);
+      video.removeEventListener("waiting", handleWaiting);
+      video.removeEventListener("playing", handlePlaying);
       if (subtitleObjectUrl) {
         URL.revokeObjectURL(subtitleObjectUrl);
       }
