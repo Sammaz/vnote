@@ -19,10 +19,13 @@ let cachedServerInfo: { port: number; token: string } | null = null;
 /**
  * 获取本地视频服务器的端口和 access_token（带懒缓存）
  */
-export async function getVideoServerInfo(): Promise<{
+export async function getVideoServerInfo(forceRefresh = false): Promise<{
   port: number;
   token: string;
 }> {
+  if (forceRefresh) {
+    cachedServerInfo = null;
+  }
   if (cachedServerInfo) return cachedServerInfo;
   const [port, token] = await invoke<[number, string]>(
     "get_video_server_info"

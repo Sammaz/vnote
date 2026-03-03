@@ -551,24 +551,39 @@ export function VideoPlayer({
     video.crossOrigin = "anonymous";
 
     let subtitleObjectUrl: string | null = null;
+    let hasRefreshedServerInfoAfterError = false;
+
+    const attachVideoSource = async (forceRefresh = false) => {
+      const { port, token } = await getVideoServerInfo(forceRefresh);
+      if (!isMounted) return;
+      const videoSrc = toStreamUrl(actualVideoUrl, port, token);
+      const source = document.createElement("source");
+      source.src = videoSrc;
+      source.type = getVideoMimeType(actualVideoUrl);
+      const existingSource = video.querySelector("source");
+      if (existingSource) {
+        existingSource.remove();
+      }
+      video.appendChild(source);
+    };
 
     const setupPlayer = async () => {
       // Fetch video server info and set the video source
       try {
-        const { port, token } = await getVideoServerInfo();
-        if (!isMounted) return;
-        const videoSrc = toStreamUrl(actualVideoUrl, port, token);
-        const source = document.createElement("source");
-        source.src = videoSrc;
-        source.type = getVideoMimeType(actualVideoUrl);
-        video.appendChild(source);
+        await attachVideoSource();
       } catch (err) {
         console.error("Failed to get video server info:", err);
-        if (!isMounted) return;
-        setError("无法连接视频服务器");
-        setLoading(false);
-        return;
+        try {
+          await attachVideoSource(true);
+        } catch (refreshErr) {
+          console.error("Failed to refresh video server info:", refreshErr);
+          if (!isMounted) return;
+          setError("无法连接视频服务器");
+          setLoading(false);
+          return;
+        }
       }
+
       if (isSrtSubtitle && subtitleUrl) {
         try {
           const srtContent = await invoke<string>("read_file_content", { path: subtitleUrl });
@@ -609,6 +624,8 @@ export function VideoPlayer({
         video.appendChild(track);
       }
 
+      video.load();
+
       if (!isMounted) return;
       const player = initPlyr();
       cleanupPlayerEvents = setupPlayerEvents(player);
@@ -622,49 +639,124 @@ export function VideoPlayer({
 
     const handleVideoError = () => {
       if (!isMounted) return;
+
+      if (!hasRefreshedServerInfoAfterError) {
+        hasRefreshedServerInfoAfterError = true;
+        void (async () => {
+          try {
+            await attachVideoSource(true);
+            if (!isMounted) return;
+            video.load();
+            if (!video.paused && !video.ended) {
+              void video.play().catch(() => {});
+            }
+            return;
+          } catch (refreshErr) {
+            console.error("Failed to recover video source after error:", refreshErr);
+          }
+
+          if (!isMounted) return;
+          setError("无法加载视频文件，请检查文件路径是否正确");
+          setLoading(false);
+        })();
+        return;
+      }
+
       setError("无法加载视频文件，请检查文件路径是否正确");
       setLoading(false);
     };
 
     // Stall recovery mechanism
     let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    let stallCooldownTimer: ReturnType<typeof setTimeout> | null = null;
     let stallRetryCount = 0;
+    let stallCooldownUntil = 0;
     const MAX_STALL_RETRIES = 10;
+    const STALL_COOLDOWN_MS = 10_000;
 
-    const attemptStallRecovery = () => {
-      if (video.paused || video.ended) return;
-      stallRetryCount++;
-      if (stallRetryCount > MAX_STALL_RETRIES) {
-        // Give up after too many retries to avoid request storms
-        console.warn("[VideoPlayer] Stall recovery exhausted, stopping retries");
-        return;
-      }
-      if (stallRetryCount > 3 && stallRetryCount % 4 === 0) {
-        // Every 4th retry, nudge currentTime to force a re-fetch
-        video.currentTime = video.currentTime + 0.01;
-      } else {
-        video.play().catch(() => {});
-      }
-    };
-
-    const handleStalled = () => {
-      if (video.paused || video.ended) return;
-      if (stallRecoveryTimer) clearTimeout(stallRecoveryTimer);
-      stallRecoveryTimer = setTimeout(attemptStallRecovery, 2000);
-    };
-
-    const handleWaiting = () => {
-      if (video.paused || video.ended) return;
-      if (stallRecoveryTimer) clearTimeout(stallRecoveryTimer);
-      stallRecoveryTimer = setTimeout(attemptStallRecovery, 1500);
-    };
-
-    const handlePlaying = () => {
+    const clearStallRecoveryTimer = () => {
       if (stallRecoveryTimer) {
         clearTimeout(stallRecoveryTimer);
         stallRecoveryTimer = null;
       }
+    };
+
+    const resetStallRecovery = () => {
+      clearStallRecoveryTimer();
       stallRetryCount = 0;
+      stallCooldownUntil = 0;
+      if (stallCooldownTimer) {
+        clearTimeout(stallCooldownTimer);
+        stallCooldownTimer = null;
+      }
+    };
+
+    const attemptStallRecovery = () => {
+      if (video.paused || video.ended) return;
+
+      const now = Date.now();
+      if (now < stallCooldownUntil) return;
+
+      stallRetryCount++;
+      if (stallRetryCount > MAX_STALL_RETRIES) {
+        console.warn("[VideoPlayer] Stall recovery exhausted, enter cooldown");
+        stallCooldownUntil = now + STALL_COOLDOWN_MS;
+        if (stallCooldownTimer) {
+          clearTimeout(stallCooldownTimer);
+        }
+        stallCooldownTimer = setTimeout(() => {
+          stallRetryCount = 0;
+          stallCooldownUntil = 0;
+          stallCooldownTimer = null;
+        }, STALL_COOLDOWN_MS);
+        return;
+      }
+
+      if (stallRetryCount > 3 && stallRetryCount % 4 === 0) {
+        // Every 4th retry, nudge currentTime to force a re-fetch
+        video.currentTime = video.currentTime + 0.01;
+      } else {
+        void video.play().catch(() => {});
+      }
+    };
+
+    const scheduleStallRecovery = (delayMs: number) => {
+      if (video.paused || video.ended) return;
+      if (Date.now() < stallCooldownUntil) return;
+      clearStallRecoveryTimer();
+      stallRecoveryTimer = setTimeout(attemptStallRecovery, delayMs);
+    };
+
+    const handleStalled = () => {
+      scheduleStallRecovery(2000);
+    };
+
+    const handleWaiting = () => {
+      scheduleStallRecovery(1500);
+    };
+
+    const handleRecoverySignal = () => {
+      resetStallRecovery();
+    };
+
+    const handlePlaying = () => {
+      handleRecoverySignal();
+    };
+
+    const handleCanPlay = () => {
+      handleRecoverySignal();
+    };
+
+    const handleProgress = () => {
+      handleRecoverySignal();
+    };
+
+    const handleSeeked = () => {
+      handleRecoverySignal();
+    };
+
+    const handleLoadedData = () => {
+      handleRecoverySignal();
     };
 
     video.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -672,17 +764,26 @@ export function VideoPlayer({
     video.addEventListener("stalled", handleStalled);
     video.addEventListener("waiting", handleWaiting);
     video.addEventListener("playing", handlePlaying);
+    video.addEventListener("canplay", handleCanPlay);
+    video.addEventListener("progress", handleProgress);
+    video.addEventListener("seeked", handleSeeked);
+    video.addEventListener("loadeddata", handleLoadedData);
 
     setupPlayer();
 
     return () => {
       isMounted = false;
       if (stallRecoveryTimer) clearTimeout(stallRecoveryTimer);
+      if (stallCooldownTimer) clearTimeout(stallCooldownTimer);
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("error", handleVideoError);
       video.removeEventListener("stalled", handleStalled);
       video.removeEventListener("waiting", handleWaiting);
       video.removeEventListener("playing", handlePlaying);
+      video.removeEventListener("canplay", handleCanPlay);
+      video.removeEventListener("progress", handleProgress);
+      video.removeEventListener("seeked", handleSeeked);
+      video.removeEventListener("loadeddata", handleLoadedData);
       if (subtitleObjectUrl) {
         URL.revokeObjectURL(subtitleObjectUrl);
       }

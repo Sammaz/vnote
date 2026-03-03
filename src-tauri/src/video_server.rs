@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
@@ -116,7 +116,7 @@ fn handle_connection(mut stream: TcpStream, access_token: &str) {
     }
 
     // Parse method and path
-    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
     if parts.len() < 2 {
         return;
     }
@@ -144,6 +144,20 @@ fn handle_connection(mut stream: TcpStream, access_token: &str) {
              Access-Control-Allow-Headers: Range\r\n\
              Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
              Content-Length: 0\r\n\
+             Connection: close\r\n\
+             \r\n"
+        );
+        let _ = stream.write_all(resp.as_bytes());
+        return;
+    }
+
+    if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
+        let resp = format!(
+            "HTTP/1.1 405 Method Not Allowed\r\n\
+             Allow: GET, HEAD, OPTIONS\r\n\
+             Content-Length: 0\r\n\
+             Access-Control-Allow-Origin: *\r\n\
+             Connection: close\r\n\
              \r\n"
         );
         let _ = stream.write_all(resp.as_bytes());
@@ -165,7 +179,11 @@ fn handle_connection(mut stream: TcpStream, access_token: &str) {
     }
 
     // Decode file path (skip leading /)
-    let encoded_path = &path[1..]; // strip leading /
+    let encoded_path = if let Some(stripped) = path.strip_prefix('/') {
+        stripped
+    } else {
+        path
+    };
     let file_path = match urlencoding::decode(encoded_path) {
         Ok(p) => p.into_owned(),
         Err(_) => {
@@ -222,12 +240,31 @@ fn handle_connection(mut stream: TcpStream, access_token: &str) {
         .find(|(k, _)| k == "range")
         .map(|(_, v)| v.clone());
 
+    let is_head = method.eq_ignore_ascii_case("HEAD");
+
     if let Some(ref range_val) = range_header {
-        // Range request
+        let is_multi_range = range_val.contains(',');
+
+        if is_multi_range {
+            let header = format!(
+                "HTTP/1.1 200 OK\r\n\
+                 Content-Type: {mime}\r\n\
+                 Content-Length: {file_size}\r\n\
+                 Accept-Ranges: bytes\r\n\
+                 Access-Control-Allow-Origin: *\r\n\
+                 Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
+                 Connection: close\r\n\
+                 \r\n"
+            );
+            let _ = stream.write_all(header.as_bytes());
+            if !is_head {
+                let _ = io::copy(&mut file, &mut stream);
+            }
+            return;
+        }
+
         if let Some((start, requested_end)) = parse_range_header(range_val, file_size) {
-            let end = requested_end
-                .min(start + MAX_CHUNK - 1)
-                .min(file_size - 1);
+            let end = requested_end.min(start + MAX_CHUNK - 1).min(file_size - 1);
             let length = end - start + 1;
 
             if file.seek(SeekFrom::Start(start)).is_err() {
@@ -241,31 +278,23 @@ fn handle_connection(mut stream: TcpStream, access_token: &str) {
                 return;
             }
 
-            let mut buf = vec![0u8; length as usize];
-            if file.read_exact(&mut buf).is_err() {
-                let _ = write_response(
-                    &mut stream,
-                    500,
-                    "Internal Server Error",
-                    "text/plain",
-                    b"Read failed",
-                );
-                return;
-            }
-
             let resp_header = format!(
                 "HTTP/1.1 206 Partial Content\r\n\
                  Content-Type: {mime}\r\n\
                  Content-Length: {length}\r\n\
                  Content-Range: bytes {start}-{end}/{file_size}\r\n\
                  Accept-Ranges: bytes\r\n\
-                 Connection: keep-alive\r\n\
+                 Connection: close\r\n\
                  Access-Control-Allow-Origin: *\r\n\
                  Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
                  \r\n"
             );
             let _ = stream.write_all(resp_header.as_bytes());
-            let _ = stream.write_all(&buf);
+
+            if !is_head {
+                let mut limited = file.take(length);
+                let _ = io::copy(&mut limited, &mut stream);
+            }
         } else {
             // Invalid range
             let body = b"Range Not Satisfiable";
@@ -274,48 +303,31 @@ fn handle_connection(mut stream: TcpStream, access_token: &str) {
                  Content-Range: bytes */{file_size}\r\n\
                  Content-Length: {}\r\n\
                  Access-Control-Allow-Origin: *\r\n\
+                 Connection: close\r\n\
                  \r\n",
                 body.len()
             );
             let _ = stream.write_all(resp.as_bytes());
-            let _ = stream.write_all(body);
+            if !is_head {
+                let _ = stream.write_all(body);
+            }
         }
     } else {
-        // No Range header — return first chunk as 206 so the browser knows
-        // the total size and will issue Range requests for subsequent chunks.
-        let end = (MAX_CHUNK - 1).min(file_size.saturating_sub(1));
-        let length = end + 1;
-
-        let mut buf = vec![0u8; length as usize];
-        let bytes_read = match file.read(&mut buf) {
-            Ok(n) => n,
-            Err(_) => {
-                let _ = write_response(
-                    &mut stream,
-                    500,
-                    "Internal Server Error",
-                    "text/plain",
-                    b"Read failed",
-                );
-                return;
-            }
-        };
-        buf.truncate(bytes_read);
-        let actual_end = bytes_read as u64 - 1;
-
         let resp_header = format!(
-            "HTTP/1.1 206 Partial Content\r\n\
+            "HTTP/1.1 200 OK\r\n\
              Content-Type: {mime}\r\n\
-             Content-Length: {bytes_read}\r\n\
-             Content-Range: bytes 0-{actual_end}/{file_size}\r\n\
+             Content-Length: {file_size}\r\n\
              Accept-Ranges: bytes\r\n\
-             Connection: keep-alive\r\n\
+             Connection: close\r\n\
              Access-Control-Allow-Origin: *\r\n\
              Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
              \r\n"
         );
         let _ = stream.write_all(resp_header.as_bytes());
-        let _ = stream.write_all(&buf);
+
+        if !is_head {
+            let _ = io::copy(&mut file, &mut stream);
+        }
     }
 }
 

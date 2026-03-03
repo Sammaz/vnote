@@ -23,7 +23,9 @@ mod video_server;
 use chat::ChatRequest;
 use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest};
 use regex::Regex;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use tokio::process::Command as TokioCommand;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -42,8 +44,15 @@ static VIDEO_SERVER: OnceLock<video_server::VideoServerInfo> = OnceLock::new();
 // 高光生成防重复：跟踪正在生成高光的 note_id
 static HIGHLIGHT_GENERATING_NOTES: OnceLock<tokio::sync::Mutex<HashSet<String>>> = OnceLock::new();
 
+// TS 转 MP4 防重复：跟踪正在转换的 (note_id + ts_path)
+static TS_CONVERTING_TASKS: OnceLock<tokio::sync::Mutex<HashSet<String>>> = OnceLock::new();
+
 fn get_highlight_generating_notes() -> &'static tokio::sync::Mutex<HashSet<String>> {
     HIGHLIGHT_GENERATING_NOTES.get_or_init(|| tokio::sync::Mutex::new(HashSet::new()))
+}
+
+fn get_ts_converting_tasks() -> &'static tokio::sync::Mutex<HashSet<String>> {
+    TS_CONVERTING_TASKS.get_or_init(|| tokio::sync::Mutex::new(HashSet::new()))
 }
 
 fn get_db() -> &'static Database {
@@ -625,35 +634,44 @@ struct TsConversionResult {
 fn start_ts_conversion(app: AppHandle, ts_path: String, note_id: String) {
     // Spawn the conversion task in background and return immediately
     let note_id_clone = note_id.clone();
+    let ts_path_clone = ts_path.clone();
     tauri::async_runtime::spawn(async move {
-        // Check ffmpeg availability first
-        let ffmpeg_available = match async_ffmpeg_command().arg("-version").output().await {
-            Ok(output) => output.status.success(),
-            Err(_) => false,
-        };
+        let convert_key = format!("{}::{}", note_id_clone, ts_path_clone);
 
-        if !ffmpeg_available {
-            let payload = TsConversionResult {
-                note_id: note_id_clone,
-                success: false,
-                mp4_path: None,
-                error: Some("未检测到 ffmpeg。请安装 ffmpeg 以支持 TS 视频播放。".to_string()),
-            };
-            let _ = app.emit("ts-conversion-complete", payload);
-            return;
+        // 防重复：同 note + 同 TS 路径仅允许一个转换任务
+        {
+            let mut converting = get_ts_converting_tasks().lock().await;
+            if converting.contains(&convert_key) {
+                tracing::warn!("[ts-convert] duplicated request ignored: {}", convert_key);
+                return;
+            }
+            converting.insert(convert_key.clone());
         }
 
-        let result = convert_ts_to_mp4_internal(&app, &ts_path, &note_id_clone).await;
+        let result = async {
+            // Check ffmpeg availability first
+            let ffmpeg_available = match async_ffmpeg_command().arg("-version").output().await {
+                Ok(output) => output.status.success(),
+                Err(_) => false,
+            };
+
+            if !ffmpeg_available {
+                return Err("未检测到 ffmpeg。请安装 ffmpeg 以支持 TS 视频播放。".to_string());
+            }
+
+            convert_ts_to_mp4_internal(&app, &ts_path_clone, &note_id_clone).await
+        }
+        .await;
 
         let payload = match result {
             Ok(mp4_path) => TsConversionResult {
-                note_id: note_id_clone,
+                note_id: note_id_clone.clone(),
                 success: true,
                 mp4_path: Some(mp4_path),
                 error: None,
             },
             Err(e) => TsConversionResult {
-                note_id: note_id_clone,
+                note_id: note_id_clone.clone(),
                 success: false,
                 mp4_path: None,
                 error: Some(e),
@@ -662,6 +680,9 @@ fn start_ts_conversion(app: AppHandle, ts_path: String, note_id: String) {
 
         // Emit event to frontend
         let _ = app.emit("ts-conversion-complete", payload);
+
+        let mut converting = get_ts_converting_tasks().lock().await;
+        converting.remove(&convert_key);
     });
 }
 
@@ -679,38 +700,34 @@ async fn convert_ts_to_mp4_internal(app: &AppHandle, ts_path: &str, note_id: &st
     let note_cache_dir = cache_dir.join("notes").join(note_id);
     tokio::fs::create_dir_all(&note_cache_dir).await.map_err(|e| e.to_string())?;
 
-    // Generate output filename based on input file hash
-    let file_name = ts_path.file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("video");
-    let mp4_path = note_cache_dir.join(format!("{}.mp4", file_name));
+    // Build a stable cache key from full ts path + file size + modified time
+    let ts_path_buf = ts_path.to_path_buf();
+    let ts_path_string = ts_path.to_string_lossy().to_string();
+    let cache_key = tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let meta = std::fs::metadata(&ts_path_buf).map_err(|e| format!("读取 TS 文件元数据失败: {}", e))?;
+        let size = meta.len();
+        let modified = meta
+            .modified()
+            .map_err(|e| format!("读取 TS 文件修改时间失败: {}", e))?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| format!("TS 文件修改时间无效: {}", e))?
+            .as_nanos();
+
+        let mut hasher = DefaultHasher::new();
+        ts_path_string.hash(&mut hasher);
+        size.hash(&mut hasher);
+        modified.hash(&mut hasher);
+
+        Ok(format!("{:016x}", hasher.finish()))
+    })
+    .await
+    .map_err(|e| format!("转换缓存键任务失败: {}", e))??;
+
+    let mp4_path = note_cache_dir.join(format!("{}.mp4", cache_key));
 
     // If already converted, return existing file
     if mp4_path.exists() {
-        // Check if the mp4 file is newer than the ts file (use spawn_blocking for sync I/O)
-        let ts_path_clone = ts_path.to_path_buf();
-        let mp4_path_clone = mp4_path.clone();
-
-        let should_use_cache = tokio::task::spawn_blocking(move || {
-            let ts_modified = std::fs::metadata(&ts_path_clone)
-                .and_then(|m| m.modified())
-                .ok();
-            let mp4_modified = std::fs::metadata(&mp4_path_clone)
-                .and_then(|m| m.modified())
-                .ok();
-
-            if let (Some(ts_time), Some(mp4_time)) = (ts_modified, mp4_modified) {
-                mp4_time > ts_time
-            } else {
-                false
-            }
-        })
-        .await
-        .unwrap_or(false);
-
-        if should_use_cache {
-            return Ok(mp4_path.to_string_lossy().to_string());
-        }
+        return Ok(mp4_path.to_string_lossy().to_string());
     }
 
     // Run ffmpeg to remux (copy streams, no re-encoding)
