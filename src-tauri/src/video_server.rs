@@ -150,12 +150,21 @@ async fn handle_video(
         .map(|s| s.to_string());
 
     if let Some(ref range_val) = range_header {
-        // Multi-range → fall back to full 200
-        if range_val.contains(',') {
-            return serve_full(file, file_size, common_headers, is_head);
+        if file_size == 0 {
+            let mut h = HeaderMap::new();
+            h.insert(header::CONTENT_RANGE, "bytes */0".parse().unwrap());
+            return (StatusCode::RANGE_NOT_SATISFIABLE, h, "Range Not Satisfiable")
+                .into_response();
         }
 
-        match parse_range_header(range_val, file_size) {
+        // Multi-range requests are served as the first range only.
+        let range_for_parse = range_val
+            .split(',')
+            .next()
+            .map(str::trim)
+            .unwrap_or(range_val.as_str());
+
+        match parse_range_header(range_for_parse, file_size) {
             Some((start, requested_end)) => {
                 let end = requested_end.min(file_size - 1);
                 let length = end - start + 1;
@@ -275,8 +284,11 @@ fn parse_range_header(range: &str, file_size: u64) -> Option<(u64, u64)> {
     let range = range.strip_prefix("bytes=")?;
     if let Some(suffix) = range.strip_prefix('-') {
         let len: u64 = suffix.parse().ok()?;
-        if len == 0 || len > file_size {
+        if len == 0 {
             return None;
+        }
+        if len >= file_size {
+            return Some((0, file_size - 1));
         }
         Some((file_size - len, file_size - 1))
     } else if let Some(start_str) = range.strip_suffix('-') {

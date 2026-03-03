@@ -18,6 +18,10 @@ import {
   RESUME_THRESHOLD_START,
   RESUME_THRESHOLD_END,
   PLYR_I18N,
+  VIDEO_STALL_DETECT_WINDOW_MS,
+  VIDEO_STALL_PROGRESS_EPSILON,
+  VIDEO_STALL_RECOVERY_MAX_RETRIES,
+  VIDEO_STALL_RECOVERY_COOLDOWN_MS,
 } from "./constants";
 import {
   convertSrtToVtt,
@@ -552,6 +556,26 @@ export function VideoPlayer({
 
     let subtitleObjectUrl: string | null = null;
     let hasRefreshedServerInfoAfterError = false;
+    let stallCheckTimeout: ReturnType<typeof setTimeout> | null = null;
+    let stallRecoveryRetryCount = 0;
+    let lastStallRecoveryAt = 0;
+    let stallCheckStartTime = 0;
+    let stallRecoveryReadyHandler: (() => void) | null = null;
+
+    const clearStallCheck = () => {
+      if (stallCheckTimeout) {
+        clearTimeout(stallCheckTimeout);
+        stallCheckTimeout = null;
+      }
+      stallCheckStartTime = 0;
+    };
+
+    const clearStallRecoveryReadyHandler = () => {
+      if (!stallRecoveryReadyHandler) return;
+      video.removeEventListener("canplay", stallRecoveryReadyHandler);
+      video.removeEventListener("loadedmetadata", stallRecoveryReadyHandler);
+      stallRecoveryReadyHandler = null;
+    };
 
     const attachVideoSource = async (forceRefresh = false) => {
       const { port, token } = await getVideoServerInfo(forceRefresh);
@@ -631,6 +655,64 @@ export function VideoPlayer({
       cleanupPlayerEvents = setupPlayerEvents(player);
     };
 
+    const maybeRecoverFromStall = () => {
+      if (!isMounted) return;
+      const player = playerRef.current;
+      if (!player || !player.playing || video.paused || video.ended) return;
+
+      const now = Date.now();
+      if (stallRecoveryRetryCount >= VIDEO_STALL_RECOVERY_MAX_RETRIES) return;
+      if (now - lastStallRecoveryAt < VIDEO_STALL_RECOVERY_COOLDOWN_MS) return;
+
+      const resumeTime = video.currentTime;
+      lastStallRecoveryAt = now;
+      stallRecoveryRetryCount += 1;
+      clearStallRecoveryReadyHandler();
+
+      stallRecoveryReadyHandler = () => {
+        if (!isMounted) return;
+        clearStallRecoveryReadyHandler();
+        try {
+          const clampedTime = Number.isFinite(video.duration)
+            ? Math.min(resumeTime, Math.max(video.duration - 0.1, 0))
+            : resumeTime;
+          video.currentTime = Math.max(clampedTime, 0);
+        } catch (seekErr) {
+          console.warn("Failed to restore playback position after stall recovery:", seekErr);
+        }
+        void video.play().catch(() => {});
+      };
+
+      video.addEventListener("canplay", stallRecoveryReadyHandler, { once: true });
+      video.addEventListener("loadedmetadata", stallRecoveryReadyHandler, { once: true });
+      video.load();
+    };
+
+    const startStallCheck = () => {
+      if (!isMounted) return;
+      clearStallCheck();
+
+      if (!playerRef.current?.playing || video.paused || video.ended) {
+        return;
+      }
+
+      stallCheckStartTime = video.currentTime;
+      stallCheckTimeout = setTimeout(() => {
+        stallCheckTimeout = null;
+        if (!isMounted) return;
+        if (!playerRef.current?.playing || video.paused || video.ended) return;
+
+        const advanced = video.currentTime - stallCheckStartTime;
+        if (advanced <= VIDEO_STALL_PROGRESS_EPSILON) {
+          maybeRecoverFromStall();
+        }
+      }, VIDEO_STALL_DETECT_WINDOW_MS);
+    };
+
+    const clearStallState = () => {
+      clearStallCheck();
+    };
+
     const handleLoadedMetadata = () => {
       if (!isMounted) return;
       setLoading(false);
@@ -668,13 +750,25 @@ export function VideoPlayer({
 
     video.addEventListener("loadedmetadata", handleLoadedMetadata);
     video.addEventListener("error", handleVideoError);
+    video.addEventListener("waiting", startStallCheck);
+    video.addEventListener("stalled", startStallCheck);
+    video.addEventListener("playing", clearStallState);
+    video.addEventListener("canplay", clearStallState);
+    video.addEventListener("progress", clearStallState);
 
     setupPlayer();
 
     return () => {
       isMounted = false;
+      clearStallCheck();
+      clearStallRecoveryReadyHandler();
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("error", handleVideoError);
+      video.removeEventListener("waiting", startStallCheck);
+      video.removeEventListener("stalled", startStallCheck);
+      video.removeEventListener("playing", clearStallState);
+      video.removeEventListener("canplay", clearStallState);
+      video.removeEventListener("progress", clearStallState);
       if (subtitleObjectUrl) {
         URL.revokeObjectURL(subtitleObjectUrl);
       }
