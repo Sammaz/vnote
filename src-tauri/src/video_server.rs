@@ -50,7 +50,7 @@ pub fn start_video_server() -> VideoServerInfo {
                     .expect("Failed to convert to tokio TcpListener");
 
                 let app = Router::new()
-                    .route("/*path", get(handle_video).head(handle_video))
+                    .route("/{*path}", get(handle_video).head(handle_video))
                     .layer(middleware::from_fn(move |req, next| {
                         let t = token.clone();
                         auth_middleware(t, req, next)
