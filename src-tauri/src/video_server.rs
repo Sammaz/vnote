@@ -37,33 +37,43 @@ pub fn start_video_server() -> VideoServerInfo {
     let access_token = uuid::Uuid::new_v4().to_string();
 
     let token = access_token.clone();
-    tokio::spawn(async move {
-        let listener = tokio::net::TcpListener::from_std(std_listener)
-            .expect("Failed to convert to tokio TcpListener");
+    std::thread::Builder::new()
+        .name("video-server".into())
+        .spawn(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to build tokio runtime for video server");
 
-        let app = Router::new()
-            .route("/*path", get(handle_video).head(handle_video))
-            .layer(middleware::from_fn(move |req, next| {
-                let t = token.clone();
-                auth_middleware(t, req, next)
-            }))
-            .layer(
-                CorsLayer::new()
-                    .allow_origin(tower_http::cors::Any)
-                    .allow_methods(tower_http::cors::Any)
-                    .allow_headers(tower_http::cors::Any)
-                    .expose_headers([
-                        header::CONTENT_RANGE,
-                        header::CONTENT_LENGTH,
-                        header::ACCEPT_RANGES,
-                    ]),
-            );
+            rt.block_on(async move {
+                let listener = tokio::net::TcpListener::from_std(std_listener)
+                    .expect("Failed to convert to tokio TcpListener");
 
-        eprintln!("[video-server] listening on 127.0.0.1:{port}");
-        axum::serve(listener, app)
-            .await
-            .expect("Video server failed");
-    });
+                let app = Router::new()
+                    .route("/*path", get(handle_video).head(handle_video))
+                    .layer(middleware::from_fn(move |req, next| {
+                        let t = token.clone();
+                        auth_middleware(t, req, next)
+                    }))
+                    .layer(
+                        CorsLayer::new()
+                            .allow_origin(tower_http::cors::Any)
+                            .allow_methods(tower_http::cors::Any)
+                            .allow_headers(tower_http::cors::Any)
+                            .expose_headers([
+                                header::CONTENT_RANGE,
+                                header::CONTENT_LENGTH,
+                                header::ACCEPT_RANGES,
+                            ]),
+                    );
+
+                eprintln!("[video-server] listening on 127.0.0.1:{port}");
+                axum::serve(listener, app)
+                    .await
+                    .expect("Video server failed");
+            });
+        })
+        .expect("Failed to spawn video-server thread");
 
     VideoServerInfo { port, access_token }
 }
