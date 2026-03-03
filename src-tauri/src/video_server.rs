@@ -1,5 +1,5 @@
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     extract::{Query, Request},
     http::{header, HeaderMap, StatusCode},
     middleware::{self, Next},
@@ -8,8 +8,9 @@ use axum::{
     Router,
 };
 use std::collections::HashMap;
-use tokio::io::{AsyncReadExt, AsyncSeekExt};
-use tokio_util::io::ReaderStream;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
+use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 
 /// Max chunk size per response: 2 MB (keep-alive makes small chunks cheap).
@@ -40,7 +41,8 @@ pub fn start_video_server() -> VideoServerInfo {
     std::thread::Builder::new()
         .name("video-server".into())
         .spawn(move || {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
                 .enable_all()
                 .build()
                 .expect("Failed to build tokio runtime for video server");
@@ -122,19 +124,22 @@ async fn handle_video(
         return (StatusCode::FORBIDDEN, "Not a video file").into_response();
     }
 
-    // Open file
-    let file = match tokio::fs::File::open(&file_path).await {
-        Ok(f) => f,
-        Err(_) => return (StatusCode::NOT_FOUND, "File not found").into_response(),
-    };
+    // Open file and get metadata in a blocking thread
+    let path_clone = file_path.clone();
+    let file_info = tokio::task::spawn_blocking(move || {
+        let file = File::open(&path_clone)?;
+        let metadata = file.metadata()?;
+        Ok::<(File, u64), std::io::Error>((file, metadata.len()))
+    })
+    .await;
 
-    let metadata = match file.metadata().await {
-        Ok(m) => m,
+    let (file, file_size) = match file_info {
+        Ok(Ok((f, s))) => (f, s),
+        Ok(Err(_)) => return (StatusCode::NOT_FOUND, "File not found").into_response(),
         Err(_) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Cannot read metadata").into_response()
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Task join error").into_response()
         }
     };
-    let file_size = metadata.len();
 
     // Common headers
     let mut common_headers = HeaderMap::new();
@@ -150,7 +155,7 @@ async fn handle_video(
     if let Some(ref range_val) = range_header {
         // Multi-range → fall back to full 200
         if range_val.contains(',') {
-            return serve_full(file, file_size, common_headers, is_head).await;
+            return serve_full(file, file_size, common_headers, is_head);
         }
 
         match parse_range_header(range_val, file_size) {
@@ -168,16 +173,7 @@ async fn handle_video(
                     return (StatusCode::PARTIAL_CONTENT, common_headers).into_response();
                 }
 
-                // Seek and stream
-                let mut file = file;
-                if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Seek failed").into_response();
-                }
-
-                let limited = file.take(length);
-                let stream = ReaderStream::with_capacity(limited, STREAM_BUF);
-                let body = Body::from_stream(stream);
-
+                let body = Body::from_stream(stream_file_range(file, start, length));
                 (StatusCode::PARTIAL_CONTENT, common_headers, body).into_response()
             }
             None => {
@@ -190,12 +186,12 @@ async fn handle_video(
             }
         }
     } else {
-        serve_full(file, file_size, common_headers, is_head).await
+        serve_full(file, file_size, common_headers, is_head)
     }
 }
 
-async fn serve_full(
-    file: tokio::fs::File,
+fn serve_full(
+    file: File,
     file_size: u64,
     mut headers: HeaderMap,
     is_head: bool,
@@ -206,9 +202,50 @@ async fn serve_full(
         return (StatusCode::OK, headers).into_response();
     }
 
-    let stream = ReaderStream::with_capacity(file, STREAM_BUF);
-    let body = Body::from_stream(stream);
+    let body = Body::from_stream(stream_file_range(file, 0, file_size));
     (StatusCode::OK, headers, body).into_response()
+}
+
+/// Stream a byte range from a file using `spawn_blocking` + synchronous I/O.
+/// Sends chunks through an mpsc channel consumed as a `Body::from_stream`.
+fn stream_file_range(
+    mut file: File,
+    start: u64,
+    length: u64,
+) -> ReceiverStream<Result<Bytes, std::io::Error>> {
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(4);
+
+    tokio::task::spawn_blocking(move || {
+        if let Err(e) = file.seek(SeekFrom::Start(start)) {
+            let _ = tx.blocking_send(Err(e));
+            return;
+        }
+
+        let mut remaining = length as usize;
+        let mut buf = vec![0u8; STREAM_BUF];
+
+        while remaining > 0 {
+            let to_read = remaining.min(buf.len());
+            match file.read(&mut buf[..to_read]) {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    remaining -= n;
+                    if tx
+                        .blocking_send(Ok(Bytes::copy_from_slice(&buf[..n])))
+                        .is_err()
+                    {
+                        return; // receiver dropped (client disconnected)
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.blocking_send(Err(e));
+                    return;
+                }
+            }
+        }
+    });
+
+    ReceiverStream::new(rx)
 }
 
 // ---------------------------------------------------------------------------
