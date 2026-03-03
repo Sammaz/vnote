@@ -1,10 +1,22 @@
-use std::fs::File;
-use std::io::{self, BufRead, BufReader, Read, Seek, SeekFrom, Write};
-use std::net::{TcpListener, TcpStream};
-use std::time::Duration;
+use axum::{
+    body::Body,
+    extract::{Query, Request},
+    http::{header, HeaderMap, StatusCode},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
+    routing::get,
+    Router,
+};
+use std::collections::HashMap;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio_util::io::ReaderStream;
+use tower_http::cors::CorsLayer;
 
-/// Max chunk size per response: 32 MB.
-const MAX_CHUNK: u64 = 32 * 1024 * 1024;
+/// Max chunk size per response: 2 MB (keep-alive makes small chunks cheap).
+const MAX_CHUNK: u64 = 2 * 1024 * 1024;
+
+/// Stream read buffer size: 64 KB.
+const STREAM_BUF: usize = 64 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct VideoServerInfo {
@@ -15,31 +27,183 @@ pub struct VideoServerInfo {
 /// Start a localhost-only HTTP video server on an OS-assigned port.
 /// Returns the port and a random access token used to authenticate requests.
 pub fn start_video_server() -> VideoServerInfo {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("Failed to bind video server");
-    let port = listener.local_addr().unwrap().port();
+    // Bind synchronously so the port is known immediately.
+    let std_listener =
+        std::net::TcpListener::bind("127.0.0.1:0").expect("Failed to bind video server");
+    std_listener
+        .set_nonblocking(true)
+        .expect("Failed to set non-blocking");
+    let port = std_listener.local_addr().unwrap().port();
     let access_token = uuid::Uuid::new_v4().to_string();
 
     let token = access_token.clone();
-    std::thread::Builder::new()
-        .name("video-server".into())
-        .spawn(move || {
-            for stream in listener.incoming() {
-                match stream {
-                    Ok(conn) => {
-                        let t = token.clone();
-                        std::thread::spawn(move || handle_connection(conn, &t));
-                    }
-                    Err(e) => {
-                        eprintln!("[video-server] accept error: {e}");
-                    }
-                }
-            }
-        })
-        .expect("Failed to spawn video-server thread");
+    tokio::spawn(async move {
+        let listener = tokio::net::TcpListener::from_std(std_listener)
+            .expect("Failed to convert to tokio TcpListener");
 
-    eprintln!("[video-server] listening on 127.0.0.1:{port}");
+        let app = Router::new()
+            .route("/*path", get(handle_video).head(handle_video))
+            .layer(middleware::from_fn(move |req, next| {
+                let t = token.clone();
+                auth_middleware(t, req, next)
+            }))
+            .layer(
+                CorsLayer::new()
+                    .allow_origin(tower_http::cors::Any)
+                    .allow_methods(tower_http::cors::Any)
+                    .allow_headers(tower_http::cors::Any)
+                    .expose_headers([
+                        header::CONTENT_RANGE,
+                        header::CONTENT_LENGTH,
+                        header::ACCEPT_RANGES,
+                    ]),
+            );
+
+        eprintln!("[video-server] listening on 127.0.0.1:{port}");
+        axum::serve(listener, app)
+            .await
+            .expect("Video server failed");
+    });
+
     VideoServerInfo { port, access_token }
 }
+
+// ---------------------------------------------------------------------------
+// Middleware: verify localhost + access_token
+// ---------------------------------------------------------------------------
+
+async fn auth_middleware(expected_token: String, req: Request, next: Next) -> Response {
+    // Extract access_token from query string
+    let query: Query<HashMap<String, String>> =
+        Query::try_from_uri(req.uri()).unwrap_or_else(|_| Query(HashMap::new()));
+
+    let token_ok = query
+        .get("access_token")
+        .map(|t| t == &expected_token)
+        .unwrap_or(false);
+
+    if !token_ok {
+        return (StatusCode::FORBIDDEN, "Invalid token").into_response();
+    }
+
+    next.run(req).await
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+async fn handle_video(
+    axum::extract::Path(encoded_path): axum::extract::Path<String>,
+    headers: HeaderMap,
+    req: Request,
+) -> Response {
+    let is_head = req.method() == axum::http::Method::HEAD;
+
+    // Decode file path
+    let file_path = match urlencoding::decode(&encoded_path) {
+        Ok(p) => p.into_owned(),
+        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid path encoding").into_response(),
+    };
+
+    // Validate MIME type is video
+    let mime = get_video_mime_type(&file_path);
+    if mime == "application/octet-stream" {
+        return (StatusCode::FORBIDDEN, "Not a video file").into_response();
+    }
+
+    // Open file
+    let file = match tokio::fs::File::open(&file_path).await {
+        Ok(f) => f,
+        Err(_) => return (StatusCode::NOT_FOUND, "File not found").into_response(),
+    };
+
+    let metadata = match file.metadata().await {
+        Ok(m) => m,
+        Err(_) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Cannot read metadata").into_response()
+        }
+    };
+    let file_size = metadata.len();
+
+    // Common headers
+    let mut common_headers = HeaderMap::new();
+    common_headers.insert(header::CONTENT_TYPE, mime.parse().unwrap());
+    common_headers.insert(header::ACCEPT_RANGES, "bytes".parse().unwrap());
+
+    // Check Range header
+    let range_header = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+
+    if let Some(ref range_val) = range_header {
+        // Multi-range → fall back to full 200
+        if range_val.contains(',') {
+            return serve_full(file, file_size, common_headers, is_head).await;
+        }
+
+        match parse_range_header(range_val, file_size) {
+            Some((start, requested_end)) => {
+                let end = requested_end.min(start + MAX_CHUNK - 1).min(file_size - 1);
+                let length = end - start + 1;
+
+                common_headers.insert(header::CONTENT_LENGTH, length.into());
+                common_headers.insert(
+                    header::CONTENT_RANGE,
+                    format!("bytes {start}-{end}/{file_size}").parse().unwrap(),
+                );
+
+                if is_head {
+                    return (StatusCode::PARTIAL_CONTENT, common_headers).into_response();
+                }
+
+                // Seek and stream
+                let mut file = file;
+                if file.seek(std::io::SeekFrom::Start(start)).await.is_err() {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Seek failed").into_response();
+                }
+
+                let limited = file.take(length);
+                let stream = ReaderStream::with_capacity(limited, STREAM_BUF);
+                let body = Body::from_stream(stream);
+
+                (StatusCode::PARTIAL_CONTENT, common_headers, body).into_response()
+            }
+            None => {
+                let mut h = HeaderMap::new();
+                h.insert(
+                    header::CONTENT_RANGE,
+                    format!("bytes */{file_size}").parse().unwrap(),
+                );
+                (StatusCode::RANGE_NOT_SATISFIABLE, h, "Range Not Satisfiable").into_response()
+            }
+        }
+    } else {
+        serve_full(file, file_size, common_headers, is_head).await
+    }
+}
+
+async fn serve_full(
+    file: tokio::fs::File,
+    file_size: u64,
+    mut headers: HeaderMap,
+    is_head: bool,
+) -> Response {
+    headers.insert(header::CONTENT_LENGTH, file_size.into());
+
+    if is_head {
+        return (StatusCode::OK, headers).into_response();
+    }
+
+    let stream = ReaderStream::with_capacity(file, STREAM_BUF);
+    let body = Body::from_stream(stream);
+    (StatusCode::OK, headers, body).into_response()
+}
+
+// ---------------------------------------------------------------------------
+// Utilities (preserved from original)
+// ---------------------------------------------------------------------------
 
 /// Return MIME type for a video file based on its extension.
 fn get_video_mime_type(path: &str) -> &'static str {
@@ -86,268 +250,4 @@ fn parse_range_header(range: &str, file_size: u64) -> Option<(u64, u64)> {
         }
         Some((start, end.min(file_size - 1)))
     }
-}
-
-// ---------------------------------------------------------------------------
-// HTTP handling
-// ---------------------------------------------------------------------------
-
-fn handle_connection(mut stream: TcpStream, access_token: &str) {
-    // Verify loopback
-    if let Ok(peer) = stream.peer_addr() {
-        if !peer.ip().is_loopback() {
-            let _ = write_response(&mut stream, 403, "Forbidden", "text/plain", b"Forbidden");
-            return;
-        }
-    } else {
-        return;
-    }
-
-    // Timeouts
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(60)));
-
-    let mut reader = BufReader::new(stream.try_clone().unwrap());
-
-    // Read request line
-    let mut request_line = String::new();
-    if reader.read_line(&mut request_line).is_err() {
-        return;
-    }
-
-    // Parse method and path
-    let parts: Vec<&str> = request_line.split_whitespace().collect();
-    if parts.len() < 2 {
-        return;
-    }
-    let method = parts[0];
-    let raw_path = parts[1]; // e.g. /D%3A/foo.mp4?access_token=xxx
-
-    // Read headers
-    let mut headers: Vec<(String, String)> = Vec::new();
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
-            break;
-        }
-        if let Some((k, v)) = line.split_once(':') {
-            headers.push((k.trim().to_ascii_lowercase(), v.trim().to_string()));
-        }
-    }
-
-    // Handle CORS preflight
-    if method.eq_ignore_ascii_case("OPTIONS") {
-        let resp = format!(
-            "HTTP/1.1 204 No Content\r\n\
-             Access-Control-Allow-Origin: *\r\n\
-             Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n\
-             Access-Control-Allow-Headers: Range\r\n\
-             Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
-             Content-Length: 0\r\n\
-             Connection: close\r\n\
-             \r\n"
-        );
-        let _ = stream.write_all(resp.as_bytes());
-        return;
-    }
-
-    if !method.eq_ignore_ascii_case("GET") && !method.eq_ignore_ascii_case("HEAD") {
-        let resp = format!(
-            "HTTP/1.1 405 Method Not Allowed\r\n\
-             Allow: GET, HEAD, OPTIONS\r\n\
-             Content-Length: 0\r\n\
-             Access-Control-Allow-Origin: *\r\n\
-             Connection: close\r\n\
-             \r\n"
-        );
-        let _ = stream.write_all(resp.as_bytes());
-        return;
-    }
-
-    // Split path and query
-    let (path, query) = raw_path.split_once('?').unwrap_or((raw_path, ""));
-
-    // Validate access_token
-    let token_ok = query
-        .split('&')
-        .filter_map(|kv| kv.split_once('='))
-        .any(|(k, v)| k == "access_token" && v == access_token);
-
-    if !token_ok {
-        let _ = write_response(&mut stream, 403, "Forbidden", "text/plain", b"Invalid token");
-        return;
-    }
-
-    // Decode file path (skip leading /)
-    let encoded_path = if let Some(stripped) = path.strip_prefix('/') {
-        stripped
-    } else {
-        path
-    };
-    let file_path = match urlencoding::decode(encoded_path) {
-        Ok(p) => p.into_owned(),
-        Err(_) => {
-            let _ = write_response(
-                &mut stream,
-                400,
-                "Bad Request",
-                "text/plain",
-                b"Invalid path encoding",
-            );
-            return;
-        }
-    };
-
-    // Validate MIME type is video
-    let mime = get_video_mime_type(&file_path);
-    if mime == "application/octet-stream" {
-        let _ = write_response(
-            &mut stream,
-            403,
-            "Forbidden",
-            "text/plain",
-            b"Not a video file",
-        );
-        return;
-    }
-
-    // Open file
-    let mut file = match File::open(&file_path) {
-        Ok(f) => f,
-        Err(_) => {
-            let _ = write_response(&mut stream, 404, "Not Found", "text/plain", b"File not found");
-            return;
-        }
-    };
-
-    let file_size = match file.metadata() {
-        Ok(m) => m.len(),
-        Err(_) => {
-            let _ = write_response(
-                &mut stream,
-                500,
-                "Internal Server Error",
-                "text/plain",
-                b"Cannot read metadata",
-            );
-            return;
-        }
-    };
-
-    // Find Range header
-    let range_header = headers
-        .iter()
-        .find(|(k, _)| k == "range")
-        .map(|(_, v)| v.clone());
-
-    let is_head = method.eq_ignore_ascii_case("HEAD");
-
-    if let Some(ref range_val) = range_header {
-        let is_multi_range = range_val.contains(',');
-
-        if is_multi_range {
-            let header = format!(
-                "HTTP/1.1 200 OK\r\n\
-                 Content-Type: {mime}\r\n\
-                 Content-Length: {file_size}\r\n\
-                 Accept-Ranges: bytes\r\n\
-                 Access-Control-Allow-Origin: *\r\n\
-                 Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
-                 Connection: close\r\n\
-                 \r\n"
-            );
-            let _ = stream.write_all(header.as_bytes());
-            if !is_head {
-                let _ = io::copy(&mut file, &mut stream);
-            }
-            return;
-        }
-
-        if let Some((start, requested_end)) = parse_range_header(range_val, file_size) {
-            let end = requested_end.min(start + MAX_CHUNK - 1).min(file_size - 1);
-            let length = end - start + 1;
-
-            if file.seek(SeekFrom::Start(start)).is_err() {
-                let _ = write_response(
-                    &mut stream,
-                    500,
-                    "Internal Server Error",
-                    "text/plain",
-                    b"Seek failed",
-                );
-                return;
-            }
-
-            let resp_header = format!(
-                "HTTP/1.1 206 Partial Content\r\n\
-                 Content-Type: {mime}\r\n\
-                 Content-Length: {length}\r\n\
-                 Content-Range: bytes {start}-{end}/{file_size}\r\n\
-                 Accept-Ranges: bytes\r\n\
-                 Connection: close\r\n\
-                 Access-Control-Allow-Origin: *\r\n\
-                 Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
-                 \r\n"
-            );
-            let _ = stream.write_all(resp_header.as_bytes());
-
-            if !is_head {
-                let mut limited = file.take(length);
-                let _ = io::copy(&mut limited, &mut stream);
-            }
-        } else {
-            // Invalid range
-            let body = b"Range Not Satisfiable";
-            let resp = format!(
-                "HTTP/1.1 416 Range Not Satisfiable\r\n\
-                 Content-Range: bytes */{file_size}\r\n\
-                 Content-Length: {}\r\n\
-                 Access-Control-Allow-Origin: *\r\n\
-                 Connection: close\r\n\
-                 \r\n",
-                body.len()
-            );
-            let _ = stream.write_all(resp.as_bytes());
-            if !is_head {
-                let _ = stream.write_all(body);
-            }
-        }
-    } else {
-        let resp_header = format!(
-            "HTTP/1.1 200 OK\r\n\
-             Content-Type: {mime}\r\n\
-             Content-Length: {file_size}\r\n\
-             Accept-Ranges: bytes\r\n\
-             Connection: close\r\n\
-             Access-Control-Allow-Origin: *\r\n\
-             Access-Control-Expose-Headers: Content-Range, Content-Length, Accept-Ranges\r\n\
-             \r\n"
-        );
-        let _ = stream.write_all(resp_header.as_bytes());
-
-        if !is_head {
-            let _ = io::copy(&mut file, &mut stream);
-        }
-    }
-}
-
-fn write_response(
-    stream: &mut TcpStream,
-    status: u16,
-    reason: &str,
-    content_type: &str,
-    body: &[u8],
-) -> std::io::Result<()> {
-    let header = format!(
-        "HTTP/1.1 {status} {reason}\r\n\
-         Content-Type: {content_type}\r\n\
-         Content-Length: {}\r\n\
-         Access-Control-Allow-Origin: *\r\n\
-         Connection: close\r\n\
-         \r\n",
-        body.len()
-    );
-    stream.write_all(header.as_bytes())?;
-    stream.write_all(body)?;
-    Ok(())
 }

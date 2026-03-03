@@ -666,124 +666,15 @@ export function VideoPlayer({
       setLoading(false);
     };
 
-    // Stall recovery mechanism
-    let stallRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
-    let stallCooldownTimer: ReturnType<typeof setTimeout> | null = null;
-    let stallRetryCount = 0;
-    let stallCooldownUntil = 0;
-    const MAX_STALL_RETRIES = 10;
-    const STALL_COOLDOWN_MS = 10_000;
-
-    const clearStallRecoveryTimer = () => {
-      if (stallRecoveryTimer) {
-        clearTimeout(stallRecoveryTimer);
-        stallRecoveryTimer = null;
-      }
-    };
-
-    const resetStallRecovery = () => {
-      clearStallRecoveryTimer();
-      stallRetryCount = 0;
-      stallCooldownUntil = 0;
-      if (stallCooldownTimer) {
-        clearTimeout(stallCooldownTimer);
-        stallCooldownTimer = null;
-      }
-    };
-
-    const attemptStallRecovery = () => {
-      if (video.paused || video.ended) return;
-
-      const now = Date.now();
-      if (now < stallCooldownUntil) return;
-
-      stallRetryCount++;
-      if (stallRetryCount > MAX_STALL_RETRIES) {
-        console.warn("[VideoPlayer] Stall recovery exhausted, enter cooldown");
-        stallCooldownUntil = now + STALL_COOLDOWN_MS;
-        if (stallCooldownTimer) {
-          clearTimeout(stallCooldownTimer);
-        }
-        stallCooldownTimer = setTimeout(() => {
-          stallRetryCount = 0;
-          stallCooldownUntil = 0;
-          stallCooldownTimer = null;
-        }, STALL_COOLDOWN_MS);
-        return;
-      }
-
-      if (stallRetryCount > 3 && stallRetryCount % 4 === 0) {
-        // Every 4th retry, nudge currentTime to force a re-fetch
-        video.currentTime = video.currentTime + 0.01;
-      } else {
-        void video.play().catch(() => {});
-      }
-    };
-
-    const scheduleStallRecovery = (delayMs: number) => {
-      if (video.paused || video.ended) return;
-      if (Date.now() < stallCooldownUntil) return;
-      clearStallRecoveryTimer();
-      stallRecoveryTimer = setTimeout(attemptStallRecovery, delayMs);
-    };
-
-    const handleStalled = () => {
-      scheduleStallRecovery(2000);
-    };
-
-    const handleWaiting = () => {
-      scheduleStallRecovery(1500);
-    };
-
-    const handleRecoverySignal = () => {
-      resetStallRecovery();
-    };
-
-    const handlePlaying = () => {
-      handleRecoverySignal();
-    };
-
-    const handleCanPlay = () => {
-      handleRecoverySignal();
-    };
-
-    const handleProgress = () => {
-      handleRecoverySignal();
-    };
-
-    const handleSeeked = () => {
-      handleRecoverySignal();
-    };
-
-    const handleLoadedData = () => {
-      handleRecoverySignal();
-    };
-
     video.addEventListener("loadedmetadata", handleLoadedMetadata);
     video.addEventListener("error", handleVideoError);
-    video.addEventListener("stalled", handleStalled);
-    video.addEventListener("waiting", handleWaiting);
-    video.addEventListener("playing", handlePlaying);
-    video.addEventListener("canplay", handleCanPlay);
-    video.addEventListener("progress", handleProgress);
-    video.addEventListener("seeked", handleSeeked);
-    video.addEventListener("loadeddata", handleLoadedData);
 
     setupPlayer();
 
     return () => {
       isMounted = false;
-      if (stallRecoveryTimer) clearTimeout(stallRecoveryTimer);
-      if (stallCooldownTimer) clearTimeout(stallCooldownTimer);
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("error", handleVideoError);
-      video.removeEventListener("stalled", handleStalled);
-      video.removeEventListener("waiting", handleWaiting);
-      video.removeEventListener("playing", handlePlaying);
-      video.removeEventListener("canplay", handleCanPlay);
-      video.removeEventListener("progress", handleProgress);
-      video.removeEventListener("seeked", handleSeeked);
-      video.removeEventListener("loadeddata", handleLoadedData);
       if (subtitleObjectUrl) {
         URL.revokeObjectURL(subtitleObjectUrl);
       }
