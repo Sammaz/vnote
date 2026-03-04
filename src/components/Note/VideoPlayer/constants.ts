@@ -51,5 +51,8 @@ export const PLYR_I18N = {
 };
 
 // 卡顿检测配置
-export const STALL_CHECK_INTERVAL = 1000; // 每秒检查一次
-export const STALL_TIMEOUT = 3; // 3秒无进度视为卡顿
+export const STALL_CHECK_INTERVAL = 1000; // 检查间隔：1秒
+export const STALL_THRESHOLD = 3; // 连续3次无进度才认定卡顿
+export const STALL_NUDGE_OFFSET = 0.1; // L1 seek 微调偏移量（秒）
+export const STALL_RECOVERY_COOLDOWN = 5000; // 恢复操作间冷却（毫秒）
+export const STALL_MAX_RELOAD_PER_SESSION = 3; // 单会话最大 reload 次数
