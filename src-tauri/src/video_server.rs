@@ -3,8 +3,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use tauri::http::{header, Response, StatusCode};
 
-/// Maximum bytes to serve in a single response (2 MB).
-const MAX_RANGE_LEN: u64 = 2 * 1024 * 1024;
+/// Maximum bytes to serve in a single response (10 MB).
+const MAX_RANGE_LEN: u64 = 10 * 1024 * 1024;
 
 /// Handle requests on the `video-stream://` custom protocol.
 ///

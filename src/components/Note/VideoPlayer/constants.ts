@@ -49,3 +49,7 @@ export const PLYR_I18N = {
   enableCaptions: "开启字幕",
   disableCaptions: "关闭字幕",
 };
+
+// 卡顿检测配置
+export const STALL_CHECK_INTERVAL = 1000; // 每秒检查一次
+export const STALL_TIMEOUT = 3; // 3秒无进度视为卡顿

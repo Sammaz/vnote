@@ -18,6 +18,8 @@ import {
   RESUME_THRESHOLD_START,
   RESUME_THRESHOLD_END,
   PLYR_I18N,
+  STALL_CHECK_INTERVAL,
+  STALL_TIMEOUT,
 } from "./constants";
 import {
   convertSrtToVtt,
@@ -69,6 +71,8 @@ export function VideoPlayer({
   const lastPlaybackPositionRef = useRef<number | null>(lastPlaybackPosition);
   const watchTimeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const addWatchTimeRef = useRef(addWatchTime);
+  const stallCheckIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastTimeRef = useRef<number>(0);
 
   // 保持 addWatchTime ref 同步
   useEffect(() => {
@@ -254,7 +258,7 @@ export function VideoPlayer({
 
     // 创建 video 元素
     const video = document.createElement("video");
-    video.preload = "metadata";
+    video.preload = "auto";
     video.playsInline = true;
     video.autoplay = autoPlay;
 
@@ -323,7 +327,39 @@ export function VideoPlayer({
         }
       };
 
-      const handlePlay = () => startWatchTimeTracking();
+      const startStallDetection = () => {
+        if (stallCheckIntervalRef.current) return;
+        lastTimeRef.current = player.currentTime;
+        stallCheckIntervalRef.current = setInterval(() => {
+          if (!player.playing) return;
+          const currentTime = player.currentTime;
+          if (currentTime === lastTimeRef.current && currentTime < player.duration - 1) {
+            console.warn("[Stall Recovery] Detected stall, reloading...");
+            const time = currentTime;
+            player.media.load();
+            player.once("canplay", () => {
+              player.currentTime = time;
+              player.play();
+            });
+          }
+          lastTimeRef.current = currentTime;
+        }, STALL_CHECK_INTERVAL);
+      };
+
+      const stopStallDetection = () => {
+        if (stallCheckIntervalRef.current) {
+          clearInterval(stallCheckIntervalRef.current);
+          stallCheckIntervalRef.current = null;
+        }
+      };
+
+      const handleWaiting = () => console.log("[Video] Buffering...");
+      const handleStalled = () => console.warn("[Video] Network stalled");
+
+      const handlePlay = () => {
+        startWatchTimeTracking();
+        startStallDetection();
+      };
 
       const handleTimeUpdate = () => {
         const currentTime = player.currentTime;
@@ -345,6 +381,7 @@ export function VideoPlayer({
       };
 
       const handlePause = () => {
+        stopStallDetection();
         stopWatchTimeTracking();
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current);
@@ -353,6 +390,7 @@ export function VideoPlayer({
       };
 
       const handleEnded = async () => {
+        stopStallDetection();
         stopWatchTimeTracking();
         if (saveTimeoutRef.current) {
           clearTimeout(saveTimeoutRef.current);
@@ -372,6 +410,8 @@ export function VideoPlayer({
       player.on("timeupdate", handleTimeUpdate);
       player.on("pause", handlePause);
       player.on("ended", handleEnded);
+      player.on("waiting", handleWaiting);
+      player.on("stalled", handleStalled);
 
       const cleanupRef = {
         srtHandler: null as (() => void) | null,
@@ -510,6 +550,7 @@ export function VideoPlayer({
       cleanupRef.seekVideoHandler = handleSeekVideo;
 
       return () => {
+        stopStallDetection();
         stopWatchTimeTracking();
         const currentTime = player.currentTime;
         const currentNoteId = noteIdRef.current;
@@ -532,6 +573,8 @@ export function VideoPlayer({
         player.off("timeupdate", handleTimeUpdate);
         player.off("pause", handlePause);
         player.off("ended", handleEnded);
+        player.off("waiting", handleWaiting);
+        player.off("stalled", handleStalled);
         if (cleanupRef.seekVideoHandler) {
           window.removeEventListener("seek-video", cleanupRef.seekVideoHandler);
         }
