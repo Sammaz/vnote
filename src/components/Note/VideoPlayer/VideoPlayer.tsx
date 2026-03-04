@@ -19,7 +19,6 @@ import {
   RESUME_THRESHOLD_END,
   PLYR_I18N,
   STALL_CHECK_INTERVAL,
-  STALL_TIMEOUT,
 } from "./constants";
 import {
   convertSrtToVtt,
@@ -336,7 +335,7 @@ export function VideoPlayer({
           if (currentTime === lastTimeRef.current && currentTime < player.duration - 1) {
             console.warn("[Stall Recovery] Detected stall, reloading...");
             const time = currentTime;
-            player.media.load();
+            (player as any).media.load();
             player.once("canplay", () => {
               player.currentTime = time;
               player.play();
