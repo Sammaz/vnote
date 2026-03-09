@@ -24,6 +24,7 @@ interface CollectionsContextType {
   deleteCollection: (id: string) => Promise<void>;
   setSelectedCollection: (id: string | null) => void;
   toggleCollectionExpand: (id: string) => void;
+  expandCollectionPathForNote: (noteId: string) => Promise<void>;
   addNoteToCollection: (collectionId: string, noteId: string) => Promise<void>;
   removeNoteFromCollection: (collectionId: string, noteId: string) => Promise<void>;
   updateCollectionsOrder: (collectionIds: string[]) => Promise<void>;
@@ -111,6 +112,31 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
       return newExpanded;
     });
   }, []);
+
+  // 展开笔记所在合集的完整路径
+  const expandCollectionPathForNote = useCallback(async (noteId: string) => {
+    try {
+      const collectionId = await invoke<string | null>("get_note_collection_id", { noteId });
+      if (!collectionId) return;
+
+      const path: string[] = [];
+      let currentId: string | null = collectionId;
+
+      while (currentId) {
+        path.unshift(currentId);
+        const current = collections.find(c => c.id === currentId);
+        currentId = current?.parent_id || null;
+      }
+
+      setExpandedCollections(prev => {
+        const newExpanded = new Set(prev);
+        path.forEach(id => newExpanded.add(id));
+        return newExpanded;
+      });
+    } catch (error) {
+      console.error("Failed to expand collection path:", error);
+    }
+  }, [collections]);
 
   // 添加笔记到合集
   const addNoteToCollection = useCallback(async (collectionId: string, noteId: string): Promise<void> => {
@@ -238,6 +264,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
     deleteCollection,
     setSelectedCollection,
     toggleCollectionExpand,
+    expandCollectionPathForNote,
     addNoteToCollection,
     removeNoteFromCollection,
     updateCollectionsOrder,
@@ -261,6 +288,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
     deleteCollection,
     setSelectedCollection,
     toggleCollectionExpand,
+    expandCollectionPathForNote,
     addNoteToCollection,
     removeNoteFromCollection,
     updateCollectionsOrder,

@@ -2,10 +2,12 @@ import { useState, useRef, useCallback } from "react";
 import { Search, FileText, ArrowUpRight } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { useApp } from "../../context/AppContext";
+import { useCollections } from "../../context/CollectionsContext";
 import type { KnowledgeSearchResult } from "./types";
 
 export function KnowledgeBaseSearch() {
   const { setSelectedNoteId, setCurrentView } = useApp();
+  const { expandCollectionPathForNote } = useCollections();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<KnowledgeSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -34,7 +36,8 @@ export function KnowledgeBaseSearch() {
     if (e.key === "Enter") handleSearch();
   };
 
-  const handleNavigateToNote = (noteId: string) => {
+  const handleNavigateToNote = async (noteId: string) => {
+    await expandCollectionPathForNote(noteId);
     setSelectedNoteId(noteId);
     setCurrentView("note");
   };

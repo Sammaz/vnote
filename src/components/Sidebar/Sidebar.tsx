@@ -18,6 +18,7 @@ import {
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useInitializationQueue } from "../../context/InitializationQueueContext";
+import { useCollections } from "../../context/CollectionsContext";
 import { CollectionSection } from "../Collection";
 import { CreateCollectionModal } from "../Collection/CreateCollectionModal";
 import { EditNoteModal } from "../Notes/EditNoteModal";
@@ -65,7 +66,8 @@ const CollectionTreeMenuItem = memo(function CollectionTreeMenuItem({
   level: number;
   onSelect: (id: string) => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const { expandedCollections, toggleCollectionExpand } = useCollections();
+  const expanded = expandedCollections.has(collection.id);
   const children = allCollections.filter((c) => c.parent_id === collection.id);
   const hasChildren = children.length > 0;
 
@@ -82,7 +84,7 @@ const CollectionTreeMenuItem = memo(function CollectionTreeMenuItem({
         <span
           onClick={(e) => {
             e.stopPropagation();
-            if (hasChildren) setExpanded(!expanded);
+            if (hasChildren) toggleCollectionExpand(collection.id);
           }}
           className={cn(
             "w-4 h-4 flex items-center justify-center flex-shrink-0",

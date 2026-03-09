@@ -1852,6 +1852,11 @@ fn get_all_notes_in_collections() -> Result<Vec<String>, String> {
     get_db().get_all_notes_in_collections().map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+fn get_note_collection_id(note_id: String) -> Result<Option<String>, String> {
+    get_db().get_note_collection_id(&note_id).map_err(|e| e.to_string())
+}
+
 // ============================================================================
 // 批量操作 API - 性能优化
 // ============================================================================
@@ -2058,6 +2063,7 @@ pub fn run() {
             update_collection_mixed_order,
             get_collections_for_note,
             get_all_notes_in_collections,
+            get_note_collection_id,
             // Batch operations (性能优化)
             batch_remove_notes_from_collection,
             batch_move_notes_to_collection,

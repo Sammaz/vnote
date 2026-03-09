@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useCollections } from "../../context/CollectionsContext";
 
 import { parseDetailedReading, type Note, type ChapterData, type SubtitleEntry, type OptimizedSubtitle } from "../../types";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
@@ -137,6 +138,7 @@ interface GlobalSearchModalProps {
 
 export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
   const { notes, setSelectedNoteId, setCurrentView, refreshNotes } = useApp();
+  const { expandCollectionPathForNote } = useCollections();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -246,12 +248,13 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
 
   // 双击打开笔记
   const handleDoubleClick = useCallback(
-    (noteId: string) => {
+    async (noteId: string) => {
+      await expandCollectionPathForNote(noteId);
       setSelectedNoteId(noteId);
       setCurrentView("note");
       onClose();
     },
-    [setSelectedNoteId, setCurrentView, onClose]
+    [expandCollectionPathForNote, setSelectedNoteId, setCurrentView, onClose]
   );
 
   // 右侧预览：始终展示视觉化总结

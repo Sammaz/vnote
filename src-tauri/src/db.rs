@@ -1929,6 +1929,16 @@ impl Database {
         note_ids.collect()
     }
 
+    /// Get the collection ID that contains a specific note
+    pub fn get_note_collection_id(&self, note_id: &str) -> SqliteResult<Option<String>> {
+        let conn = self.connection();
+        conn.query_row(
+            "SELECT collection_id FROM collection_items WHERE note_id = ?1 LIMIT 1",
+            [note_id],
+            |row| row.get(0),
+        ).optional()
+    }
+
     /// Get all note IDs in a collection and its sub-collections (recursive)
     pub fn get_all_note_ids_in_collection_tree(&self, collection_id: &str) -> SqliteResult<Vec<String>> {
         let conn = self.connection();
