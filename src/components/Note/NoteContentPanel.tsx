@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useAutoScroll } from "../../hooks/useAutoScroll";
 import {
   FileText,
   BookOpen,
@@ -181,6 +182,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [currentChapterId, setCurrentChapterId] = useState<string | null>(null);
   // 用户点击章节的时间戳（用于忽略视频时间更新）
   const userClickTimeRef = useRef<number>(0);
+  // 自动滚动控制
+  const lastChapterIdRef = useRef<string | null>(null);
+  const { shouldAutoScroll, handleUserScroll, isAutoScrollingRef } = useAutoScroll(autoScroll);
   // 显示章节字幕开关
   const [showChapterSubtitles, setShowChapterSubtitles] = useState(false);
 
@@ -934,18 +938,25 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         (chapter) => currentTime >= chapter.start_time && currentTime <= chapter.end_time
       );
 
-      if (currentChapter) {
-        // 滚动到对应的章节卡片
-        const chapterElement = document.getElementById(`chapter-${currentChapter.id}`);
-        if (chapterElement) {
-          chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (currentChapter && currentChapter.id !== lastChapterIdRef.current) {
+        if (shouldAutoScroll) {
+          // 滚动到对应的章节卡片
+          const chapterElement = document.getElementById(`chapter-${currentChapter.id}`);
+          if (chapterElement) {
+            isAutoScrollingRef.current = true;
+            chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
+            setTimeout(() => {
+              isAutoScrollingRef.current = false;
+            }, 500); // 增加保护时间到 500ms
+          }
         }
+        lastChapterIdRef.current = currentChapter.id;
       }
     };
 
     window.addEventListener("video-time-update", handleVideoTimeUpdate);
     return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
-  }, [autoScroll, activeTab, chapterData]);
+  }, [autoScroll, activeTab, chapterData, shouldAutoScroll, isAutoScrollingRef]);
 
   // 检查标签页是否正在生成
   const isTabGenerating = (tabId: TabId): boolean => {
@@ -3128,16 +3139,19 @@ Video subtitles content:`;
       )}
 
       {/* 内容区域 */}
-      <div className={cn(
-        "flex-1 min-h-0", // min-h-0 确保 flex 子元素可以正确收缩，让虚拟列表获得正确高度
-        activeTab === "visual" && visualViewMode === "mindmap"
-          ? "p-0 overflow-visible"
-          : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas"
-          ? "p-0 overflow-hidden"
-          : activeTab === "script"
-          ? "p-0 overflow-hidden" // 字幕脚本使用虚拟列表，需要隐藏外层滚动
-          : isEditMode ? "p-0 overflow-y-auto overflow-x-hidden" : "p-6 overflow-y-auto overflow-x-hidden"
-      )}>
+      <div
+        className={cn(
+          "flex-1 min-h-0", // min-h-0 确保 flex 子元素可以正确收缩，让虚拟列表获得正确高度
+          activeTab === "visual" && visualViewMode === "mindmap"
+            ? "p-0 overflow-visible"
+            : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas"
+            ? "p-0 overflow-hidden"
+            : activeTab === "script"
+            ? "p-0 overflow-hidden" // 字幕脚本使用虚拟列表，需要隐藏外层滚动
+            : isEditMode ? "p-0 overflow-y-auto overflow-x-hidden" : "p-6 overflow-y-auto overflow-x-hidden"
+        )}
+        onScroll={activeTab === "original" ? handleUserScroll : undefined}
+      >
         {/* 正常内容渲染 */}
         {activeTab === "summary" && (
           note.full_summary ? (

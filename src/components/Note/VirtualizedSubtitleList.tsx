@@ -6,6 +6,7 @@ import { useRef, useEffect, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SubtitleEntry } from "../../types";
 import { SubtitleRow } from "./SubtitleRow";
+import { useAutoScroll } from "../../hooks/useAutoScroll";
 
 // 常量定义
 const ESTIMATED_ROW_HEIGHT = 56; // 预估行高
@@ -24,6 +25,9 @@ export function VirtualizedSubtitleList({
   onEntryClick,
 }: VirtualizedSubtitleListProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const lastIndexRef = useRef<number | null>(null);
+  const isInitializedRef = useRef(false);
+  const { shouldAutoScroll, handleUserScroll, isAutoScrollingRef } = useAutoScroll(true);
 
   // 虚拟化配置
   const virtualizer = useVirtualizer({
@@ -37,13 +41,30 @@ export function VirtualizedSubtitleList({
 
   // 当 currentEntryIndex 变化时，滚动到对应位置
   useEffect(() => {
-    if (currentEntryIndex !== null && currentEntryIndex >= 0 && currentEntryIndex < entries.length) {
+    if (currentEntryIndex === null) return;
+
+    // 索引没变化，不滚动
+    if (currentEntryIndex === lastIndexRef.current) return;
+
+    if (shouldAutoScroll && currentEntryIndex >= 0 && currentEntryIndex < entries.length) {
+      isAutoScrollingRef.current = true;
+
+      // 计算滚动距离，决定使用 smooth 还是 auto
+      const scrollDistance = Math.abs(currentEntryIndex - (lastIndexRef.current ?? currentEntryIndex));
+      const behavior = scrollDistance > 10 ? "auto" : "smooth"; // 超过10条使用瞬时滚动
+
       virtualizer.scrollToIndex(currentEntryIndex, {
         align: "center",
-        behavior: "smooth",
+        behavior: isInitializedRef.current ? behavior : "auto",
       });
+      setTimeout(() => {
+        isAutoScrollingRef.current = false;
+      }, 500);
     }
-  }, [currentEntryIndex, entries.length, virtualizer]);
+
+    lastIndexRef.current = currentEntryIndex;
+    isInitializedRef.current = true;
+  }, [currentEntryIndex, entries.length, virtualizer, shouldAutoScroll, isAutoScrollingRef]);
 
   const handleClick = useCallback((index: number) => {
     onEntryClick?.(index);
@@ -54,6 +75,7 @@ export function VirtualizedSubtitleList({
       ref={parentRef}
       className="h-full overflow-auto"
       style={{ contain: "strict" }}
+      onScroll={handleUserScroll}
     >
       <div
         className="relative w-full px-6"
