@@ -83,6 +83,7 @@ function AppContent() {
   const handleMinimize = useCallback(async () => {
     if (!isTauri) return;
     try {
+      window.dispatchEvent(new CustomEvent("window-control-action"));
       await getCurrentWindow().minimize();
     } catch (error) {
       console.warn("Failed to minimize window:", error);
@@ -101,6 +102,7 @@ function AppContent() {
   const handleClose = useCallback(async () => {
     if (!isTauri) return;
     try {
+      window.dispatchEvent(new CustomEvent("window-control-action"));
       await getCurrentWindow().close();
     } catch (error) {
       console.warn("Failed to close window:", error);

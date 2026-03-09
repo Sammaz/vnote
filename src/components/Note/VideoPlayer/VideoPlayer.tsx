@@ -45,7 +45,7 @@ export function VideoPlayer({
   noteId,
   lastPlaybackPosition: initialLastPlaybackPosition,
 }: VideoPlayerProps) {
-  const { toolbarSettings, setCaptionsEnabled, addWatchTime } = useApp();
+  const { toolbarSettings, setCaptionsEnabled, addWatchTime, currentView } = useApp();
   const { captionsEnabled } = toolbarSettings;
   const containerRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Plyr | null>(null);
@@ -701,6 +701,35 @@ export function VideoPlayer({
       playerWithConfig.config.keyboard.global = !showHelp;
     }
   }, [showHelp]);
+
+  // 当离开笔记页面时暂停播放
+  useEffect(() => {
+    if (currentView !== "note" && playerRef.current) {
+      playerRef.current.pause();
+    }
+  }, [currentView]);
+
+  // 监听窗口可见性变化，最小化时暂停播放
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden && playerRef.current) {
+        playerRef.current.pause();
+      }
+    };
+
+    const handleWindowControl = () => {
+      if (playerRef.current) {
+        playerRef.current.pause();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("window-control-action", handleWindowControl);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("window-control-action", handleWindowControl);
+    };
+  }, []);
 
   // 错误状态
   if (error) {
