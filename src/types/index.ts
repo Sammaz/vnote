@@ -19,7 +19,7 @@ export interface Note {
   subtitle_path: string | null;
   model_id: string | null; // AI model ID used for generating notes
   full_summary: string | null;
-  detailed_reading: string | ChapterData | null;  // 支持纯文本或章节数据
+  detailed_reading: string | ChapterData | DetailedReadingData | null;  // 支持纯文本或章节数据
   highlights: string | null;
   visual_summary: string | null;
   custom_summary: string | null;
@@ -286,6 +286,24 @@ export interface ChapterData {
   generated_at: string;            // 生成时间（ISO格式）
 }
 
+// 原文细读章节数据
+export interface DetailedReadingChapter {
+  id: string;
+  title: string;
+  start_time: number;
+  end_time: number;
+  content?: string;
+  subtitle_entries: SubtitleEntry[];
+  screenshot_path: string | null;
+}
+
+// 原文细读数据容器
+export interface DetailedReadingData {
+  chapters: DetailedReadingChapter[];
+  total_duration: number;
+  generated_at: string;
+}
+
 // ============================================================================
 // 类型守卫函数 (Type Guards)
 // ============================================================================
@@ -295,15 +313,69 @@ export interface ChapterData {
  * @param value - Note.detailed_reading 字段值
  * @returns 如果是 ChapterData 返回 true
  */
-export function isChapterData(value: string | ChapterData | null): value is ChapterData {
-  if (value === null || typeof value === "string") {
+export function isChapterData(value: unknown): value is ChapterData {
+  if (value === null || typeof value !== "object") {
     return false;
   }
+
+  const candidate = value as {
+    chapters?: unknown;
+    total_duration?: unknown;
+    generated_at?: unknown;
+  };
+
+  if (!Array.isArray(candidate.chapters)) {
+    return false;
+  }
+
+  if (candidate.chapters.length === 0) {
+    return (
+      typeof candidate.total_duration === "number" &&
+      typeof candidate.generated_at === "string"
+    );
+  }
+
+  const firstChapter = candidate.chapters[0] as Record<string, unknown>;
+  const hasSubtitleEntries = Array.isArray(firstChapter?.subtitle_entries);
+
   return (
-    typeof value === "object" &&
-    Array.isArray(value.chapters) &&
-    typeof value.total_duration === "number" &&
-    typeof value.generated_at === "string"
+    !hasSubtitleEntries &&
+    typeof candidate.total_duration === "number" &&
+    typeof candidate.generated_at === "string"
+  );
+}
+
+/**
+ * 判断 detailed_reading 是否为 DetailedReadingData 类型
+ */
+export function isDetailedReadingData(value: unknown): value is DetailedReadingData {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as {
+    chapters?: unknown;
+    total_duration?: unknown;
+    generated_at?: unknown;
+  };
+
+  if (!Array.isArray(candidate.chapters)) {
+    return false;
+  }
+
+  if (candidate.chapters.length === 0) {
+    return (
+      typeof candidate.total_duration === "number" &&
+      typeof candidate.generated_at === "string"
+    );
+  }
+
+  const firstChapter = candidate.chapters[0] as Record<string, unknown>;
+
+  return (
+    Array.isArray(firstChapter?.subtitle_entries) &&
+    typeof candidate.total_duration === "number" &&
+    typeof candidate.generated_at === "string"
   );
 }
 
@@ -312,7 +384,7 @@ export function isChapterData(value: string | ChapterData | null): value is Chap
  * @param value - Note.detailed_reading 字段值
  * @returns 解析后的 ChapterData 或 null
  */
-export function parseDetailedReading(value: string | ChapterData | null): ChapterData | null {
+export function parseDetailedReading(value: string | ChapterData | DetailedReadingData | null): ChapterData | null {
   if (value === null) {
     return null;
   }
@@ -323,6 +395,31 @@ export function parseDetailedReading(value: string | ChapterData | null): Chapte
     try {
       const parsed = JSON.parse(value);
       if (isChapterData(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // 解析失败，返回 null
+    }
+  }
+  return null;
+}
+
+/**
+ * 安全解析 detailed_reading 字段为 DetailedReadingData
+ * @param value - Note.detailed_reading 字段值
+ * @returns 解析后的 DetailedReadingData 或 null
+ */
+export function parseDetailedReadingData(value: string | ChapterData | DetailedReadingData | null): DetailedReadingData | null {
+  if (value === null) {
+    return null;
+  }
+  if (isDetailedReadingData(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      if (isDetailedReadingData(parsed)) {
         return parsed;
       }
     } catch {

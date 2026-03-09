@@ -66,6 +66,26 @@ pub struct ChapterData {
     pub generated_at: String,
 }
 
+/// 原文细读章节数据
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DetailedReadingChapter {
+    pub id: String,
+    pub title: String,
+    pub start_time: f64,
+    pub end_time: f64,
+    pub content: Option<String>,
+    pub subtitle_entries: Vec<SubtitleEntry>,
+    pub screenshot_path: Option<String>,
+}
+
+/// 原文细读数据容器
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DetailedReadingData {
+    pub chapters: Vec<DetailedReadingChapter>,
+    pub total_duration: f64,
+    pub generated_at: String,
+}
+
 /// 章节生成请求
 #[derive(Debug, Deserialize)]
 pub struct GenerateChaptersRequest {
@@ -251,7 +271,7 @@ pub fn split_subtitle_into_chunks(subtitle_entries: &[SubtitleEntry]) -> Vec<Sub
 }
 
 /// AI 分析字幕生成章节（支持分段并发处理长字幕）
-async fn analyze_subtitle_for_chapters(
+pub async fn analyze_subtitle_for_chapters(
     ai_config: &AiConfig,
     subtitle_entries: &[SubtitleEntry],
     abort_flag: &Arc<AtomicBool>,

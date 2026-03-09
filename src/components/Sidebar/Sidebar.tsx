@@ -126,7 +126,7 @@ interface NoteItemProps {
 
 // 笔记记录列表项 - 使用 memo 优化避免不必要的重渲染
 const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
-  const { setSelectedNoteId, setCurrentView, selectedNoteId, deleteNote, setSelectedFolder, collections, addNoteToCollection } = useApp();
+  const { setSelectedNoteId, setCurrentView, selectedNoteId, deleteNote, setSelectedFolder, setSelectedCollection, collections, addNoteToCollection } = useApp();
   const { removeNoteFromQueue } = useInitializationQueue();
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -349,7 +349,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
 });
 
 export function Sidebar() {
-  const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, setSelectedCollection, notesInCollections } = useApp();
+  const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, notesInCollections } = useApp();
   const { collapsed } = sidebar;
   const [isHovered, setIsHovered] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);

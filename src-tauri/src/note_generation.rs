@@ -11,8 +11,9 @@
 
 use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
 use crate::chapter::{
-    capture_video_screenshot, split_subtitle_into_chunks, sanitize_filename,
-    format_timestamp_for_filename, Chapter, ChapterData, ChapterGenerationEvent,
+    analyze_subtitle_for_chapters, capture_video_screenshot, sanitize_filename,
+    split_subtitle_into_chunks, format_timestamp_for_filename, Chapter, ChapterData, ChapterGenerationEvent,
+    DetailedReadingChapter, DetailedReadingData,
 };
 use crate::db::{AiConfig, Database, ScreenshotMarker};
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
@@ -940,9 +941,9 @@ async fn optimize_chapter_titles(
 
 /// 生成原文细读章节数据（非辅助模式）
 ///
-/// 该函数使用 AI 自动分段字幕，然后为每个分段生成标题和内容摘要，并截图。
-/// 输出格式与辅助模式一致，都是 ChapterData。
-async fn generate_detailed_reading_chapters(
+/// 该函数优先使用 AI 智能分段字幕，然后为每个分段生成标题和内容摘要，并截图。
+/// 当智能分段失败时回退到 chunk 分段兜底，最终输出 DetailedReadingData。
+pub async fn generate_detailed_reading_chapters(
     app: &AppHandle,
     event_name: &str,
     ai_config: &AiConfig,
@@ -950,16 +951,20 @@ async fn generate_detailed_reading_chapters(
     video_path: &str,
     note_id: &str,
     abort_flag: &Arc<AtomicBool>,
-) -> Result<ChapterData, String> {
+) -> Result<DetailedReadingData, String> {
     tracing::info!("[原文细读] ========================================");
     tracing::info!("[原文细读] 开始生成章节数据");
     tracing::info!("[原文细读] 字幕总条数: {}", subtitle_entries.len());
     tracing::info!("[原文细读] 使用模型: {}", ai_config.model);
 
+    if subtitle_entries.is_empty() {
+        return Err("字幕内容为空".to_string());
+    }
+
     // 计算总时长
     let total_duration = subtitle_entries.last().map(|e| e.end_time).unwrap_or(0.0);
 
-    // 第一步：使用 AI 分段字幕
+    // 第一步：使用 chapter.rs 的智能分段能力
     let _ = app.emit(
         event_name,
         GenerationEvent::TabProgress {
@@ -970,49 +975,96 @@ async fn generate_detailed_reading_chapters(
         },
     );
 
-    let chunks = split_subtitle_into_chunks(subtitle_entries);
-    let total_chunks = chunks.len();
-    tracing::info!("[原文细读] 分段数: {}", total_chunks);
+    let planned_segments: Vec<(usize, usize)> = match analyze_subtitle_for_chapters(
+        ai_config,
+        subtitle_entries,
+        abort_flag,
+        app,
+        event_name,
+    ).await {
+        Ok(ai_chapters) if !ai_chapters.is_empty() => {
+            let total_entries = subtitle_entries.len();
+            let mut starts = ai_chapters
+                .iter()
+                .map(|c| c.start_index)
+                .filter(|&idx| idx < total_entries)
+                .collect::<Vec<_>>();
+            starts.push(0);
+            starts.sort_unstable();
+            starts.dedup();
 
-    // 第二步：并发生成每个分段的章节内容
+            let mut segments = Vec::new();
+            for i in 0..starts.len() {
+                let start = starts[i];
+                let end = if i + 1 < starts.len() {
+                    starts[i + 1]
+                } else {
+                    total_entries
+                };
+                if end > start {
+                    segments.push((start, end));
+                }
+            }
+
+            if segments.is_empty() {
+                split_subtitle_into_chunks(subtitle_entries)
+                    .into_iter()
+                    .map(|c| (c.start_index, c.end_index))
+                    .collect()
+            } else {
+                segments
+            }
+        }
+        Ok(_) => split_subtitle_into_chunks(subtitle_entries)
+            .into_iter()
+            .map(|c| (c.start_index, c.end_index))
+            .collect(),
+        Err(e) => {
+            tracing::warn!("[原文细读] 智能分段失败，回退 chunk 分段: {}", e);
+            split_subtitle_into_chunks(subtitle_entries)
+                .into_iter()
+                .map(|c| (c.start_index, c.end_index))
+                .collect()
+        }
+    };
+
+    if planned_segments.is_empty() {
+        return Err("未能生成任何章节".to_string());
+    }
+
+    tracing::info!("[原文细读] 分段数: {}", planned_segments.len());
+
+    // 第二步：为分段生成章节内容
+    let total_chunks = planned_segments.len();
     let mut tasks = Vec::new();
 
-    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+    for (chunk_idx, (start_index, end_index)) in planned_segments.iter().copied().enumerate() {
         let ai_config = ai_config.clone();
         let abort_flag = abort_flag.clone();
         let app = app.clone();
         let event_name = event_name.to_string();
         let subtitle_entries = subtitle_entries.to_vec();
-        let chunk_start = chunk.start_index;
-        let chunk_end = chunk.end_index;
-
-        // 提取该分段的字幕文本（用于生成内容）
-        let segment_subtitles: Vec<&SubtitleEntry> = subtitle_entries
-            .iter()
-            .skip(chunk_start)
-            .take(chunk_end - chunk_start)
-            .collect();
-
-        let subtitle_text: String = segment_subtitles
-            .iter()
-            .map(|e| e.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        // 计算时间范围
-        let start_time = subtitle_entries.get(chunk_start).map(|e| e.start_time).unwrap_or(0.0);
-        let end_time = subtitle_entries.get(chunk_end.saturating_sub(1)).map(|e| e.end_time).unwrap_or(total_duration);
 
         let task = tokio::spawn(async move {
-            // 检查中止
             if abort_flag.load(Ordering::Relaxed) {
                 return Err::<(usize, String, String, f64, f64), String>("已中止".to_string());
             }
 
-            tracing::info!("[原文细读] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
-                chunk_idx + 1, total_chunks, chunk_start, chunk_end);
+            let safe_start = start_index.min(subtitle_entries.len().saturating_sub(1));
+            let safe_end = end_index.min(subtitle_entries.len());
 
-            // 发送进度事件
+            if safe_end <= safe_start {
+                return Err::<(usize, String, String, f64, f64), String>("无效章节边界".to_string());
+            }
+
+            tracing::info!(
+                "[原文细读] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+                chunk_idx + 1,
+                total_chunks,
+                safe_start,
+                safe_end
+            );
+
             let _ = app.emit(&event_name, GenerationEvent::TabProgress {
                 tab_type: "DetailedReading".to_string(),
                 current: chunk_idx + 1,
@@ -1020,7 +1072,27 @@ async fn generate_detailed_reading_chapters(
                 message: format!("AI正在生成第 {}/{} 章节内容...", chunk_idx + 1, total_chunks),
             });
 
-            // 调用 AI 生成章节标题和内容
+            let segment_subtitles: Vec<&SubtitleEntry> = subtitle_entries
+                .iter()
+                .skip(safe_start)
+                .take(safe_end - safe_start)
+                .collect();
+
+            let subtitle_text: String = segment_subtitles
+                .iter()
+                .map(|e| e.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            let start_time = subtitle_entries
+                .get(safe_start)
+                .map(|e| e.start_time)
+                .unwrap_or(0.0);
+            let end_time = subtitle_entries
+                .get(safe_end.saturating_sub(1))
+                .map(|e| e.end_time)
+                .unwrap_or(total_duration);
+
             let prompt = build_detailed_reading_chapter_prompt(&subtitle_text);
             let req = NonStreamingRequest {
                 config: ai_config,
@@ -1028,20 +1100,22 @@ async fn generate_detailed_reading_chapters(
             };
 
             let (title, content) = match execute_non_streaming_with_abort(req, &abort_flag).await {
-                Ok(response) => {
-                    match parse_detailed_reading_chapter_response(&response.content) {
-                        Ok((t, c)) => (t, c),
-                        Err(e) => {
-                            tracing::error!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
-                            // 使用默认标题和内容
-                            (format!("章节 {}", chunk_idx + 1), subtitle_text.chars().take(200).collect())
-                        }
+                Ok(response) => match parse_detailed_reading_chapter_response(&response.content) {
+                    Ok((t, c)) => (t, c),
+                    Err(e) => {
+                        tracing::error!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
+                        (
+                            format!("章节 {}", chunk_idx + 1),
+                            subtitle_text.chars().take(200).collect(),
+                        )
                     }
-                }
+                },
                 Err(e) => {
                     tracing::error!("[原文细读] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
-                    // 使用默认标题和内容
-                    (format!("章节 {}", chunk_idx + 1), subtitle_text.chars().take(200).collect())
+                    (
+                        format!("章节 {}", chunk_idx + 1),
+                        subtitle_text.chars().take(200).collect(),
+                    )
                 }
             };
 
@@ -1051,7 +1125,6 @@ async fn generate_detailed_reading_chapters(
         tasks.push(task);
     }
 
-    // 等待所有任务完成并收集结果
     let mut results: Vec<(usize, String, String, f64, f64)> = Vec::new();
 
     for task in tasks {
@@ -1063,6 +1136,7 @@ async fn generate_detailed_reading_chapters(
                 if e == "已中止" {
                     return Err(e);
                 }
+                tracing::warn!("[原文细读] 分段任务失败，跳过: {}", e);
             }
             Err(e) => {
                 tracing::error!("[原文细读] 任务执行出错: {}", e);
@@ -1070,7 +1144,6 @@ async fn generate_detailed_reading_chapters(
         }
     }
 
-    // 按分段索引排序
     results.sort_by_key(|(idx, _, _, _, _)| *idx);
 
     if results.is_empty() {
@@ -1099,40 +1172,23 @@ async fn generate_detailed_reading_chapters(
         .unwrap_or("video");
     let safe_video_name = sanitize_filename(video_name);
 
-    // 构建章节列表
-    let mut chapters: Vec<Chapter> = Vec::new();
+    // 构建章节列表（先构建临时 Chapter 用于标题优化）
+    let mut temp_chapters: Vec<Chapter> = Vec::new();
 
-    for (idx, title, content, start_time, end_time) in results {
-        // 截图
-        let timestamp_str = format_timestamp_for_filename(start_time);
-        let screenshot_filename = format!("{}_{}.jpg", safe_video_name, timestamp_str);
-        let screenshot_path = screenshots_dir.join(&screenshot_filename);
-
-        let screenshot_result = capture_video_screenshot(video_path, start_time, screenshot_path.to_str().unwrap());
-        let screenshot_path_str = match screenshot_result {
-            Ok(_) => {
-                tracing::info!("[原文细读] 第 {} 章截图成功: {}", idx + 1, screenshot_filename);
-                Some(screenshot_path.to_string_lossy().to_string())
-            }
-            Err(e) => {
-                tracing::error!("[原文细读] 第 {} 章截图失败: {}", idx + 1, e);
-                None
-            }
-        };
-
-        chapters.push(Chapter {
+    for (_, title, content, start_time, end_time) in results {
+        temp_chapters.push(Chapter {
             id: uuid::Uuid::new_v4().to_string(),
             title,
             start_time,
             end_time,
             content,
-            screenshot_path: screenshot_path_str,
+            screenshot_path: None,
             level: None,
             parent_id: None,
         });
     }
 
-    tracing::info!("[原文细读] 成功生成 {} 个章节", chapters.len());
+    tracing::info!("[原文细读] 成功生成 {} 个章节", temp_chapters.len());
 
     // 第四步：优化标题（添加层级信息）
     let _ = app.emit(
@@ -1145,15 +1201,56 @@ async fn generate_detailed_reading_chapters(
         },
     );
 
-    if let Err(e) = optimize_chapter_titles(ai_config, &mut chapters, abort_flag).await {
+    if let Err(e) = optimize_chapter_titles(ai_config, &mut temp_chapters, abort_flag).await {
         tracing::error!("[原文细读] 标题优化失败: {}", e);
-        // 标题优化失败不影响整体流程，继续返回结果
+    }
+
+    // 第五步：构建 DetailedReadingChapter（包含字幕条目和截图）
+    let mut detailed_chapters: Vec<DetailedReadingChapter> = Vec::new();
+
+    for (idx, chapter) in temp_chapters.iter().enumerate() {
+        // 截图
+        let timestamp_str = format_timestamp_for_filename(chapter.start_time);
+        let screenshot_filename = format!("{}_{}.jpg", safe_video_name, timestamp_str);
+        let screenshot_path = screenshots_dir.join(&screenshot_filename);
+
+        let screenshot_path_str = match capture_video_screenshot(video_path, chapter.start_time, screenshot_path.to_str().unwrap()) {
+            Ok(_) => {
+                tracing::info!("[原文细读] 第 {} 章截图成功: {}", idx + 1, screenshot_filename);
+                Some(screenshot_path.to_string_lossy().to_string())
+            }
+            Err(e) => {
+                tracing::error!("[原文细读] 第 {} 章截图失败: {}", idx + 1, e);
+                None
+            }
+        };
+
+        // 提取该章节时间范围内的字幕条目
+        let chapter_subtitles: Vec<SubtitleEntry> = subtitle_entries
+            .iter()
+            .filter(|e| e.start_time >= chapter.start_time && e.start_time < chapter.end_time)
+            .cloned()
+            .collect();
+
+        detailed_chapters.push(DetailedReadingChapter {
+            id: chapter.id.clone(),
+            title: chapter.title.clone(),
+            start_time: chapter.start_time,
+            end_time: chapter.end_time,
+            content: Some(chapter.content.clone()),
+            subtitle_entries: chapter_subtitles,
+            screenshot_path: screenshot_path_str,
+        });
     }
 
     tracing::info!("[原文细读] ========================================");
+    tracing::info!("[原文细读] 生成的章节数: {}", detailed_chapters.len());
+    if !detailed_chapters.is_empty() {
+        tracing::info!("[原文细读] 第一个章节包含 {} 条字幕", detailed_chapters[0].subtitle_entries.len());
+    }
 
-    Ok(ChapterData {
-        chapters,
+    Ok(DetailedReadingData {
+        chapters: detailed_chapters,
         total_duration,
         generated_at: chrono::Local::now().to_rfc3339(),
     })
@@ -1303,18 +1400,15 @@ pub async fn generate_note(
                     },
                 );
 
-                // 使用与手动重新生成相同的高质量章节生成方法
-                match crate::chapter::generate_chapters(
-                    app.clone(),
-                    db,
-                    generation_id.clone(),
-                    crate::chapter::GenerateChaptersRequest {
-                        note_id: request.note_id.clone(),
-                        model_id: request.model_id.clone(),
-                        video_path: note.video_path.clone(),
-                        subtitle_path: subtitle_path.clone(),
-                        capture_screenshots: true,
-                    },
+                // 使用统一的 DetailedReadingData 生成链路
+                match generate_detailed_reading_chapters(
+                    &app,
+                    &event_name,
+                    &ai_config,
+                    &entries,
+                    &note.video_path,
+                    &request.note_id,
+                    &abort_flag,
                 ).await {
                     Ok(chapter_data) => {
                         tracing::info!("[笔记生成] {:?} 生成完成", tab_type);
