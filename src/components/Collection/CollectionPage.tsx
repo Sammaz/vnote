@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
-import { MoreHorizontal, Edit2, Trash2, BookOpen, GripVertical, CheckSquare, Square, Plus, FolderOpen } from "lucide-react";
+import { MoreHorizontal, Edit2, Trash2, BookOpen, GripVertical, CheckSquare, Square, Plus, FolderOpen, ArrowLeft } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   DndContext,
@@ -239,6 +239,9 @@ export function CollectionPage() {
   const menuRef = useRef<HTMLDivElement>(null);
 
   const collection = collections.find((c) => c.id === selectedCollectionId);
+  const parentCollection = collection?.parent_id
+    ? collections.find((c) => c.id === collection.parent_id)
+    : null;
 
   // 获取子合集
   const childCollections = useMemo(() => {
@@ -272,6 +275,12 @@ export function CollectionPage() {
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
+
+  const handleBackToParent = () => {
+    if (collection?.parent_id) {
+      setSelectedCollection(collection.parent_id);
+    }
+  };
 
   const handleDragEnd = async (event: DragEndEvent) => {
     const { active, over } = event;
@@ -474,6 +483,15 @@ export function CollectionPage() {
           )}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
+              {parentCollection && (
+                <button
+                  onClick={handleBackToParent}
+                  className="flex-shrink-0 p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
+                  title={`返回到 ${parentCollection.name}`}
+                >
+                  <ArrowLeft className="w-5 h-5" />
+                </button>
+              )}
               <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100 truncate">
                 {collection.name}
               </h1>

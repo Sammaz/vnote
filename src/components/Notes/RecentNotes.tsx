@@ -1,10 +1,12 @@
 import { ChevronRight } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useCollections } from "../../context/CollectionsContext";
 import { NoteCard } from "./NoteCard";
 
 export function RecentNotes() {
   const { notes, setSelectedNoteId, setCurrentView } = useApp();
+  const { expandCollectionPathForNote } = useCollections();
 
   // 按时间排序，取最近 4 条（数据库已经按 created_at DESC 排序）
   const recentNotes = notes.slice(0, 4);
@@ -36,9 +38,10 @@ export function RecentNotes() {
           <NoteCard
             key={note.id}
             note={note}
-            onClick={() => {
+            onClick={async () => {
               setSelectedNoteId(note.id);
               setCurrentView("note");
+              await expandCollectionPathForNote(note.id);
             }}
           />
         ))}

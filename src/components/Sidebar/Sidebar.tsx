@@ -220,6 +220,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
           onClick={() => {
             setSelectedFolder(null); // 清除文件夹选中
             setSelectedNoteId(note.id);
+            setSelectedCollection(null); // 清除合集选中
             setCurrentView("note");
           }}
           className={cn(
@@ -348,7 +349,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
 });
 
 export function Sidebar() {
-  const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, notesInCollections } = useApp();
+  const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, setSelectedCollection, notesInCollections } = useApp();
   const { collapsed } = sidebar;
   const [isHovered, setIsHovered] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
@@ -438,7 +439,7 @@ export function Sidebar() {
         <NavItem
           icon={<Search className="w-5 h-5" />}
           label="全局搜索"
-          active={showSearchModal}
+          active={false}
           collapsed={collapsed}
           onClick={() => setShowSearchModal(true)}
         />

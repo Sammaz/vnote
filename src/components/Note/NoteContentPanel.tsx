@@ -27,11 +27,13 @@ import {
   Network,
   Palette,
   Map as MapIcon,
+  ArrowLeft,
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useApp } from "../../context/AppContext";
 import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData, FlashcardGenerationEvent } from "../../types";
 import { ResponsiveTabs } from "./ResponsiveTabs";
 import { EditableMarkdown } from "./EditableMarkdown";
@@ -144,10 +146,16 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
 }
 
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
+  // Context
+  const { notesInCollections, setSelectedCollection, setCurrentView } = useApp();
+
   // 当前激活的标签页
   const [activeTab, setActiveTab] = useState<TabId>("summary");
   // 当前激活的标签组
   const [activeGroup, setActiveGroup] = useState<TabGroupId>("summary");
+
+  // 父合集ID
+  const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
 
   // ChapterGrid 组件的 ref
   const chapterGridRef = useRef<ChapterGridRef>(null);
@@ -203,6 +211,26 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   useEffect(() => {
     subtitleOptimizingRef.current = subtitleOptimizing;
   }, [subtitleOptimizing]);
+
+  // 获取父合集ID
+  useEffect(() => {
+    const fetchParentCollection = async () => {
+      if (notesInCollections.has(note.id)) {
+        try {
+          const collectionId = await invoke<string | null>("get_note_collection_id", {
+            noteId: note.id,
+          });
+          setParentCollectionId(collectionId);
+        } catch (error) {
+          console.error("Failed to get note collection:", error);
+          setParentCollectionId(null);
+        }
+      } else {
+        setParentCollectionId(null);
+      }
+    };
+    fetchParentCollection();
+  }, [note.id, notesInCollections]);
 
   // 高光笔记相关状态
   const [highlightIsGenerating, setHighlightIsGenerating] = useState(false);
@@ -984,6 +1012,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
     return content || null;
   }, [activeTab, note]);
+
+  // 返回到父合集
+  const handleBackToCollection = () => {
+    if (parentCollectionId) {
+      setSelectedCollection(parentCollectionId);
+      setCurrentView("collection");
+    }
+  };
 
   // 复制当前内容到剪贴板
   const handleCopy = async () => {
@@ -2392,6 +2428,16 @@ Video subtitles content:`;
         // 全文总结标签页的工具栏
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
           <div className="flex items-center gap-2">
+            {parentCollectionId && (
+              <button
+                onClick={handleBackToCollection}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                title="返回合集"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+            )}
             <button
               onClick={() => setIsEditMode(!isEditMode)}
               className={cn(
@@ -2435,6 +2481,16 @@ Video subtitles content:`;
         // 原文细读标签页的工具栏（不管有无章节数据都显示相同）
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
           <div className="flex items-center gap-3">
+            {parentCollectionId && (
+              <button
+                onClick={handleBackToCollection}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                title="返回合集"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+            )}
             {/* 辅助模式提示 - 仅在辅助模式下显示 */}
             {isAssistModeActive && (
               <div className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
@@ -2641,6 +2697,16 @@ Video subtitles content:`;
         // 字幕脚本标签页的专用工具栏
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
           <div className="flex items-center gap-3">
+            {parentCollectionId && (
+              <button
+                onClick={handleBackToCollection}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                title="返回合集"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+            )}
             {/* 字幕滚动开关 */}
             <button
               onClick={() => setAutoScroll(!autoScroll)}
@@ -2660,7 +2726,19 @@ Video subtitles content:`;
         </div>
       ) : activeTab === "highlights" ? (
         // 高光笔记标签页的专用工具栏
-        <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-2">
+            {parentCollectionId && (
+              <button
+                onClick={handleBackToCollection}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                title="返回合集"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+            )}
+          </div>
           {/* 重新生成按钮 */}
           <button
             onClick={handleHighlightRegenerate}
@@ -2684,6 +2762,16 @@ Video subtitles content:`;
         // 视觉化总结标签页的专用工具栏
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface select-none">
           <div className="flex items-center gap-2">
+            {parentCollectionId && (
+              <button
+                onClick={handleBackToCollection}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                title="返回合集"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+            )}
             {/* 视图模式切换 */}
             <div className="flex items-center bg-slate-100 dark:bg-vnote-hover rounded-lg p-0.5">
               <button
@@ -2825,6 +2913,16 @@ Video subtitles content:`;
         // 自定义总结标签页的工具栏（有内容时显示完整工具栏）
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
           <div className="flex items-center gap-2">
+            {parentCollectionId && (
+              <button
+                onClick={handleBackToCollection}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                title="返回合集"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+            )}
             <button
               onClick={() => setIsEditMode(!isEditMode)}
               className={cn(
@@ -2873,7 +2971,19 @@ Video subtitles content:`;
         null
       ) : activeTab === "flashcard" ? (
         // 闪记卡标签页的专用工具栏
-        <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+          <div className="flex items-center gap-2">
+            {parentCollectionId && (
+              <button
+                onClick={handleBackToCollection}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                title="返回合集"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-1">
             <button
               onClick={() => {
@@ -2910,28 +3020,40 @@ Video subtitles content:`;
       ) : activeTab === "panoramic_blueprint" && note.panoramic_blueprint ? (
         // 深度蓝图标签页的工具栏（有内容时显示）
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          {/* 进度提示 */}
-          {blueprintIsGenerating && blueprintProgress ? (
-            <div className="flex items-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-              <span className="text-sm text-blue-800 dark:text-blue-300">
-                正在生成深度蓝图... ({blueprintProgress.current}/{blueprintProgress.total})
-              </span>
-            </div>
-          ) : (
-            <button
-              onClick={() => setBlueprintEditMode(!blueprintEditMode)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                blueprintEditMode
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
-            >
-              <Edit3 className="w-4 h-4" />
-              {blueprintEditMode ? "预览" : "编辑"}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {parentCollectionId && (
+              <button
+                onClick={handleBackToCollection}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                title="返回合集"
+              >
+                <ArrowLeft className="w-4 h-4" />
+                返回
+              </button>
+            )}
+            {/* 进度提示 */}
+            {blueprintIsGenerating && blueprintProgress ? (
+              <div className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
+                <span className="text-sm text-blue-800 dark:text-blue-300">
+                  正在生成深度蓝图... ({blueprintProgress.current}/{blueprintProgress.total})
+                </span>
+              </div>
+            ) : (
+              <button
+                onClick={() => setBlueprintEditMode(!blueprintEditMode)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                  blueprintEditMode
+                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                )}
+              >
+                <Edit3 className="w-4 h-4" />
+                {blueprintEditMode ? "预览" : "编辑"}
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-1">
             <button
               onClick={async () => {
