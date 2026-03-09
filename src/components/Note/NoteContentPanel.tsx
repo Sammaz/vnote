@@ -17,7 +17,6 @@ import {
   List,
   Clock,
   Subtitles as SubtitlesIcon,
-  Wand2,
   Loader2,
   MousePointer2,
   Package,
@@ -35,10 +34,11 @@ import { cn } from "../../utils/cn";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useApp } from "../../context/AppContext";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData, FlashcardGenerationEvent } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData, FlashcardGenerationEvent, DetailedReadingData, DetailedReadingChapter, ChapterGenerationEvent } from "../../types";
+import { parseDetailedReadingData } from "../../types";
 import { ResponsiveTabs } from "./ResponsiveTabs";
 import { EditableMarkdown } from "./EditableMarkdown";
-import { ChapterGrid, type ChapterGridRef } from "./ChapterGrid";
+import { DetailedReadingView } from "./DetailedReadingView";
 import { VirtualizedSubtitleList } from "./VirtualizedSubtitleList";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
 import { VisualSummaryContent, type VisualViewMode } from "./VisualSummaryContent";
@@ -57,8 +57,8 @@ import {
   unregisterActiveGenerationId,
   setHighlightGenerating,
   setFlashcardGenerating,
+  setChapterGenerating,
 } from "../../utils/noteGenerationState";
-import type { ChapterGenerationEvent } from "../../types";
 
 type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "flashcard" | "panoramic_blueprint" | "quicknotes" | "mindmap" | "canvas";
 type TabGroupId = "summary" | "study";
@@ -159,28 +159,33 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 父合集ID
   const [parentCollectionId, setParentCollectionId] = useState<string | null>(null);
 
-  // ChapterGrid 组件的 ref
-  const chapterGridRef = useRef<ChapterGridRef>(null);
-
   // HighlightGrid 组件的 ref
   const highlightGridRef = useRef<HighlightGridRef>(null);
 
   // MindMapView 组件的 ref
   const mindMapRef = useRef<MindMapViewRef>(null);
 
-  // 章节相关状态
-  const [chapterData, setChapterData] = useState<ChapterData | null>(null);
-  // 记录 chapterData 所属的笔记 ID，防止笔记切换时的竞态条件
-  const chapterDataNoteIdRef = useRef<string | null>(null);
+  // 原文细读相关状态
+  const [detailedReadingData, setDetailedReadingData] = useState<DetailedReadingData | null>(null);
+  // 记录 detailedReadingData 所属的笔记 ID，防止笔记切换时的竞态条件
+  const detailedReadingDataNoteIdRef = useRef<string | null>(null);
 
   // 章节下拉框状态
   const [showChapterDropdown, setShowChapterDropdown] = useState(false);
   const chapterDropdownRef = useRef<HTMLDivElement>(null);
 
+  const getCurrentChapter = useCallback((time: number): DetailedReadingChapter | null => {
+    if (!detailedReadingData) return null;
+    return detailedReadingData.chapters.find(
+      chapter => time >= chapter.start_time && time <= chapter.end_time
+    ) || null;
+  }, [detailedReadingData]);
+
   // 字幕滚动状态
   const [autoScroll, setAutoScroll] = useState(true);
+  // 当前视频播放时间（秒）
+  const [currentTime, setCurrentTime] = useState(0);
   // 当前播放的章节ID
-  const [currentChapterId, setCurrentChapterId] = useState<string | null>(null);
   // 用户点击章节的时间戳（用于忽略视频时间更新）
   const userClickTimeRef = useRef<number>(0);
   // 自动滚动控制
@@ -200,7 +205,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 字幕优化相关状态
   const [subtitleOptimizationEnabled, setSubtitleOptimizationEnabled] = useState(false);
   const [subtitleOptimizing, setSubtitleOptimizing] = useState(false);
-  const [subtitleOptimizationProgress, setSubtitleOptimizationProgress] = useState<{ current: number; total: number } | null>(null);
+  const [, setSubtitleOptimizationProgress] = useState<{ current: number; total: number } | null>(null);
   const [optimizedSubtitles, setOptimizedSubtitles] = useState<Map<string, string>>(new Map());
   // 标记优化字幕是否已从数据库加载完成（防止迁移保存时的竞态条件）
   const [optimizedSubtitlesLoaded, setOptimizedSubtitlesLoaded] = useState(false);
@@ -259,37 +264,15 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     onConfirm: () => void;
   }>({ title: "", message: "", onConfirm: () => {} });
 
-  // 解析 detailed_reading 是否为章节数据
+  // 解析 detailed_reading 为 DetailedReadingData
   useEffect(() => {
-    if (note.detailed_reading) {
-      // 尝试解析为 JSON
-      if (typeof note.detailed_reading === "string") {
-        try {
-          const parsed = JSON.parse(note.detailed_reading);
-          // 检查是否是 ChapterData 格式
-          if (parsed && parsed.chapters && Array.isArray(parsed.chapters)) {
-            setChapterData(parsed);
-            chapterDataNoteIdRef.current = note.id;
-          } else {
-            setChapterData(null);
-            chapterDataNoteIdRef.current = null;
-          }
-        } catch (e) {
-          // 不是 JSON，保持为普通文本模式
-          setChapterData(null);
-          chapterDataNoteIdRef.current = null;
-        }
-      } else if (typeof note.detailed_reading === "object" && note.detailed_reading.chapters) {
-        // 已经是 ChapterData 对象
-        setChapterData(note.detailed_reading);
-        chapterDataNoteIdRef.current = note.id;
-      } else {
-        setChapterData(null);
-        chapterDataNoteIdRef.current = null;
-      }
+    const parsed = parseDetailedReadingData(note.detailed_reading);
+    if (parsed) {
+      setDetailedReadingData(parsed);
+      detailedReadingDataNoteIdRef.current = note.id;
     } else {
-      setChapterData(null);
-      chapterDataNoteIdRef.current = null;
+      setDetailedReadingData(null);
+      detailedReadingDataNoteIdRef.current = null;
     }
   }, [note.id, note.detailed_reading]);
 
@@ -897,43 +880,30 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       if (chapterDropdownRef.current && !chapterDropdownRef.current.contains(event.target as Node)) {
         setShowChapterDropdown(false);
       }
+      if (subtitleModeDropdownRef.current && !subtitleModeDropdownRef.current.contains(event.target as Node)) {
+        setShowSubtitleModeDropdown(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 监听视频播放时间变化，更新当前章节（不管是否开启字幕滚动）
+  // 监听视频播放时间变化（用于原文细读当前时间同步）
   useEffect(() => {
-    if (activeTab !== "original" || !chapterData) return;
+    if (activeTab !== "original") return;
 
-    const handleVideoTimeUpdate = (e: Event) => {
-      // 如果用户刚刚点击过章节（500ms内），忽略视频时间更新
-      if (Date.now() - userClickTimeRef.current < 500) {
-        return;
-      }
-
+    const handleCurrentTimeUpdate = (e: Event) => {
       const event = e as CustomEvent<{ time: number }>;
-      const currentTime = event.detail.time;
-
-      // 找到当前时间对应的章节
-      const currentChapter = chapterData.chapters.find(
-        (chapter) => currentTime >= chapter.start_time && currentTime <= chapter.end_time
-      );
-
-      if (currentChapter) {
-        setCurrentChapterId(currentChapter.id);
-      } else {
-        setCurrentChapterId(null);
-      }
+      setCurrentTime(event.detail.time);
     };
 
-    window.addEventListener("video-time-update", handleVideoTimeUpdate);
-    return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
-  }, [activeTab, chapterData]);
+    window.addEventListener("video-time-update", handleCurrentTimeUpdate);
+    return () => window.removeEventListener("video-time-update", handleCurrentTimeUpdate);
+  }, [activeTab]);
 
   // 字幕滚动自动跳转卡片
   useEffect(() => {
-    if (!autoScroll || activeTab !== "original" || !chapterData) return;
+    if (!autoScroll || activeTab !== "original" || !detailedReadingData) return;
 
     const handleVideoTimeUpdate = (e: Event) => {
       // 如果用户刚刚点击过章节（500ms内），忽略视频时间更新带来的滚动
@@ -945,9 +915,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       const currentTime = event.detail.time;
 
       // 找到当前时间对应的章节
-      const currentChapter = chapterData.chapters.find(
-        (chapter) => currentTime >= chapter.start_time && currentTime <= chapter.end_time
-      );
+      const currentChapter = getCurrentChapter(currentTime);
 
       if (currentChapter && currentChapter.id !== lastChapterIdRef.current) {
         if (shouldAutoScroll) {
@@ -967,7 +935,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     window.addEventListener("video-time-update", handleVideoTimeUpdate);
     return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
-  }, [autoScroll, activeTab, chapterData, shouldAutoScroll, isAutoScrollingRef]);
+  }, [autoScroll, activeTab, detailedReadingData, shouldAutoScroll, isAutoScrollingRef, getCurrentChapter]);
 
   // 检查标签页是否正在生成
   const isTabGenerating = (tabId: TabId): boolean => {
@@ -1101,18 +1069,37 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   };
 
+  const visualChaptersForMarkdown = useCallback((): ChapterData | null => {
+    if (!detailedReadingData) return null;
+    return {
+      chapters: detailedReadingData.chapters.map((chapter) => ({
+        id: chapter.id,
+        title: chapter.title,
+        start_time: chapter.start_time,
+        end_time: chapter.end_time,
+        content: "",
+        screenshot_path: chapter.screenshot_path,
+        level: 1,
+        parent_id: null,
+      })),
+      total_duration: detailedReadingData.total_duration,
+      generated_at: detailedReadingData.generated_at,
+    };
+  }, [detailedReadingData]);
+
   // 获取视觉化总结的 Markdown 内容（动态生成）
   const getVisualSummaryContent = useCallback((): string => {
-    if (!chapterData || chapterData.chapters.length === 0) {
+    const chapterDataForMarkdown = visualChaptersForMarkdown();
+    if (!chapterDataForMarkdown || chapterDataForMarkdown.chapters.length === 0) {
       return "";
     }
     return assembleChapterMarkdown({
-      chapters: chapterData.chapters,
+      chapters: chapterDataForMarkdown.chapters,
       optimizedSubtitles,
       originalSubtitles: subtitleEntries,
       showTimestamp: showVisualTimestamp,
     });
-  }, [chapterData, optimizedSubtitles, subtitleEntries, showVisualTimestamp]);
+  }, [visualChaptersForMarkdown, optimizedSubtitles, subtitleEntries, showVisualTimestamp]);
 
   // 获取已保存的视觉化总结 Markdown（区分思维导图 JSON）
   const getSavedVisualMarkdown = useCallback((): string | null => {
@@ -1131,9 +1118,10 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 组装视觉化总结 Markdown 并保存到数据库
   const saveAssembledVisualMarkdown = useCallback(async () => {
-    if (!chapterData || chapterData.chapters.length === 0) return;
-    // 防止笔记切换时的竞态条件：确保 chapterData 属于当前笔记
-    if (chapterDataNoteIdRef.current !== note.id) return;
+    const chapterDataForMarkdown = visualChaptersForMarkdown();
+    if (!chapterDataForMarkdown || chapterDataForMarkdown.chapters.length === 0) return;
+    // 防止笔记切换时的竞态条件：确保 detailedReadingData 属于当前笔记
+    if (detailedReadingDataNoteIdRef.current !== note.id) return;
     // 保护思维导图数据：如果当前 visual_summary 是有效 JSON，跳过保存
     if (note.visual_summary && note.visual_summary.trim().startsWith('{')) {
       try {
@@ -1145,7 +1133,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
     // 组装 Markdown（showTimestamp 固定为 true，显隐由 CSS 控制）
     const content = assembleChapterMarkdown({
-      chapters: chapterData.chapters,
+      chapters: chapterDataForMarkdown.chapters,
       optimizedSubtitles,
       originalSubtitles: subtitleEntries,
       showTimestamp: true,
@@ -1160,25 +1148,25 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     } catch (error) {
       console.error("保存视觉化总结失败:", error);
     }
-  }, [note.id, note.visual_summary, chapterData, optimizedSubtitles, subtitleEntries]);
+  }, [visualChaptersForMarkdown, note.id, note.visual_summary, optimizedSubtitles, subtitleEntries]);
 
-  // 当 chapterData/optimizedSubtitles 更新后，如果有待保存标志，执行保存
+  // 当章节数据/optimizedSubtitles 更新后，如果有待保存标志，执行保存
   useEffect(() => {
     if (!pendingVisualSummarySaveRef.current) return;
     pendingVisualSummarySaveRef.current = false;
     saveAssembledVisualMarkdown().then(() => {
       onGenerationComplete?.();
     });
-  }, [chapterData, optimizedSubtitles, saveAssembledVisualMarkdown, onGenerationComplete]);
+  }, [detailedReadingData, optimizedSubtitles, saveAssembledVisualMarkdown, onGenerationComplete]);
 
   // 迁移兼容：已有章节但从未保存过 visual_summary 的旧笔记，自动保存
   // 必须等待 optimizedSubtitles 从数据库加载完成，否则会回退到原始字幕
-  // 注意：队列完成后 refreshNotes 会更新 note.detailed_reading（触发 chapterData 解析），
+  // 注意：队列完成后 refreshNotes 会更新 note.detailed_reading（触发章节数据解析），
   // 但 loadSavedState 只依赖 note.id 不会重新执行，导致 optimizedSubtitles 可能是空 Map。
   // 因此这里需要重新从数据库加载优化字幕，确保用最新数据组装 markdown。
   useEffect(() => {
     if (!optimizedSubtitlesLoaded) return;
-    if (!(chapterData && chapterData.chapters.length > 0 && !note.visual_summary)) return;
+    if (!(detailedReadingData && detailedReadingData.chapters.length > 0 && !note.visual_summary)) return;
     let cancelled = false;
     (async () => {
       // 重新从数据库加载优化字幕，防止队列完成后 optimizedSubtitles 仍为空 Map
@@ -1200,7 +1188,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       }
     })();
     return () => { cancelled = true; };
-  }, [note.id, chapterData, note.visual_summary, optimizedSubtitlesLoaded, saveAssembledVisualMarkdown, onGenerationComplete]);
+  }, [note.id, detailedReadingData, note.visual_summary, optimizedSubtitlesLoaded, saveAssembledVisualMarkdown, onGenerationComplete]);
 
   // 视觉化总结复制
   const handleVisualCopy = async () => {
@@ -1365,10 +1353,16 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       return;
     }
 
+    const generationId = crypto.randomUUID();
+
+    // 先注册 generation_id，确保 catch 里可安全清理
+    registerActiveGenerationId(note.id, generationId);
+
     try {
       setAssistModeGenerating(true);
+      setChapterIsGenerating(true);
+      setChapterGenerating(note.id, true);
       setAssistModeProgress({ current: 0, total: markers.length, message: "准备生成章节..." });
-      const generationId = crypto.randomUUID();
 
       // 设置事件监听
       const unlisten = await listen<ChapterGenerationEvent>(
@@ -1396,6 +1390,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               // 刷新笔记数据
               onGenerationComplete?.();
               message.success("章节生成完成");
+              setChapterIsGenerating(false);
+              setChapterGenerating(note.id, false);
+              unregisterActiveGenerationId(note.id, generationId);
               setTimeout(() => {
                 setAssistModeGenerating(false);
                 setAssistModeProgress(null);
@@ -1408,11 +1405,17 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               message.error(`生成失败: ${data.error}`);
               setAssistModeGenerating(false);
               setAssistModeProgress(null);
+              setChapterIsGenerating(false);
+              setChapterGenerating(note.id, false);
+              unregisterActiveGenerationId(note.id, generationId);
               unlisten();
               break;
             case "Aborted":
               setAssistModeGenerating(false);
               setAssistModeProgress(null);
+              setChapterIsGenerating(false);
+              setChapterGenerating(note.id, false);
+              unregisterActiveGenerationId(note.id, generationId);
               unlisten();
               break;
           }
@@ -1450,6 +1453,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       message.error(`生成失败: ${error}`);
       setAssistModeGenerating(false);
       setAssistModeProgress(null);
+      setChapterIsGenerating(false);
+      setChapterGenerating(note.id, false);
+      unregisterActiveGenerationId(note.id, generationId);
     }
   }, [note.id, note.video_path, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete]);
 
@@ -1476,7 +1482,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         modelId: effectiveModelId,
         subtitlePath: note.subtitle_path,
         highlightType: "default",
-        totalDuration: chapterData?.total_duration || 0,
+        totalDuration: detailedReadingData?.total_duration || 0,
       });
 
       // 注册 generation_id 以便删除时可以中止
@@ -1506,7 +1512,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setHighlightIsGenerating(false);
       setHighlightGenerating(note.id, false);
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, detailedReadingData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 用于存储 triggerVisualSummaryOptimizationSilent 的 ref，避免循环依赖
   const triggerVisualSummaryOptimizationSilentRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -1527,7 +1533,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     // 检查必要条件
-    if (!chapterData || !note.subtitle_path || !note.model_id) {
+    if (!detailedReadingData || !note.subtitle_path || !note.model_id) {
       return;
     }
 
@@ -1557,7 +1563,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const generationId = crypto.randomUUID();
     subtitleOptimizationIdRef.current = generationId;
 
-    const chaptersToOptimize = chapterData.chapters
+    const chaptersToOptimize = detailedReadingData.chapters
       .filter(chapter => chapter.id)
       .map(chapter => {
         const filtered = currentSubtitleEntries.filter(
@@ -1615,7 +1621,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setSubtitleOptimizationProgress(null);
       setOptimizingChapterIds(new Set());
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData, subtitleEntries, optimizedSubtitles.size, subtitleOptimizing, setupSubtitleOptimizationListener]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, detailedReadingData, subtitleEntries, optimizedSubtitles.size, subtitleOptimizing, setupSubtitleOptimizationListener]);
 
   // 更新 triggerVisualSummaryOptimizationSilent ref
   useEffect(() => {
@@ -1766,7 +1772,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 开启优化：检查是否有缓存
     if (optimizedSubtitles.size > 0) {
       // 检查缓存的章节ID是否与当前章节匹配
-      const currentChapterIds = new Set(chapterData?.chapters.map(c => c.id) || []);
+      const currentChapterIds = new Set(detailedReadingData?.chapters.map(c => c.id) || []);
       const cachedChapterIds = Array.from(optimizedSubtitles.keys());
       const isMatch = cachedChapterIds.some(id => currentChapterIds.has(id));
 
@@ -1785,7 +1791,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       const savedSubtitles = await invoke<OptimizedSubtitle[]>("get_optimized_subtitles", { noteId: note.id });
       if (savedSubtitles && savedSubtitles.length > 0) {
         // 检查数据库缓存的章节ID是否与当前章节匹配
-        const currentChapterIds = new Set(chapterData?.chapters.map(c => c.id) || []);
+        const currentChapterIds = new Set(detailedReadingData?.chapters.map(c => c.id) || []);
         const matchedSubtitles = savedSubtitles.filter(s => currentChapterIds.has(s.chapter_id));
 
         if (matchedSubtitles.length > 0) {
@@ -1804,7 +1810,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     // 无缓存或缓存不匹配，开始优化
     // 优先使用视频播放器右上角选择的模型
     const effectiveModelId = currentModelId || note.model_id;
-    if (!chapterData || !effectiveModelId || !note.subtitle_path) {
+    if (!detailedReadingData || !effectiveModelId || !note.subtitle_path) {
       message.warning("缺少必要的数据，无法进行字幕优化");
       return;
     }
@@ -1834,7 +1840,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     subtitleOptimizationIdRef.current = generationId;
 
     // 准备章节字幕数据
-    const chaptersToOptimize = chapterData.chapters
+    const chaptersToOptimize = detailedReadingData.chapters
       .filter(chapter => chapter.id)
       .map(chapter => {
         // 过滤出当前章节时间范围内的字幕
@@ -1900,15 +1906,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setSubtitleOptimizationProgress(null);
       setOptimizingChapterIds(new Set());
     }
-  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, chapterData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId]);
-
-  // 字幕模式切换处理
-  const handleSubtitleModeChange = useCallback(async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const shouldEnable = e.target.value === "optimized";
-    if (shouldEnable !== subtitleOptimizationEnabled) {
-      await handleSubtitleOptimizationToggle();
-    }
-  }, [subtitleOptimizationEnabled, handleSubtitleOptimizationToggle]);
+  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, detailedReadingData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId]);
 
   // 高光笔记重新生成处理
   const handleHighlightRegenerate = useCallback(async () => {
@@ -1932,7 +1930,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             modelId: currentModelId || note.model_id,
             subtitlePath: note.subtitle_path,
             highlightType: "default",
-            totalDuration: chapterData?.total_duration || 0,
+            totalDuration: detailedReadingData?.total_duration || 0,
           });
 
       // 等待生成完成
@@ -1959,15 +1957,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       }
     });
     setShowConfirmDialog(true);
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
-
-  // 章节生成完成后的回调
-  const handleChapterGenerationComplete = useCallback(() => {
-    // 标记待保存视觉化总结
-    pendingVisualSummarySaveRef.current = true;
-    // 刷新笔记数据
-    onGenerationComplete?.();
-  }, [onGenerationComplete]);
+  }, [note.id, note.subtitle_path, note.model_id, currentModelId, detailedReadingData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 单章节重新优化字幕
   const handleReoptimizeChapter = useCallback(async (chapterId: string) => {
@@ -1984,7 +1974,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     // 获取章节数据
-    const chapter = chapterData?.chapters.find(c => c.id === chapterId);
+    const chapter = detailedReadingData?.chapters.find(c => c.id === chapterId);
     if (!chapter) {
       message.error("找不到章节数据");
       return;
@@ -2123,7 +2113,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       });
       unlisten();
     }
-  }, [chapterData, currentModelId, note.model_id, note.id, note.subtitle_path, subtitleEntries, optimizingChapterIds]);
+  }, [detailedReadingData, currentModelId, note.model_id, note.id, note.subtitle_path, subtitleEntries, optimizingChapterIds]);
 
   // 根据配置生成动态提示词（Markdown 格式）
   const generateDynamicPrompt = useCallback((): string => {
@@ -2549,10 +2539,10 @@ Video subtitles content:`;
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
                 >
                   <List className="w-4 h-4" />
-                  共 {chapterData?.chapters.length || 0} 个章节
+                  共 {detailedReadingData?.chapters.length || 0} 个章节
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
                 </button>
-                {showChapterDropdown && chapterData && (
+                {showChapterDropdown && detailedReadingData && (
                   <div className="absolute top-full left-0 mt-1 w-96 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-auto">
                     {/* 下拉框头部 */}
                     <div className="sticky top-0 bg-white dark:bg-slate-800 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
@@ -2561,7 +2551,8 @@ Video subtitles content:`;
                     </div>
                     {/* 章节列表 */}
                     <div className="py-1">
-                      {chapterData.chapters.map((chapter, index) => {
+                      {detailedReadingData.chapters.map((chapter, index) => {
+                        const isCurrentChapter = chapter.id === getCurrentChapter(currentTime)?.id;
                         const formatTime = (seconds: number): string => {
                           const hours = Math.floor(seconds / 3600);
                           const minutes = Math.floor((seconds % 3600) / 60);
@@ -2577,8 +2568,6 @@ Video subtitles content:`;
                             onClick={() => {
                               // 记录用户点击时间，防止视频时间更新干扰
                               userClickTimeRef.current = Date.now();
-                              // 设置当前选中的章节
-                              setCurrentChapterId(chapter.id);
                               // 跳转到视频时间
                               window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
                               // 滚动到对应章节卡片
@@ -2588,7 +2577,12 @@ Video subtitles content:`;
                               }
                               setShowChapterDropdown(false);
                             }}
-                            className="w-full px-4 py-2 flex items-center gap-3 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer text-left"
+                            className={cn(
+                              "w-full px-4 py-2 flex items-center gap-3 transition-colors cursor-pointer text-left",
+                              isCurrentChapter
+                                ? "bg-blue-50 dark:bg-blue-900/20"
+                                : "hover:bg-slate-100 dark:hover:bg-slate-700"
+                            )}
                           >
                             <span className="text-xs text-blue-400 dark:text-blue-400 font-mono w-12 flex-shrink-0">
                               {formatTime(chapter.start_time)}
@@ -2596,7 +2590,12 @@ Video subtitles content:`;
                             <span className="text-xs w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
                               {index + 1}
                             </span>
-                            <span className="text-sm text-slate-700 dark:text-slate-200 truncate">
+                            <span className={cn(
+                              "text-sm truncate",
+                              isCurrentChapter
+                                ? "text-blue-600 dark:text-blue-400 font-medium"
+                                : "text-slate-700 dark:text-slate-200"
+                            )}>
                               {chapter.title}
                             </span>
                           </button>
@@ -2608,7 +2607,7 @@ Video subtitles content:`;
               </div>
             )}
             {/* 字幕模式切换下拉框 - 辅助模式下隐藏 */}
-            {!isAssistModeActive && note.subtitle_path && showChapterSubtitles && chapterData && (
+            {!isAssistModeActive && note.subtitle_path && showChapterSubtitles && detailedReadingData && (
               <div className="relative" ref={subtitleModeDropdownRef}>
                 <button
                   type="button"
@@ -2738,8 +2737,26 @@ Video subtitles content:`;
                       }
                       // 标记待保存视觉化总结
                       pendingVisualSummarySaveRef.current = true;
-                      // 重新生成章节
-                      chapterGridRef.current?.generateChapters();
+                      // 重新生成章节（统一走详细阅读链路）
+                      setChapterIsGenerating(true);
+                      setChapterGenerating(note.id, true);
+                      const generationId = crypto.randomUUID();
+                      registerActiveGenerationId(note.id, generationId);
+                      try {
+                        await invoke("generate_note_content", {
+                          generationId,
+                          noteId: note.id,
+                          modelId: currentModelId || note.model_id,
+                          concurrent: true,
+                          regenerate: true,
+                          tabsToGenerate: ["detailed_reading"],
+                        });
+                      } catch (error) {
+                        setChapterIsGenerating(false);
+                        setChapterGenerating(note.id, false);
+                        unregisterActiveGenerationId(note.id, generationId);
+                        message.error(`重新生成章节失败: ${error}`);
+                      }
                     }
                   }
                 });
@@ -3307,7 +3324,6 @@ Video subtitles content:`;
                 subtitlePath={note.subtitle_path}
                 videoPath={note.video_path}
                 onRegenerateChapters={(markers: ScreenshotMarker[]) => {
-                  // 使用截图标记生成章节
                   generateChaptersWithMarkers(markers);
                 }}
                 onExitAssistMode={() => setIsAssistModeActive(false)}
@@ -3316,49 +3332,28 @@ Video subtitles content:`;
             );
           }
 
-          // 检查是否是纯文本内容（向后兼容旧数据）
-          const isPlainText = typeof note.detailed_reading === "string" &&
-            note.detailed_reading.trim() &&
-            !note.detailed_reading.trim().startsWith("{");
+          // 使用新格式 DetailedReadingData
+          if (detailedReadingData) {
+            return (
+              <DetailedReadingView
+                data={detailedReadingData}
+                currentTime={currentTime}
+                subtitleEntries={subtitleEntries}
+                showSubtitles={showChapterSubtitles}
+                subtitleOptimizationEnabled={subtitleOptimizationEnabled}
+                optimizedSubtitles={optimizedSubtitles}
+                optimizingChapterIds={optimizingChapterIds}
+                failedChapterIds={failedChapterIds}
+                onReoptimizeChapter={handleReoptimizeChapter}
+              />
+            );
+          }
 
-          return isPlainText ? (
-            <EditableMarkdown
-              noteId={note.id}
-              tabType="detailed_reading"
-              content={note.detailed_reading as string | null}
-              isGenerating={isTabGenerating("original")}
-              emptyMessage="原文细读内容将在AI分析后生成"
-              isEditMode={isEditMode}
-              onContentUpdate={onGenerationComplete}
-            />
-          ) : (
-            // 否则显示 ChapterGrid（包含空状态和有数据的状态）
-            <ChapterGrid
-              ref={chapterGridRef}
-              noteId={note.id}
-              videoPath={note.video_path}
-              subtitlePath={note.subtitle_path}
-              chapterData={chapterData}
-              isGenerating={isTabGenerating("original")}
-              onChapterClick={(chapter) => {
-                // 记录用户点击时间，防止视频时间更新干扰
-                userClickTimeRef.current = Date.now();
-                setCurrentChapterId(chapter.id);
-                // 发送事件跳转视频时间
-                window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
-              }}
-              onGenerationComplete={handleChapterGenerationComplete}
-              modelId={currentModelId || note.model_id}
-              showToolbar={false}
-              currentChapterId={currentChapterId}
-              showSubtitles={showChapterSubtitles}
-              // 字幕优化相关
-              subtitleOptimizationEnabled={subtitleOptimizationEnabled}
-              optimizedSubtitles={optimizedSubtitles}
-              optimizingChapterIds={optimizingChapterIds}
-              failedChapterIds={failedChapterIds}
-              onReoptimizeChapter={handleReoptimizeChapter}
-            />
+          // 空状态
+          return (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-slate-500">暂无原文细读数据，请点击右上角"重新生成"按钮生成</p>
+            </div>
           );
         })()}
         {activeTab === "highlights" && (
@@ -3367,7 +3362,7 @@ Video subtitles content:`;
             noteId={note.id}
             subtitlePath={note.subtitle_path}
             modelId={currentModelId || note.model_id}
-            totalDuration={chapterData?.total_duration || 0}
+            totalDuration={detailedReadingData?.total_duration || 0}
             initialHighlightData={parseHighlightData(note.highlights)}
             onGenerationComplete={() => {
               onGenerationComplete?.();
@@ -3380,7 +3375,7 @@ Video subtitles content:`;
         {activeTab === "visual" && (
           <VisualSummaryContent
             ref={mindMapRef}
-            chapterData={chapterData}
+            chapterData={visualChaptersForMarkdown()}
             optimizedSubtitles={optimizedSubtitles}
             originalSubtitles={subtitleEntries}
             isEditMode={isVisualEditMode}

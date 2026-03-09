@@ -8,11 +8,11 @@ import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 
-import { parseDetailedReading, type Note, type ChapterData, type SubtitleEntry, type OptimizedSubtitle } from "../../types";
+import { parseDetailedReading, type Note, type ChapterData, type DetailedReadingData, type SubtitleEntry, type OptimizedSubtitle } from "../../types";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 
 // 从 detailed_reading 中提取第一章的截图路径
-function getFirstChapterScreenshot(detailedReading: string | ChapterData | null): string | null {
+function getFirstChapterScreenshot(detailedReading: string | ChapterData | DetailedReadingData | null): string | null {
   if (!detailedReading) return null;
   if (typeof detailedReading === "string") {
     try {

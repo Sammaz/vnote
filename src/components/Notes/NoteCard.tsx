@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Video, Calendar, Edit3, Trash2 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
-import type { Note, ChapterData } from "../../types";
+import type { Note, ChapterData, DetailedReadingData } from "../../types";
 
 interface NoteCardProps {
   note: Note;
@@ -26,7 +26,7 @@ function formatDate(dateStr: string): string {
 }
 
 // 从 detailed_reading 中提取第一章的截图路径
-function getFirstChapterScreenshot(detailedReading: string | ChapterData | null): string | null {
+function getFirstChapterScreenshot(detailedReading: string | ChapterData | DetailedReadingData | null): string | null {
   if (!detailedReading) return null;
 
   // 如果是字符串，尝试解析为 JSON

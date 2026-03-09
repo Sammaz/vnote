@@ -9,7 +9,7 @@
 //! 6. 闪记卡 (generate_flashcards)
 
 use crate::bcut_asr;
-use crate::chapter::ChapterData;
+use crate::chapter::DetailedReadingData;
 use crate::chat;
 use crate::note_generation;
 use crate::subtitle_optimizer::ChapterSubtitleInput;
@@ -303,12 +303,12 @@ async fn run_initialization(
     let start_step = params.start_from_step.unwrap_or(0);
 
     // 用于存储章节数据（步骤3的结果，步骤4需要）
-    let mut chapter_data: Option<ChapterData> = None;
+    let mut chapter_data: Option<DetailedReadingData> = None;
 
     // 如果从步骤4开始恢复，需要从数据库加载章节数据
     if start_step >= 4 {
         if let Some(detailed_reading) = &note.detailed_reading {
-            if let Ok(data) = serde_json::from_str::<ChapterData>(detailed_reading) {
+            if let Ok(data) = serde_json::from_str::<DetailedReadingData>(detailed_reading) {
                 chapter_data = Some(data);
             }
         }
@@ -443,7 +443,7 @@ async fn execute_step(
     step: InitializationStep,
     has_subtitle: bool,
     abort_flag: &Arc<AtomicBool>,
-    chapter_data: &mut Option<ChapterData>,
+    chapter_data: &mut Option<DetailedReadingData>,
 ) -> StepResult {
     match step {
         InitializationStep::SubtitleGeneration => {
@@ -695,7 +695,7 @@ async fn execute_chapters_step(
     event_name: &str,
     params: &InitializationParams,
     abort_flag: &Arc<AtomicBool>,
-    chapter_data_out: &mut Option<ChapterData>,
+    chapter_data_out: &mut Option<DetailedReadingData>,
 ) -> StepResult {
     let subtitle_path = match &params.subtitle_path {
         Some(p) => p.clone(),
@@ -706,7 +706,7 @@ async fn execute_chapters_step(
         event_name,
         NoteInitializationEvent::StepProgress {
             step: InitializationStep::Chapters,
-            message: "正在生成章节...".to_string(),
+            message: "正在生成原文细读...".to_string(),
         },
     );
 
@@ -715,36 +715,55 @@ async fn execute_chapters_step(
         None => return StepResult::Failed("数据库未初始化".to_string()),
     };
 
-    let generation_id = format!("init-chapters-{}", uuid::Uuid::new_v4());
-
-    let request = crate::chapter::GenerateChaptersRequest {
-        note_id: params.note_id.clone(),
-        model_id: params.model_id.clone(),
-        video_path: params.video_path.clone(),
-        subtitle_path,
-        capture_screenshots: true,
+    // 获取 AI 配置
+    let ai_config = match db.get_ai_config_by_id(&params.model_id) {
+        Ok(Some(config)) => config,
+        Ok(None) => return StepResult::Failed("AI模型未找到".to_string()),
+        Err(e) => return StepResult::Failed(format!("获取AI配置失败: {}", e)),
     };
 
-    match crate::chapter::generate_chapters(
-        app.clone(),
-        db,
-        generation_id.clone(),
-        request,
+    // 解析字幕
+    let subtitle_entries = match crate::subtitle::parse_subtitle_file(&subtitle_path) {
+        Ok(entries) => entries,
+        Err(e) => return StepResult::Failed(format!("解析字幕失败: {}", e)),
+    };
+
+    let generation_id = format!("init-chapters-{}", uuid::Uuid::new_v4());
+    let event_name_detailed = format!("chapter-generation-{}", generation_id);
+
+    // 注册中止标志
+    let abort_flag_detailed = crate::ai_pool::get_ai_pool_manager()
+        .register_abort_flag(generation_id.clone())
+        .await;
+
+    match crate::note_generation::generate_detailed_reading_chapters(
+        app,
+        &event_name_detailed,
+        &ai_config,
+        &subtitle_entries,
+        &params.video_path,
+        &params.note_id,
+        &abort_flag_detailed,
     )
     .await
     {
         Ok(data) => {
-            // 保存章节数据到 detailed_reading 字段
-            if let Ok(chapter_json) = serde_json::to_string(&data) {
+            // 保存步骤输出，供后续步骤复用
+            *chapter_data_out = Some(data.clone());
+
+            // 保存数据到 detailed_reading 字段
+            if let Ok(json) = serde_json::to_string(&data) {
                 if let Ok(Some(mut note)) = db.get_note_by_id(&params.note_id) {
-                    note.detailed_reading = Some(chapter_json);
+                    note.detailed_reading = Some(json);
                     let _ = db.update_note(&note);
                 }
             }
-            *chapter_data_out = Some(data);
+            // 清理中止标志
+            crate::ai_pool::get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
             StepResult::Completed
         }
         Err(e) => {
+            crate::ai_pool::get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
             if is_aborted(abort_flag) {
                 StepResult::Failed("已中止".to_string())
             } else {
@@ -759,12 +778,40 @@ async fn execute_subtitle_optimization_step(
     app: &AppHandle,
     event_name: &str,
     params: &InitializationParams,
-    chapter_data: &Option<ChapterData>,
+    _chapter_data: &Option<DetailedReadingData>,
     abort_flag: &Arc<AtomicBool>,
 ) -> StepResult {
-    // 需要章节数据作为输入
-    let chapters = match chapter_data {
-        Some(data) => &data.chapters,
+    let db = match DATABASE.get() {
+        Some(db) => db,
+        None => return StepResult::Failed("数据库未初始化".to_string()),
+    };
+
+    // 从数据库读取 detailed_reading 并提取章节信息
+    let note = match db.get_note_by_id(&params.note_id) {
+        Ok(Some(n)) => n,
+        Ok(None) => return StepResult::Failed("笔记未找到".to_string()),
+        Err(e) => return StepResult::Failed(format!("读取笔记失败: {}", e)),
+    };
+
+    let chapters = match &note.detailed_reading {
+        Some(json_str) => {
+            match serde_json::from_str::<crate::chapter::DetailedReadingData>(json_str) {
+                Ok(data) => {
+                    // 转换为 Chapter 列表供字幕优化使用
+                    data.chapters.iter().map(|dc| crate::chapter::Chapter {
+                        id: dc.id.clone(),
+                        title: dc.title.clone(),
+                        start_time: dc.start_time,
+                        end_time: dc.end_time,
+                        content: String::new(), // 字幕优化不需要 content
+                        screenshot_path: dc.screenshot_path.clone(),
+                        level: None,
+                        parent_id: None,
+                    }).collect::<Vec<_>>()
+                }
+                Err(_) => return StepResult::Skipped("无章节数据".to_string()),
+            }
+        }
         None => return StepResult::Skipped("无章节数据".to_string()),
     };
 
@@ -785,11 +832,6 @@ async fn execute_subtitle_optimization_step(
             message: "正在优化字幕...".to_string(),
         },
     );
-
-    let db = match DATABASE.get() {
-        Some(db) => db,
-        None => return StepResult::Failed("数据库未初始化".to_string()),
-    };
 
     // 获取 AI 配置
     let config = match db.get_ai_config_by_id(&params.model_id) {
