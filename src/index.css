@@ -52,6 +52,12 @@
   background: transparent;
 }
 
+/* 隐藏 Windows WebView/Edge 密码输入框自带的显示按钮，避免与自定义眼睛图标重复 */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+
 ::-webkit-scrollbar-thumb {
   background: rgba(203, 213, 225, 0.6);
   border-radius: 4px;
