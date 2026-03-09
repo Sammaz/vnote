@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Pencil } from "lucide-react";
+import { Pencil, ArrowLeft } from "lucide-react";
 import { VideoPlayer } from "./VideoPlayer";
 import { ChatWindow } from "./ChatWindow";
 import { NoteContentPanel } from "./NoteContentPanel";
@@ -53,7 +53,7 @@ function Resizer({ onDrag, isDragging }: ResizerProps) {
 }
 
 export function NotePage() {
-  const { notes, selectedNoteId, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth } = useApp();
+  const { notes, selectedNoteId, selectedCollectionId, setCurrentView, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, toggleSidebar, sidebar, setSelectedNoteId } = useApp();
 
   // 使用全局初始化队列 Context
   const { currentTask, initState } = useInitializationQueue();
@@ -88,6 +88,13 @@ export function NotePage() {
       refreshNotes();
     }
   }, [currentTask, selectedNoteId, initState.isInitializing, initState.completed, refreshNotes]);
+
+  // 自动展开侧边栏
+  useEffect(() => {
+    if (sidebar.collapsed) {
+      toggleSidebar();
+    }
+  }, []);
 
   // 从全局设置获取工具栏状态
   const { videoVisible, autoPlay, layoutSwapped, layoutPanelWidth } = toolbarSettings;
@@ -156,11 +163,25 @@ export function NotePage() {
   // 视频+聊天面板
   const videoPanel = (
     <div className="flex flex-col gap-4 flex-shrink-0" style={{ width: `${leftWidth}%` }}>
-      {/* 工具栏 */}
-      <VideoToolbar
-        currentModelId={currentModelId}
-        onModelChange={setCurrentModelId}
-      />
+      {/* 返回按钮 + 工具栏 */}
+      <div className="flex items-center gap-2">
+        {selectedCollectionId && (
+          <button
+            onClick={() => {
+              setSelectedNoteId(null);
+              setCurrentView("collection");
+            }}
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-neutral-700 rounded-lg transition-colors text-slate-600 dark:text-slate-300"
+            title="返回合集"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+        )}
+        <VideoToolbar
+          currentModelId={currentModelId}
+          onModelChange={setCurrentModelId}
+        />
+      </div>
 
       {/* 视频播放器 */}
       {videoVisible && (

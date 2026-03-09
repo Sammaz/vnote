@@ -133,6 +133,8 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
         path.forEach(id => newExpanded.add(id));
         return newExpanded;
       });
+
+      setSelectedCollectionId(collectionId);
     } catch (error) {
       console.error("Failed to expand collection path:", error);
     }

@@ -117,6 +117,7 @@ function CollectionNoteItem({
 }) {
   const {
     setSelectedNoteId,
+    setSelectedCollection,
     setCurrentView,
     selectedNoteId,
     deleteNote,
@@ -202,6 +203,7 @@ function CollectionNoteItem({
         <button
           onClick={() => {
             setSelectedNoteId(item.note_id);
+            setSelectedCollection(currentCollectionId);
             setCurrentView("note");
           }}
           className={cn(
@@ -340,16 +342,18 @@ export function CollectionItem({
     toggleCollectionExpand,
     selectedCollectionId,
     setSelectedCollection,
+    setSelectedNoteId,
     setCurrentView,
     deleteCollection,
     notes,
+    currentView,
   } = useApp();
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [collectionNotes, setCollectionNotes] = useState<NoteWithDetails[]>([]);
 
   const isExpanded = expandedCollections.has(collection.id);
-  const isSelected = selectedCollectionId === collection.id;
+  const isSelected = selectedCollectionId === collection.id && currentView === "collection";
   const hasChildren = childCollections.length > 0;
   const hasNotes = collection.item_count > 0;
 
@@ -390,6 +394,7 @@ export function CollectionItem({
 
   const handleClick = () => {
     setSelectedCollection(collection.id);
+    setSelectedNoteId(null);
     setCurrentView("collection");
   };
 
