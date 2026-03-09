@@ -1,0 +1,188 @@
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS ai_configs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    api_key TEXT NOT NULL,
+    model TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    concurrent_limit INTEGER NOT NULL DEFAULT 5,
+    request_timeout INTEGER NOT NULL DEFAULT 180,
+    rate_limit INTEGER NOT NULL DEFAULT 60
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme', 'dark');
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('tray_enabled', 'false');
+
+CREATE TABLE IF NOT EXISTS notes (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    video_path TEXT NOT NULL,
+    subtitle_path TEXT,
+    model_id TEXT,
+    init_status INTEGER NOT NULL DEFAULT 0,
+    full_summary TEXT,
+    detailed_reading TEXT,
+    highlights TEXT,
+    visual_summary TEXT,
+    custom_summary TEXT,
+    suggested_questions TEXT,
+    last_playback_position REAL,
+    flashcards TEXT,
+    panoramic_blueprint TEXT,
+    quick_notes TEXT,
+    quick_notes_mindmap TEXT,
+    quick_notes_canvas TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS subtitle_chunks (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    start_time REAL NOT NULL,
+    end_time REAL NOT NULL,
+    content TEXT NOT NULL,
+    embedding BLOB,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+    UNIQUE(note_id, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_subtitle_chunks_note ON subtitle_chunks(note_id);
+
+CREATE TABLE IF NOT EXISTS embedding_configs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    api_key TEXT NOT NULL,
+    model TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_default INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS reranker_configs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    base_url TEXT NOT NULL,
+    api_key TEXT NOT NULL,
+    model TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_default INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS prompt_configs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    content TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT 'other',
+    recommended_model_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (recommended_model_id) REFERENCES ai_configs(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS optimized_subtitles (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL,
+    chapter_id TEXT NOT NULL,
+    optimized_text TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+    UNIQUE(note_id, chapter_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_optimized_subtitles_note ON optimized_subtitles(note_id);
+
+CREATE TABLE IF NOT EXISTS note_ui_state (
+    note_id TEXT PRIMARY KEY,
+    show_subtitles INTEGER NOT NULL DEFAULT 0,
+    subtitle_optimization_enabled INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS screenshot_markers (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL,
+    subtitle_index INTEGER NOT NULL,
+    timestamp REAL NOT NULL,
+    screenshot_path TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+    UNIQUE(note_id, subtitle_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_screenshot_markers_note_id ON screenshot_markers(note_id);
+
+CREATE TABLE IF NOT EXISTS collections (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    parent_id TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    cover_image TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (parent_id) REFERENCES collections(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS collection_items (
+    id TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL,
+    note_id TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+    UNIQUE(collection_id, note_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_items_collection ON collection_items(collection_id);
+CREATE INDEX IF NOT EXISTS idx_collection_items_note ON collection_items(note_id);
+
+CREATE TABLE IF NOT EXISTS subtitle_index_status (
+    note_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK(status IN ('indexing', 'completed', 'failed')),
+    started_at TEXT NOT NULL,
+    completed_at TEXT,
+    error_message TEXT,
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_subtitle_index_status_status ON subtitle_index_status(status);
+
+CREATE TABLE IF NOT EXISTS knowledge_chunks (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    embedding BLOB,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chunks_note ON knowledge_chunks(note_id);
+
+CREATE TABLE IF NOT EXISTS knowledge_index_status (
+    note_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL CHECK(status IN ('indexing', 'completed', 'failed')),
+    chunk_count INTEGER NOT NULL DEFAULT 0,
+    content_hash TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    error_message TEXT,
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_index_status_status ON knowledge_index_status(status);

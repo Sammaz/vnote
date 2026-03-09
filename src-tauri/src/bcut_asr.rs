@@ -4,7 +4,9 @@ use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
+
+use crate::storage_paths;
 use tokio::process::Command as TokioCommand;
 
 const API_REQ_UPLOAD: &str = "https://member.bilibili.com/x/bcut/rubick-interface/resource/create";
@@ -292,11 +294,7 @@ fn build_srt_from_result(result_json: &serde_json::Value) -> Result<String, Stri
 }
 
 fn build_subtitle_dir(app: &AppHandle, note_id: &str) -> Result<PathBuf, String> {
-    let cache_dir = app
-        .path()
-        .app_cache_dir()
-        .map_err(|e| e.to_string())?;
-    Ok(cache_dir.join("notes").join(note_id).join("subtitle"))
+    Ok(storage_paths::note_dir(app, note_id)?.join("subtitle"))
 }
 
 pub async fn transcribe_video_to_srt(

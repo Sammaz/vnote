@@ -2,6 +2,8 @@
 
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+use vnote_lib::storage_paths;
+
 fn main() {
     // 初始化日志系统
     init_logging();
@@ -12,10 +14,8 @@ fn main() {
 }
 
 fn init_logging() {
-    // 创建日志目录
-    let log_dir = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join("logs");
+    // 创建日志目录（安装目录优先，不可写则自动降级）
+    let log_dir = storage_paths::logs_dir_bootstrap();
 
     std::fs::create_dir_all(&log_dir).ok();
 

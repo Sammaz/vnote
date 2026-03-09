@@ -17,13 +17,14 @@ use crate::chapter::{
 use crate::db::{AiConfig, Database, ScreenshotMarker};
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
 use crate::settings::{SettingsManager, keys, defaults};
+use crate::storage_paths;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use std::sync::OnceLock;
 
 // ============================================================================
@@ -1088,8 +1089,7 @@ async fn generate_detailed_reading_chapters(
     );
 
     // 准备截图目录
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
+    let screenshots_dir = storage_paths::note_dir(app, note_id)?.join("screenshots");
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
     // 从视频路径提取文件名
@@ -1939,8 +1939,7 @@ pub async fn generate_chapters_with_markers(
     tracing::info!("[辅助模式章节生成] 计算得到 {} 个分段", total_segments);
 
     // 准备截图目录
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let screenshots_dir = cache_dir.join("notes").join(note_id.to_string()).join("screenshots");
+    let screenshots_dir = storage_paths::note_dir(&app, &note_id)?.join("screenshots");
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
     // 从视频路径提取文件名

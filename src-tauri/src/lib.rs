@@ -19,6 +19,7 @@ mod subtitle_optimizer;
 pub mod validation;
 mod keyring_manager;
 mod video_server;
+pub mod storage_paths;
 
 use chat::ChatRequest;
 use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest};
@@ -34,6 +35,7 @@ use tauri::image::Image;
 use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, WindowEvent};
+
 
 const TRAY_ICON: &[u8] = include_bytes!("../icons/icon.png");
 static TRAY_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -686,9 +688,8 @@ async fn convert_ts_to_mp4_internal(app: &AppHandle, ts_path: &str, note_id: &st
         return Err("Not a .ts file".to_string());
     }
 
-    // Create output path in app cache directory, organized by note ID
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let note_cache_dir = cache_dir.join("notes").join(note_id);
+    // Create output path in notes directory, organized by note ID
+    let note_cache_dir = storage_paths::note_dir(app, note_id)?;
     tokio::fs::create_dir_all(&note_cache_dir).await.map_err(|e| e.to_string())?;
 
     // Build a stable cache key from full ts path + file size + modified time
@@ -762,8 +763,7 @@ async fn check_ffmpeg() -> Result<bool, String> {
 /// Get the total size of video cache (converted MP4 files only, excluding screenshots)
 #[tauri::command]
 async fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let notes_cache_dir = cache_dir.join("notes");
+    let notes_cache_dir = storage_paths::notes_dir(&app)?;
 
     if !notes_cache_dir.exists() {
         return Ok(0);
@@ -807,8 +807,7 @@ async fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
 /// Clear chapter screenshots for a specific note
 #[tauri::command]
 async fn clear_chapter_screenshots(app: AppHandle, note_id: String) -> Result<(), String> {
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let screenshots_dir = cache_dir.join("notes").join(&note_id).join("screenshots");
+    let screenshots_dir = storage_paths::note_dir(&app, &note_id)?.join("screenshots");
 
     if screenshots_dir.exists() {
         tokio::task::spawn_blocking(move || {
@@ -825,8 +824,7 @@ async fn clear_chapter_screenshots(app: AppHandle, note_id: String) -> Result<()
 /// Clear video cache (delete MP4 files only, keep screenshots)
 #[tauri::command]
 async fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let notes_cache_dir = cache_dir.join("notes");
+    let notes_cache_dir = storage_paths::notes_dir(&app)?;
 
     if !notes_cache_dir.exists() {
         return Ok(0);
@@ -906,10 +904,9 @@ fn update_note_metadata(req: UpdateNoteMetadataRequest) -> Result<(), String> {
 async fn delete_note(app: AppHandle, id: String) -> Result<(), String> {
     let db = get_db();
 
-    // Delete entire note cache directory (includes TS video cache and chapter screenshots)
+    // Delete entire note directory (includes TS cache, screenshots and subtitle files)
     let id_clone = id.clone();
-    if let Ok(cache_dir) = app.path().app_cache_dir() {
-        let note_cache_dir = cache_dir.join("notes").join(&id_clone);
+    if let Ok(note_cache_dir) = storage_paths::note_dir(&app, &id_clone) {
         if note_cache_dir.exists() {
             tokio::task::spawn_blocking(move || {
                 let _ = std::fs::remove_dir_all(&note_cache_dir);
@@ -1427,10 +1424,7 @@ async fn save_screenshot_marker(
     screenshot_data: Vec<u8>,
 ) -> Result<ScreenshotMarker, String> {
     // Create screenshot directory for this note
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let screenshots_dir = cache_dir
-        .join("notes")
-        .join(&note_id)
+    let screenshots_dir = storage_paths::note_dir(&app, &note_id)?
         .join("assist_screenshots");
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
@@ -1800,10 +1794,9 @@ async fn delete_collection(app: AppHandle, id: String) -> Result<(), String> {
     // Get all note IDs in this collection and its sub-collections
     let note_ids = db.get_all_note_ids_in_collection_tree(&id).map_err(|e| e.to_string())?;
 
-    // Delete cache directories for all notes
-    if let Ok(cache_dir) = app.path().app_cache_dir() {
-        for note_id in &note_ids {
-            let note_cache_dir = cache_dir.join("notes").join(note_id);
+    // Delete directories for all notes
+    for note_id in &note_ids {
+        if let Ok(note_cache_dir) = storage_paths::note_dir(&app, note_id) {
             if note_cache_dir.exists() {
                 let dir_to_delete = note_cache_dir.clone();
                 tokio::task::spawn_blocking(move || {
@@ -1897,9 +1890,8 @@ fn batch_delete_notes(app: AppHandle, note_ids: Vec<String>) -> Result<(), Strin
     let db = get_db();
 
     for id in note_ids {
-        // 删除笔记缓存目录
-        if let Ok(cache_dir) = app.path().app_cache_dir() {
-            let note_cache_dir = cache_dir.join("notes").join(&id);
+        // 删除笔记目录
+        if let Ok(note_cache_dir) = storage_paths::note_dir(&app, &id) {
             if note_cache_dir.exists() {
                 let _ = std::fs::remove_dir_all(&note_cache_dir);
             }
@@ -1926,12 +1918,10 @@ pub fn run() {
         .register_uri_scheme_protocol("video-stream", video_server::handle_video_protocol)
         .setup(|app| {
             // Initialize database
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("Failed to get app data dir");
+            let db_dir = storage_paths::db_dir(&app.handle())
+                .expect("Failed to resolve db directory");
 
-            let db = Database::new(app_data_dir).expect("Failed to initialize database");
+            let db = Database::new(db_dir).expect("Failed to initialize database");
 
             // Load tray setting from database
             if let Ok(settings) = db.get_app_settings() {

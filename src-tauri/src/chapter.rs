@@ -9,6 +9,7 @@ use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonS
 use crate::db::AiConfig;
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
 use crate::settings::{SettingsManager, keys, defaults};
+use crate::storage_paths;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Command;
@@ -16,7 +17,7 @@ use std::process::Command;
 use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 // ============================================================================
 // 辅助函数
@@ -507,9 +508,8 @@ async fn capture_chapter_screenshots(
     abort_flag: &Arc<AtomicBool>,
     note_id: &str,
 ) -> Result<(), String> {
-    // 按笔记 ID 组织截图目录：app_cache_dir/notes/{note_id}/screenshots/
-    let cache_dir = app.path().app_cache_dir().map_err(|e| e.to_string())?;
-    let screenshots_dir = cache_dir.join("notes").join(note_id).join("screenshots");
+    // 按笔记 ID 组织截图目录：data/notes/{note_id}/screenshots/
+    let screenshots_dir = storage_paths::note_dir(app, note_id)?.join("screenshots");
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
     // 从视频路径提取文件名（不含扩展名）
