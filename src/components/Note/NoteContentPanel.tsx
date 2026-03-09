@@ -48,6 +48,7 @@ import type { MindMapViewRef } from "./MindMap";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
+import { ConfirmDialog } from "../common/ConfirmDialog";
 import {
   getNoteGenerationState,
   setNoteGenerationState,
@@ -249,6 +250,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [blueprintIsGenerating, setBlueprintIsGenerating] = useState(false);
   const [blueprintProgress, setBlueprintProgress] = useState<{current: number; total: number} | null>(null);
   const [blueprintEditMode, setBlueprintEditMode] = useState(false);
+
+  // 确认对话框状态
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [confirmDialogConfig, setConfirmDialogConfig] = useState<{
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({ title: "", message: "", onConfirm: () => {} });
 
   // 解析 detailed_reading 是否为章节数据
   useEffect(() => {
@@ -1903,21 +1912,28 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 高光笔记重新生成处理
   const handleHighlightRegenerate = useCallback(async () => {
-    if (!note.subtitle_path || !note.model_id) {
-      message.warning("缺少字幕文件或 AI 模型配置");
-      return;
-    }
+    // 显示确认对话框
+    setConfirmDialogConfig({
+      title: "确认重新生成",
+      message: "重新生成将覆盖当前的高光笔记，此操作不可撤销。是否继续？",
+      onConfirm: async () => {
+        setShowConfirmDialog(false);
 
-    setHighlightIsGenerating(true);
-    setHighlightGenerating(note.id, true);
-    try {
-      const generationId = await invoke<string>("generate_highlights", {
-        noteId: note.id,
-        modelId: currentModelId || note.model_id,
-        subtitlePath: note.subtitle_path,
-        highlightType: "default",
-        totalDuration: chapterData?.total_duration || 0,
-      });
+        if (!note.subtitle_path || !note.model_id) {
+          message.warning("缺少字幕文件或 AI 模型配置");
+          return;
+        }
+
+        setHighlightIsGenerating(true);
+        setHighlightGenerating(note.id, true);
+        try {
+          const generationId = await invoke<string>("generate_highlights", {
+            noteId: note.id,
+            modelId: currentModelId || note.model_id,
+            subtitlePath: note.subtitle_path,
+            highlightType: "default",
+            totalDuration: chapterData?.total_duration || 0,
+          });
 
       // 等待生成完成
       const eventName = `highlight-generation-${generationId}`;
@@ -1940,6 +1956,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setHighlightIsGenerating(false);
       setHighlightGenerating(note.id, false);
     }
+      }
+    });
+    setShowConfirmDialog(true);
   }, [note.id, note.subtitle_path, note.model_id, currentModelId, chapterData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 章节生成完成后的回调
@@ -2691,32 +2710,40 @@ Video subtitles content:`;
             </button>
             {/* 重新生成按钮 */}
             <button
-              onClick={async () => {
-                if (isAssistModeActive) {
-                  // 辅助模式下：使用截图标记生成章节
-                  generateChaptersWithMarkers(assistModeMarkers);
-                } else {
-                  // 普通模式下：清除缓存并重新生成
-                  // 清除字幕优化缓存（内存和数据库）
-                  setOptimizedSubtitles(new Map());
-                  setSubtitleOptimizationEnabled(false);
-                  setFailedChapterIds(new Set());
-                  try {
-                    await invoke("delete_optimized_subtitles", { noteId: note.id });
-                  } catch (err) {
-                    console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
+              onClick={() => {
+                setConfirmDialogConfig({
+                  title: "确认重新生成",
+                  message: "重新生成将覆盖当前的章节内容，此操作不可撤销。是否继续？",
+                  onConfirm: async () => {
+                    setShowConfirmDialog(false);
+                    if (isAssistModeActive) {
+                      // 辅助模式下：使用截图标记生成章节
+                      generateChaptersWithMarkers(assistModeMarkers);
+                    } else {
+                      // 普通模式下：清除缓存并重新生成
+                      // 清除字幕优化缓存（内存和数据库）
+                      setOptimizedSubtitles(new Map());
+                      setSubtitleOptimizationEnabled(false);
+                      setFailedChapterIds(new Set());
+                      try {
+                        await invoke("delete_optimized_subtitles", { noteId: note.id });
+                      } catch (err) {
+                        console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
+                      }
+                      // 清除之前生成的截图
+                      try {
+                        await invoke("clear_chapter_screenshots", { noteId: note.id });
+                      } catch (err) {
+                        console.error("[NoteContentPanel] 清除截图缓存失败:", err);
+                      }
+                      // 标记待保存视觉化总结
+                      pendingVisualSummarySaveRef.current = true;
+                      // 重新生成章节
+                      chapterGridRef.current?.generateChapters();
+                    }
                   }
-                  // 清除之前生成的截图
-                  try {
-                    await invoke("clear_chapter_screenshots", { noteId: note.id });
-                  } catch (err) {
-                    console.error("[NoteContentPanel] 清除截图缓存失败:", err);
-                  }
-                  // 标记待保存视觉化总结
-                  pendingVisualSummarySaveRef.current = true;
-                  // 重新生成章节
-                  chapterGridRef.current?.generateChapters();
-                }
+                });
+                setShowConfirmDialog(true);
               }}
               disabled={assistModeGenerating}
               className={cn(
@@ -2858,12 +2885,20 @@ Video subtitles content:`;
               <>
                 <button
                   onClick={() => {
-                    if (mindMapRef.current) {
-                      mindMapRef.current.regenerate();
-                      message.success("思维导图已重新生成");
-                    } else {
-                      message.warning("思维导图未初始化");
-                    }
+                    setConfirmDialogConfig({
+                      title: "确认重新生成",
+                      message: "重新生成将从章节数据重新创建思维导图，当前的编辑内容将丢失。是否继续？",
+                      onConfirm: () => {
+                        setShowConfirmDialog(false);
+                        if (mindMapRef.current) {
+                          mindMapRef.current.regenerate();
+                          message.success("思维导图已重新生成");
+                        } else {
+                          message.warning("思维导图未初始化");
+                        }
+                      }
+                    });
+                    setShowConfirmDialog(true);
                   }}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
                 >
@@ -3038,7 +3073,15 @@ Video subtitles content:`;
           <div className="flex items-center gap-1">
             <button
               onClick={() => {
-                window.dispatchEvent(new CustomEvent('flashcard-regenerate', { detail: { noteId: note.id } }));
+                setConfirmDialogConfig({
+                  title: "确认重新生成",
+                  message: "重新生成将覆盖当前的闪记卡，此操作不可撤销。是否继续？",
+                  onConfirm: () => {
+                    setShowConfirmDialog(false);
+                    window.dispatchEvent(new CustomEvent('flashcard-regenerate', { detail: { noteId: note.id } }));
+                  }
+                });
+                setShowConfirmDialog(true);
               }}
               disabled={isTabGenerating("flashcard")}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
@@ -3143,7 +3186,17 @@ Video subtitles content:`;
             </button>
             <span className="text-slate-300 dark:text-slate-600">|</span>
             <button
-              onClick={generatePanoramicBlueprint}
+              onClick={() => {
+                setConfirmDialogConfig({
+                  title: "确认重新生成",
+                  message: "重新生成将覆盖当前的深度蓝图，此操作不可撤销。是否继续？",
+                  onConfirm: () => {
+                    setShowConfirmDialog(false);
+                    generatePanoramicBlueprint();
+                  }
+                });
+                setShowConfirmDialog(true);
+              }}
               disabled={blueprintIsGenerating}
               className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -3917,6 +3970,16 @@ Video subtitles content:`;
           </div>
         </div>
       )}
+
+      {/* 确认对话框 */}
+      <ConfirmDialog
+        open={showConfirmDialog}
+        title={confirmDialogConfig.title}
+        message={confirmDialogConfig.message}
+        onConfirm={confirmDialogConfig.onConfirm}
+        onCancel={() => setShowConfirmDialog(false)}
+        danger={true}
+      />
     </div>
   );
 }
