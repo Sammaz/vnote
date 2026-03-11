@@ -14,8 +14,8 @@ export const RESUME_THRESHOLD_END = 10;
 
 // ASS 双语字幕样式调整参数
 export const ASS_BASE_MARGIN_V = 20; // 底部字幕边距
-export const ASS_LINE_HEIGHT = 45; // 每行字幕的高度间隔
-export const ASS_MIN_MARGIN_GAP = 30; // 最小边距差距
+export const ASS_LINE_HEIGHT = 30; // 每行字幕的高度间隔
+export const ASS_MIN_MARGIN_GAP = 20; // 最小边距差距
 
 // 视频扩展名到 MIME 类型的映射
 export const VIDEO_MIME_TYPES: Record<string, string> = {
