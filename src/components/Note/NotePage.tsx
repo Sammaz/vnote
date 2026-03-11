@@ -171,7 +171,7 @@ export function NotePage() {
               setSelectedNoteId(null);
               setCurrentView("collection");
             }}
-            className="p-1.5 hover:bg-slate-100 dark:hover:bg-neutral-700 rounded-lg transition-colors text-slate-600 dark:text-slate-300"
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-neutral-700 rounded-lg transition-colors text-slate-600 dark:text-slate-300 cursor-pointer"
             title="返回合集"
           >
             <ArrowLeft className="w-4 h-4" />

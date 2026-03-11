@@ -220,7 +220,7 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
           e.stopPropagation();
           setIsOpen(!isOpen);
         }}
-        className={`absolute right-5 top-0 z-40 p-1.5 rounded-lg glass-button transition-all duration-300 text-slate-500 dark:text-slate-400 hover:text-blue-500 dark:hover:text-blue-400 shadow-sm hover:shadow-md ${
+        className={`absolute right-5 top-0 z-40 p-1.5 rounded-lg glass-button transition-all duration-300 text-slate-500 dark:text-slate-400 hover:text-blue-500 dark:hover:text-blue-400 shadow-sm hover:shadow-md cursor-pointer ${
           isOpen ? "opacity-0 pointer-events-none translate-x-4" : "opacity-100 translate-x-0"
         }`}
         title="目录"
@@ -241,7 +241,7 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
           </h3>
           <button
             onClick={() => setIsOpen(false)}
-            className="p-1.5 hover:bg-slate-200/70 dark:hover:bg-slate-700/70 rounded-lg text-slate-500 transition-colors"
+            className="p-1.5 hover:bg-slate-200/70 dark:hover:bg-slate-700/70 rounded-lg text-slate-500 transition-colors cursor-pointer"
           >
             <ChevronRight size={18} />
           </button>

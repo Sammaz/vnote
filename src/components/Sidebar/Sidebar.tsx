@@ -237,7 +237,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
             <div
               ref={menuTriggerRef}
               onClick={handleMenuClick}
-              className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-neutral-700 flex-shrink-0"
+              className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-neutral-700 flex-shrink-0 cursor-pointer"
             >
               <MoreHorizontal className="w-4 h-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
             </div>
