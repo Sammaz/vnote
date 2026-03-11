@@ -20,6 +20,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useCollections } from "../../context/CollectionsContext";
 import { useInitializationQueue } from "../../context/InitializationQueueContext";
 import { CreateCollectionModal } from "./CreateCollectionModal";
 import { AddNotesToCollectionModal } from "./AddNotesToCollectionModal";
@@ -224,6 +225,7 @@ export function CollectionPage() {
     refreshCollections,
   } = useApp();
   const { removeNoteFromQueue } = useInitializationQueue();
+  const { expandedCollections, toggleCollectionExpand, expandCollectionPathForNote } = useCollections();
 
   const [collectionItems, setCollectionItems] = useState<NoteWithDetails[]>([]);
   const [mixedItems, setMixedItems] = useState<MixedItem[]>([]);
@@ -278,6 +280,22 @@ export function CollectionPage() {
 
   const handleBackToParent = () => {
     if (collection?.parent_id) {
+      // 展开父合集的完整路径
+      const path: string[] = [];
+      let currentId: string | null = collection.parent_id;
+
+      while (currentId) {
+        path.unshift(currentId);
+        const current = collections.find(c => c.id === currentId);
+        currentId = current?.parent_id || null;
+      }
+
+      path.forEach(id => {
+        if (!expandedCollections.has(id)) {
+          toggleCollectionExpand(id);
+        }
+      });
+
       setSelectedCollection(collection.parent_id);
     }
   };
@@ -410,7 +428,8 @@ export function CollectionPage() {
     }
   };
 
-  const handleOpenNote = (noteId: string) => {
+  const handleOpenNote = async (noteId: string) => {
+    await expandCollectionPathForNote(noteId);
     setSelectedNoteId(noteId);
     setCurrentView("note");
   };

@@ -6,6 +6,7 @@ import { NoteContentPanel } from "./NoteContentPanel";
 import { VideoToolbar } from "./VideoToolbar";
 import { EditNoteModal } from "../Notes/EditNoteModal";
 import { useApp } from "../../context/AppContext";
+import { useCollections } from "../../context/CollectionsContext";
 import { useInitializationQueue } from "../../context/InitializationQueueContext";
 
 // 拖拽分隔条组件
@@ -54,6 +55,7 @@ function Resizer({ onDrag, isDragging }: ResizerProps) {
 
 export function NotePage() {
   const { notes, selectedNoteId, selectedCollectionId, setCurrentView, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, toggleSidebar, sidebar, setSelectedNoteId } = useApp();
+  const { expandCollectionPathForNote } = useCollections();
 
   // 使用全局初始化队列 Context
   const { currentTask, initState } = useInitializationQueue();
@@ -167,7 +169,10 @@ export function NotePage() {
       <div className="flex items-center gap-2">
         {selectedCollectionId && (
           <button
-            onClick={() => {
+            onClick={async () => {
+              if (selectedCollectionId) {
+                await expandCollectionPathForNote(selectedNoteId!);
+              }
               setSelectedNoteId(null);
               setCurrentView("collection");
             }}

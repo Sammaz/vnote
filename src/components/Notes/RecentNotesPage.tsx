@@ -1,15 +1,18 @@
 import { ArrowLeft, FileText } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useCollections } from "../../context/CollectionsContext";
 import { VirtualizedNoteGrid } from "./VirtualizedNoteGrid";
 
 export function RecentNotesPage() {
   const { notes, setSelectedNoteId, setCurrentView } = useApp();
+  const { expandCollectionPathForNote } = useCollections();
 
   // 显示所有笔记（不再限制12条，虚拟滚动可以处理大量数据）
   const recentNotes = notes;
 
-  const handleOpenNote = (noteId: string) => {
+  const handleOpenNote = async (noteId: string) => {
+    await expandCollectionPathForNote(noteId);
     setSelectedNoteId(noteId);
     setCurrentView("note");
   };

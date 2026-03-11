@@ -199,6 +199,7 @@ function CollectionNoteItem({
           setIsHovered(false);
           if (!showMenu) setShowMenu(false);
         }}
+        data-note-id={item.note_id}
       >
         <button
           onClick={() => {

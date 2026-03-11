@@ -135,6 +135,18 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
       });
 
       setSelectedCollectionId(collectionId);
+
+      // 滚动到笔记位置 - 使用轮询确保元素已渲染
+      const scrollToNote = (attempts = 0) => {
+        const noteElement = document.querySelector(`[data-note-id="${noteId}"]`);
+        if (noteElement) {
+          noteElement.scrollIntoView({ behavior: "smooth", block: "center" });
+        } else if (attempts < 10) {
+          setTimeout(() => scrollToNote(attempts + 1), 50);
+        }
+      };
+
+      requestAnimationFrame(() => scrollToNote());
     } catch (error) {
       console.error("Failed to expand collection path:", error);
     }
