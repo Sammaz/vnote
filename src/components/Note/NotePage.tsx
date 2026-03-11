@@ -55,7 +55,7 @@ function Resizer({ onDrag, isDragging }: ResizerProps) {
 
 export function NotePage() {
   const { notes, selectedNoteId, selectedCollectionId, setCurrentView, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, toggleSidebar, sidebar, setSelectedNoteId } = useApp();
-  const { expandCollectionPathForNote } = useCollections();
+  const { expandCollectionPath } = useCollections();
 
   // 使用全局初始化队列 Context
   const { currentTask, initState } = useInitializationQueue();
@@ -169,9 +169,9 @@ export function NotePage() {
       <div className="flex items-center gap-2">
         {selectedCollectionId && (
           <button
-            onClick={async () => {
+            onClick={() => {
               if (selectedCollectionId) {
-                await expandCollectionPathForNote(selectedNoteId!);
+                expandCollectionPath(selectedCollectionId);
               }
               setSelectedNoteId(null);
               setCurrentView("collection");

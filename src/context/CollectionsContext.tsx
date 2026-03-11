@@ -25,6 +25,7 @@ interface CollectionsContextType {
   setSelectedCollection: (id: string | null) => void;
   toggleCollectionExpand: (id: string) => void;
   expandCollectionPathForNote: (noteId: string) => Promise<void>;
+  expandCollectionPath: (collectionId: string) => void;
   addNoteToCollection: (collectionId: string, noteId: string) => Promise<void>;
   removeNoteFromCollection: (collectionId: string, noteId: string) => Promise<void>;
   updateCollectionsOrder: (collectionIds: string[]) => Promise<void>;
@@ -150,6 +151,36 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.error("Failed to expand collection path:", error);
     }
+  }, [collections]);
+
+  // 展开合集的完整路径并滚动到合集位置
+  const expandCollectionPath = useCallback((collectionId: string) => {
+    const path: string[] = [];
+    let currentId: string | null = collectionId;
+
+    while (currentId) {
+      path.unshift(currentId);
+      const current = collections.find(c => c.id === currentId);
+      currentId = current?.parent_id || null;
+    }
+
+    setExpandedCollections(prev => {
+      const newExpanded = new Set(prev);
+      path.forEach(id => newExpanded.add(id));
+      return newExpanded;
+    });
+
+    // 滚动到合集位置
+    const scrollToCollection = (attempts = 0) => {
+      const collectionElement = document.querySelector(`[data-collection-id="${collectionId}"]`);
+      if (collectionElement) {
+        collectionElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      } else if (attempts < 10) {
+        setTimeout(() => scrollToCollection(attempts + 1), 50);
+      }
+    };
+
+    requestAnimationFrame(() => scrollToCollection());
   }, [collections]);
 
   // 添加笔记到合集
@@ -279,6 +310,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
     setSelectedCollection,
     toggleCollectionExpand,
     expandCollectionPathForNote,
+    expandCollectionPath,
     addNoteToCollection,
     removeNoteFromCollection,
     updateCollectionsOrder,
@@ -303,6 +335,7 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
     setSelectedCollection,
     toggleCollectionExpand,
     expandCollectionPathForNote,
+    expandCollectionPath,
     addNoteToCollection,
     removeNoteFromCollection,
     updateCollectionsOrder,

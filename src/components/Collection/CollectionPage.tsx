@@ -225,7 +225,7 @@ export function CollectionPage() {
     refreshCollections,
   } = useApp();
   const { removeNoteFromQueue } = useInitializationQueue();
-  const { expandedCollections, toggleCollectionExpand, expandCollectionPathForNote } = useCollections();
+  const { expandCollectionPathForNote, expandCollectionPath } = useCollections();
 
   const [collectionItems, setCollectionItems] = useState<NoteWithDetails[]>([]);
   const [mixedItems, setMixedItems] = useState<MixedItem[]>([]);
@@ -280,22 +280,7 @@ export function CollectionPage() {
 
   const handleBackToParent = () => {
     if (collection?.parent_id) {
-      // 展开父合集的完整路径
-      const path: string[] = [];
-      let currentId: string | null = collection.parent_id;
-
-      while (currentId) {
-        path.unshift(currentId);
-        const current = collections.find(c => c.id === currentId);
-        currentId = current?.parent_id || null;
-      }
-
-      path.forEach(id => {
-        if (!expandedCollections.has(id)) {
-          toggleCollectionExpand(id);
-        }
-      });
-
+      expandCollectionPath(collection.parent_id);
       setSelectedCollection(collection.parent_id);
     }
   };

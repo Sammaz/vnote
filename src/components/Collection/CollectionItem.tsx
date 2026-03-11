@@ -415,7 +415,7 @@ export function CollectionItem({
 
   return (
     <div className="animate-fade-in">
-      <div className="relative">
+      <div className="relative" data-collection-id={collection.id}>
         <button
           onClick={handleClick}
           className={cn(
