@@ -140,35 +140,35 @@ export function VideoToolbar({
   };
 
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex items-center gap-1 flex-1">
       {/* Left side buttons */}
-      <div className="flex items-center gap-1">
-        <TooltipButton
-          icon={videoVisible ? <MonitorPlay className="w-4 h-4" /> : <MonitorOff className="w-4 h-4" />}
-          tooltip={videoVisible ? "隐藏视频" : "显示视频"}
-          onClick={() => setVideoVisible(!videoVisible)}
-          active={!videoVisible}
-        />
-        <TooltipButton
-          icon={autoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          tooltip={autoPlay ? "关闭自动播放" : "开启自动播放"}
-          onClick={() => setAutoPlay(!autoPlay)}
-          active={autoPlay}
-        />
-        <TooltipButton
-          icon={<ArrowLeftRight className="w-4 h-4" />}
-          tooltip="左右交换"
-          onClick={handleToggleSwap}
-          active={layoutSwapped}
-        />
-      </div>
+      <TooltipButton
+        icon={videoVisible ? <MonitorPlay className="w-4 h-4" /> : <MonitorOff className="w-4 h-4" />}
+        tooltip={videoVisible ? "隐藏视频" : "显示视频"}
+        onClick={() => setVideoVisible(!videoVisible)}
+        active={!videoVisible}
+      />
+      <TooltipButton
+        icon={autoPlay ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+        tooltip={autoPlay ? "关闭自动播放" : "开启自动播放"}
+        onClick={() => setAutoPlay(!autoPlay)}
+        active={autoPlay}
+      />
+      <TooltipButton
+        icon={<ArrowLeftRight className="w-4 h-4" />}
+        tooltip="左右交换"
+        onClick={handleToggleSwap}
+        active={layoutSwapped}
+      />
 
       {/* Right side model selector */}
-      <ModelSelector
-        models={aiConfigs}
-        currentModelId={currentModelId}
-        onModelChange={onModelChange}
-      />
+      <div className="ml-auto">
+        <ModelSelector
+          models={aiConfigs}
+          currentModelId={currentModelId}
+          onModelChange={onModelChange}
+        />
+      </div>
     </div>
   );
 }

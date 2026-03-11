@@ -164,8 +164,8 @@ export function NotePage() {
   const videoPanel = (
     <div className="flex flex-col gap-4 flex-shrink-0" style={{ width: `${leftWidth}%` }}>
       {/* 返回按钮 + 工具栏 */}
-      <div className="flex items-center justify-between">
-        {selectedCollectionId ? (
+      <div className="flex items-center gap-2">
+        {selectedCollectionId && (
           <button
             onClick={() => {
               setSelectedNoteId(null);
@@ -176,8 +176,6 @@ export function NotePage() {
           >
             <ArrowLeft className="w-4 h-4" />
           </button>
-        ) : (
-          <div />
         )}
         <VideoToolbar
           currentModelId={currentModelId}
