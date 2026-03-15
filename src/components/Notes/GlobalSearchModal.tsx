@@ -8,7 +8,7 @@ import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 
-import { parseDetailedReading, type Note, type ChapterData, type DetailedReadingData, type SubtitleEntry, type OptimizedSubtitle } from "../../types";
+import { parseDetailedReading, parseDetailedReadingData, type Note, type ChapterData, type DetailedReadingData, type SubtitleEntry, type OptimizedSubtitle } from "../../types";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 
 // 从 detailed_reading 中提取第一章的截图路径
@@ -201,8 +201,8 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
     if (!selectedNote) return;
     if (selectedNote.visual_summary) return;
     if (!selectedNote.subtitle_path) return;
-    const chapterData = parseDetailedReading(selectedNote.detailed_reading);
-    if (!chapterData || chapterData.chapters.length === 0) return;
+    const detailedReadingData = parseDetailedReadingData(selectedNote.detailed_reading);
+    if (!detailedReadingData || detailedReadingData.chapters.length === 0) return;
 
     let cancelled = false;
     (async () => {
@@ -219,7 +219,22 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
         const subtitleEntries = await invoke<SubtitleEntry[]>("parse_subtitle_file", { path: selectedNote.subtitle_path });
         if (cancelled) return;
 
-        // 组装 Markdown
+        // 按照 NoteContentPanel 的标准格式转换章节数据
+        const chapterData: ChapterData = {
+          chapters: detailedReadingData.chapters.map((chapter) => ({
+            id: chapter.id,
+            title: chapter.title,
+            start_time: chapter.start_time,
+            end_time: chapter.end_time,
+            content: "",  // 关键：设为空字符串，避免重复显示内容
+            screenshot_path: chapter.screenshot_path,
+            level: 1,
+            parent_id: null,
+          })),
+          total_duration: detailedReadingData.total_duration,
+          generated_at: detailedReadingData.generated_at,
+        };
+
         const content = assembleChapterMarkdown({
           chapters: chapterData.chapters,
           optimizedSubtitles,
