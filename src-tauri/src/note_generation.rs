@@ -192,6 +192,10 @@ async fn cleanup_abort_flag(generation_id: &str) {
 struct PromptTemplates;
 
 impl PromptTemplates {
+    fn ai_note_output_boundary_rules() -> &'static str {
+        "直接输出最终可直接保存的 Markdown 笔记正文，并在正文结束处自然收尾；不要在结尾添加“如果你愿意”“如需我可以”“我还可以继续”等服务型话术；不要推荐再整理为极简版、树状层级版、问题清单版、思维导图版、复习卡片等其他格式；不要追加任何邀请继续提问、继续整理、继续改写的句子"
+    }
+
     /// 全文总结提示词 - 返回 Markdown 格式
     fn full_summary(subtitle_content: &str) -> String {
         format!(
@@ -314,6 +318,7 @@ mindmap
 5. 如果出现适合回看视频的位置，在对应小节标题或要点后补充时间信息，格式统一为 `（时间：mm:ss）` 或 `（时间：hh:mm:ss）`。
 6. 不要输出 Mermaid，不要输出 JSON。
 7. {}。
+8. {}。
 
 建议结构：
 # 主题
@@ -340,6 +345,7 @@ mindmap
 视频字幕内容：
 {}"#,
             style_requirements,
+            Self::ai_note_output_boundary_rules(),
             subtitle_content
         )
     }
@@ -1745,8 +1751,15 @@ async fn generate_single_tab(
         _ => {
             // 使用自定义提示词或默认提示词
             let prompt = if let Some(custom) = custom_prompt {
-                // 自定义提示词需要包含字幕内容
-                format!("{}\n\n视频字幕内容：\n{}", custom, subtitle_text)
+                match tab_type {
+                    TabType::AiNote => format!(
+                        "{}\n\n补充输出边界：\n{}\n\n视频字幕内容：\n{}",
+                        custom,
+                        PromptTemplates::ai_note_output_boundary_rules(),
+                        subtitle_text
+                    ),
+                    _ => format!("{}\n\n视频字幕内容：\n{}", custom, subtitle_text),
+                }
             } else {
                 get_prompt_for_tab(tab_type, subtitle_text, style)
             };
