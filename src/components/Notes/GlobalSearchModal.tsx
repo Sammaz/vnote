@@ -89,35 +89,9 @@ function highlightChildren(children: React.ReactNode, query: string): React.Reac
   return children;
 }
 
-// 从思维导图 JSON 节点树中递归提取文本，转为 Markdown 列表
-function mindMapNodeToMarkdown(node: any, depth = 0): string {
-  if (!node) return "";
-  const text = node.data?.text || "";
-  const indent = "  ".repeat(depth);
-  const prefix = depth === 0 ? "# " : `${indent}- `;
-  let md = text ? `${prefix}${text}\n` : "";
-  if (node.children && Array.isArray(node.children)) {
-    for (const child of node.children) {
-      md += mindMapNodeToMarkdown(child, depth + 1);
-    }
-  }
-  return md;
-}
-
-// 提取视觉化总结内容（Markdown 或思维导图 JSON 均支持）
+// 提取视觉化总结内容（仅 Markdown）
 function getVisualContent(note: Note): string | null {
-  if (note.visual_summary) {
-    return note.visual_summary;
-  }
-  if (!note.visual_summary_mindmap) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(note.visual_summary_mindmap);
-    return mindMapNodeToMarkdown(parsed) || null;
-  } catch {
-    return null;
-  }
+  return note.visual_summary;
 }
 
 // 相对日期格式化

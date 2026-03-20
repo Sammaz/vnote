@@ -1,57 +1,30 @@
 /**
  * 视频视觉总结内容组件
  * 将原文细读的章节数据组装为 Markdown 格式并使用 ReactMarkdown 渲染展示
- * 支持 Markdown 和思维导图两种视图模式
  */
 
-import { useMemo, useEffect, forwardRef, useRef } from "react";
+import { useMemo, useEffect, useRef } from "react";
 import { BarChart3 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ChapterData, SubtitleEntry } from "../../types";
-import { MindMapView, type MindMapViewRef } from "./MindMap";
 import { TableOfContents, generateId, getTextFromChildren } from "./TableOfContents";
 
-/** 视觉化总结视图模式 */
-export type VisualViewMode = "markdown" | "mindmap";
-
 interface VisualSummaryContentProps {
-  chapterData: ChapterData | null;
-  optimizedSubtitles: Map<string, string>;
-  originalSubtitles: SubtitleEntry[];
   isEditMode?: boolean;
   editContent?: string;
   onEditContentChange?: (content: string) => void;
   showTimestamp?: boolean;
-  /** 视图模式：markdown 或 mindmap */
-  viewMode?: VisualViewMode;
-  /** 笔记标题（用于思维导图根节点） */
-  noteTitle?: string;
-  /** 已保存的思维导图数据（JSON 字符串） */
-  savedMindMapData?: string | null;
   /** 已保存的 Markdown 编辑内容（用户编辑后保存的内容） */
   savedMarkdownContent?: string | null;
-  /** 笔记 ID（用于思维导图自动保存） */
-  noteId?: string;
-  /** 数据变更回调（保存成功后调用，用于刷新笔记状态） */
-  onDataChange?: () => void;
 }
 
-export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryContentProps>(function VisualSummaryContent({
-  chapterData,
-  optimizedSubtitles,
-  originalSubtitles,
+export function VisualSummaryContent({
   isEditMode = false,
   editContent = "",
   onEditContentChange,
   showTimestamp = true,
-  viewMode = "markdown",
-  noteTitle = "思维导图",
-  savedMindMapData,
   savedMarkdownContent,
-  noteId,
-  onDataChange,
-}, ref) {
+}: VisualSummaryContentProps) {
   // 用于生成唯一标题 ID 的计数器（必须在所有条件返回之前声明）
   const slugCountsRef = useRef<Record<string, number>>({});
 
@@ -67,8 +40,7 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
     }
   }, [isEditMode, editContent, markdownContent, onEditContentChange]);
 
-  // 空状态：按视图模式分别判断
-  if (viewMode === "markdown" && !markdownContent) {
+  if (!markdownContent) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 text-slate-400">
         <BarChart3 className="w-16 h-16 mb-4 opacity-50" />
@@ -77,34 +49,6 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
           请先在「原文细读」标签页生成章节内容，然后返回此页面查看视觉化总结
         </p>
       </div>
-    );
-  }
-
-  if (viewMode === "mindmap" && (!chapterData || chapterData.chapters.length === 0)) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-slate-400">
-        <BarChart3 className="w-16 h-16 mb-4 opacity-50" />
-        <p className="text-lg mb-2">暂无视觉总结内容</p>
-        <p className="text-sm text-center max-w-md">
-          请先在「原文细读」标签页生成章节内容，然后返回此页面查看视觉化总结
-        </p>
-      </div>
-    );
-  }
-
-  // 思维导图模式
-  if (viewMode === "mindmap") {
-    return (
-      <MindMapView
-        ref={ref}
-        chapterData={chapterData}
-        noteTitle={noteTitle}
-        savedMindMapData={savedMindMapData}
-        optimizedSubtitles={optimizedSubtitles}
-        originalSubtitles={originalSubtitles}
-        noteId={noteId}
-        onDataChange={onDataChange}
-      />
     );
   }
 
@@ -268,4 +212,4 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
       <TableOfContents markdown={markdownContent} idPrefix="viz" />
     </div>
   );
-});
+}
