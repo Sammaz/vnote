@@ -1858,9 +1858,6 @@ fn update_note_tab(
         TabType::CustomSummary => note.custom_summary = Some(content.to_string()),
         TabType::AiNote => {
             note.ai_note_markdown = Some(content.to_string());
-            if note.ai_note_original_markdown.is_none() {
-                note.ai_note_original_markdown = Some(content.to_string());
-            }
             note.ai_note_meta = Some(
                 serde_json::json!({
                     "style": style.unwrap_or(if custom_prompt.is_some() { "custom" } else { "default" }),

@@ -34,7 +34,6 @@ CREATE TABLE IF NOT EXISTS notes (
     visual_summary TEXT,
     custom_summary TEXT,
     ai_note_markdown TEXT,
-    ai_note_original_markdown TEXT,
     ai_note_meta TEXT,
     suggested_questions TEXT,
     last_playback_position REAL,

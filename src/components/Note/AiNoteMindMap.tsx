@@ -258,14 +258,6 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
       if (uid) {
         void focusNodeByUid(uid);
       }
-
-      const seekSeconds = group.getAttribute("data-seek-seconds");
-      if (seekSeconds) {
-        const seconds = Number(seekSeconds);
-        if (!Number.isNaN(seconds)) {
-          window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: seconds } }));
-        }
-      }
     };
 
     existingSvg.addEventListener("click", handleClick);
@@ -298,11 +290,6 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
       }
 
       group.setAttribute("data-uid", item.uid);
-      if (item.seekTime !== null) {
-        group.setAttribute("data-seek-seconds", String(item.seekTime));
-      } else {
-        group.removeAttribute("data-seek-seconds");
-      }
     });
   }, [items, transformed.root]);
 

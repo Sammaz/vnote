@@ -5,7 +5,6 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AiConfig, Note, PromptConfig } from "../../types";
 import { cn } from "../../utils/cn";
 import { message } from "../../utils/message";
-import { ConfirmDialog } from "../common/ConfirmDialog";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { AiNoteMindMap } from "./AiNoteMindMap";
 import { getNoteGenerationState, setNoteGenerationState } from "../../utils/noteGenerationState";
@@ -113,13 +112,7 @@ export function AiNoteContent({
   const [customPrompt, setCustomPrompt] = useState("");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPromptDropdown, setShowPromptDropdown] = useState(false);
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [mindMapSvg, setMindMapSvg] = useState<SVGSVGElement | null>(null);
-  const [confirmDialogConfig, setConfirmDialogConfig] = useState({
-    title: "",
-    message: "",
-    onConfirm: () => {},
-  });
 
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const promptDropdownRef = useRef<HTMLDivElement>(null);
@@ -206,26 +199,6 @@ export function AiNoteContent({
       message.error(`下载失败: ${error}`);
     }
   }, [mindMapSvg, note.title]);
-
-  const handleReset = useCallback(() => {
-    setConfirmDialogConfig({
-      title: "确认重置大纲笔记",
-      message: "重置后将恢复到首次生成的大纲笔记内容，当前编辑内容会被覆盖。是否继续？",
-      onConfirm: async () => {
-        setShowConfirmDialog(false);
-        try {
-          await invoke("reset_ai_note_content", { noteId: note.id });
-          setIsEditMode(false);
-          onGenerationComplete?.();
-          message.success("大纲笔记已重置");
-        } catch (error) {
-          console.error("重置大纲笔记失败:", error);
-          message.error(`重置失败: ${error}`);
-        }
-      },
-    });
-    setShowConfirmDialog(true);
-  }, [note.id, onGenerationComplete]);
 
   const handleGenerate = useCallback(async () => {
     if (!selectedModelId) {
@@ -327,11 +300,6 @@ export function AiNoteContent({
                 脑图
               </button>
             </div>
-            {viewMode === "mindmap" && (
-              <span className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
-                点击带时间戳的节点可跳转视频
-              </span>
-            )}
             {viewMode === "markdown" && (
               <>
                 <button
@@ -377,14 +345,6 @@ export function AiNoteContent({
                 >
                   <RefreshCw className="w-4 h-4" />
                   重新生成
-                </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
-                <button
-                  onClick={handleReset}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                  重置
                 </button>
               </>
             ) : (
@@ -603,14 +563,6 @@ export function AiNoteContent({
         </div>
       )}
 
-      <ConfirmDialog
-        open={showConfirmDialog}
-        title={confirmDialogConfig.title}
-        message={confirmDialogConfig.message}
-        onConfirm={confirmDialogConfig.onConfirm}
-        onCancel={() => setShowConfirmDialog(false)}
-        danger={true}
-      />
     </div>
   );
 }

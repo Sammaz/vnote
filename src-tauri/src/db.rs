@@ -46,7 +46,6 @@ pub struct Note {
     pub visual_summary: Option<String>,
     pub custom_summary: Option<String>,
     pub ai_note_markdown: Option<String>,
-    pub ai_note_original_markdown: Option<String>,
     pub ai_note_meta: Option<String>,
     pub flashcards: Option<String>, // JSON string of flashcard data
     pub panoramic_blueprint: Option<String>, // Panoramic depth reconstruction blueprint (markdown)
@@ -486,10 +485,9 @@ impl Database {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_original_markdown, ai_note_meta,
-                    flashcards, panoramic_blueprint, quick_notes, quick_notes_mindmap,
-                    quick_notes_canvas, suggested_questions, last_playback_position,
-                    created_at, updated_at
+                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
+                    panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
+                    suggested_questions, last_playback_position, created_at, updated_at
              FROM notes ORDER BY created_at DESC, rowid DESC"
         )?;
 
@@ -507,17 +505,16 @@ impl Database {
                 visual_summary: row.get(9)?,
                 custom_summary: row.get(10)?,
                 ai_note_markdown: row.get(11)?,
-                ai_note_original_markdown: row.get(12)?,
-                ai_note_meta: row.get(13)?,
-                flashcards: row.get(14)?,
-                panoramic_blueprint: row.get(15)?,
-                quick_notes: row.get(16)?,
-                quick_notes_mindmap: row.get(17)?,
-                quick_notes_canvas: row.get(18)?,
-                suggested_questions: row.get(19)?,
-                last_playback_position: row.get(20)?,
-                created_at: row.get(21)?,
-                updated_at: row.get(22)?,
+                ai_note_meta: row.get(12)?,
+                flashcards: row.get(13)?,
+                panoramic_blueprint: row.get(14)?,
+                quick_notes: row.get(15)?,
+                quick_notes_mindmap: row.get(16)?,
+                quick_notes_canvas: row.get(17)?,
+                suggested_questions: row.get(18)?,
+                last_playback_position: row.get(19)?,
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
             })
         })?;
 
@@ -528,10 +525,9 @@ impl Database {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_original_markdown, ai_note_meta,
-                    flashcards, panoramic_blueprint, quick_notes, quick_notes_mindmap,
-                    quick_notes_canvas, suggested_questions, last_playback_position,
-                    created_at, updated_at
+                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
+                    panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
+                    suggested_questions, last_playback_position, created_at, updated_at
              FROM notes WHERE id = ?1"
         )?;
 
@@ -549,17 +545,16 @@ impl Database {
                 visual_summary: row.get(9)?,
                 custom_summary: row.get(10)?,
                 ai_note_markdown: row.get(11)?,
-                ai_note_original_markdown: row.get(12)?,
-                ai_note_meta: row.get(13)?,
-                flashcards: row.get(14)?,
-                panoramic_blueprint: row.get(15)?,
-                quick_notes: row.get(16)?,
-                quick_notes_mindmap: row.get(17)?,
-                quick_notes_canvas: row.get(18)?,
-                suggested_questions: row.get(19)?,
-                last_playback_position: row.get(20)?,
-                created_at: row.get(21)?,
-                updated_at: row.get(22)?,
+                ai_note_meta: row.get(12)?,
+                flashcards: row.get(13)?,
+                panoramic_blueprint: row.get(14)?,
+                quick_notes: row.get(15)?,
+                quick_notes_mindmap: row.get(16)?,
+                quick_notes_canvas: row.get(17)?,
+                suggested_questions: row.get(18)?,
+                last_playback_position: row.get(19)?,
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
             })
         });
 
@@ -582,8 +577,8 @@ impl Database {
         // Return the created note
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_original_markdown, ai_note_meta,
-                    flashcards, panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
+                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
+                    panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
                     suggested_questions, last_playback_position, created_at, updated_at
              FROM notes WHERE id = ?1"
         )?;
@@ -602,17 +597,16 @@ impl Database {
                 visual_summary: row.get(9)?,
                 custom_summary: row.get(10)?,
                 ai_note_markdown: row.get(11)?,
-                ai_note_original_markdown: row.get(12)?,
-                ai_note_meta: row.get(13)?,
-                flashcards: row.get(14)?,
-                panoramic_blueprint: row.get(15)?,
-                quick_notes: row.get(16)?,
-                quick_notes_mindmap: row.get(17)?,
-                quick_notes_canvas: row.get(18)?,
-                suggested_questions: row.get(19)?,
-                last_playback_position: row.get(20)?,
-                created_at: row.get(21)?,
-                updated_at: row.get(22)?,
+                ai_note_meta: row.get(12)?,
+                flashcards: row.get(13)?,
+                panoramic_blueprint: row.get(14)?,
+                quick_notes: row.get(15)?,
+                quick_notes_mindmap: row.get(16)?,
+                quick_notes_canvas: row.get(17)?,
+                suggested_questions: row.get(18)?,
+                last_playback_position: row.get(19)?,
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
             })
         })
     }
@@ -624,17 +618,17 @@ impl Database {
                 title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4,
                 init_status = ?5, full_summary = ?6, detailed_reading = ?7, highlights = ?8,
                 visual_summary = ?9, custom_summary = ?10, ai_note_markdown = ?11,
-                ai_note_original_markdown = ?12, ai_note_meta = ?13, flashcards = ?14, panoramic_blueprint = ?15,
-                quick_notes = ?16, quick_notes_mindmap = ?17, quick_notes_canvas = ?18, suggested_questions = ?19,
-                last_playback_position = ?20,
+                ai_note_meta = ?12, flashcards = ?13, panoramic_blueprint = ?14, quick_notes = ?15,
+                quick_notes_mindmap = ?16, quick_notes_canvas = ?17, suggested_questions = ?18,
+                last_playback_position = ?19,
                 updated_at = datetime('now', 'localtime')
-             WHERE id = ?21",
+             WHERE id = ?20",
             rusqlite::params![
                 &note.title, &note.video_path, &note.subtitle_path, &note.model_id,
                 note.init_status, &note.full_summary, &note.detailed_reading, &note.highlights,
                 &note.visual_summary, &note.custom_summary, &note.ai_note_markdown,
-                &note.ai_note_original_markdown, &note.ai_note_meta, &note.flashcards, &note.panoramic_blueprint,
-                &note.quick_notes, &note.quick_notes_mindmap, &note.quick_notes_canvas, &note.suggested_questions,
+                &note.ai_note_meta, &note.flashcards, &note.panoramic_blueprint, &note.quick_notes,
+                &note.quick_notes_mindmap, &note.quick_notes_canvas, &note.suggested_questions,
                 &note.last_playback_position,
                 note.id,
             ],
@@ -691,10 +685,9 @@ impl Database {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_original_markdown, ai_note_meta,
-                    flashcards, panoramic_blueprint, quick_notes, quick_notes_mindmap,
-                    quick_notes_canvas, suggested_questions, last_playback_position,
-                    created_at, updated_at
+                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
+                    panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
+                    suggested_questions, last_playback_position, created_at, updated_at
              FROM notes WHERE init_status < 7 AND model_id IS NOT NULL ORDER BY created_at ASC, rowid ASC"
         )?;
 
@@ -712,17 +705,16 @@ impl Database {
                 visual_summary: row.get(9)?,
                 custom_summary: row.get(10)?,
                 ai_note_markdown: row.get(11)?,
-                ai_note_original_markdown: row.get(12)?,
-                ai_note_meta: row.get(13)?,
-                flashcards: row.get(14)?,
-                panoramic_blueprint: row.get(15)?,
-                quick_notes: row.get(16)?,
-                quick_notes_mindmap: row.get(17)?,
-                quick_notes_canvas: row.get(18)?,
-                suggested_questions: row.get(19)?,
-                last_playback_position: row.get(20)?,
-                created_at: row.get(21)?,
-                updated_at: row.get(22)?,
+                ai_note_meta: row.get(12)?,
+                flashcards: row.get(13)?,
+                panoramic_blueprint: row.get(14)?,
+                quick_notes: row.get(15)?,
+                quick_notes_mindmap: row.get(16)?,
+                quick_notes_canvas: row.get(17)?,
+                suggested_questions: row.get(18)?,
+                last_playback_position: row.get(19)?,
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
             })
         })?;
 

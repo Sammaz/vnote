@@ -1092,9 +1092,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return extractMarkdownHeadings(visualSummaryDisplayMarkdown);
   }, [visualSummaryDisplayMarkdown]);
 
-  const activeVisualChapter =
-    activeVisualChapterIndex >= 0 ? visualChapterItems[activeVisualChapterIndex] ?? null : null;
-
   const handleVisualChapterJump = useCallback((index: number) => {
     const didScroll = scrollToMarkdownHeading(index);
     if (!didScroll) return;

@@ -1241,22 +1241,6 @@ async fn generate_ai_note_content(
     Ok(return_id)
 }
 
-#[tauri::command]
-fn reset_ai_note_content(note_id: String) -> Result<(), String> {
-    let mut note = get_db()
-        .get_note_by_id(&note_id)
-        .map_err(|e| e.to_string())?
-        .ok_or("笔记未找到")?;
-
-    if let Some(original) = note.ai_note_original_markdown.clone() {
-        note.ai_note_markdown = Some(original);
-    } else {
-        note.ai_note_markdown = None;
-    }
-
-    get_db().update_note(&note).map_err(|e| e.to_string())
-}
-
 // Chapter generation commands
 #[tauri::command]
 async fn generate_chapters(
@@ -1388,7 +1372,6 @@ fn update_note_content(
         "visual_summary" => note.visual_summary = Some(content),
         "custom_summary" => note.custom_summary = Some(content),
         "ai_note_markdown" | "ai_note" => note.ai_note_markdown = Some(content),
-        "ai_note_original_markdown" => note.ai_note_original_markdown = Some(content),
         "ai_note_meta" => note.ai_note_meta = Some(content),
         "quick_notes" => note.quick_notes = Some(content),
         "quick_notes_mindmap" => note.quick_notes_mindmap = Some(content),
@@ -2159,7 +2142,6 @@ pub fn run() {
             generate_note_content,
             abort_note_generation,
             generate_ai_note_content,
-            reset_ai_note_content,
             generate_chapters,
             abort_chapter_generation,
             parse_subtitle_file,

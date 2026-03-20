@@ -24,7 +24,6 @@ export interface Note {
   visual_summary: string | null;
   custom_summary: string | null;
   ai_note_markdown: string | null;
-  ai_note_original_markdown: string | null;
   ai_note_meta: string | null;
   flashcards: string | null; // JSON string of FlashcardData
   panoramic_blueprint: string | null; // Panoramic depth reconstruction blueprint (markdown)
