@@ -22,6 +22,7 @@ export interface Note {
   detailed_reading: string | ChapterData | DetailedReadingData | null;  // 支持纯文本或章节数据
   highlights: string | null;
   visual_summary: string | null;
+  visual_summary_mindmap: string | null; // Visual summary mindmap data (JSON)
   custom_summary: string | null;
   ai_note_markdown: string | null;
   ai_note_original_markdown: string | null;

@@ -1386,6 +1386,7 @@ fn update_note_content(
         "detailed_reading" => note.detailed_reading = Some(content),
         "highlights" => note.highlights = Some(content),
         "visual_summary" => note.visual_summary = Some(content),
+        "visual_summary_mindmap" => note.visual_summary_mindmap = Some(content),
         "custom_summary" => note.custom_summary = Some(content),
         "ai_note_markdown" | "ai_note" => note.ai_note_markdown = Some(content),
         "ai_note_original_markdown" => note.ai_note_original_markdown = Some(content),

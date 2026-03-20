@@ -567,7 +567,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   useEffect(() => {
     // 当笔记内容更新时，触发重新渲染
     forceUpdate({});
-  }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.full_summary, note.ai_note_markdown, note.ai_note_meta]);
+  }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.visual_summary_mindmap, note.full_summary, note.ai_note_markdown, note.ai_note_meta]);
 
   // 设置深度蓝图生成监听器
   const setupBlueprintListener = useCallback(async (noteId: string, genId: string) => {
@@ -1067,37 +1067,19 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     });
   }, [visualChaptersForMarkdown, optimizedSubtitles, subtitleEntries, showVisualTimestamp]);
 
-  // 获取已保存的视觉化总结 Markdown（区分思维导图 JSON）
   const getSavedVisualMarkdown = useCallback((): string | null => {
-    if (!note.visual_summary) return null;
-    // 如果是 JSON 格式（思维导图数据），返回 null
-    if (note.visual_summary.trim().startsWith('{')) {
-      try {
-        JSON.parse(note.visual_summary);
-        return null; // 是有效 JSON，说明是思维导图数据
-      } catch {
-        // 解析失败，可能是 Markdown
-      }
-    }
-    return note.visual_summary;
+    return note.visual_summary || null;
   }, [note.visual_summary]);
+
+  const getSavedVisualMindMap = useCallback((): string | null => {
+    return note.visual_summary_mindmap || null;
+  }, [note.visual_summary_mindmap]);
 
   // 组装视觉化总结 Markdown 并保存到数据库
   const saveAssembledVisualMarkdown = useCallback(async () => {
     const chapterDataForMarkdown = visualChaptersForMarkdown();
     if (!chapterDataForMarkdown || chapterDataForMarkdown.chapters.length === 0) return;
-    // 防止笔记切换时的竞态条件：确保 detailedReadingData 属于当前笔记
     if (detailedReadingDataNoteIdRef.current !== note.id) return;
-    // 保护思维导图数据：如果当前 visual_summary 是有效 JSON，跳过保存
-    if (note.visual_summary && note.visual_summary.trim().startsWith('{')) {
-      try {
-        JSON.parse(note.visual_summary);
-        return; // 是思维导图 JSON，不覆盖
-      } catch {
-        // 不是有效 JSON，继续保存
-      }
-    }
-    // 组装 Markdown（showTimestamp 固定为 true，显隐由 CSS 控制）
     const content = assembleChapterMarkdown({
       chapters: chapterDataForMarkdown.chapters,
       optimizedSubtitles,
@@ -1114,7 +1096,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     } catch (error) {
       console.error("保存视觉化总结失败:", error);
     }
-  }, [visualChaptersForMarkdown, note.id, note.visual_summary, optimizedSubtitles, subtitleEntries]);
+  }, [visualChaptersForMarkdown, note.id, optimizedSubtitles, subtitleEntries]);
 
   // 当章节数据/optimizedSubtitles 更新后，如果有待保存标志，执行保存
   useEffect(() => {
@@ -3208,8 +3190,8 @@ Video subtitles content:`;
             showTimestamp={showVisualTimestamp}
             viewMode={visualViewMode}
             noteTitle={note.title}
-            savedMindMapData={note.visual_summary}
-            savedMarkdownContent={getSavedVisualMarkdown()}
+            savedMindMapData={getSavedVisualMindMap()}
+            savedMarkdownContent={getSavedVisualMarkdown() || getVisualSummaryContent()}
             noteId={note.id}
             onDataChange={onGenerationComplete}
           />

@@ -143,7 +143,7 @@ export const MindMapView = forwardRef<MindMapViewRef, MindMapViewProps>(function
       const jsonString = JSON.stringify(cleanedData);
       await invoke("update_note_content", {
         noteId,
-        tabType: "visual_summary",
+        tabType: "visual_summary_mindmap",
         content: jsonString,
       });
       // 通知父组件刷新笔记状态

@@ -106,17 +106,18 @@ function mindMapNodeToMarkdown(node: any, depth = 0): string {
 
 // 提取视觉化总结内容（Markdown 或思维导图 JSON 均支持）
 function getVisualContent(note: Note): string | null {
-  if (!note.visual_summary) return null;
-  if (note.visual_summary.trim().startsWith("{")) {
-    try {
-      const parsed = JSON.parse(note.visual_summary);
-      // 有效 JSON = 思维导图数据，转为 Markdown 列表展示
-      return mindMapNodeToMarkdown(parsed) || null;
-    } catch {
-      // 解析失败，当作 Markdown 处理
-    }
+  if (note.visual_summary) {
+    return note.visual_summary;
   }
-  return note.visual_summary;
+  if (!note.visual_summary_mindmap) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(note.visual_summary_mindmap);
+    return mindMapNodeToMarkdown(parsed) || null;
+  } catch {
+    return null;
+  }
 }
 
 // 相对日期格式化
@@ -154,7 +155,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
       // 匹配标题
       if (note.title.toLowerCase().includes(query)) return true;
       // 匹配已保存的视觉化总结编辑内容
-      if (note.visual_summary?.toLowerCase().includes(query)) return true;
+      if (getVisualContent(note)?.toLowerCase().includes(query)) return true;
       // 匹配 detailed_reading 章节的 title 和 content
       const chapterData = parseDetailedReading(note.detailed_reading);
       if (chapterData) {

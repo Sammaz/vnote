@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS notes (
     detailed_reading TEXT,
     highlights TEXT,
     visual_summary TEXT,
+    visual_summary_mindmap TEXT,
     custom_summary TEXT,
     ai_note_markdown TEXT,
     ai_note_original_markdown TEXT,

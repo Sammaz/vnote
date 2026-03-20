@@ -55,7 +55,7 @@ export const VisualSummaryContent = forwardRef<MindMapViewRef, VisualSummaryCont
   // 用于生成唯一标题 ID 的计数器（必须在所有条件返回之前声明）
   const slugCountsRef = useRef<Record<string, number>>({});
 
-  // 从数据库字段读取 Markdown 内容（不再动态组装）
+  // 从数据库字段读取 Markdown 内容
   const markdownContent = useMemo(() => {
     return savedMarkdownContent || "";
   }, [savedMarkdownContent]);
