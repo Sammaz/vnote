@@ -23,6 +23,9 @@ export interface Note {
   highlights: string | null;
   visual_summary: string | null;
   custom_summary: string | null;
+  ai_note_markdown: string | null;
+  ai_note_original_markdown: string | null;
+  ai_note_meta: string | null;
   flashcards: string | null; // JSON string of FlashcardData
   panoramic_blueprint: string | null; // Panoramic depth reconstruction blueprint (markdown)
   quick_notes: string | null; // User's quick notes (markdown)
@@ -205,6 +208,7 @@ export type TabType =
   | "highlights"
   | "visual_summary"
   | "custom_summary"
+  | "ai_note"
   | "flashcards";
 
 // 全文总结结构化数据

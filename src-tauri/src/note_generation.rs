@@ -57,6 +57,9 @@ pub struct GenerationOptions {
     /// 并发数限制（1-5，默认3）
     #[serde(default = "default_concurrent_limit")]
     pub concurrent_limit: usize,
+    /// AI 笔记样式（可选）
+    #[serde(default)]
+    pub style: Option<String>,
     /// 自定义提示词（可选）
     #[serde(default)]
     pub custom_prompt: Option<String>,
@@ -79,6 +82,7 @@ pub enum TabType {
     Highlights,       // 高光笔记
     VisualSummary,    // 视觉化总结
     CustomSummary,    // 自定义总结
+    AiNote,           // AI 笔记
 }
 
 /// 生成策略
@@ -288,6 +292,54 @@ mindmap
 
 视频字幕内容：
 {}"#,
+            subtitle_content
+        )
+    }
+
+    fn ai_note(subtitle_content: &str, style: Option<&str>) -> String {
+        let style_requirements = match style.unwrap_or("detailed") {
+            "concise" => "请保持内容精炼，优先输出核心结论、关键概念和行动建议，避免冗长展开。",
+            "outline" => "请突出标题层级与结构骨架，尽量使用多级标题和短列表，便于直接转换为思维导图。",
+            _ => "请在结构清晰的前提下保留必要细节，兼顾概念解释、步骤方法和关键结论。",
+        };
+
+        format!(
+            r#"你是一个专业的学习型笔记助手。请根据视频字幕生成一份便于学习、复习和后续转换为思维导图的 AI 笔记。
+
+输出要求：
+1. 使用 Markdown 格式输出，不要使用代码块包裹全文。
+2. 必须使用中文。
+3. 结构清晰，严格使用标题和列表组织内容。
+4. 优先提炼核心概念、层级关系、因果关系、步骤方法和关键结论。
+5. 如果出现适合回看视频的位置，在对应小节标题或要点后补充时间信息，格式统一为 `（时间：mm:ss）` 或 `（时间：hh:mm:ss）`。
+6. 不要输出 Mermaid，不要输出 JSON。
+7. {}。
+
+建议结构：
+# 主题
+
+## 核心结论
+- 要点
+
+## 关键概念
+### 概念1
+- 定义
+- 作用
+- 关联
+
+## 方法/流程
+1. 步骤一
+2. 步骤二
+
+## 易错点 / 注意事项
+- 要点
+
+## 可行动清单
+- 要点
+
+视频字幕内容：
+{}"#,
+            style_requirements,
             subtitle_content
         )
     }
@@ -1328,6 +1380,7 @@ pub async fn generate_note(
                     TabType::Highlights => note.highlights.is_some(),
                     TabType::VisualSummary => note.visual_summary.is_some(),
                     TabType::CustomSummary => note.custom_summary.is_some(),
+                    TabType::AiNote => note.ai_note_markdown.is_some(),
                 };
                 !has_content
             })
@@ -1371,6 +1424,7 @@ pub async fn generate_note(
             TabType::Highlights => "高光笔记",
             TabType::VisualSummary => "视觉化总结",
             TabType::CustomSummary => "自定义总结",
+            TabType::AiNote => "大纲笔记",
         }).collect();
         tracing::info!("[笔记生成] 开始串行生成，标签页顺序: {:?}", tab_names);
         for tab_type in &tabs_to_generate {
@@ -1414,7 +1468,15 @@ pub async fn generate_note(
                         tracing::info!("[笔记生成] {:?} 生成完成", tab_type);
                         let content = serde_json::to_string(&chapter_data)
                             .map_err(|e| format!("序列化章节数据失败: {}", e))?;
-                        update_note_tab(db, &request.note_id, tab_type, &content, &request.model_id)?;
+                        update_note_tab(
+                            db,
+                            &request.note_id,
+                            tab_type,
+                            &content,
+                            &request.model_id,
+                            request.options.style.as_deref(),
+                            request.options.custom_prompt.as_deref(),
+                        )?;
                         let _ = app.emit(
                             &event_name,
                             GenerationEvent::TabCompleted {
@@ -1447,6 +1509,7 @@ pub async fn generate_note(
                     &abort_flag,
                     model_context_size,
                     tab_name,
+                    request.options.style.as_deref(),
                     request.options.custom_prompt.as_deref(),
                 ).await;
 
@@ -1454,7 +1517,15 @@ pub async fn generate_note(
 
                 if result.success {
                     generated_count += 1;
-                    if let Err(e) = update_note_tab(db, &request.note_id, tab_type, &result.content, &request.model_id) {
+                    if let Err(e) = update_note_tab(
+                        db,
+                        &request.note_id,
+                        tab_type,
+                        &result.content,
+                        &request.model_id,
+                        request.options.style.as_deref(),
+                        request.options.custom_prompt.as_deref(),
+                    ) {
                         tracing::error!("[笔记生成] 更新数据库失败: {}", e);
                         failed_count += 1;
                     }
@@ -1497,7 +1568,15 @@ pub async fn generate_note(
                 let content = serde_json::to_string(&chapter_data)
                     .map_err(|e| format!("序列化章节数据失败: {}", e))?;
 
-                update_note_tab(db, &request.note_id, &TabType::DetailedReading, &content, &request.model_id)?;
+                update_note_tab(
+                    db,
+                    &request.note_id,
+                    &TabType::DetailedReading,
+                    &content,
+                    &request.model_id,
+                    request.options.style.as_deref(),
+                    request.options.custom_prompt.as_deref(),
+                )?;
 
                 let _ = app.emit(
                     &event_name,
@@ -1534,6 +1613,7 @@ pub async fn generate_note(
             let subtitle_text = subtitle_text.clone();
             let abort_flag = abort_flag.clone();
             let tab_name = get_tab_name(&tab_type);
+            let style = request.options.style.clone();
             let custom_prompt = request.options.custom_prompt.clone();
 
             let task = tokio::spawn(async move {
@@ -1561,6 +1641,7 @@ pub async fn generate_note(
                     &abort_flag,
                     model_context_size,
                     tab_name,
+                    style.as_deref(),
                     custom_prompt.as_deref(),
                 ).await
             });
@@ -1575,7 +1656,15 @@ pub async fn generate_note(
                     if result.success {
                         generated_count += 1;
                         // 更新数据库
-                        if let Err(e) = update_note_tab(db, &request.note_id, &result.tab_type, &result.content, &request.model_id) {
+                        if let Err(e) = update_note_tab(
+                            db,
+                            &request.note_id,
+                            &result.tab_type,
+                            &result.content,
+                            &request.model_id,
+                            request.options.style.as_deref(),
+                            request.options.custom_prompt.as_deref(),
+                        ) {
                             tracing::error!("[笔记生成] 更新数据库失败: {}", e);
                             failed_count += 1;
                         }
@@ -1618,6 +1707,7 @@ async fn generate_single_tab(
     abort_flag: &Arc<AtomicBool>,
     model_context_size: usize,
     tab_name: String,
+    style: Option<&str>,
     custom_prompt: Option<&str>,
 ) -> TabResult {
     // 检查中止
@@ -1658,7 +1748,7 @@ async fn generate_single_tab(
                 // 自定义提示词需要包含字幕内容
                 format!("{}\n\n视频字幕内容：\n{}", custom, subtitle_text)
             } else {
-                get_prompt_for_tab(tab_type, subtitle_text)
+                get_prompt_for_tab(tab_type, subtitle_text, style)
             };
             call_ai_api(ai_config, &prompt, abort_flag).await
         }
@@ -1727,6 +1817,7 @@ fn post_process_content(tab_type: &TabType, content: &str) -> Result<String, Str
             // 直接返回清理后的 Markdown 内容
             Ok(content.trim().to_string())
         }
+        TabType::AiNote => Ok(content.trim().to_string()),
         _ => Ok(content.trim().to_string()),
     }
 }
@@ -1738,6 +1829,8 @@ fn update_note_tab(
     tab_type: &TabType,
     content: &str,
     model_id: &str,
+    style: Option<&str>,
+    custom_prompt: Option<&str>,
 ) -> Result<(), String> {
     let mut note = db
         .get_note_by_id(note_id)
@@ -1750,6 +1843,21 @@ fn update_note_tab(
         TabType::Highlights => note.highlights = Some(content.to_string()),
         TabType::VisualSummary => note.visual_summary = Some(content.to_string()),
         TabType::CustomSummary => note.custom_summary = Some(content.to_string()),
+        TabType::AiNote => {
+            note.ai_note_markdown = Some(content.to_string());
+            if note.ai_note_original_markdown.is_none() {
+                note.ai_note_original_markdown = Some(content.to_string());
+            }
+            note.ai_note_meta = Some(
+                serde_json::json!({
+                    "style": style.unwrap_or(if custom_prompt.is_some() { "custom" } else { "default" }),
+                    "custom_prompt": custom_prompt,
+                    "model_id": model_id,
+                    "generated_at": chrono::Local::now().to_rfc3339(),
+                })
+                .to_string(),
+            );
+        }
     }
 
     // 同时更新 model_id，确保使用的模型被记录
@@ -1777,17 +1885,19 @@ fn get_tab_name(tab_type: &TabType) -> String {
         TabType::Highlights => "高光笔记".to_string(),
         TabType::VisualSummary => "视觉化总结".to_string(),
         TabType::CustomSummary => "自定义总结".to_string(),
+        TabType::AiNote => "大纲笔记".to_string(),
     }
 }
 
 /// 获取标签页对应的提示词
-fn get_prompt_for_tab(tab_type: &TabType, subtitle_text: &str) -> String {
+fn get_prompt_for_tab(tab_type: &TabType, subtitle_text: &str, style: Option<&str>) -> String {
     match tab_type {
         TabType::FullSummary => PromptTemplates::full_summary(subtitle_text),
         TabType::DetailedReading => unreachable!("DetailedReading 已在 generate_note 中单独处理"),
         TabType::Highlights => PromptTemplates::highlights(subtitle_text),
         TabType::VisualSummary => PromptTemplates::visual_summary(subtitle_text),
         TabType::CustomSummary => PromptTemplates::custom_summary(subtitle_text),
+        TabType::AiNote => PromptTemplates::ai_note(subtitle_text, style),
     }
 }
 

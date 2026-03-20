@@ -1150,6 +1150,7 @@ async fn generate_note_content(
             "highlights" => Some(TabType::Highlights),
             "visual_summary" => Some(TabType::VisualSummary),
             "custom_summary" => Some(TabType::CustomSummary),
+            "ai_note" => Some(TabType::AiNote),
             _ => None,
         })
         .collect();
@@ -1168,6 +1169,7 @@ async fn generate_note_content(
         tabs_to_generate: tabs,
         regenerate,
         concurrent_limit,
+        style: None,
         custom_prompt,
     };
 
@@ -1191,6 +1193,68 @@ async fn generate_note_content(
 #[tauri::command]
 async fn abort_note_generation(generation_id: String) -> Result<(), String> {
     note_generation::abort_generation(generation_id).await
+}
+
+#[tauri::command]
+async fn generate_ai_note_content(
+    app: AppHandle,
+    generation_id: Option<String>,
+    note_id: String,
+    model_id: String,
+    regenerate: bool,
+    concurrent_limit: Option<usize>,
+    style: Option<String>,
+    custom_prompt: Option<String>,
+) -> Result<String, String> {
+    use note_generation::{GenerateNoteRequest, GenerationOptions, TabType};
+
+    let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let return_id = generation_id.clone();
+
+    let concurrent_limit = concurrent_limit.unwrap_or_else(|| {
+        if let Ok(Some(ai_config)) = get_db().get_ai_config_by_id(&model_id) {
+            ai_config.concurrent_limit as usize
+        } else {
+            5
+        }
+    });
+
+    let request = GenerateNoteRequest {
+        note_id,
+        model_id,
+        options: GenerationOptions {
+            concurrent: true,
+            tabs_to_generate: vec![TabType::AiNote],
+            regenerate,
+            concurrent_limit,
+            style,
+            custom_prompt,
+        },
+    };
+
+    tokio::spawn(async move {
+        if let Err(e) = note_generation::generate_note(app, get_db(), generation_id, request).await {
+            tracing::error!("[generate_ai_note_content] 生成失败: {}", e);
+        }
+    });
+
+    Ok(return_id)
+}
+
+#[tauri::command]
+fn reset_ai_note_content(note_id: String) -> Result<(), String> {
+    let mut note = get_db()
+        .get_note_by_id(&note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到")?;
+
+    if let Some(original) = note.ai_note_original_markdown.clone() {
+        note.ai_note_markdown = Some(original);
+    } else {
+        note.ai_note_markdown = None;
+    }
+
+    get_db().update_note(&note).map_err(|e| e.to_string())
 }
 
 // Chapter generation commands
@@ -1323,6 +1387,9 @@ fn update_note_content(
         "highlights" => note.highlights = Some(content),
         "visual_summary" => note.visual_summary = Some(content),
         "custom_summary" => note.custom_summary = Some(content),
+        "ai_note_markdown" | "ai_note" => note.ai_note_markdown = Some(content),
+        "ai_note_original_markdown" => note.ai_note_original_markdown = Some(content),
+        "ai_note_meta" => note.ai_note_meta = Some(content),
         "quick_notes" => note.quick_notes = Some(content),
         "quick_notes_mindmap" => note.quick_notes_mindmap = Some(content),
         "quick_notes_canvas" => note.quick_notes_canvas = Some(content),
@@ -2091,6 +2158,8 @@ pub fn run() {
             delete_prompt_config,
             generate_note_content,
             abort_note_generation,
+            generate_ai_note_content,
+            reset_ai_note_content,
             generate_chapters,
             abort_chapter_generation,
             parse_subtitle_file,

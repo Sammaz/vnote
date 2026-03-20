@@ -11,7 +11,7 @@ import remarkGfm from "remark-gfm";
 import { TableOfContents, generateId, getTextFromChildren } from "./TableOfContents";
 import { convertJsonToMarkdown } from "../../utils/markdownUtils";
 
-type TabType = "full_summary" | "detailed_reading" | "highlights" | "visual_summary" | "custom_summary" | "panoramic_blueprint";
+type TabType = "full_summary" | "detailed_reading" | "highlights" | "visual_summary" | "custom_summary" | "ai_note" | "panoramic_blueprint";
 
 interface EditableMarkdownProps {
   noteId: string;

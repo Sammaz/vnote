@@ -666,6 +666,7 @@ async fn execute_full_summary_step(
             tabs_to_generate: vec![note_generation::TabType::FullSummary],
             regenerate: true,
             concurrent_limit: 1,
+            style: None,
             custom_prompt: Some(default_prompt.to_string()),
         },
     };
