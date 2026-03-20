@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 import {
   FileText,
@@ -39,11 +39,18 @@ import { EditableMarkdown } from "./EditableMarkdown";
 import { DetailedReadingView } from "./DetailedReadingView";
 import { VirtualizedSubtitleList } from "./VirtualizedSubtitleList";
 import { HighlightGrid, type HighlightGridRef } from "./Highlight";
-import { VisualSummaryContent, type VisualViewMode } from "./VisualSummaryContent";
+import { VisualSummaryContent } from "./VisualSummaryContent";
+import {
+  extractMarkdownHeadings,
+  getMarkdownContainer,
+  getMarkdownHeadingElements,
+  getMarkdownScrollContainer,
+  scrollToMarkdownHeading,
+  type TOCItem,
+} from "./TableOfContents";
 import { FlashcardContent } from "./FlashcardContent";
 import { QuickNotesContainer } from "./QuickNotesContainer";
 import { AiNoteContent } from "./AiNoteContent";
-import type { MindMapViewRef } from "./MindMap";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
@@ -157,9 +164,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // HighlightGrid 组件的 ref
   const highlightGridRef = useRef<HighlightGridRef>(null);
-
-  // MindMapView 组件的 ref
-  const mindMapRef = useRef<MindMapViewRef>(null);
 
   // 原文细读相关状态
   const [detailedReadingData, setDetailedReadingData] = useState<DetailedReadingData | null>(null);
@@ -486,9 +490,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [isVisualEditMode, setIsVisualEditMode] = useState(false);
   const [visualEditContent, setVisualEditContent] = useState<string>("");
   const [showVisualTimestamp, setShowVisualTimestamp] = useState(true);
-  const [visualViewMode, setVisualViewMode] = useState<VisualViewMode>("markdown");
-  const [showMindMapExportMenu, setShowMindMapExportMenu] = useState(false);
-  const mindMapExportMenuRef = useRef<HTMLDivElement>(null);
+  const [showVisualChapterDropdown, setShowVisualChapterDropdown] = useState(false);
+  const [activeVisualChapterIndex, setActiveVisualChapterIndex] = useState(-1);
+  const visualChapterDropdownRef = useRef<HTMLDivElement>(null);
+  const visualManualScrollingRef = useRef(false);
+  const visualManualScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // 标记"需要在状态更新后保存视觉化总结到数据库"
   const pendingVisualSummarySaveRef = useRef<boolean>(false);
 
@@ -567,7 +573,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   useEffect(() => {
     // 当笔记内容更新时，触发重新渲染
     forceUpdate({});
-  }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.visual_summary_mindmap, note.full_summary, note.ai_note_markdown, note.ai_note_meta]);
+  }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.full_summary, note.ai_note_markdown, note.ai_note_meta]);
 
   // 设置深度蓝图生成监听器
   const setupBlueprintListener = useCallback(async (noteId: string, genId: string) => {
@@ -853,6 +859,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       if (chapterDropdownRef.current && !chapterDropdownRef.current.contains(event.target as Node)) {
         setShowChapterDropdown(false);
       }
+      if (visualChapterDropdownRef.current && !visualChapterDropdownRef.current.contains(event.target as Node)) {
+        setShowVisualChapterDropdown(false);
+      }
       if (subtitleModeDropdownRef.current && !subtitleModeDropdownRef.current.contains(event.target as Node)) {
         setShowSubtitleModeDropdown(false);
       }
@@ -1071,9 +1080,119 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return note.visual_summary || null;
   }, [note.visual_summary]);
 
-  const getSavedVisualMindMap = useCallback((): string | null => {
-    return note.visual_summary_mindmap || null;
-  }, [note.visual_summary_mindmap]);
+  const getVisualSummaryDisplayMarkdown = useCallback((): string => {
+    return getSavedVisualMarkdown() || getVisualSummaryContent();
+  }, [getSavedVisualMarkdown, getVisualSummaryContent]);
+
+  const visualSummaryDisplayMarkdown = useMemo(() => {
+    return getVisualSummaryDisplayMarkdown();
+  }, [getVisualSummaryDisplayMarkdown]);
+
+  const visualChapterItems = useMemo<TOCItem[]>(() => {
+    return extractMarkdownHeadings(visualSummaryDisplayMarkdown);
+  }, [visualSummaryDisplayMarkdown]);
+
+  const activeVisualChapter =
+    activeVisualChapterIndex >= 0 ? visualChapterItems[activeVisualChapterIndex] ?? null : null;
+
+  const handleVisualChapterJump = useCallback((index: number) => {
+    const didScroll = scrollToMarkdownHeading(index);
+    if (!didScroll) return;
+
+    visualManualScrollingRef.current = true;
+    if (visualManualScrollTimerRef.current) {
+      clearTimeout(visualManualScrollTimerRef.current);
+    }
+
+    setActiveVisualChapterIndex(index);
+    setShowVisualChapterDropdown(false);
+
+    visualManualScrollTimerRef.current = setTimeout(() => {
+      visualManualScrollingRef.current = false;
+    }, 800);
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "visual" || isVisualEditMode || visualChapterItems.length === 0) {
+      setShowVisualChapterDropdown(false);
+    }
+  }, [activeTab, isVisualEditMode, visualChapterItems.length]);
+
+  useEffect(() => {
+    visualManualScrollingRef.current = false;
+    if (visualManualScrollTimerRef.current) {
+      clearTimeout(visualManualScrollTimerRef.current);
+      visualManualScrollTimerRef.current = null;
+    }
+    setShowVisualChapterDropdown(false);
+    setActiveVisualChapterIndex(visualChapterItems.length > 0 ? 0 : -1);
+  }, [note.id, visualSummaryDisplayMarkdown, visualChapterItems.length]);
+
+  useEffect(() => {
+    if (activeTab !== "visual" || isVisualEditMode || visualChapterItems.length === 0) return;
+
+    let observer: IntersectionObserver | null = null;
+
+    const timer = window.setTimeout(() => {
+      const container = getMarkdownContainer();
+      const headers = getMarkdownHeadingElements();
+      if (!container || headers.length === 0) {
+        setActiveVisualChapterIndex(-1);
+        return;
+      }
+
+      const count = Math.min(headers.length, visualChapterItems.length);
+      const scrollContainer = getMarkdownScrollContainer(container);
+
+      const syncActiveIndex = () => {
+        if (visualManualScrollingRef.current) return;
+
+        const referenceTop = scrollContainer ? scrollContainer.getBoundingClientRect().top : 0;
+        let nextActiveIndex = 0;
+
+        for (let i = 0; i < count; i++) {
+          const top = headers[i].getBoundingClientRect().top - referenceTop;
+          if (top <= 48) {
+            nextActiveIndex = i;
+          } else {
+            break;
+          }
+        }
+
+        setActiveVisualChapterIndex(nextActiveIndex);
+      };
+
+      observer = new IntersectionObserver(
+        () => {
+          syncActiveIndex();
+        },
+        {
+          root: scrollContainer,
+          rootMargin: "-10% 0px -80% 0px",
+          threshold: [0, 1],
+        }
+      );
+
+      for (let i = 0; i < count; i++) {
+        observer.observe(headers[i]);
+      }
+
+      syncActiveIndex();
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timer);
+      observer?.disconnect();
+    };
+  }, [activeTab, isVisualEditMode, note.id, visualChapterItems]);
+
+  useEffect(() => {
+    return () => {
+      if (visualManualScrollTimerRef.current) {
+        clearTimeout(visualManualScrollTimerRef.current);
+      }
+    };
+  }, []);
 
   // 组装视觉化总结 Markdown 并保存到数据库
   const saveAssembledVisualMarkdown = useCallback(async () => {
@@ -1140,7 +1259,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 视觉化总结复制
   const handleVisualCopy = async () => {
-    const content = isVisualEditMode ? visualEditContent : getVisualSummaryContent();
+    const content = isVisualEditMode ? visualEditContent : getVisualSummaryDisplayMarkdown();
     if (!content) {
       message.warning("暂无内容可复制");
       return;
@@ -1155,7 +1274,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 视觉化总结下载
   const handleVisualDownload = async () => {
-    const content = isVisualEditMode ? visualEditContent : getVisualSummaryContent();
+    const content = isVisualEditMode ? visualEditContent : getVisualSummaryDisplayMarkdown();
     if (!content) {
       message.warning("暂无内容可下载");
       return;
@@ -1176,7 +1295,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 视觉化总结导出（打包 Markdown 和图片为 zip）
   const handleVisualExport = async () => {
-    const content = isVisualEditMode ? visualEditContent : getVisualSummaryContent();
+    const content = isVisualEditMode ? visualEditContent : getVisualSummaryDisplayMarkdown();
     if (!content) {
       message.warning("暂无内容可导出");
       return;
@@ -1199,75 +1318,17 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   };
 
-  // 思维导图导出为不同格式
-  const handleMindMapExport = useCallback(async (format: 'png' | 'svg' | 'pdf') => {
-    if (mindMapRef.current) {
-      const mindMapInstance = mindMapRef.current.getInstance();
-      if (!mindMapInstance) {
-        message.warning("思维导图未初始化");
-        return;
-      }
-      try {
-        // 让用户选择保存位置
-        const filePath = await save({
-          defaultPath: `${note.title}.${format}`,
-          filters: [{
-            name: format.toUpperCase(),
-            extensions: [format]
-          }]
-        });
-
-        if (!filePath) {
-          // 用户取消了保存
-          return;
-        }
-
-        // 导出思维导图数据
-        const dataUrl = await mindMapInstance.export(format, true, note.title);
-
-        // 将 data URL 转换为 Blob
-        const response = await fetch(dataUrl as string);
-        const blob = await response.blob();
-        const arrayBuffer = await blob.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-
-        // 写入文件
-        const { writeFile } = await import("@tauri-apps/plugin-fs");
-        await writeFile(filePath, uint8Array);
-
-        message.success(`导出${format.toUpperCase()}成功`);
-        setShowMindMapExportMenu(false);
-      } catch (error) {
-        console.error("Export failed:", error);
-        message.error(`导出${format.toUpperCase()}失败: ${error}`);
-      }
-    } else {
-      message.warning("思维导图未初始化");
-    }
-  }, [note.title]);
-
-  // 点击外部关闭思维导图导出菜单
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (mindMapExportMenuRef.current && !mindMapExportMenuRef.current.contains(e.target as Node)) {
-        setShowMindMapExportMenu(false);
-      }
-    };
-    if (showMindMapExportMenu) {
-      document.addEventListener("mousedown", handleClickOutside);
-    }
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showMindMapExportMenu]);
-
   // 视觉化总结编辑模式切换（进入时初始化内容，退出时保存）
   const handleVisualEditToggle = async () => {
+    setShowVisualChapterDropdown(false);
+
     if (!isVisualEditMode) {
       // 进入编辑模式，优先使用已保存的编辑内容
       const savedMarkdown = getSavedVisualMarkdown();
-      setVisualEditContent(savedMarkdown || getVisualSummaryContent());
+      setVisualEditContent(savedMarkdown || getVisualSummaryDisplayMarkdown());
     } else {
       // 退出编辑模式，保存内容
-      const generatedContent = getVisualSummaryContent();
+      const generatedContent = getVisualSummaryDisplayMarkdown();
       const savedMarkdown = getSavedVisualMarkdown();
       const originalContent = savedMarkdown || generatedContent;
       if (visualEditContent && visualEditContent !== originalContent) {
@@ -2701,99 +2762,60 @@ Video subtitles content:`;
       ) : activeTab === "visual" ? (
         // 视觉化总结标签页的专用工具栏
         <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface select-none">
-          <div className="flex items-center gap-2">
-            {/* 视图模式切换 */}
-            <div className="flex items-center bg-slate-100 dark:bg-vnote-hover rounded-lg p-0.5">
-              <button
-                onClick={() => setVisualViewMode("markdown")}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer",
-                  visualViewMode === "markdown"
-                    ? "bg-white dark:bg-vnote-card text-blue-600 dark:text-blue-400 shadow-sm"
-                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                )}
-              >
-                <FileText className="w-4 h-4" />
-                文档
-              </button>
-              <button
-                onClick={() => setVisualViewMode("mindmap")}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer",
-                  visualViewMode === "mindmap"
-                    ? "bg-white dark:bg-vnote-card text-blue-600 dark:text-blue-400 shadow-sm"
-                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                )}
-              >
-                <GitBranch className="w-4 h-4" />
-                思维导图
-              </button>
-            </div>
-          </div>
-          {/* 右侧按钮区域 */}
           <div className="flex items-center gap-1">
-            {/* 思维导图模式下显示重新生成和导出按钮 */}
-            {visualViewMode === "mindmap" && (
+            {!isVisualEditMode && visualChapterItems.length > 0 && (
               <>
-                <button
-                  onClick={() => {
-                    setConfirmDialogConfig({
-                      title: "确认重新生成",
-                      message: "重新生成将从章节数据重新创建思维导图，当前的编辑内容将丢失。是否继续？",
-                      onConfirm: () => {
-                        setShowConfirmDialog(false);
-                        if (mindMapRef.current) {
-                          mindMapRef.current.regenerate();
-                          message.success("思维导图已重新生成");
-                        } else {
-                          message.warning("思维导图未初始化");
-                        }
-                      }
-                    });
-                    setShowConfirmDialog(true);
-                  }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-                >
-                  <RefreshCw className="w-4 h-4" />
-                  重新生成
-                </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
-                <div className="relative" ref={mindMapExportMenuRef}>
+                <div className="relative" ref={visualChapterDropdownRef}>
                   <button
-                    onClick={() => setShowMindMapExportMenu(!showMindMapExportMenu)}
+                    onClick={() => setShowVisualChapterDropdown(!showVisualChapterDropdown)}
                     className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
                   >
-                    <Download className="w-4 h-4" />
-                    导出
+                    <List className="w-4 h-4" />
+                    {`共 ${visualChapterItems.length} 个章节`}
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showVisualChapterDropdown ? "rotate-180" : ""}`} />
                   </button>
-                  {showMindMapExportMenu && (
-                    <div className="absolute top-full right-0 mt-2 w-40 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1">
-                      <button
-                        onClick={() => handleMindMapExport('png')}
-                        className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
-                      >
-                        导出为 PNG
-                      </button>
-                      <button
-                        onClick={() => handleMindMapExport('svg')}
-                        className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
-                      >
-                        导出为 SVG
-                      </button>
-                      <button
-                        onClick={() => handleMindMapExport('pdf')}
-                        className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
-                      >
-                        导出为 PDF
-                      </button>
+                  {showVisualChapterDropdown && (
+                    <div className="absolute top-full left-0 mt-1 w-96 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-auto">
+                      <div className="sticky top-0 bg-white dark:bg-slate-800 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                        <List className="w-4 h-4 text-slate-500" />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
+                      </div>
+                      <div className="py-1">
+                        {visualChapterItems.map((chapter) => {
+                          const isCurrentChapter = chapter.index === activeVisualChapterIndex;
+                          return (
+                            <button
+                              key={`visual-chapter-${chapter.index}`}
+                              onClick={() => handleVisualChapterJump(chapter.index)}
+                              className={cn(
+                                "w-full px-4 py-2 flex items-center gap-3 transition-colors cursor-pointer text-left",
+                                isCurrentChapter
+                                  ? "bg-blue-50 dark:bg-blue-900/20"
+                                  : "hover:bg-slate-100 dark:hover:bg-slate-700"
+                              )}
+                            >
+                              <span className="text-xs w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
+                                {chapter.index + 1}
+                              </span>
+                              <span
+                                className={cn(
+                                  "text-sm truncate",
+                                  chapter.level === 2 && "pl-3",
+                                  chapter.level === 3 && "pl-6",
+                                  isCurrentChapter
+                                    ? "text-blue-600 dark:text-blue-400 font-medium"
+                                    : "text-slate-700 dark:text-slate-200"
+                                )}
+                              >
+                                {chapter.text}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
                 </div>
-              </>
-            )}
-            {/* 仅在文档模式下显示时间戳、编辑和导出按钮 */}
-            {visualViewMode === "markdown" && (
-              <>
                 <button
                   onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
                   className={cn(
@@ -2806,45 +2828,46 @@ Video subtitles content:`;
                   <Clock className="w-4 h-4" />
                   时间戳
                 </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
-                <button
-                  onClick={handleVisualEditToggle}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                    isVisualEditMode
-                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-                  )}
-                >
-                  <Edit3 className="w-4 h-4" />
-                  {isVisualEditMode ? "预览" : "编辑"}
-                </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
-                <button
-                  onClick={handleVisualCopy}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-                >
-                  <Copy className="w-4 h-4" />
-                  复制
-                </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
-                <button
-                  onClick={handleVisualDownload}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  下载
-                </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
-                <button
-                  onClick={handleVisualExport}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-                >
-                  <Package className="w-4 h-4" />
-                  导出
-                </button>
               </>
             )}
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleVisualEditToggle}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                isVisualEditMode
+                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              )}
+            >
+              <Edit3 className="w-4 h-4" />
+              {isVisualEditMode ? "预览" : "编辑"}
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={handleVisualCopy}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Copy className="w-4 h-4" />
+              复制
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={handleVisualDownload}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Download className="w-4 h-4" />
+              下载
+            </button>
+            <span className="text-slate-300 dark:text-slate-600">|</span>
+            <button
+              onClick={handleVisualExport}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            >
+              <Package className="w-4 h-4" />
+              导出
+            </button>
           </div>
         </div>
       ) : activeTab === "custom" && note.custom_summary ? (
@@ -3056,9 +3079,7 @@ Video subtitles content:`;
       <div
         className={cn(
           "flex-1 min-h-0", // min-h-0 确保 flex 子元素可以正确收缩，让虚拟列表获得正确高度
-          activeTab === "visual" && visualViewMode === "mindmap"
-            ? "p-0 overflow-visible"
-            : activeTab === "ai_note"
+          activeTab === "ai_note"
             ? "p-0 overflow-hidden"
             : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas"
             ? "p-0 overflow-hidden"
@@ -3180,20 +3201,11 @@ Video subtitles content:`;
         {activeTab === "script" && <ScriptContent subtitlePath={note.subtitle_path} autoScroll={autoScroll} />}
         {activeTab === "visual" && (
           <VisualSummaryContent
-            ref={mindMapRef}
-            chapterData={visualChaptersForMarkdown()}
-            optimizedSubtitles={optimizedSubtitles}
-            originalSubtitles={subtitleEntries}
             isEditMode={isVisualEditMode}
             editContent={visualEditContent}
             onEditContentChange={setVisualEditContent}
             showTimestamp={showVisualTimestamp}
-            viewMode={visualViewMode}
-            noteTitle={note.title}
-            savedMindMapData={getSavedVisualMindMap()}
-            savedMarkdownContent={getSavedVisualMarkdown() || getVisualSummaryContent()}
-            noteId={note.id}
-            onDataChange={onGenerationComplete}
+            savedMarkdownContent={visualSummaryDisplayMarkdown}
           />
         )}
         {activeTab === "custom" && (
