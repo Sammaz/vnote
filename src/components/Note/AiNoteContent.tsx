@@ -336,7 +336,7 @@ export function AiNoteContent({
             {viewMode === "mindmap" ? (
               <div
                 ref={setMindMapDepthControlContainer}
-                className="flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
+                className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 dark:border-slate-700 dark:bg-slate-900"
                 title="显示层级"
               />
             ) : null}

@@ -604,15 +604,17 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
 
   const shouldShowDepthControl = treeMaxDepth > 2;
   const depthControl = shouldShowDepthControl ? (
-    <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
-      <span className="min-w-6 text-xs font-semibold">H{resolvedMaxDepth}</span>
+    <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
+      <span className="inline-flex h-6 min-w-7 items-center justify-center rounded-md bg-blue-50 text-xs font-bold text-blue-600 dark:bg-blue-900/40 dark:text-blue-400">
+        H{resolvedMaxDepth}
+      </span>
       <input
         type="range"
         min={2}
         max={Math.max(2, treeMaxDepth)}
         value={resolvedMaxDepth}
         onChange={handleDepthChange}
-        className="h-1.5 w-12 cursor-pointer accent-blue-500"
+        className="h-1.5 w-20 cursor-pointer accent-blue-500"
         title={`展开到 H${resolvedMaxDepth}`}
       />
     </div>
