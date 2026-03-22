@@ -542,22 +542,26 @@ export function AiNoteContent({
 
               <div className="mb-6">
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300">关键帧截图</label>
-                <div className="grid grid-cols-2 gap-3 mt-3">
+                <div className="grid grid-cols-4 gap-2 mt-3">
                   {AI_NOTE_SCREENSHOT_OPTIONS.map((option) => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setSelectedScreenshotDensity(option.value)}
-                      className={cn(
-                        "rounded-xl border px-4 py-3 text-left transition-colors cursor-pointer",
-                        selectedScreenshotDensity === option.value
-                          ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
-                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500"
-                      )}
-                    >
-                      <div className="text-sm font-medium">{option.label}</div>
-                      <div className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{option.description}</div>
-                    </button>
+                    <div key={option.value} className="relative group">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedScreenshotDensity(option.value)}
+                        className={cn(
+                          "w-full rounded-lg border px-2.5 py-2 text-center transition-colors cursor-pointer",
+                          selectedScreenshotDensity === option.value
+                            ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500"
+                        )}
+                      >
+                        <div className="text-sm font-medium">{option.label}</div>
+                      </button>
+                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 bg-slate-800 text-slate-100 dark:bg-slate-200 dark:text-slate-800 shadow-lg">
+                        {option.description}
+                        <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-800 dark:border-t-slate-200" />
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
