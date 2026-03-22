@@ -650,7 +650,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         />
 
         {/* 缩放控制工具栏 */}
-        <div className="absolute bottom-4 right-4 flex flex-col items-center gap-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-1 z-[100]">
+        <div className="absolute bottom-4 left-4 flex flex-col items-center gap-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-1 z-[100]">
           <button
             onClick={handleZoomOut}
             className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors cursor-pointer"

@@ -138,6 +138,7 @@ export function AiNoteContent({
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPromptDropdown, setShowPromptDropdown] = useState(false);
   const [mindMapSvg, setMindMapSvg] = useState<SVGSVGElement | null>(null);
+  const [mindMapDepthControlContainer, setMindMapDepthControlContainer] = useState<HTMLDivElement | null>(null);
 
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const promptDropdownRef = useRef<HTMLDivElement>(null);
@@ -332,6 +333,13 @@ export function AiNoteContent({
                 脑图
               </button>
             </div>
+            {viewMode === "mindmap" ? (
+              <div
+                ref={setMindMapDepthControlContainer}
+                className="flex min-w-0 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 dark:border-slate-700 dark:bg-slate-900"
+                title="显示层级"
+              />
+            ) : null}
             {viewMode === "markdown" && (
               <>
                 <button
@@ -398,7 +406,12 @@ export function AiNoteContent({
       <div className={cn("flex-1 min-h-0", viewMode === "mindmap" ? "p-0 overflow-hidden" : isEditMode ? "p-0 overflow-y-auto overflow-x-hidden" : "p-6 overflow-y-auto overflow-x-hidden")}>
         {note.ai_note_markdown ? (
           viewMode === "mindmap" ? (
-            <AiNoteMindMap markdown={note.ai_note_markdown} noteTitle={note.title} onSvgReady={setMindMapSvg} />
+            <AiNoteMindMap
+              markdown={note.ai_note_markdown}
+              noteTitle={note.title}
+              depthControlContainer={mindMapDepthControlContainer}
+              onSvgReady={setMindMapSvg}
+            />
           ) : (
             <EditableMarkdown
               noteId={note.id}

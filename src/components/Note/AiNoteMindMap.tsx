@@ -1,4 +1,5 @@
-import { useMemo, useEffect, useRef, useState, useCallback } from "react";
+import { useMemo, useEffect, useRef, useState, useCallback, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
 import { BarChart3, ZoomIn, ZoomOut, Maximize2, Fullscreen, Minimize } from "lucide-react";
 import { Transformer, type IMarkmapJSONOptions } from "markmap-lib";
 import { Markmap, loadCSS, loadJS } from "markmap-view";
@@ -8,6 +9,7 @@ import { deriveOptions } from "markmap-view";
 interface AiNoteMindMapProps {
   markdown: string;
   noteTitle: string;
+  depthControlContainer?: HTMLElement | null;
   onSvgReady?: (svg: SVGSVGElement | null) => void;
 }
 
@@ -19,7 +21,15 @@ interface OutlineItem {
   isSyncTarget: boolean;
 }
 
+interface NormalizedMindmapMarkdownResult {
+  normalizedMarkdown: string;
+  hasHeadings: boolean;
+  hasLevel1Heading: boolean;
+  rootTitle: string;
+}
+
 const transformer = new Transformer();
+const MINDMAP_DEPTH_STORAGE_KEY = "ai-note-mindmap-depth";
 const HEADING_RE = /^\s{0,3}(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/;
 const TIMESTAMP_PATTERNS = [
   /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/,
@@ -65,6 +75,90 @@ function cleanMarkdownText(text: string): string {
 function isSummaryHeading(text: string): boolean {
   const normalized = text.replace(/\s+/g, "");
   return normalized === "总结" || normalized === "总结：" || normalized === "总结:";
+}
+
+function getRootTitle(noteTitle: string): string {
+  const singleLineTitle = noteTitle.replace(/\r?\n+/g, " ").trim();
+  return cleanMarkdownText(singleLineTitle) || "大纲笔记";
+}
+
+function normalizeMindmapMarkdown(markdown: string, noteTitle: string): NormalizedMindmapMarkdownResult {
+  const rootTitle = getRootTitle(noteTitle);
+  const lines = markdown.split(/\r?\n/);
+  let hasHeadings = false;
+  let hasLevel1Heading = false;
+  let inCodeBlock = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+    if (inCodeBlock) {
+      continue;
+    }
+
+    const match = line.match(HEADING_RE);
+    if (!match) {
+      continue;
+    }
+
+    hasHeadings = true;
+    if (match[1].length === 1) {
+      hasLevel1Heading = true;
+      break;
+    }
+  }
+
+  if (!hasHeadings || hasLevel1Heading) {
+    return {
+      normalizedMarkdown: markdown,
+      hasHeadings,
+      hasLevel1Heading,
+      rootTitle,
+    };
+  }
+
+  return {
+    normalizedMarkdown: `# ${rootTitle}\n\n${markdown}`,
+    hasHeadings: true,
+    hasLevel1Heading: false,
+    rootTitle,
+  };
+}
+
+function getMaxDepth(node: IPureNode, current = 1): number {
+  if (!node.children?.length) {
+    return current;
+  }
+  return Math.max(...node.children.map((child) => getMaxDepth(child, current + 1)));
+}
+
+function applyFoldDepth(node: IPureNode, foldDepth: number, current = 1): IPureNode {
+  return {
+    ...node,
+    payload: {
+      ...(node.payload ?? {}),
+      fold: current >= foldDepth ? 1 : 0,
+    },
+    children: node.children.map((child) => applyFoldDepth(child, foldDepth, current + 1)),
+  };
+}
+
+function readStoredMindmapDepth(): number {
+  if (typeof window === "undefined") {
+    return 2;
+  }
+
+  const saved = Number.parseInt(window.localStorage.getItem(MINDMAP_DEPTH_STORAGE_KEY) ?? "", 10);
+  return Number.isFinite(saved) ? saved : 2;
+}
+
+function clampMindmapDepth(depth: number, treeMaxDepth: number): number {
+  const safeMaxDepth = Math.max(1, treeMaxDepth);
+  const minDepth = safeMaxDepth > 1 ? 2 : 1;
+  return Math.min(safeMaxDepth, Math.max(minDepth, depth));
 }
 
 function collectOutlineItems(markdown: string): OutlineItem[] {
@@ -218,7 +312,7 @@ function findMarkmapNode(root: INode | null | undefined, predicate: (node: INode
   return null;
 }
 
-export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMapProps) {
+export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSvgReady }: AiNoteMindMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const mmRef = useRef<Markmap | null>(null);
@@ -226,17 +320,41 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
   const userSeekRef = useRef<{ targetTime: number; timestamp: number } | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains("dark"));
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [maxDepth, setMaxDepth] = useState(() => readStoredMindmapDepth());
 
-  const items = useMemo(() => collectOutlineItems(markdown), [markdown]);
+  const normalized = useMemo(() => normalizeMindmapMarkdown(markdown, noteTitle), [markdown, noteTitle]);
+  const items = useMemo(() => {
+    if (!normalized.hasHeadings) {
+      return [];
+    }
+    return collectOutlineItems(normalized.normalizedMarkdown);
+  }, [normalized.hasHeadings, normalized.normalizedMarkdown]);
   const syncItems = useMemo(() => items.filter((item) => item.isSyncTarget), [items]);
   const syncUidSet = useMemo(() => new Set(syncItems.map((item) => item.uid)), [syncItems]);
   const transformed = useMemo(() => {
-    const { root, features } = transformer.transform(markdown);
+    if (!normalized.hasHeadings) {
+      return null;
+    }
+
+    const { root, features } = transformer.transform(normalized.normalizedMarkdown);
+    const baseRoot = enhanceNodeKeys(root, items, normalized.rootTitle);
     return {
-      root: enhanceNodeKeys(root, items, `${noteTitle} · 大纲笔记`),
+      baseRoot,
+      treeMaxDepth: getMaxDepth(baseRoot),
       assets: transformer.getUsedAssets(features),
     };
-  }, [markdown, items, noteTitle]);
+  }, [normalized.hasHeadings, normalized.normalizedMarkdown, normalized.rootTitle, items]);
+  const treeMaxDepth = transformed?.treeMaxDepth ?? 0;
+  const resolvedMaxDepth = useMemo(
+    () => clampMindmapDepth(maxDepth, treeMaxDepth || 1),
+    [maxDepth, treeMaxDepth],
+  );
+  const foldedRoot = useMemo(() => {
+    if (!transformed?.baseRoot) {
+      return null;
+    }
+    return applyFoldDepth(transformed.baseRoot, resolvedMaxDepth);
+  }, [resolvedMaxDepth, transformed?.baseRoot]);
 
   const focusNodeByUid = useCallback(async (uid: string | null) => {
     const mm = mmRef.current;
@@ -268,6 +386,10 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
   }, []);
 
   useEffect(() => {
+    if (!transformed) {
+      return;
+    }
+
     if (transformed.assets.styles) {
       loadCSS(transformed.assets.styles);
     }
@@ -276,10 +398,20 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
         getMarkmap: () => ({ Markmap, loadCSS, loadJS }),
       });
     }
-  }, [transformed.assets]);
+  }, [transformed]);
 
   useEffect(() => {
-    if (!containerRef.current || items.length === 0) {
+    if (!transformed) {
+      return;
+    }
+
+    const nextDepth = clampMindmapDepth(readStoredMindmapDepth(), transformed.treeMaxDepth);
+    setMaxDepth((current) => (current === nextDepth ? current : nextDepth));
+    window.localStorage.setItem(MINDMAP_DEPTH_STORAGE_KEY, String(nextDepth));
+  }, [transformed]);
+
+  useEffect(() => {
+    if (!containerRef.current || !foldedRoot || items.length === 0) {
       onSvgReady?.(null);
       return;
     }
@@ -298,18 +430,6 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
 
     const options = deriveOptions(getMarkmapOptions(isDarkMode) as IMarkmapJSONOptions);
 
-    const render = async () => {
-      if (!mmRef.current) {
-        mmRef.current = Markmap.create(existingSvg, options, transformed.root);
-      } else {
-        mmRef.current.setOptions(options);
-        await mmRef.current.setData(transformed.root);
-      }
-      await mmRef.current.fit();
-    };
-
-    render();
-
     const updateNodeInteractivity = () => {
       const groups = existingSvg.querySelectorAll<SVGGElement>("g.markmap-node");
       groups.forEach((group) => {
@@ -326,7 +446,18 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
       });
     };
 
-    queueMicrotask(updateNodeInteractivity);
+    const render = async () => {
+      if (!mmRef.current) {
+        mmRef.current = Markmap.create(existingSvg, options, foldedRoot);
+      } else {
+        mmRef.current.setOptions(options);
+        await mmRef.current.setData(foldedRoot);
+      }
+      await mmRef.current.fit();
+      updateNodeInteractivity();
+    };
+
+    void render();
 
     const handleClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
@@ -365,7 +496,7 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
       resizeObserver.disconnect();
       onSvgReady?.(null);
     };
-  }, [transformed.root, items.length, isDarkMode, focusNodeByUid, onSvgReady, syncUidSet]);
+  }, [foldedRoot, items.length, isDarkMode, focusNodeByUid, onSvgReady, syncUidSet]);
 
   useEffect(() => {
     if (syncItems.length === 0) {
@@ -460,6 +591,28 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
     void mmRef.current?.fit();
   }, []);
 
+  const handleDepthChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const nextDepth = clampMindmapDepth(Number(event.target.value), treeMaxDepth || 1);
+    setMaxDepth(nextDepth);
+    window.localStorage.setItem(MINDMAP_DEPTH_STORAGE_KEY, String(nextDepth));
+  }, [treeMaxDepth]);
+
+  const shouldShowDepthControl = treeMaxDepth > 2;
+  const depthControl = shouldShowDepthControl ? (
+    <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+      <span className="min-w-6 text-xs font-semibold">H{resolvedMaxDepth}</span>
+      <input
+        type="range"
+        min={2}
+        max={Math.max(2, treeMaxDepth)}
+        value={resolvedMaxDepth}
+        onChange={handleDepthChange}
+        className="h-1.5 w-12 cursor-pointer accent-blue-500"
+        title={`展开到 H${resolvedMaxDepth}`}
+      />
+    </div>
+  ) : null;
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-8 text-slate-400">
@@ -481,7 +634,8 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
         backgroundColor: isDarkMode ? "#0d0d0d" : "#f8fafc",
       }}
     >
-      <div className="absolute right-4 top-4 z-10 flex items-center gap-1 rounded-xl bg-white/85 p-1 shadow-sm backdrop-blur-sm dark:bg-slate-900/85">
+      {depthControl && depthControlContainer ? createPortal(depthControl, depthControlContainer) : null}
+      <div className="absolute bottom-4 left-4 z-10 flex flex-col items-center gap-2 rounded-xl bg-white/85 p-1.5 shadow-sm backdrop-blur-sm dark:bg-slate-900/85">
         <button
           onClick={handleZoomOut}
           className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
