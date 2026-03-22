@@ -74,6 +74,14 @@ pub fn note_dir(app: &AppHandle, note_id: &str) -> Result<PathBuf, String> {
     ensure_dir(notes_dir(app)?.join(note_id))
 }
 
+pub fn chapter_screenshots_dir(app: &AppHandle, note_id: &str) -> Result<PathBuf, String> {
+    ensure_dir(note_dir(app, note_id)?.join("chapter_screenshots"))
+}
+
+pub fn ai_note_screenshots_dir(app: &AppHandle, note_id: &str) -> Result<PathBuf, String> {
+    ensure_dir(note_dir(app, note_id)?.join("ai_note_screenshots"))
+}
+
 pub fn cache_dir(app: &AppHandle) -> Result<PathBuf, String> {
     ensure_dir(data_root(app)?.join("cache"))
 }

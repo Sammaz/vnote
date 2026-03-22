@@ -252,6 +252,11 @@ export function AiNoteContent({
       });
       setupGenerationListener(note.id, generationId);
       await new Promise((resolve) => setTimeout(resolve, 100));
+      try {
+        await invoke("clear_ai_note_screenshots", { noteId: note.id });
+      } catch (clearError) {
+        console.error("[AiNoteContent] 清除大纲笔记截图缓存失败:", clearError);
+      }
       await invoke("generate_ai_note_content", {
         generationId,
         noteId: note.id,

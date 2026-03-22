@@ -317,9 +317,9 @@ mindmap
         };
 
         let screenshot_requirements = match screenshot_density {
-            Some("few") => "\n\n**关键帧截图要求：**\n- 在最重要的章节开头放置 `[[SCREENSHOT:mm:ss]]` 标记。\n- 全篇控制在 3-5 个截图点。\n- 标记需独占一行，并使用最能代表该章节内容的时间点。",
-            Some("moderate") => "\n\n**关键帧截图要求：**\n- 在每个 `##` 章节标题后放置一个 `[[SCREENSHOT:mm:ss]]` 标记。\n- 遇到图表、界面演示、关键步骤或视觉重点时，可追加截图标记。\n- 标记需独占一行。",
-            Some("dense") => "\n\n**关键帧截图要求：**\n- 在每个 `##` 章节标题后都放置 `[[SCREENSHOT:mm:ss]]` 标记。\n- 对图表、界面、步骤演示、关键对比等视觉重点补充更多截图标记。\n- 标记需独占一行。",
+            Some("few") => "\n\n**关键帧截图要求：**\n- 在最重要的正文章节开头放置 `[[SCREENSHOT:hh:mm:ss]]` 标记。\n- 全篇控制在 3-5 个截图点。\n- 标记需独占一行，并使用 transcript 中出现的真实三段式时间。\n- 笔记末尾的 `## 总结` 下面禁止放置任何截图标记。",
+            Some("moderate") => "\n\n**关键帧截图要求：**\n- 在每个正文 `##` 章节标题后放置一个 `[[SCREENSHOT:hh:mm:ss]]` 标记。\n- 遇到图表、界面演示、关键步骤或视觉重点时，可追加截图标记。\n- 标记需独占一行，并使用 transcript 中出现的真实三段式时间。\n- 笔记末尾的 `## 总结` 下面禁止放置任何截图标记。",
+            Some("dense") => "\n\n**关键帧截图要求：**\n- 在每个正文 `##` 章节标题后都放置 `[[SCREENSHOT:hh:mm:ss]]` 标记。\n- 对图表、界面、步骤演示、关键对比等视觉重点补充更多截图标记。\n- 标记需独占一行，并使用 transcript 中出现的真实三段式时间。\n- 笔记末尾的 `## 总结` 下面禁止放置任何截图标记。",
             _ => "",
         };
 
@@ -335,16 +335,19 @@ mindmap
 **笔记要求：**
 1. 笔记必须使用中文输出，专有名词和技术术语可保留英文。
 2. 使用 Markdown 标题组织内容，不要使用代码块包裹全文。
-3. 主要章节标题统一使用 `## 章节名 ⏱ mm:ss` 格式，时间戳代表该章节在视频中的起始时刻。
+3. 主要章节标题统一使用 `## 章节名 ⏱ mm:ss` 格式；如果时间超过 1 小时，则使用 `## 章节名 ⏱ hh:mm:ss`，时间戳代表该章节在视频中的起始时刻。
 4. 忠实保留视频的核心信息、关键细节、案例、步骤、结论与注意事项，省略广告、寒暄和口头填充词。
 5. 不要生成目录，不要输出 JSON，不要输出 Mermaid。
-6. 在笔记末尾添加 `## AI总结`，用 2-4 句话概括整支视频的核心观点。
+6. 在笔记末尾添加 `## 总结`，用 2-4 句话概括整支视频的核心观点，不要在该章节下放置任何截图标记。
 7. {}
 8. {}
 
 **时间戳输入说明：**
 你收到的转写内容按行提供，格式为 `[hh:mm:ss] 文本内容`。
-请根据这些时间信息，在合适的章节标题中标注 `⏱ mm:ss` 或 `⏱ hh:mm:ss`。{}
+请严格根据这些时间信息生成时间戳，并遵守以下规则：
+- 当 transcript 时间是 `[00:13:25]` 时，章节标题必须写成 `⏱ 13:25`，不能写成 `⏱ 00:13`。
+- 当 transcript 时间是 `[01:13:25]` 时，章节标题必须写成 `⏱ 01:13:25`。
+- 所有截图标记必须写成 `[[SCREENSHOT:00:13:25]]` 这样的三段式 `hh:mm:ss`，禁止写成两段式。{}
 
 **风格要求：**
 {}
@@ -572,7 +575,7 @@ static AI_NOTE_SCREENSHOT_REGEX: OnceLock<Regex> = OnceLock::new();
 
 fn get_ai_note_screenshot_regex() -> &'static Regex {
     AI_NOTE_SCREENSHOT_REGEX.get_or_init(|| {
-        Regex::new(r"\[\[SCREENSHOT:(\d{1,2}:\d{2}(?::\d{2})?)\]\]").unwrap()
+        Regex::new(r"\[\[SCREENSHOT:(\d{2}:\d{2}:\d{2})\]\]").unwrap()
     })
 }
 
@@ -614,7 +617,6 @@ fn parse_ai_note_timestamp_to_seconds(raw: &str) -> Option<f64> {
         .collect::<Option<Vec<_>>>()?;
 
     match parts.as_slice() {
-        [minutes, seconds] => Some((minutes * 60 + seconds) as f64),
         [hours, minutes, seconds] => Some((hours * 3600 + minutes * 60 + seconds) as f64),
         _ => None,
     }
@@ -647,7 +649,7 @@ fn extract_ai_note_screenshots(
         return Ok(content.trim().to_string());
     }
 
-    let screenshots_dir = storage_paths::note_dir(app, &note.id)?.join("screenshots");
+    let screenshots_dir = storage_paths::ai_note_screenshots_dir(app, &note.id)?;
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| format!("创建截图目录失败: {}", e))?;
 
     let video_name = Path::new(&note.video_path)
@@ -1356,7 +1358,7 @@ pub async fn generate_detailed_reading_chapters(
     );
 
     // 准备截图目录
-    let screenshots_dir = storage_paths::note_dir(app, note_id)?.join("screenshots");
+    let screenshots_dir = storage_paths::chapter_screenshots_dir(app, note_id)?;
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
     // 从视频路径提取文件名
@@ -2334,7 +2336,7 @@ pub async fn generate_chapters_with_markers(
     tracing::info!("[辅助模式章节生成] 计算得到 {} 个分段", total_segments);
 
     // 准备截图目录
-    let screenshots_dir = storage_paths::note_dir(&app, &note_id)?.join("screenshots");
+    let screenshots_dir = storage_paths::chapter_screenshots_dir(&app, &note_id)?;
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
     // 从视频路径提取文件名

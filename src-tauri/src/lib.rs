@@ -780,9 +780,12 @@ async fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
                     let entry = entry?;
                     let path = entry.path();
 
-                    // Skip screenshots directory
-                    if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("screenshots") {
-                        continue;
+                    // Skip screenshot directories
+                    if path.is_dir() {
+                        let dir_name = path.file_name().and_then(|n| n.to_str());
+                        if matches!(dir_name, Some("chapter_screenshots") | Some("ai_note_screenshots")) {
+                            continue;
+                        }
                     }
 
                     if path.is_dir() {
@@ -807,12 +810,28 @@ async fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
 /// Clear chapter screenshots for a specific note
 #[tauri::command]
 async fn clear_chapter_screenshots(app: AppHandle, note_id: String) -> Result<(), String> {
-    let screenshots_dir = storage_paths::note_dir(&app, &note_id)?.join("screenshots");
+    let screenshots_dir = storage_paths::chapter_screenshots_dir(&app, &note_id)?;
 
     if screenshots_dir.exists() {
         tokio::task::spawn_blocking(move || {
             std::fs::remove_dir_all(&screenshots_dir)
                 .map_err(|e| format!("Failed to clear screenshots: {}", e))
+        })
+        .await
+        .map_err(|e| format!("Task join error: {}", e))??;
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn clear_ai_note_screenshots(app: AppHandle, note_id: String) -> Result<(), String> {
+    let screenshots_dir = storage_paths::ai_note_screenshots_dir(&app, &note_id)?;
+
+    if screenshots_dir.exists() {
+        tokio::task::spawn_blocking(move || {
+            std::fs::remove_dir_all(&screenshots_dir)
+                .map_err(|e| format!("Failed to clear ai note screenshots: {}", e))
         })
         .await
         .map_err(|e| format!("Task join error: {}", e))??;
@@ -841,9 +860,12 @@ async fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
                     let entry = entry?;
                     let path = entry.path();
 
-                    // Skip screenshots directory
-                    if path.is_dir() && path.file_name().and_then(|n| n.to_str()) == Some("screenshots") {
-                        continue;
+                    // Skip screenshot directories
+                    if path.is_dir() {
+                        let dir_name = path.file_name().and_then(|n| n.to_str());
+                        if matches!(dir_name, Some("chapter_screenshots") | Some("ai_note_screenshots")) {
+                            continue;
+                        }
                     }
 
                     if path.is_dir() {
@@ -2114,6 +2136,7 @@ pub fn run() {
             get_video_cache_size,
             clear_video_cache,
             clear_chapter_screenshots,
+            clear_ai_note_screenshots,
             get_notes,
             get_note,
             create_note,

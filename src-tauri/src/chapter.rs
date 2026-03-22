@@ -528,8 +528,8 @@ async fn capture_chapter_screenshots(
     abort_flag: &Arc<AtomicBool>,
     note_id: &str,
 ) -> Result<(), String> {
-    // 按笔记 ID 组织截图目录：data/notes/{note_id}/screenshots/
-    let screenshots_dir = storage_paths::note_dir(app, note_id)?.join("screenshots");
+    // 按笔记 ID 组织章节截图目录：data/notes/{note_id}/chapter_screenshots/
+    let screenshots_dir = storage_paths::chapter_screenshots_dir(app, note_id)?;
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
     // 从视频路径提取文件名（不含扩展名）
