@@ -336,7 +336,12 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
       return null;
     }
 
-    const { root, features } = transformer.transform(normalized.normalizedMarkdown);
+    // Strip image markdown before transformation to keep mind map nodes clean (ref: Diting1)
+    const cleanedMarkdown = normalized.normalizedMarkdown
+      .replace(/!\[.*?\]\(.*?\)/g, "")
+      .replace(/<img[^>]*\/?>/gi, "")
+      .replace(/\n{3,}/g, "\n\n");
+    const { root, features } = transformer.transform(cleanedMarkdown);
     const baseRoot = enhanceNodeKeys(root, items, normalized.rootTitle);
     return {
       baseRoot,
