@@ -19,8 +19,9 @@ use crate::db::{AiConfig, Database, ScreenshotMarker};
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
 use crate::settings::{SettingsManager, keys, defaults};
 use crate::storage_paths;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -63,6 +64,9 @@ pub struct GenerationOptions {
     /// 自定义提示词（可选）
     #[serde(default)]
     pub custom_prompt: Option<String>,
+    /// AI 笔记截图密度（可选）
+    #[serde(default)]
+    pub screenshot_density: Option<String>,
 }
 
 fn default_concurrent_limit() -> usize {
@@ -300,53 +304,60 @@ mindmap
         )
     }
 
-    fn ai_note(subtitle_content: &str, style: Option<&str>) -> String {
+    fn ai_note(
+        transcript_content: &str,
+        style: Option<&str>,
+        screenshot_density: Option<&str>,
+        custom_prompt: Option<&str>,
+    ) -> String {
         let style_requirements = match style.unwrap_or("detailed") {
-            "concise" => "请保持内容精炼，优先输出核心结论、关键概念和行动建议，避免冗长展开。",
-            "outline" => "请突出标题层级与结构骨架，尽量使用多级标题和短列表，便于直接转换为思维导图。",
-            _ => "请在结构清晰的前提下保留必要细节，兼顾概念解释、步骤方法和关键结论。",
+            "concise" => "简洁模式：每个主要章节使用 3-5 条要点总结核心信息，优先保留关键结论、概念和行动建议，避免冗长展开。",
+            "outline" => "大纲模式：只输出标题、子标题和必要的极短要点，不展开成长段落，突出层级结构，便于直接转换为脑图。",
+            _ => "详细模式：充分展开每个章节，保留关键概念、案例、方法步骤、因果关系与重要结论，但避免机械重复字幕原文。",
         };
 
+        let screenshot_requirements = match screenshot_density {
+            Some("few") => "\n\n**关键帧截图要求：**\n- 在最重要的章节开头放置 `[[SCREENSHOT:mm:ss]]` 标记。\n- 全篇控制在 3-5 个截图点。\n- 标记需独占一行，并使用最能代表该章节内容的时间点。",
+            Some("moderate") => "\n\n**关键帧截图要求：**\n- 在每个 `##` 章节标题后放置一个 `[[SCREENSHOT:mm:ss]]` 标记。\n- 遇到图表、界面演示、关键步骤或视觉重点时，可追加截图标记。\n- 标记需独占一行。",
+            Some("dense") => "\n\n**关键帧截图要求：**\n- 在每个 `##` 章节标题后都放置 `[[SCREENSHOT:mm:ss]]` 标记。\n- 对图表、界面、步骤演示、关键对比等视觉重点补充更多截图标记。\n- 标记需独占一行。",
+            _ => "",
+        };
+
+        let user_requirements = custom_prompt
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| format!("\n\n**用户附加指令：**\n{}", value))
+            .unwrap_or_default();
+
         format!(
-            r#"你是一个专业的学习型笔记助手。请根据视频字幕生成一份便于学习、复习和后续转换为思维导图的 AI 笔记。
+            r#"你是一个专业的视频内容笔记助手，擅长将视频逐字稿整理成结构清晰、内容完整、适合复习的学习笔记。
 
-输出要求：
-1. 使用 Markdown 格式输出，不要使用代码块包裹全文。
-2. 必须使用中文。
-3. 结构清晰，严格使用标题和列表组织内容。
-4. 优先提炼核心概念、层级关系、因果关系、步骤方法和关键结论。
-5. 如果出现适合回看视频的位置，在对应小节标题或要点后补充时间信息，格式统一为 `（时间：mm:ss）` 或 `（时间：hh:mm:ss）`。
-6. 不要输出 Mermaid，不要输出 JSON。
-7. {}。
-8. {}。
+**笔记要求：**
+1. 笔记必须使用中文输出，专有名词和技术术语可保留英文。
+2. 使用 Markdown 标题组织内容，不要使用代码块包裹全文。
+3. 主要章节标题统一使用 `## 章节名 ⏱ mm:ss` 格式，时间戳代表该章节在视频中的起始时刻。
+4. 忠实保留视频的核心信息、关键细节、案例、步骤、结论与注意事项，省略广告、寒暄和口头填充词。
+5. 不要生成目录，不要输出 JSON，不要输出 Mermaid。
+6. 在笔记末尾添加 `## AI总结`，用 2-4 句话概括整支视频的核心观点。
+7. {}
+8. {}
 
-建议结构：
-# 主题
+**时间戳输入说明：**
+你收到的转写内容按行提供，格式为 `[hh:mm:ss] 文本内容`。
+请根据这些时间信息，在合适的章节标题中标注 `⏱ mm:ss` 或 `⏱ hh:mm:ss`。{}
 
-## 核心结论
-- 要点
+**风格要求：**
+{}
+{}
 
-## 关键概念
-### 概念1
-- 定义
-- 作用
-- 关联
-
-## 方法/流程
-1. 步骤一
-2. 步骤二
-
-## 易错点 / 注意事项
-- 要点
-
-## 可行动清单
-- 要点
-
-视频字幕内容：
+视频转写全文：
 {}"#,
-            style_requirements,
             Self::ai_note_output_boundary_rules(),
-            subtitle_content
+            "直接输出最终可保存的 Markdown 笔记正文，不要在结尾追加继续提问或继续整理的邀请。",
+            screenshot_requirements,
+            style_requirements,
+            user_requirements,
+            transcript_content
         )
     }
 
@@ -556,6 +567,127 @@ fn find_semantic_boundary_near(text: &str, around: usize, max_distance: usize) -
 // ============================================================================
 // AI API 调用（使用ai_pool统一管理）
 // ============================================================================
+
+static AI_NOTE_SCREENSHOT_REGEX: OnceLock<Regex> = OnceLock::new();
+
+fn get_ai_note_screenshot_regex() -> &'static Regex {
+    AI_NOTE_SCREENSHOT_REGEX.get_or_init(|| {
+        Regex::new(r"\[\[SCREENSHOT:(\d{1,2}:\d{2}(?::\d{2})?)\]\]").unwrap()
+    })
+}
+
+fn format_ai_note_timestamp(seconds: f64) -> String {
+    let total_seconds = seconds.max(0.0).floor() as u64;
+    let hours = total_seconds / 3600;
+    let minutes = (total_seconds % 3600) / 60;
+    let secs = total_seconds % 60;
+
+    format!("{:02}:{:02}:{:02}", hours, minutes, secs)
+}
+
+fn build_ai_note_transcript(entries: &[SubtitleEntry]) -> String {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            let text = entry
+                .text
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .trim()
+                .to_string();
+
+            if text.is_empty() {
+                return None;
+            }
+
+            Some(format!("[{}] {}", format_ai_note_timestamp(entry.start_time), text))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn parse_ai_note_timestamp_to_seconds(raw: &str) -> Option<f64> {
+    let parts = raw
+        .split(':')
+        .map(|part| part.trim().parse::<u64>().ok())
+        .collect::<Option<Vec<_>>>()?;
+
+    match parts.as_slice() {
+        [minutes, seconds] => Some((minutes * 60 + seconds) as f64),
+        [hours, minutes, seconds] => Some((hours * 3600 + minutes * 60 + seconds) as f64),
+        _ => None,
+    }
+}
+
+fn build_ai_note_screenshot_markdown(image_path: &str, timestamp: &str) -> String {
+    format!("![⏱ {}]({})", timestamp, image_path.replace('\\', "/"))
+}
+
+fn extract_ai_note_screenshots(
+    app: &AppHandle,
+    note: &crate::db::Note,
+    content: &str,
+) -> Result<String, String> {
+    if note.video_path.trim().is_empty() {
+        return Ok(content.trim().to_string());
+    }
+
+    let screenshot_regex = get_ai_note_screenshot_regex();
+    let markers: Vec<String> = screenshot_regex
+        .captures_iter(content)
+        .filter_map(|capture| capture.get(1).map(|matched| matched.as_str().to_string()))
+        .collect();
+
+    if markers.is_empty() {
+        return Ok(content.trim().to_string());
+    }
+
+    let screenshots_dir = storage_paths::note_dir(app, &note.id)?.join("screenshots");
+    std::fs::create_dir_all(&screenshots_dir).map_err(|e| format!("创建截图目录失败: {}", e))?;
+
+    let video_name = Path::new(&note.video_path)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("video");
+    let safe_video_name = sanitize_filename(video_name);
+
+    let mut replaced = content.to_string();
+    let mut processed = HashSet::new();
+
+    for marker in markers {
+        if !processed.insert(marker.clone()) {
+            continue;
+        }
+
+        let placeholder = format!("[[SCREENSHOT:{}]]", marker);
+        let Some(seconds) = parse_ai_note_timestamp_to_seconds(&marker) else {
+            replaced = replaced.replace(&placeholder, "");
+            continue;
+        };
+
+        let filename = format!(
+            "{}_ai_note_{}.jpg",
+            safe_video_name,
+            format_timestamp_for_filename(seconds)
+        );
+        let screenshot_path = screenshots_dir.join(filename);
+        let screenshot_path_str = screenshot_path.to_string_lossy().to_string();
+
+        if !screenshot_path.exists() {
+            if let Err(error) = capture_video_screenshot(&note.video_path, seconds, &screenshot_path_str) {
+                tracing::warn!("[AiNote] 关键帧截图失败 {}: {}", marker, error);
+                replaced = replaced.replace(&placeholder, "");
+                continue;
+            }
+        }
+
+        let markdown = build_ai_note_screenshot_markdown(&screenshot_path_str, &marker);
+        replaced = replaced.replace(&placeholder, &markdown);
+    }
+
+    Ok(screenshot_regex.replace_all(&replaced, "").trim().to_string())
+}
 
 /// 调用AI API（非流式，通过ai_pool统一管理并发）
 async fn call_ai_api(
@@ -1343,6 +1475,7 @@ pub async fn generate_note(
     // 检查字幕
     let subtitle_path = note
         .subtitle_path
+        .clone()
         .ok_or("未上传字幕文件，无法生成笔记")?;
 
     // 解析字幕
@@ -1357,6 +1490,7 @@ pub async fn generate_note(
         .map(|e| e.text.as_str())
         .collect::<Vec<_>>()
         .join(" ");
+    let ai_note_transcript = build_ai_note_transcript(&entries);
 
     // 确定要生成的标签页
     // 如果用户指定了要生成的标签页，则使用用户指定的；否则使用默认的全文总结
@@ -1482,6 +1616,7 @@ pub async fn generate_note(
                             &request.model_id,
                             request.options.style.as_deref(),
                             request.options.custom_prompt.as_deref(),
+                            request.options.screenshot_density.as_deref(),
                         )?;
                         let _ = app.emit(
                             &event_name,
@@ -1506,17 +1641,24 @@ pub async fn generate_note(
                 }
             } else {
                 // 其他标签页：生成文本内容
+                let current_subtitle_text = if matches!(tab_type, TabType::AiNote) {
+                    ai_note_transcript.as_str()
+                } else {
+                    subtitle_text.as_str()
+                };
                 let result = generate_single_tab(
                     &app,
                     &event_name,
                     tab_type,
                     &ai_config,
-                    &subtitle_text,
+                    &note,
+                    current_subtitle_text,
                     &abort_flag,
                     model_context_size,
                     tab_name,
                     request.options.style.as_deref(),
                     request.options.custom_prompt.as_deref(),
+                    request.options.screenshot_density.as_deref(),
                 ).await;
 
                 tracing::info!("[笔记生成] {:?} 生成结果: success={}", tab_type, result.success);
@@ -1531,6 +1673,7 @@ pub async fn generate_note(
                         &request.model_id,
                         request.options.style.as_deref(),
                         request.options.custom_prompt.as_deref(),
+                        request.options.screenshot_density.as_deref(),
                     ) {
                         tracing::error!("[笔记生成] 更新数据库失败: {}", e);
                         failed_count += 1;
@@ -1582,6 +1725,7 @@ pub async fn generate_note(
                     &request.model_id,
                     request.options.style.as_deref(),
                     request.options.custom_prompt.as_deref(),
+                    request.options.screenshot_density.as_deref(),
                 )?;
 
                 let _ = app.emit(
@@ -1616,11 +1760,17 @@ pub async fn generate_note(
             let app = app.clone();
             let event_name = event_name.clone();
             let ai_config = ai_config.clone();
-            let subtitle_text = subtitle_text.clone();
+            let note = note.clone();
+            let subtitle_text = if tab_type == TabType::AiNote {
+                ai_note_transcript.clone()
+            } else {
+                subtitle_text.clone()
+            };
             let abort_flag = abort_flag.clone();
             let tab_name = get_tab_name(&tab_type);
             let style = request.options.style.clone();
             let custom_prompt = request.options.custom_prompt.clone();
+            let screenshot_density = request.options.screenshot_density.clone();
 
             let task = tokio::spawn(async move {
                 // 获取信号量许可（控制标签页级别的并发）
@@ -1643,12 +1793,14 @@ pub async fn generate_note(
                     &event_name,
                     &tab_type,
                     &ai_config,
+                    &note,
                     &subtitle_text,
                     &abort_flag,
                     model_context_size,
                     tab_name,
                     style.as_deref(),
                     custom_prompt.as_deref(),
+                    screenshot_density.as_deref(),
                 ).await
             });
 
@@ -1670,6 +1822,7 @@ pub async fn generate_note(
                             &request.model_id,
                             request.options.style.as_deref(),
                             request.options.custom_prompt.as_deref(),
+                            request.options.screenshot_density.as_deref(),
                         ) {
                             tracing::error!("[笔记生成] 更新数据库失败: {}", e);
                             failed_count += 1;
@@ -1709,12 +1862,14 @@ async fn generate_single_tab(
     event_name: &str,
     tab_type: &TabType,
     ai_config: &AiConfig,
+    note: &crate::db::Note,
     subtitle_text: &str,
     abort_flag: &Arc<AtomicBool>,
     model_context_size: usize,
     tab_name: String,
     style: Option<&str>,
     custom_prompt: Option<&str>,
+    screenshot_density: Option<&str>,
 ) -> TabResult {
     // 检查中止
     if abort_flag.load(Ordering::Relaxed) {
@@ -1750,18 +1905,21 @@ async fn generate_single_tab(
         }
         _ => {
             // 使用自定义提示词或默认提示词
-            let prompt = if let Some(custom) = custom_prompt {
-                match tab_type {
-                    TabType::AiNote => format!(
-                        "{}\n\n补充输出边界：\n{}\n\n视频字幕内容：\n{}",
-                        custom,
-                        PromptTemplates::ai_note_output_boundary_rules(),
-                        subtitle_text
-                    ),
-                    _ => format!("{}\n\n视频字幕内容：\n{}", custom, subtitle_text),
+            let prompt = match tab_type {
+                TabType::AiNote => get_prompt_for_tab(
+                    tab_type,
+                    subtitle_text,
+                    style,
+                    screenshot_density,
+                    custom_prompt,
+                ),
+                _ => {
+                    if let Some(custom) = custom_prompt {
+                        format!("{}\n\n视频字幕内容：\n{}", custom, subtitle_text)
+                    } else {
+                        get_prompt_for_tab(tab_type, subtitle_text, style, None, None)
+                    }
                 }
-            } else {
-                get_prompt_for_tab(tab_type, subtitle_text, style)
             };
             call_ai_api(ai_config, &prompt, abort_flag).await
         }
@@ -1786,8 +1944,13 @@ async fn generate_single_tab(
         }
     };
 
+    let has_screenshots = matches!(tab_type, TabType::AiNote)
+        && screenshot_density
+            .map(|value| !value.trim().is_empty() && value != "off")
+            .unwrap_or(false);
+
     // 后处理（如JSON解析验证）
-    let processed_content = match post_process_content(tab_type, &content) {
+    let processed_content = match post_process_content(app, tab_type, note, &content, has_screenshots) {
         Ok(c) => c,
         Err(e) => {
             let _ = app.emit(
@@ -1824,13 +1987,15 @@ async fn generate_single_tab(
 }
 
 /// 后处理生成的内容
-fn post_process_content(tab_type: &TabType, content: &str) -> Result<String, String> {
+fn post_process_content(
+    app: &AppHandle,
+    tab_type: &TabType,
+    note: &crate::db::Note,
+    content: &str,
+    has_screenshots: bool,
+) -> Result<String, String> {
     match tab_type {
-        TabType::FullSummary => {
-            // 直接返回清理后的 Markdown 内容
-            Ok(content.trim().to_string())
-        }
-        TabType::AiNote => Ok(content.trim().to_string()),
+        TabType::AiNote if has_screenshots => extract_ai_note_screenshots(app, note, content),
         _ => Ok(content.trim().to_string()),
     }
 }
@@ -1844,6 +2009,7 @@ fn update_note_tab(
     model_id: &str,
     style: Option<&str>,
     custom_prompt: Option<&str>,
+    screenshot_density: Option<&str>,
 ) -> Result<(), String> {
     let mut note = db
         .get_note_by_id(note_id)
@@ -1858,11 +2024,16 @@ fn update_note_tab(
         TabType::CustomSummary => note.custom_summary = Some(content.to_string()),
         TabType::AiNote => {
             note.ai_note_markdown = Some(content.to_string());
+            let screenshot_density = screenshot_density
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && *value != "off");
             note.ai_note_meta = Some(
                 serde_json::json!({
                     "style": style.unwrap_or(if custom_prompt.is_some() { "custom" } else { "default" }),
                     "custom_prompt": custom_prompt,
                     "model_id": model_id,
+                    "screenshot_density": screenshot_density,
+                    "has_screenshots": screenshot_density.is_some(),
                     "generated_at": chrono::Local::now().to_rfc3339(),
                 })
                 .to_string(),
@@ -1900,14 +2071,20 @@ fn get_tab_name(tab_type: &TabType) -> String {
 }
 
 /// 获取标签页对应的提示词
-fn get_prompt_for_tab(tab_type: &TabType, subtitle_text: &str, style: Option<&str>) -> String {
+fn get_prompt_for_tab(
+    tab_type: &TabType,
+    subtitle_text: &str,
+    style: Option<&str>,
+    screenshot_density: Option<&str>,
+    custom_prompt: Option<&str>,
+) -> String {
     match tab_type {
         TabType::FullSummary => PromptTemplates::full_summary(subtitle_text),
         TabType::DetailedReading => unreachable!("DetailedReading 已在 generate_note 中单独处理"),
         TabType::Highlights => PromptTemplates::highlights(subtitle_text),
         TabType::VisualSummary => PromptTemplates::visual_summary(subtitle_text),
         TabType::CustomSummary => PromptTemplates::custom_summary(subtitle_text),
-        TabType::AiNote => PromptTemplates::ai_note(subtitle_text, style),
+        TabType::AiNote => PromptTemplates::ai_note(subtitle_text, style, screenshot_density, custom_prompt),
     }
 }
 

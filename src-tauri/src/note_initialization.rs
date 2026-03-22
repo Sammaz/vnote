@@ -668,6 +668,7 @@ async fn execute_full_summary_step(
             concurrent_limit: 1,
             style: None,
             custom_prompt: Some(default_prompt.to_string()),
+            screenshot_density: None,
         },
     };
 

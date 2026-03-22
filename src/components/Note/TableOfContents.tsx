@@ -7,7 +7,9 @@ const HEADING_SELECTOR = "h1, h2, h3";
 // Helper to strip markdown syntax for display text
 export const cleanMarkdown = (text: string) => {
   return text
-    .replace(/\[\d{2}:\d{2}:\d{2}\]/g, "") // Remove timestamps
+    .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "") // Remove timestamps
+    .replace(/⏱\s*\d{1,2}:\d{2}(?::\d{2})?/g, "")
+    .replace(/（时间：\d{1,2}:\d{2}(?::\d{2})?）/g, "")
     .replace(/\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\)/g, "") // Remove time ranges
     .replace(/!\[.*?\]\(.*?\)/g, "") // Remove images
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // Remove links

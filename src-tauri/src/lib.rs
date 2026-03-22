@@ -1171,6 +1171,7 @@ async fn generate_note_content(
         concurrent_limit,
         style: None,
         custom_prompt,
+        screenshot_density: None,
     };
 
     let request = GenerateNoteRequest {
@@ -1205,6 +1206,7 @@ async fn generate_ai_note_content(
     concurrent_limit: Option<usize>,
     style: Option<String>,
     custom_prompt: Option<String>,
+    screenshot_density: Option<String>,
 ) -> Result<String, String> {
     use note_generation::{GenerateNoteRequest, GenerationOptions, TabType};
 
@@ -1229,6 +1231,7 @@ async fn generate_ai_note_content(
             concurrent_limit,
             style,
             custom_prompt,
+            screenshot_density,
         },
     };
 

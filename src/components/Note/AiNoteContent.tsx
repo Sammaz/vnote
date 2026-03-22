@@ -13,6 +13,8 @@ interface AiNoteMeta {
   style?: string;
   custom_prompt?: string | null;
   model_id?: string;
+  screenshot_density?: AiNoteScreenshotDensity | null;
+  has_screenshots?: boolean;
   generated_at?: string;
 }
 
@@ -27,6 +29,7 @@ interface AiNoteContentProps {
 }
 
 type AiNoteStyle = "concise" | "detailed" | "outline";
+type AiNoteScreenshotDensity = "off" | "few" | "moderate" | "dense";
 
 const AI_NOTE_STYLE_OPTIONS: Array<{ value: AiNoteStyle; label: string; description: string }> = [
   { value: "concise", label: "简洁", description: "更聚焦核心结论与重点，适合快速复习。" },
@@ -38,6 +41,20 @@ const AI_NOTE_STYLE_LABELS: Record<AiNoteStyle, string> = {
   concise: "简洁",
   detailed: "详细",
   outline: "大纲",
+};
+
+const AI_NOTE_SCREENSHOT_OPTIONS: Array<{ value: AiNoteScreenshotDensity; label: string; description: string }> = [
+  { value: "off", label: "关闭", description: "仅生成文字笔记，不插入关键帧截图。" },
+  { value: "few", label: "少量", description: "仅在最关键章节插入少量截图，适合快速回看。" },
+  { value: "moderate", label: "适中", description: "每个主要章节配一张截图，兼顾结构与可回看性。" },
+  { value: "dense", label: "密集", description: "尽可能保留更多视觉节点，适合演示型视频。" },
+];
+
+const AI_NOTE_SCREENSHOT_LABELS: Record<AiNoteScreenshotDensity, string> = {
+  off: "关闭",
+  few: "少量",
+  moderate: "适中",
+  dense: "密集",
 };
 
 function parseAiNoteMeta(metaJson: string | null): AiNoteMeta | null {
@@ -54,6 +71,13 @@ function parseAiNoteStyle(style?: string | null): AiNoteStyle | null {
     return style;
   }
   return null;
+}
+
+function parseAiNoteScreenshotDensity(value?: string | null): AiNoteScreenshotDensity {
+  if (value === "few" || value === "moderate" || value === "dense") {
+    return value;
+  }
+  return "off";
 }
 
 function buildMindMapSvgContent(svg: SVGSVGElement): string {
@@ -109,6 +133,7 @@ export function AiNoteContent({
   const [showPromptDialog, setShowPromptDialog] = useState(false);
   const [selectedModelId, setSelectedModelId] = useState("");
   const [selectedStyle, setSelectedStyle] = useState<AiNoteStyle>("detailed");
+  const [selectedScreenshotDensity, setSelectedScreenshotDensity] = useState<AiNoteScreenshotDensity>("off");
   const [customPrompt, setCustomPrompt] = useState("");
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPromptDropdown, setShowPromptDropdown] = useState(false);
@@ -138,9 +163,10 @@ export function AiNoteContent({
   const openPromptDialog = useCallback(() => {
     setSelectedModelId(getDefaultModelId());
     setSelectedStyle(parseAiNoteStyle(aiNoteMeta?.style) ?? "detailed");
+    setSelectedScreenshotDensity(parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density));
     setCustomPrompt(aiNoteMeta?.custom_prompt || "");
     setShowPromptDialog(true);
-  }, [aiNoteMeta?.custom_prompt, aiNoteMeta?.style, getDefaultModelId]);
+  }, [aiNoteMeta?.custom_prompt, aiNoteMeta?.screenshot_density, aiNoteMeta?.style, getDefaultModelId]);
 
   const handleCopy = useCallback(async () => {
     if (!note.ai_note_markdown) {
@@ -233,6 +259,7 @@ export function AiNoteContent({
         regenerate: true,
         style: selectedStyle,
         customPrompt: trimmedPrompt || null,
+        screenshotDensity: selectedScreenshotDensity,
       });
     } catch (error) {
       const currentTabs = new Set(getNoteGenerationState(note.id).regeneratingTabs);
@@ -242,7 +269,7 @@ export function AiNoteContent({
       });
       message.error(`生成失败: ${error}`);
     }
-  }, [customPrompt, note.id, selectedModelId, selectedStyle, setupGenerationListener]);
+  }, [customPrompt, note.id, selectedModelId, selectedScreenshotDensity, selectedStyle, setupGenerationListener]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -316,6 +343,9 @@ export function AiNoteContent({
                 </button>
                 <span className="text-xs text-slate-500 dark:text-slate-400 px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800">
                   风格：{hasCustomPrompt ? "自定义" : AI_NOTE_STYLE_LABELS[aiNoteStyle]}
+                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400 px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800">
+                  截图：{AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]}
                 </span>
               </>
             )}
@@ -481,6 +511,28 @@ export function AiNoteContent({
                       className={cn(
                         "rounded-xl border px-4 py-3 text-left transition-colors cursor-pointer",
                         selectedStyle === option.value
+                          ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500"
+                      )}
+                    >
+                      <div className="text-sm font-medium">{option.label}</div>
+                      <div className="mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400">{option.description}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">关键帧截图</label>
+                <div className="grid grid-cols-2 gap-3 mt-3">
+                  {AI_NOTE_SCREENSHOT_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => setSelectedScreenshotDensity(option.value)}
+                      className={cn(
+                        "rounded-xl border px-4 py-3 text-left transition-colors cursor-pointer",
+                        selectedScreenshotDensity === option.value
                           ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
                           : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-slate-500"
                       )}

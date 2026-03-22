@@ -4,7 +4,7 @@ import { markdown as markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { EditorView } from "@codemirror/view";
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
-import { invoke } from "@tauri-apps/api/core";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -164,7 +164,11 @@ export function EditableMarkdown({
   slugCountsRef.current = {};
 
   const generateHeaderId = (children: React.ReactNode) => {
-    const rawText = getTextFromChildren(children).replace(/\[\d{2}:\d{2}:\d{2}\]/g, "").trim();
+    const rawText = getTextFromChildren(children)
+      .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "")
+      .replace(/⏱\s*\d{1,2}:\d{2}(?::\d{2})?/g, "")
+      .replace(/（时间：\d{1,2}:\d{2}(?::\d{2})?）/g, "")
+      .trim();
     let id = generateId(rawText, "doc");
     if (slugCountsRef.current[id]) {
         slugCountsRef.current[id]++;
@@ -234,6 +238,20 @@ export function EditableMarkdown({
               const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
               return <strong>{renderWithTimestamp(content)}</strong>;
             },
+            img: ({ src, alt }) => {
+              if (!src) return null;
+
+              let resolvedSrc = src;
+              if (/^[a-zA-Z]:[\\/]/.test(src) || src.startsWith("\\\\")) {
+                try {
+                  resolvedSrc = convertFileSrc(src);
+                } catch (error) {
+                  console.error("转换本地图片路径失败:", error);
+                }
+              }
+
+              return <img src={resolvedSrc} alt={alt || ""} className="max-w-full h-auto rounded-xl my-4" />;
+            },
           }}
         >
           {markdown}
@@ -248,11 +266,9 @@ export function EditableMarkdown({
 function renderWithTimestamp(children: React.ReactNode[]): React.ReactNode {
   return children.map((child, index) => {
     if (typeof child === 'string') {
-      // 合并正则：同时匹配时间戳和标签
-      const combinedRegex = /(\[\d{2}:\d{2}:\d{2}\])|(#[^\s]+)/g;
+      const combinedRegex = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(#[^\s]+)/g;
 
       if (combinedRegex.test(child)) {
-        // 重置正则的 lastIndex
         combinedRegex.lastIndex = 0;
 
         const result: React.ReactNode[] = [];
@@ -261,7 +277,6 @@ function renderWithTimestamp(children: React.ReactNode[]): React.ReactNode {
         let partIndex = 0;
 
         while ((match = combinedRegex.exec(child)) !== null) {
-          // 添加匹配前的普通文本
           if (match.index > lastIndex) {
             result.push(
               <span key={`${index}-${partIndex++}`}>
@@ -272,16 +287,25 @@ function renderWithTimestamp(children: React.ReactNode[]): React.ReactNode {
 
           const matchedText = match[0];
 
-          if (match[1]) {
-            // 时间戳匹配 - 提取时间部分（去掉方括号）
-            const timeText = matchedText.slice(1, -1);
+          if (match[1] || match[2] || match[3]) {
+            const timeText = match[1]
+              ? matchedText.slice(1, -1)
+              : matchedText.replace(/^⏱\s*/, "").replace(/^（时间：/, "").replace(/）$/, "");
+            const seekTime = parseTimestampToSeconds(timeText);
             result.push(
-              <span key={`${index}-${partIndex++}`} className="timestamp">
+              <button
+                key={`${index}-${partIndex++}`}
+                type="button"
+                className="timestamp cursor-pointer hover:opacity-80"
+                onClick={() => {
+                  if (seekTime === null) return;
+                  window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: seekTime } }));
+                }}
+              >
                 {timeText}
-              </span>
+              </button>
             );
-          } else if (match[2]) {
-            // 标签匹配
+          } else if (match[4]) {
             result.push(
               <span
                 key={`${index}-${partIndex++}`}
@@ -295,7 +319,6 @@ function renderWithTimestamp(children: React.ReactNode[]): React.ReactNode {
           lastIndex = match.index + matchedText.length;
         }
 
-        // 添加剩余的普通文本
         if (lastIndex < child.length) {
           result.push(
             <span key={`${index}-${partIndex++}`}>
@@ -309,4 +332,17 @@ function renderWithTimestamp(children: React.ReactNode[]): React.ReactNode {
     }
     return <span key={index}>{child}</span>;
   });
+}
+
+function parseTimestampToSeconds(value: string): number | null {
+  const parts = value.trim().split(":").map(Number);
+  if (parts.length < 2 || parts.length > 3 || parts.some(Number.isNaN)) {
+    return null;
+  }
+
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1];
+  }
+
+  return parts[0] * 3600 + parts[1] * 60 + parts[2];
 }
