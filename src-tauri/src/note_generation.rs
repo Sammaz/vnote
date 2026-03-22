@@ -620,8 +620,12 @@ fn parse_ai_note_timestamp_to_seconds(raw: &str) -> Option<f64> {
     }
 }
 
+fn build_ai_note_screenshot_asset_url(image_path: &str) -> String {
+    format!("http://asset.localhost/{}", urlencoding::encode(image_path))
+}
+
 fn build_ai_note_screenshot_markdown(image_path: &str, timestamp: &str) -> String {
-    format!("![⏱ {}]({})", timestamp, image_path.replace('\\', "/"))
+    format!("![⏱ {}]({})", timestamp, build_ai_note_screenshot_asset_url(image_path))
 }
 
 fn extract_ai_note_screenshots(
