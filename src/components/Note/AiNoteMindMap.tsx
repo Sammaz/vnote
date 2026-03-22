@@ -16,6 +16,7 @@ interface OutlineItem {
   text: string;
   uid: string;
   seekTime: number | null;
+  isSyncTarget: boolean;
 }
 
 const transformer = new Transformer();
@@ -50,6 +51,10 @@ function findFirstTimestamp(text: string): number | null {
 
 function cleanMarkdownText(text: string): string {
   return text
+    .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "")
+    .replace(/⏱\s*\d{1,2}:\d{2}(?::\d{2})?/g, "")
+    .replace(/（时间：\d{1,2}:\d{2}(?::\d{2})?）/g, "")
+    .replace(/\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\)/g, "")
     .replace(/!\[.*?\]\(.*?\)/g, "")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/`([^`]+)`/g, "$1")
@@ -57,12 +62,17 @@ function cleanMarkdownText(text: string): string {
     .trim();
 }
 
+function isSummaryHeading(text: string): boolean {
+  const normalized = text.replace(/\s+/g, "");
+  return normalized === "总结" || normalized === "总结：" || normalized === "总结:";
+}
+
 function collectOutlineItems(markdown: string): OutlineItem[] {
   const lines = markdown.split(/\r?\n/);
-  const headings: Array<{ level: number; rawText: string; lineIndex: number }> = [];
+  const headings: Array<{ level: number; rawText: string }> = [];
   let inCodeBlock = false;
 
-  lines.forEach((line, lineIndex) => {
+  lines.forEach((line) => {
     const trimmed = line.trim();
     if (trimmed.startsWith("```") || trimmed.startsWith("~~~")) {
       inCodeBlock = !inCodeBlock;
@@ -78,25 +88,45 @@ function collectOutlineItems(markdown: string): OutlineItem[] {
     headings.push({
       level: match[1].length,
       rawText: match[2],
-      lineIndex,
     });
   });
 
   return headings.map((heading, index) => {
-    const nextLineIndex = headings[index + 1]?.lineIndex ?? lines.length;
-    const sectionText = lines.slice(heading.lineIndex, nextLineIndex).join("\n");
+    const seekTime = findFirstTimestamp(heading.rawText);
     const text = cleanMarkdownText(heading.rawText) || `节点 ${index + 1}`;
     return {
       level: heading.level,
       text,
       uid: `ai-note-node-${index}`,
-      seekTime: findFirstTimestamp(heading.rawText) ?? findFirstTimestamp(sectionText),
+      seekTime,
+      isSyncTarget: heading.level === 2 && seekTime !== null && !isSummaryHeading(text),
     };
   });
 }
 
+function findActiveOutlineItem(items: OutlineItem[], currentTime: number): OutlineItem | null {
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (typeof item.seekTime !== "number") {
+      continue;
+    }
+
+    const nextTime = items[index + 1]?.seekTime;
+    if (currentTime >= item.seekTime && (typeof nextTime !== "number" || currentTime < nextTime)) {
+      return item;
+    }
+  }
+
+  return null;
+}
+
+function isHeadingTag(tag: unknown): tag is `h${1 | 2 | 3 | 4 | 5 | 6}` {
+  return typeof tag === "string" && /^h[1-6]$/.test(tag);
+}
+
 function enhanceNodeKeys(root: IPureNode, items: OutlineItem[], noteTitle: string): IPureNode {
   let headingIndex = 0;
+  let nodeIndex = 0;
 
   const visit = (node: IPureNode, isRoot = false): IPureNode => {
     const nextNode: IPureNode = {
@@ -105,20 +135,33 @@ function enhanceNodeKeys(root: IPureNode, items: OutlineItem[], noteTitle: strin
       children: [],
     };
 
+    const tag = node.payload?.tag;
+    const isHeadingNode = isHeadingTag(tag);
+
     if (isRoot) {
+      if (isHeadingNode && headingIndex < items.length) {
+        headingIndex += 1;
+      }
       nextNode.payload = {
         ...nextNode.payload,
         uid: "ai-note-root",
         heading: noteTitle || "大纲笔记",
         seekTime: null,
       };
-    } else {
+    } else if (isHeadingNode) {
       const item = items[headingIndex++];
       nextNode.payload = {
         ...nextNode.payload,
         uid: item?.uid ?? `ai-note-node-${headingIndex}`,
-        heading: item?.text ?? "",
+        heading: item?.text ?? cleanMarkdownText(node.content),
         seekTime: item?.seekTime ?? null,
+      };
+    } else {
+      nextNode.payload = {
+        ...nextNode.payload,
+        uid: `ai-note-tree-node-${nodeIndex++}`,
+        heading: cleanMarkdownText(node.content),
+        seekTime: null,
       };
     }
 
@@ -155,15 +198,38 @@ function getScale(mm: Markmap | null): number {
   return Number.isFinite(scale) ? scale : 1;
 }
 
+function findMarkmapNode(root: INode | null | undefined, predicate: (node: INode) => boolean): INode | null {
+  if (!root) {
+    return null;
+  }
+
+  const stack: INode[] = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!node) {
+      continue;
+    }
+    if (predicate(node)) {
+      return node;
+    }
+    stack.push(...node.children);
+  }
+
+  return null;
+}
+
 export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const mmRef = useRef<Markmap | null>(null);
   const activeUidRef = useRef<string | null>(null);
+  const userSeekRef = useRef<{ targetTime: number; timestamp: number } | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains("dark"));
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const items = useMemo(() => collectOutlineItems(markdown), [markdown]);
+  const syncItems = useMemo(() => items.filter((item) => item.isSyncTarget), [items]);
+  const syncUidSet = useMemo(() => new Set(syncItems.map((item) => item.uid)), [syncItems]);
   const transformed = useMemo(() => {
     const { root, features } = transformer.transform(markdown);
     return {
@@ -178,18 +244,14 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
       return;
     }
 
-    const stack: INode[] = [mm.state.data];
-    while (stack.length > 0) {
-      const node = stack.pop();
-      if (!node) continue;
-      if (node.payload?.uid === uid) {
-        await mm.setHighlight(node);
-        await mm.ensureVisible(node, { top: 80, bottom: 80, left: 80, right: 80 });
-        activeUidRef.current = uid;
-        return;
-      }
-      stack.push(...node.children);
+    const node = findMarkmapNode(mm.state.data, (current) => current.payload?.uid === uid);
+    if (!node) {
+      return;
     }
+
+    await mm.setHighlight(node);
+    await mm.ensureVisible(node, { top: 80, bottom: 80, left: 80, right: 80 });
+    activeUidRef.current = uid;
   }, []);
 
   useEffect(() => {
@@ -248,17 +310,45 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
 
     render();
 
+    const updateNodeInteractivity = () => {
+      const groups = existingSvg.querySelectorAll<SVGGElement>("g.markmap-node");
+      groups.forEach((group) => {
+        const path = group.getAttribute("data-path");
+        if (!path) {
+          group.style.cursor = "default";
+          return;
+        }
+
+        const node = findMarkmapNode(mmRef.current?.state.data, (current) => current.state?.path === path);
+        const uid = typeof node?.payload?.uid === "string" ? node.payload.uid : null;
+        const seekTime = typeof node?.payload?.seekTime === "number" ? node.payload.seekTime : null;
+        group.style.cursor = uid && seekTime !== null && syncUidSet.has(uid) ? "pointer" : "default";
+      });
+    };
+
+    queueMicrotask(updateNodeInteractivity);
+
     const handleClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       const group = target?.closest("g.markmap-node") as SVGGElement | null;
-      if (!group) {
+      const path = group?.getAttribute("data-path");
+      if (!path) {
         return;
       }
 
-      const uid = group.getAttribute("data-uid");
-      if (uid) {
-        void focusNodeByUid(uid);
+      const node = findMarkmapNode(mmRef.current?.state.data, (current) => current.state?.path === path);
+      const uid = typeof node?.payload?.uid === "string" ? node.payload.uid : null;
+      const seekTime = typeof node?.payload?.seekTime === "number" ? node.payload.seekTime : null;
+      if (!uid || seekTime === null || !syncUidSet.has(uid)) {
+        return;
       }
+
+      userSeekRef.current = {
+        targetTime: seekTime,
+        timestamp: Date.now(),
+      };
+      void focusNodeByUid(uid);
+      window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: seekTime } }));
     };
 
     existingSvg.addEventListener("click", handleClick);
@@ -275,30 +365,31 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
       resizeObserver.disconnect();
       onSvgReady?.(null);
     };
-  }, [transformed.root, items.length, isDarkMode, focusNodeByUid, onSvgReady]);
+  }, [transformed.root, items.length, isDarkMode, focusNodeByUid, onSvgReady, syncUidSet]);
 
   useEffect(() => {
-    const svg = svgRef.current;
-    if (!svg) {
+    if (syncItems.length === 0) {
       return;
     }
 
-    const nodeGroups = Array.from(svg.querySelectorAll("g.markmap-node"));
-    nodeGroups.forEach((group, index) => {
-      const item = items[index];
-      if (!item) {
+    const handleSeekVideo = (event: Event) => {
+      const targetTime = (event as CustomEvent<{ time: number }>).detail?.time;
+      if (typeof targetTime !== "number") {
         return;
       }
 
-      group.setAttribute("data-uid", item.uid);
-    });
-  }, [items, transformed.root]);
+      userSeekRef.current = {
+        targetTime,
+        timestamp: Date.now(),
+      };
 
-  useEffect(() => {
-    const itemsWithTime = items.filter((item) => item.seekTime !== null);
-    if (itemsWithTime.length === 0) {
-      return;
-    }
+      const activeItem = findActiveOutlineItem(syncItems, targetTime);
+      if (!activeItem || activeItem.uid === activeUidRef.current) {
+        return;
+      }
+
+      void focusNodeByUid(activeItem.uid);
+    };
 
     const handleVideoTimeUpdate = (event: Event) => {
       const currentTime = (event as CustomEvent<{ time: number }>).detail?.time;
@@ -306,25 +397,38 @@ export function AiNoteMindMap({ markdown, noteTitle, onSvgReady }: AiNoteMindMap
         return;
       }
 
-      let nextActive: OutlineItem | null = null;
-      for (const item of itemsWithTime) {
-        if (item.seekTime !== null && item.seekTime <= currentTime) {
-          nextActive = item;
-        } else {
-          break;
+      const userSeek = userSeekRef.current;
+      if (userSeek) {
+        const timeSinceSeek = Date.now() - userSeek.timestamp;
+        if (timeSinceSeek < 800) {
+          return;
         }
+        userSeekRef.current = null;
       }
 
-      if (!nextActive || nextActive.uid === activeUidRef.current) {
+      const activeItem = findActiveOutlineItem(syncItems, currentTime);
+      if (!activeItem) {
+        if (activeUidRef.current) {
+          activeUidRef.current = null;
+          void mmRef.current?.setHighlight(null);
+        }
         return;
       }
 
-      void focusNodeByUid(nextActive.uid);
+      if (activeItem.uid === activeUidRef.current) {
+        return;
+      }
+
+      void focusNodeByUid(activeItem.uid);
     };
 
+    window.addEventListener("seek-video", handleSeekVideo);
     window.addEventListener("video-time-update", handleVideoTimeUpdate);
-    return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
-  }, [items, focusNodeByUid]);
+    return () => {
+      window.removeEventListener("seek-video", handleSeekVideo);
+      window.removeEventListener("video-time-update", handleVideoTimeUpdate);
+    };
+  }, [syncItems, focusNodeByUid]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

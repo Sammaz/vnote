@@ -335,18 +335,21 @@ mindmap
 **笔记要求：**
 1. 笔记必须使用中文输出，专有名词和技术术语可保留英文。
 2. 使用 Markdown 标题组织内容，不要使用代码块包裹全文。
-3. 主要章节标题统一使用 `## 章节名 ⏱ mm:ss` 格式；如果时间超过 1 小时，则使用 `## 章节名 ⏱ hh:mm:ss`，时间戳代表该章节在视频中的起始时刻。
-4. 忠实保留视频的核心信息、关键细节、案例、步骤、结论与注意事项，省略广告、寒暄和口头填充词。
-5. 不要生成目录，不要输出 JSON，不要输出 Mermaid。
-6. 在笔记末尾添加 `## 总结`，用 2-4 句话概括整支视频的核心观点，不要在该章节下放置任何截图标记。
-7. {}
-8. {}
+3. 每个正文 `##` 主章节标题必须统一使用 `## 章节名 ⏱ mm:ss` 格式；如果时间超过 1 小时，则使用 `## 章节名 ⏱ hh:mm:ss`，时间戳代表该章节在视频中的起始时刻。
+4. 每个正文 `##` 主章节必须且只能包含 1 个显式起始时间；不要省略时间，也不要在同一标题中放多个时间。
+5. `###` 子章节、正文说明、案例引用、截图标记都不承担章节起始时间语义，不要用它们替代 `##` 主章节标题时间。
+6. 忠实保留视频的核心信息、关键细节、案例、步骤、结论与注意事项，省略广告、寒暄和口头填充词。
+7. 不要生成目录，不要输出 JSON，不要输出 Mermaid。
+8. 在笔记末尾添加 `## 总结`，用 2-4 句话概括整支视频的核心观点，不要在该章节下放置任何截图标记，也不要为 `## 总结` 添加时间戳。
+9. {}
+10. {}
 
 **时间戳输入说明：**
 你收到的转写内容按行提供，格式为 `[hh:mm:ss] 文本内容`。
 请严格根据这些时间信息生成时间戳，并遵守以下规则：
 - 当 transcript 时间是 `[00:13:25]` 时，章节标题必须写成 `⏱ 13:25`，不能写成 `⏱ 00:13`。
 - 当 transcript 时间是 `[01:13:25]` 时，章节标题必须写成 `⏱ 01:13:25`。
+- 不要把正文中的引用时间、示例时间、回顾时间或截图时间当成章节起始时间。
 - 所有截图标记必须写成 `[[SCREENSHOT:00:13:25]]` 这样的三段式 `hh:mm:ss`，禁止写成两段式。{}
 
 **风格要求：**
@@ -572,10 +575,22 @@ fn find_semantic_boundary_near(text: &str, around: usize, max_distance: usize) -
 // ============================================================================
 
 static AI_NOTE_SCREENSHOT_REGEX: OnceLock<Regex> = OnceLock::new();
+static AI_NOTE_MAIN_HEADING_REGEX: OnceLock<Regex> = OnceLock::new();
+static AI_NOTE_MAIN_HEADING_TIMESTAMP_REGEX: OnceLock<Regex> = OnceLock::new();
 
 fn get_ai_note_screenshot_regex() -> &'static Regex {
     AI_NOTE_SCREENSHOT_REGEX.get_or_init(|| {
         Regex::new(r"\[\[SCREENSHOT:(\d{2}:\d{2}:\d{2})\]\]").unwrap()
+    })
+}
+
+fn get_ai_note_main_heading_regex() -> &'static Regex {
+    AI_NOTE_MAIN_HEADING_REGEX.get_or_init(|| Regex::new(r"^\s{0,3}##\s+(.+?)\s*$").unwrap())
+}
+
+fn get_ai_note_main_heading_timestamp_regex() -> &'static Regex {
+    AI_NOTE_MAIN_HEADING_TIMESTAMP_REGEX.get_or_init(|| {
+        Regex::new(r"⏱\s*(\d{1,2}:\d{2}(?::\d{2})?)\s*$").unwrap()
     })
 }
 
@@ -628,6 +643,27 @@ fn build_ai_note_screenshot_asset_url(image_path: &str) -> String {
 
 fn build_ai_note_screenshot_markdown(image_path: &str, timestamp: &str) -> String {
     format!("![⏱ {}]({})", timestamp, build_ai_note_screenshot_asset_url(image_path))
+}
+
+fn validate_ai_note_structure(content: &str) -> String {
+    let heading_regex = get_ai_note_main_heading_regex();
+    let timestamp_regex = get_ai_note_main_heading_timestamp_regex();
+
+    let normalized = content.trim().to_string();
+    for line in normalized.lines() {
+        let Some(captures) = heading_regex.captures(line) else {
+            continue;
+        };
+        let heading_text = captures.get(1).map(|m| m.as_str().trim()).unwrap_or_default();
+        if heading_text == "总结" || heading_text == "总结：" || heading_text == "总结:" {
+            continue;
+        }
+        if timestamp_regex.captures(heading_text).is_none() {
+            tracing::warn!("[AiNote] 主章节缺少显式时间戳: {}", heading_text);
+        }
+    }
+
+    normalized
 }
 
 fn extract_ai_note_screenshots(
@@ -2001,7 +2037,14 @@ fn post_process_content(
     has_screenshots: bool,
 ) -> Result<String, String> {
     match tab_type {
-        TabType::AiNote if has_screenshots => extract_ai_note_screenshots(app, note, content),
+        TabType::AiNote => {
+            let validated = validate_ai_note_structure(content);
+            if has_screenshots {
+                extract_ai_note_screenshots(app, note, &validated)
+            } else {
+                Ok(validated)
+            }
+        }
         _ => Ok(content.trim().to_string()),
     }
 }
