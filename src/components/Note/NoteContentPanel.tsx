@@ -2570,7 +2570,7 @@ Video subtitles content:`;
                           setShowSubtitleModeDropdown(false);
                         }}
                         className={cn(
-                          "w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between",
+                          "w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between cursor-pointer",
                           (mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled)
                             ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20"
                             : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"

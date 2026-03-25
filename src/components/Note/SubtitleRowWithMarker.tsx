@@ -106,7 +106,7 @@ export const SubtitleRowWithMarker = memo(function SubtitleRowWithMarker({
               <button
                 onClick={handleRemoveScreenshot}
                 className={cn(
-                  "text-xs px-2 py-1 rounded transition-colors",
+                  "text-xs px-2 py-1 rounded transition-colors cursor-pointer",
                   "text-red-600 dark:text-red-400",
                   "hover:bg-red-50 dark:hover:bg-red-900/20",
                   "focus:outline-none focus:ring-2 focus:ring-red-500/50"
@@ -127,7 +127,7 @@ export const SubtitleRowWithMarker = memo(function SubtitleRowWithMarker({
               "border border-dashed",
               isAddButtonDisabled
                 ? "border-slate-300 dark:border-slate-600 text-slate-400 dark:text-slate-500 cursor-not-allowed"
-                : "border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 dark:hover:border-blue-500"
+                : "border-blue-300 dark:border-blue-600 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 dark:hover:border-blue-500 cursor-pointer"
             )}
           >
             {isCapturing ? (

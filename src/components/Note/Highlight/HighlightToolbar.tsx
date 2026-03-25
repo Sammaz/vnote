@@ -35,7 +35,7 @@ export function HighlightToolbar({
               onClick={() => onTypeChange(type)}
               disabled={isGenerating}
               className={cn(
-                "px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200",
+                "px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 cursor-pointer",
                 activeType === type
                   ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm"
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200",
@@ -52,7 +52,7 @@ export function HighlightToolbar({
           onClick={onRegenerate}
           disabled={isGenerating}
           className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all",
+            "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-all cursor-pointer",
             "bg-blue-500 hover:bg-blue-600 text-white",
             "disabled:opacity-50 disabled:cursor-not-allowed"
           )}

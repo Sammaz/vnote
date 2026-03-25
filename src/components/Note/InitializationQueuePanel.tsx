@@ -323,7 +323,7 @@ export function InitializationQueuePanel() {
                 e.stopPropagation();
                 clearQueue();
               }}
-              className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 px-1"
+              className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 px-1 cursor-pointer"
             >
               清空队列
             </button>
@@ -334,7 +334,7 @@ export function InitializationQueuePanel() {
               e.stopPropagation();
               toggleMinimize(true);
             }}
-            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors cursor-pointer"
             title="最小化"
           >
             <Minus className="w-4 h-4" />
@@ -374,7 +374,7 @@ export function InitializationQueuePanel() {
               {currentTask.status === "running" && (
                 <button
                   onClick={abortCurrent}
-                  className="ml-2 p-1 text-slate-400 hover:text-red-500 transition-colors"
+                  className="ml-2 p-1 text-slate-400 hover:text-red-500 transition-colors cursor-pointer"
                   title="取消"
                 >
                   <X className="w-4 h-4" />
@@ -470,7 +470,7 @@ export function InitializationQueuePanel() {
                   </span>
                   <button
                     onClick={() => removeFromQueue(task.id)}
-                    className="ml-2 p-0.5 text-slate-400 hover:text-red-500 transition-colors"
+                    className="ml-2 p-0.5 text-slate-400 hover:text-red-500 transition-colors cursor-pointer"
                     title="移除"
                   >
                     <X className="w-3.5 h-3.5" />

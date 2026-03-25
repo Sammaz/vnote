@@ -52,7 +52,7 @@ export function TopicTags({
           <button
             onClick={onClearAll}
             className={cn(
-              "flex items-center gap-1 px-2 py-1 text-xs rounded-full",
+              "flex items-center gap-1 px-2 py-1 text-xs rounded-full cursor-pointer",
               "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-400",
               "hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
             )}
@@ -69,7 +69,7 @@ export function TopicTags({
               key={tag}
               onClick={() => onTagToggle(tag)}
               className={cn(
-                "px-2.5 py-1 text-xs rounded-full transition-all duration-200",
+                "px-2.5 py-1 text-xs rounded-full transition-all duration-200 cursor-pointer",
                 isSelected
                   ? "bg-blue-500 text-white shadow-sm"
                   : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700"

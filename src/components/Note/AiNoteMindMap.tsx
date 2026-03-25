@@ -645,28 +645,28 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
       <div className="absolute bottom-4 left-4 z-10 flex flex-col items-center gap-2 rounded-xl bg-white/85 p-1.5 shadow-sm backdrop-blur-sm dark:bg-slate-900/85">
         <button
           onClick={handleZoomOut}
-          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
           title="缩小"
         >
           <ZoomOut className="h-4 w-4" />
         </button>
         <button
           onClick={handleZoomIn}
-          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
           title="放大"
         >
           <ZoomIn className="h-4 w-4" />
         </button>
         <button
           onClick={handleReset}
-          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
           title="重置视图"
         >
           <Maximize2 className="h-4 w-4" />
         </button>
         <button
           onClick={() => setIsFullscreen((value) => !value)}
-          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
           title={isFullscreen ? "退出全屏" : "全屏"}
         >
           {isFullscreen ? <Minimize className="h-4 w-4" /> : <Fullscreen className="h-4 w-4" />}

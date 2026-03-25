@@ -459,7 +459,7 @@ export function DetailedReadingChapterCard({
             {showSubtitleArea && (
               <button
                 onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
-                className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors"
+                className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded transition-colors cursor-pointer"
               >
                 {expanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
               </button>

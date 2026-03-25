@@ -64,7 +64,7 @@ export function InitializationOverlay({
           </h3>
           <button
             onClick={onAbort}
-            className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
             title="取消初始化"
           >
             <X className="w-5 h-5 text-slate-500" />

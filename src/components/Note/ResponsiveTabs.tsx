@@ -94,7 +94,7 @@ export function ResponsiveTabs({
     <div className={cn("relative flex-1 min-w-0", className)} ref={containerRef}>
       <div className="flex items-center w-full">
         {visibleItems.map(item => (
-          <div key={item.id} className="flex-shrink-0" onClick={() => onTabClick(item.id)}>
+          <div key={item.id} className="flex-shrink-0 cursor-pointer" onClick={() => onTabClick(item.id)}>
             {renderTab(item, false)}
           </div>
         ))}
@@ -103,7 +103,7 @@ export function ResponsiveTabs({
           <div className="relative dropdown-trigger flex-shrink-0 ml-1">
             <button
               onClick={() => setShowDropdown(!showDropdown)}
-              className="flex items-center justify-center w-8 h-8 rounded-lg transition-colors text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700"
+              className="flex items-center justify-center w-8 h-8 rounded-lg transition-colors text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 cursor-pointer"
             >
               <MoreHorizontal className="w-4 h-4" />
             </button>

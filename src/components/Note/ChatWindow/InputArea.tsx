@@ -152,7 +152,7 @@ export function InputArea({
             onClick={onSend}
             disabled={!input.trim() && uploadedImages.length === 0}
             className={cn(
-              "w-10 h-10 flex items-center justify-center rounded-full transition-colors",
+              "w-10 h-10 flex items-center justify-center rounded-full transition-colors cursor-pointer",
               input.trim() || uploadedImages.length > 0
                 ? "bg-slate-700 dark:bg-slate-600 text-white hover:bg-slate-600 dark:hover:bg-slate-500"
                 : "bg-slate-200 dark:bg-vnote-surface text-slate-400 cursor-not-allowed"
