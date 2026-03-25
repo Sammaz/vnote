@@ -2530,62 +2530,6 @@ Video subtitles content:`;
                 )}
               </div>
             )}
-            {/* 字幕模式切换下拉框 - 辅助模式下隐藏 */}
-            {!isAssistModeActive && note.subtitle_path && showChapterSubtitles && detailedReadingData && (
-              <div className="relative" ref={subtitleModeDropdownRef}>
-                <button
-                  type="button"
-                  onClick={() => setShowSubtitleModeDropdown(!showSubtitleModeDropdown)}
-                  disabled={subtitleOptimizing}
-                  className={cn(
-                    "px-3 py-1.5 pr-8 text-sm rounded-xl border transition-all cursor-pointer relative",
-                    subtitleOptimizationEnabled
-                      ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800"
-                      : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500",
-                    "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                    subtitleOptimizing && "opacity-50 cursor-not-allowed"
-                  )}
-                >
-                  {subtitleOptimizationEnabled ? "智能优化" : "原文"}
-                  <ChevronDown className={cn(
-                    "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 transition-transform pointer-events-none",
-                    subtitleOptimizationEnabled ? "text-blue-400" : "text-slate-400",
-                    showSubtitleModeDropdown && "rotate-180"
-                  )} />
-                </button>
-                {showSubtitleModeDropdown && !subtitleOptimizing && (
-                  <div className="absolute z-50 mt-2 w-28 right-0 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1">
-                    {[
-                      { value: "original", label: "原文" },
-                      { value: "optimized", label: "智能优化" },
-                    ].map(mode => (
-                      <button
-                        key={mode.value}
-                        type="button"
-                        onClick={async () => {
-                          const shouldEnable = mode.value === "optimized";
-                          if (shouldEnable !== subtitleOptimizationEnabled) {
-                            await handleSubtitleOptimizationToggle();
-                          }
-                          setShowSubtitleModeDropdown(false);
-                        }}
-                        className={cn(
-                          "w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between cursor-pointer",
-                          (mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled)
-                            ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20"
-                            : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                        )}
-                      >
-                        {mode.label}
-                        {(mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled) && (
-                          <Check className="w-4 h-4" />
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
             {/* 字幕滚动开关 - 辅助模式下隐藏 */}
             {!isAssistModeActive && (
               <button
@@ -2603,18 +2547,76 @@ Video subtitles content:`;
             )}
             {/* 显示字幕开关 - 辅助模式下隐藏 */}
             {!isAssistModeActive && note.subtitle_path && (
-              <button
-                onClick={() => setShowChapterSubtitles(!showChapterSubtitles)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                  showChapterSubtitles
-                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+              <>
+                <button
+                  onClick={() => setShowChapterSubtitles(!showChapterSubtitles)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
+                    showChapterSubtitles
+                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
+                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                  )}
+                >
+                  <SubtitlesIcon className="w-4 h-4" />
+                  {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
+                </button>
+                {/* 字幕模式切换下拉框 - 放在显示/隐藏字幕按钮右侧 */}
+                {showChapterSubtitles && detailedReadingData && (
+                  <div className="relative" ref={subtitleModeDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowSubtitleModeDropdown(!showSubtitleModeDropdown)}
+                      disabled={subtitleOptimizing}
+                      className={cn(
+                        "px-3 py-1.5 pr-8 text-sm rounded-xl border transition-all cursor-pointer relative",
+                        subtitleOptimizationEnabled
+                          ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800"
+                          : "bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-slate-300 dark:hover:border-slate-500",
+                        "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                        subtitleOptimizing && "opacity-50 cursor-not-allowed"
+                      )}
+                    >
+                      {subtitleOptimizationEnabled ? "智能优化" : "原文"}
+                      <ChevronDown className={cn(
+                        "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 transition-transform pointer-events-none",
+                        subtitleOptimizationEnabled ? "text-blue-400" : "text-slate-400",
+                        showSubtitleModeDropdown && "rotate-180"
+                      )} />
+                    </button>
+                    {showSubtitleModeDropdown && !subtitleOptimizing && (
+                      <div className="absolute z-50 mt-2 w-28 right-0 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1">
+                        {[
+                          { value: "original", label: "原文" },
+                          { value: "optimized", label: "智能优化" },
+                        ].map(mode => (
+                          <button
+                            key={mode.value}
+                            type="button"
+                            onClick={async () => {
+                              const shouldEnable = mode.value === "optimized";
+                              if (shouldEnable !== subtitleOptimizationEnabled) {
+                                await handleSubtitleOptimizationToggle();
+                              }
+                              setShowSubtitleModeDropdown(false);
+                            }}
+                            className={cn(
+                              "w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between cursor-pointer",
+                              (mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled)
+                                ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20"
+                                : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                            )}
+                          >
+                            {mode.label}
+                            {(mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled) && (
+                              <Check className="w-4 h-4" />
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 )}
-              >
-                <SubtitlesIcon className="w-4 h-4" />
-                {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
-              </button>
+              </>
             )}
           </div>
           <div className="flex items-center gap-2">
