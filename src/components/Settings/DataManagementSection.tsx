@@ -364,14 +364,6 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
         </div>
       </div>
 
-      <div className="rounded-xl border border-slate-200 dark:border-vnote-border p-4">
-        <div className="font-medium text-slate-900 dark:text-slate-100 mb-3">清理策略与备份迁移（规划占位）</div>
-        <div className="text-sm text-slate-500 dark:text-slate-400 space-y-1">
-          <div>后续将补充：日志保留天数、启动扫描、空间阈值提醒、应用数据导出/导入。</div>
-          <div>当前版本已优先落地：分类统计、单笔记筛选、异常扫描、清理预览与执行。</div>
-        </div>
-      </div>
-
       <ConfirmDialog
         open={confirmOpen}
         title="确认清理"
