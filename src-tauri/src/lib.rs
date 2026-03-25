@@ -1446,7 +1446,7 @@ pub fn assemble_and_save_visual_summary(db: &Database, note: &mut Note) -> Resul
         // Screenshot image (matching frontend convertFileSrc format)
         if let Some(ref path) = ch.screenshot_path {
             let encoded = urlencoding::encode(path);
-            lines.push(format!("![{}](https://asset.localhost/{})", ch.title, encoded));
+            lines.push(format!("![{}](http://asset.localhost/{})", ch.title, encoded));
             lines.push(String::new());
         }
         // Subtitle content: prefer optimized, fallback to original
