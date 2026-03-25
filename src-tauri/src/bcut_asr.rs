@@ -294,7 +294,7 @@ fn build_srt_from_result(result_json: &serde_json::Value) -> Result<String, Stri
 }
 
 fn build_subtitle_dir(app: &AppHandle, note_id: &str) -> Result<PathBuf, String> {
-    Ok(storage_paths::note_dir(app, note_id)?.join("subtitle"))
+    storage_paths::subtitle_dir(app, note_id)
 }
 
 pub async fn transcribe_video_to_srt(

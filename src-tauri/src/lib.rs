@@ -2,6 +2,7 @@ mod ai_pool;
 mod bcut_asr;
 mod chat;
 mod chapter;
+mod data_management;
 mod db;
 pub mod error;
 mod flashcard_generation;
@@ -22,6 +23,7 @@ mod video_server;
 pub mod storage_paths;
 
 use chat::ChatRequest;
+use data_management::{CleanupPreview, CleanupRequest, CleanupResult, DataManagementOverview, DataManagementScanResult};
 use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest};
 use regex::Regex;
 use std::collections::hash_map::DefaultHasher;
@@ -843,51 +845,42 @@ async fn clear_ai_note_screenshots(app: AppHandle, note_id: String) -> Result<()
 /// Clear video cache (delete MP4 files only, keep screenshots)
 #[tauri::command]
 async fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
-    let notes_cache_dir = storage_paths::notes_dir(&app)?;
+    let result = data_management::execute_cleanup(
+        &app,
+        get_db(),
+        CleanupRequest {
+            categories: vec!["video_mp4_cache".to_string()],
+            integrity_targets: None,
+            note_ids: None,
+        },
+    )?;
+    Ok(result.cleared_bytes)
+}
 
-    if !notes_cache_dir.exists() {
-        return Ok(0);
-    }
+#[tauri::command]
+fn get_data_management_overview(
+    app: AppHandle,
+    note_ids: Option<Vec<String>>,
+) -> Result<DataManagementOverview, String> {
+    data_management::get_overview(&app, get_db(), note_ids.as_deref())
+}
 
-    // Move the recursive operation to a blocking thread pool
-    tokio::task::spawn_blocking(move || {
-        let mut cleared_size: u64 = 0;
+#[tauri::command]
+fn scan_data_management(
+    app: AppHandle,
+    note_ids: Option<Vec<String>>,
+) -> Result<DataManagementScanResult, String> {
+    data_management::scan(&app, get_db(), note_ids.as_deref())
+}
 
-        // Recursively find and delete MP4 files only
-        fn delete_mp4_files(dir: &std::path::Path, cleared: &mut u64) -> std::io::Result<()> {
-            if dir.is_dir() {
-                for entry in std::fs::read_dir(dir)? {
-                    let entry = entry?;
-                    let path = entry.path();
+#[tauri::command]
+fn preview_data_cleanup(app: AppHandle, request: CleanupRequest) -> Result<CleanupPreview, String> {
+    data_management::preview_cleanup(&app, get_db(), request)
+}
 
-                    // Skip screenshot directories
-                    if path.is_dir() {
-                        let dir_name = path.file_name().and_then(|n| n.to_str());
-                        if matches!(dir_name, Some("chapter_screenshots") | Some("ai_note_screenshots")) {
-                            continue;
-                        }
-                    }
-
-                    if path.is_dir() {
-                        delete_mp4_files(&path, cleared)?;
-                    } else if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("mp4") {
-                        if let Ok(metadata) = std::fs::metadata(&path) {
-                            let file_size = metadata.len();
-                            if std::fs::remove_file(&path).is_ok() {
-                                *cleared += file_size;
-                            }
-                        }
-                    }
-                }
-            }
-            Ok(())
-        }
-
-        let _ = delete_mp4_files(&notes_cache_dir, &mut cleared_size);
-        Ok::<u64, String>(cleared_size)
-    })
-    .await
-    .map_err(|e| format!("Task join error: {}", e))?
+#[tauri::command]
+fn execute_data_cleanup(app: AppHandle, request: CleanupRequest) -> Result<CleanupResult, String> {
+    data_management::execute_cleanup(&app, get_db(), request)
 }
 
 // Note commands
@@ -1529,8 +1522,7 @@ async fn save_screenshot_marker(
     screenshot_data: Vec<u8>,
 ) -> Result<ScreenshotMarker, String> {
     // Create screenshot directory for this note
-    let screenshots_dir = storage_paths::note_dir(&app, &note_id)?
-        .join("assist_screenshots");
+    let screenshots_dir = storage_paths::assist_screenshots_dir(&app, &note_id)?;
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
     // Generate unique ID and filename
@@ -1632,6 +1624,11 @@ async fn generate_chapters_with_markers(
                 // 保存章节数据到笔记
                 if let Err(e) = save_chapters_to_note_internal(&note_id_for_save, &detailed_reading) {
                     tracing::error!("[generate_chapters_with_markers] 保存章节数据失败: {}", e);
+                } else {
+                    let event_name = format!("chapter-generation-{}", generation_id);
+                    let _ = app.emit(&event_name, chapter::ChapterGenerationEvent::Completed {
+                        chapter_data,
+                    });
                 }
             }
             Err(e) => {
@@ -2135,6 +2132,10 @@ pub fn run() {
             check_ffmpeg,
             get_video_cache_size,
             clear_video_cache,
+            get_data_management_overview,
+            scan_data_management,
+            preview_data_cleanup,
+            execute_data_cleanup,
             clear_chapter_screenshots,
             clear_ai_note_screenshots,
             get_notes,

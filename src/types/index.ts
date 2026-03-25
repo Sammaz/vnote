@@ -196,6 +196,93 @@ export interface PromptConfig {
   updated_at: string;
 }
 
+export interface DataCategoryStat {
+  key: string;
+  label: string;
+  size_bytes: number;
+  file_count: number;
+  note_count: number | null;
+  reclaimable_bytes: number;
+  status: string;
+}
+
+export interface DataManagementOverview {
+  data_root: string;
+  total_size_bytes: number;
+  total_file_count: number;
+  reclaimable_bytes: number;
+  categories: DataCategoryStat[];
+}
+
+export interface CleanupCandidateGroup {
+  key: string;
+  label: string;
+  reclaimable_bytes: number;
+  items_count: number;
+  sample_paths: string[];
+  risk_level: string;
+  requires_confirmation: boolean;
+}
+
+export interface IntegrityIssue {
+  note_id: string | null;
+  path: string;
+  detail: string;
+}
+
+export interface IntegrityReport {
+  db_orphans_count: number;
+  fs_orphans_count: number;
+  broken_assets_count: number;
+  examples: IntegrityIssue[];
+}
+
+export interface SourceHealthIssue {
+  note_id: string;
+  title: string;
+  path: string;
+  kind: string;
+}
+
+export interface SourceHealthReport {
+  missing_video_count: number;
+  missing_subtitle_count: number;
+  issues: SourceHealthIssue[];
+}
+
+export interface DataManagementScanResult {
+  overview: DataManagementOverview;
+  cleanup_candidates: CleanupCandidateGroup[];
+  integrity_report: IntegrityReport;
+  source_health_report: SourceHealthReport;
+}
+
+export interface CleanupRequest {
+  categories: string[];
+  integrity_targets?: string[] | null;
+  note_ids?: string[] | null;
+}
+
+export interface CleanupPreview {
+  groups: CleanupCandidateGroup[];
+  total_bytes: number;
+  total_files: number;
+  total_items: number;
+  affected_note_ids: string[];
+  warnings: string[];
+}
+
+export interface CleanupResult {
+  cleared_bytes: number;
+  deleted_files: number;
+  skipped_files: number;
+  processed_items: number;
+  failed_files: string[];
+  affected_categories: string[];
+  affected_note_ids: string[];
+  warnings: string[];
+}
+
 // ============================================================================
 // 笔记生成相关类型
 // ============================================================================

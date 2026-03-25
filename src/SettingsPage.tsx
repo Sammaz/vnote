@@ -1,9 +1,10 @@
 import {
-    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, HardDrive, MessageSquareText, Search
+    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, MessageSquareText, Search, HardDrive
 } from "lucide-react";
 import { useState, useEffect, useMemo } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useApp } from "./context/AppContext";
+import { DataManagementSection } from "./components/Settings/DataManagementSection";
 import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptCategory, PromptConfig } from "./types";
 
 interface SettingsPageProps {
@@ -12,7 +13,7 @@ interface SettingsPageProps {
     onClose: () => void;
 }
 
-type SettingsTab = "general" | "model" | "prompt";
+type SettingsTab = "general" | "model" | "prompt" | "data-management";
 type EditingType = "ai" | "embedding" | "reranker" | null;
 
 // 分类颜色映射
@@ -25,7 +26,7 @@ const categoryColors: Record<PromptCategory, { bg: string; text: string; label: 
 };
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
-    const { refreshAiConfigs, refreshPromptConfigs } = useApp();
+    const { notes, refreshAiConfigs, refreshPromptConfigs } = useApp();
     const [activeTab, setActiveTab] = useState<SettingsTab>("general");
     const [trayEnabled, setTrayEnabled] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -51,10 +52,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const [testingApi, setTestingApi] = useState(false);
     const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
-    // Video cache state
-    const [videoCacheSize, setVideoCacheSize] = useState<number>(0);
-    const [clearingCache, setClearingCache] = useState(false);
-
     // Prompt config state
     const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
     const [editingPromptConfig, setEditingPromptConfig] = useState<PromptConfig | null>(null);
@@ -69,19 +66,17 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     useEffect(() => {
         const loadSettings = async () => {
             try {
-                const [tray, aiCfgs, embCfgs, rerCfgs, cacheSize, promptCfgs] = await Promise.all([
+                const [tray, aiCfgs, embCfgs, rerCfgs, promptCfgs] = await Promise.all([
                     invoke<boolean>("get_tray_enabled"),
                     invoke<AiConfig[]>("get_ai_configs"),
                     invoke<EmbeddingConfig[]>("get_embedding_configs"),
                     invoke<RerankerConfig[]>("get_reranker_configs"),
-                    invoke<number>("get_video_cache_size"),
                     invoke<PromptConfig[]>("get_prompt_configs"),
                 ]);
                 setTrayEnabled(tray);
                 setAiConfigs(aiCfgs);
                 setEmbeddingConfigs(embCfgs);
                 setRerankerConfigs(rerCfgs);
-                setVideoCacheSize(cacheSize);
                 setPromptConfigs(promptCfgs);
             } catch (error) {
                 console.error("Failed to load settings:", error);
@@ -108,27 +103,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             setTrayEnabled(newValue);
         } catch (error) {
             console.error("Failed to update tray:", error);
-        }
-    };
-
-    // Format bytes to human readable size
-    const formatBytes = (bytes: number): string => {
-        if (bytes === 0) return "0 B";
-        const k = 1024;
-        const sizes = ["B", "KB", "MB", "GB"];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-    };
-
-    const handleClearVideoCache = async () => {
-        setClearingCache(true);
-        try {
-            await invoke<number>("clear_video_cache");
-            setVideoCacheSize(0);
-        } catch (error) {
-            console.error("Failed to clear video cache:", error);
-        } finally {
-            setClearingCache(false);
         }
     };
 
@@ -639,6 +613,18 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         <MessageSquareText size={16} />
                         提示词管理
                     </button>
+                    <button
+                        onClick={() => setActiveTab("data-management")}
+                        className={[
+                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all mt-1 cursor-pointer",
+                            activeTab === "data-management"
+                                ? "bg-blue-600 text-white shadow-sm"
+                                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover",
+                        ].join(" ")}
+                    >
+                        <HardDrive size={16} />
+                        数据管理
+                    </button>
                 </nav>
             </aside>
 
@@ -646,11 +632,29 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 <div className="flex items-center justify-between mb-6">
                     <div>
                         <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                            {activeTab === "general" ? <SettingsIcon size={20} /> : activeTab === "model" ? <Bot size={20} /> : <MessageSquareText size={20} />}
-                            {activeTab === "general" ? "常规设置" : activeTab === "model" ? "模型配置" : "提示词管理"}
+                            {activeTab === "general"
+                                ? <SettingsIcon size={20} />
+                                : activeTab === "model"
+                                    ? <Bot size={20} />
+                                    : activeTab === "prompt"
+                                        ? <MessageSquareText size={20} />
+                                        : <HardDrive size={20} />}
+                            {activeTab === "general"
+                                ? "常规设置"
+                                : activeTab === "model"
+                                    ? "模型配置"
+                                    : activeTab === "prompt"
+                                        ? "提示词管理"
+                                        : "数据管理"}
                         </h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                            {activeTab === "general" ? "界面显示与桌面行为" : activeTab === "model" ? "配置对话模型、Embedding 和 Reranker" : "创建和管理自定义提示词模板"}
+                            {activeTab === "general"
+                                ? "界面显示与桌面行为"
+                                : activeTab === "model"
+                                    ? "配置对话模型、Embedding 和 Reranker"
+                                    : activeTab === "prompt"
+                                        ? "创建和管理自定义提示词模板"
+                                        : "统一查看空间占用、分类清理与异常扫描"}
                         </p>
                     </div>
                     <button
@@ -690,36 +694,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     </div>
                                     <button onClick={handleTrayToggle} className={["relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer", trayEnabled ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-600"].join(" ")}>
                                         <span className={["inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform", trayEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-4">
-                            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100 mb-4">数据管理</h3>
-                            <div className="space-y-3">
-                                <div className="flex items-center gap-4 p-4 rounded-lg border border-slate-200 dark:border-vnote-border">
-                                    <div className="h-8 w-8 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
-                                        <HardDrive size={16} className="text-slate-600 dark:text-slate-400" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">视频缓存</div>
-                                        <div className="text-sm text-slate-500 dark:text-slate-400">视频转换后的临时文件</div>
-                                    </div>
-                                    <div className="text-sm text-slate-500 dark:text-slate-400 mr-2">
-                                        {formatBytes(videoCacheSize)}
-                                    </div>
-                                    <button
-                                        onClick={handleClearVideoCache}
-                                        disabled={clearingCache || videoCacheSize === 0}
-                                        className="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
-                                    >
-                                        {clearingCache ? (
-                                            <Loader2 size={14} className="animate-spin" />
-                                        ) : (
-                                            <Trash2 size={14} />
-                                        )}
-                                        {clearingCache ? "清除中..." : "清除"}
                                     </button>
                                 </div>
                             </div>
@@ -929,6 +903,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                             )}
                         </div>
                     )
+                ) : activeTab === "data-management" ? (
+                    <DataManagementSection notes={notes} />
                 ) : editingType ? (
                     // Editor view
                     <>

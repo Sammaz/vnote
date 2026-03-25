@@ -2552,11 +2552,6 @@ pub async fn generate_chapters_with_markers(
         chapters,
     };
 
-    // 发送完成事件
-    let _ = app.emit(&event_name, ChapterGenerationEvent::Completed {
-        chapter_data: chapter_data.clone(),
-    });
-
     // 清理
     get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
 
