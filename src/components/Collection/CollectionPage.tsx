@@ -462,7 +462,7 @@ export function CollectionPage() {
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-100 dark:bg-neutral-900">
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50/20 dark:bg-vnote-bg/10 backdrop-blur-[2px]">
       {/* 批量操作工具栏 */}
       {batchSelection.isSelecting && selectedCollectionId && (
         <BatchActionBar

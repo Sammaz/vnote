@@ -437,7 +437,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
       {/* 头部 */}
       <div
         className={cn(
-          "flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border",
+          "flex items-center justify-between px-4 py-2 border-b border-slate-200/80 dark:border-vnote-border/80 bg-white/35 dark:bg-black/10 backdrop-blur-md",
           isPopout && "cursor-move select-none"
         )}
         onMouseDown={isPopout ? handleMouseDown : undefined}
@@ -523,7 +523,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
       <>
         <div
           ref={containerRef}
-          className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden items-center justify-center"
+          className="flex flex-col h-full bg-white/68 dark:bg-vnote-card/40 backdrop-blur-2xl rounded-lg border border-slate-200/75 dark:border-vnote-border/80 overflow-hidden shadow-soft items-center justify-center"
         >
           <div className="text-slate-400 dark:text-slate-500 text-sm">
             聊天窗口已弹出
@@ -548,7 +548,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
               zIndex: 9999,
             }}
             className={cn(
-              "flex flex-col bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border shadow-2xl overflow-hidden",
+              "flex flex-col bg-white/72 dark:bg-vnote-card/46 backdrop-blur-2xl rounded-lg border border-slate-200/75 dark:border-vnote-border/80 shadow-2xl overflow-hidden",
               isDragging && "cursor-grabbing",
               isResizing && "select-none"
             )}
@@ -566,7 +566,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
   return (
     <div
       ref={containerRef}
-      className="flex flex-col h-full bg-white dark:bg-vnote-card rounded-lg border border-slate-200 dark:border-vnote-border overflow-hidden"
+      className="flex flex-col h-full bg-white/68 dark:bg-vnote-card/40 backdrop-blur-2xl rounded-lg border border-slate-200/75 dark:border-vnote-border/80 overflow-hidden shadow-soft"
     >
       {chatContent}
     </div>

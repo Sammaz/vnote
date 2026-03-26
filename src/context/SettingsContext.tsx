@@ -20,6 +20,24 @@ const mockStats: AppStats = {
   lastActivityDate: null,
 };
 
+export const DEFAULT_BACKGROUND_SETTINGS: BackgroundSettings = {
+  overlayOpacity: 60,
+  contentOpacity: 46,
+  blur: 8,
+  size: "cover",
+  position: "center",
+  attachment: "fixed",
+};
+
+export interface BackgroundSettings {
+  overlayOpacity: number;
+  contentOpacity: number;
+  blur: number;
+  size: "cover" | "contain";
+  position: "center" | "top" | "bottom";
+  attachment: "fixed" | "scroll";
+}
+
 interface SettingsContextType {
   // AI 配置
   aiConfigs: AiConfig[];
@@ -41,6 +59,13 @@ interface SettingsContextType {
   setLayoutSwapped: (swapped: boolean) => void;
   setLayoutPanelWidth: (width: number) => void;
   setCaptionsEnabled: (enabled: boolean) => void;
+
+  // 背景图
+  backgroundImage: string | null;
+  backgroundSettings: BackgroundSettings;
+  setBackgroundImage: (path: string | null) => void;
+  updateBackgroundSettings: (settings: Partial<BackgroundSettings>) => void;
+  resetBackgroundSettings: () => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -58,6 +83,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     layoutPanelWidth: LAYOUT_PANEL_WIDTH.DEFAULT,
     captionsEnabled: true,
   });
+
+  const [backgroundImage, setBackgroundImageState] = useState<string | null>(null);
+  const [backgroundSettings, setBackgroundSettingsState] = useState<BackgroundSettings>(DEFAULT_BACKGROUND_SETTINGS);
 
   // 保存单个设置
   const saveSetting = useCallback(async (key: string, value: string) => {
@@ -149,6 +177,83 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     saveSetting("toolbar_captions_enabled", enabled.toString());
   }, [saveSetting]);
 
+  // 加载背景图设置
+  const loadBackgroundImage = useCallback(async () => {
+    try {
+      const value = await invoke<string | null>("get_setting", { key: "background_image" });
+      if (value) {
+        setBackgroundImageState(value);
+      }
+    } catch (error) {
+      console.error("Failed to load background image:", error);
+    }
+  }, []);
+
+  const loadBackgroundSettings = useCallback(async () => {
+    try {
+      const [overlayOpacity, contentOpacity, blur, size, position, attachment] = await Promise.all([
+        invoke<string | null>("get_setting", { key: "background_overlay_opacity" }),
+        invoke<string | null>("get_setting", { key: "background_content_opacity" }),
+        invoke<string | null>("get_setting", { key: "background_blur" }),
+        invoke<string | null>("get_setting", { key: "background_size" }),
+        invoke<string | null>("get_setting", { key: "background_position" }),
+        invoke<string | null>("get_setting", { key: "background_attachment" }),
+      ]);
+
+      setBackgroundSettingsState({
+        overlayOpacity: overlayOpacity ? Math.max(20, Math.min(90, parseInt(overlayOpacity, 10) || DEFAULT_BACKGROUND_SETTINGS.overlayOpacity)) : DEFAULT_BACKGROUND_SETTINGS.overlayOpacity,
+        contentOpacity: contentOpacity ? Math.max(10, Math.min(85, parseInt(contentOpacity, 10) || DEFAULT_BACKGROUND_SETTINGS.contentOpacity)) : DEFAULT_BACKGROUND_SETTINGS.contentOpacity,
+        blur: blur ? Math.max(0, Math.min(24, parseInt(blur, 10) || DEFAULT_BACKGROUND_SETTINGS.blur)) : DEFAULT_BACKGROUND_SETTINGS.blur,
+        size: size === "contain" ? "contain" : DEFAULT_BACKGROUND_SETTINGS.size,
+        position: position === "top" || position === "bottom" ? position : DEFAULT_BACKGROUND_SETTINGS.position,
+        attachment: attachment === "scroll" ? "scroll" : DEFAULT_BACKGROUND_SETTINGS.attachment,
+      });
+    } catch (error) {
+      console.error("Failed to load background settings:", error);
+    }
+  }, []);
+
+  // 设置/清除背景图
+  const setBackgroundImage = useCallback((path: string | null) => {
+    setBackgroundImageState(path);
+    saveSetting("background_image", path ?? "");
+  }, [saveSetting]);
+
+  const updateBackgroundSettings = useCallback((settings: Partial<BackgroundSettings>) => {
+    setBackgroundSettingsState(prev => {
+      const next = { ...prev, ...settings };
+      if (settings.overlayOpacity !== undefined) {
+        saveSetting("background_overlay_opacity", next.overlayOpacity.toString());
+      }
+      if (settings.contentOpacity !== undefined) {
+        saveSetting("background_content_opacity", next.contentOpacity.toString());
+      }
+      if (settings.blur !== undefined) {
+        saveSetting("background_blur", next.blur.toString());
+      }
+      if (settings.size !== undefined) {
+        saveSetting("background_size", next.size);
+      }
+      if (settings.position !== undefined) {
+        saveSetting("background_position", next.position);
+      }
+      if (settings.attachment !== undefined) {
+        saveSetting("background_attachment", next.attachment);
+      }
+      return next;
+    });
+  }, [saveSetting]);
+
+  const resetBackgroundSettings = useCallback(() => {
+    setBackgroundSettingsState(DEFAULT_BACKGROUND_SETTINGS);
+    saveSetting("background_overlay_opacity", DEFAULT_BACKGROUND_SETTINGS.overlayOpacity.toString());
+    saveSetting("background_content_opacity", DEFAULT_BACKGROUND_SETTINGS.contentOpacity.toString());
+    saveSetting("background_blur", DEFAULT_BACKGROUND_SETTINGS.blur.toString());
+    saveSetting("background_size", DEFAULT_BACKGROUND_SETTINGS.size);
+    saveSetting("background_position", DEFAULT_BACKGROUND_SETTINGS.position);
+    saveSetting("background_attachment", DEFAULT_BACKGROUND_SETTINGS.attachment);
+  }, [saveSetting]);
+
   // 加载 AI 配置
   const refreshAiConfigs = useCallback(async () => {
     try {
@@ -184,6 +289,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     refreshPromptConfigs();
     loadToolbarSettings();
     loadTotalWatchTime();
+    loadBackgroundImage();
+    loadBackgroundSettings();
   }, []);
 
   const value = useMemo(() => ({
@@ -202,6 +309,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setLayoutSwapped,
     setLayoutPanelWidth,
     setCaptionsEnabled,
+    backgroundImage,
+    backgroundSettings,
+    setBackgroundImage,
+    updateBackgroundSettings,
+    resetBackgroundSettings,
   }), [
     aiConfigs,
     promptConfigs,
@@ -216,6 +328,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setLayoutSwapped,
     setLayoutPanelWidth,
     setCaptionsEnabled,
+    backgroundImage,
+    backgroundSettings,
+    setBackgroundImage,
+    updateBackgroundSettings,
+    resetBackgroundSettings,
   ]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

@@ -460,7 +460,7 @@ export function KnowledgeBaseChat() {
           className="hidden"
         />
 
-        <div className="rounded-xl border border-slate-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-400 transition-shadow">
+        <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/70 dark:bg-vnote-card/44 backdrop-blur-xl overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-400 transition-shadow shadow-soft">
           {/* Image preview */}
           {uploadedImages.length > 0 && (
             <div className="px-4 pt-3 flex flex-wrap gap-2">
@@ -528,7 +528,7 @@ export function KnowledgeBaseChat() {
                 </button>
 
                 {showModelDropdown && (
-                  <div className="absolute bottom-full left-0 mb-1 w-56 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-600 rounded-lg shadow-lg z-50 py-1 max-h-60 overflow-y-auto">
+                  <div className="absolute bottom-full left-0 mb-2 w-56 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 py-1 max-h-60 overflow-y-auto">
                     {aiConfigs.length === 0 ? (
                       <div className="px-3 py-2 text-xs text-slate-400">
                         未配置 AI 模型，请在设置中添加
@@ -583,7 +583,7 @@ export function KnowledgeBaseChat() {
                 </button>
 
                 {showPromptDropdown && (
-                  <div className="absolute bottom-full left-0 mb-1 w-64 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-600 rounded-lg shadow-lg z-50 py-1 max-h-60 overflow-y-auto">
+                  <div className="absolute bottom-full left-0 mb-2 w-64 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 py-1 max-h-60 overflow-y-auto">
                     {/* Clear selection */}
                     <button
                       onClick={() => {
@@ -815,7 +815,7 @@ function MessageBubble({
             onChange={handleEditFileSelect}
             className="hidden"
           />
-          <div className="bg-slate-100 dark:bg-neutral-800 rounded-2xl border border-slate-200 dark:border-neutral-700 overflow-hidden">
+          <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/70 dark:bg-vnote-card/44 backdrop-blur-xl overflow-hidden shadow-soft">
             {/* Image previews - existing + newly uploaded */}
             {(editExistingImageUrls.length > 0 || editImages.length > 0) && (
               <div className="px-4 pt-3 flex flex-wrap gap-2">
@@ -923,7 +923,7 @@ function MessageBubble({
                 "rounded-xl px-4 py-3",
                 isUser
                   ? "bg-slate-200 dark:bg-neutral-700 text-slate-800 dark:text-slate-100 rounded-tr-sm"
-                  : "bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 text-slate-700 dark:text-slate-200 rounded-tl-sm"
+                  : "bg-white/78 dark:bg-vnote-card/56 backdrop-blur-lg border border-slate-200/80 dark:border-vnote-border/80 text-slate-700 dark:text-slate-200 rounded-tl-sm shadow-soft"
               )}
             >
               {/* Sources */}
@@ -1002,10 +1002,10 @@ function MessageBubble({
           {showDeleteConfirm && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center">
           <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            className="absolute inset-0 bg-slate-950/34 backdrop-blur-md"
             onClick={() => setShowDeleteConfirm(false)}
           />
-          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
+          <div className="relative w-full max-w-md mx-4 p-6 rounded-[24px] border border-white/45 dark:border-vnote-border/80 bg-white/74 dark:bg-vnote-card/46 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_24px_70px_rgba(15,23,42,0.26)]">
             <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
               确定要删除这条消息吗？
             </h3>
@@ -1015,7 +1015,7 @@ function MessageBubble({
             <div className="mt-6 flex justify-end gap-3">
               <button
                 onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 rounded-md transition-colors cursor-pointer"
+                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-white/50 dark:bg-white/5 border border-slate-200/80 dark:border-vnote-border/80 hover:bg-white/75 dark:hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
               >
                 取消
               </button>
@@ -1024,7 +1024,7 @@ function MessageBubble({
                   setShowDeleteConfirm(false);
                   onDelete(message.id);
                 }}
-                className="px-4 py-2 text-sm font-medium text-slate-700 dark:text-slate-200 bg-slate-200 dark:bg-neutral-700 hover:bg-slate-300 dark:hover:bg-neutral-600 rounded-md transition-colors cursor-pointer"
+                className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors cursor-pointer shadow-sm"
               >
                 删除
               </button>

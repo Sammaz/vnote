@@ -1,9 +1,11 @@
 import {
-    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, MessageSquareText, Search, HardDrive
+    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, MessageSquareText, Search, HardDrive, ImagePlus, X as XIcon, SlidersHorizontal, Focus, ScanText, RefreshCw
 } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "./context/AppContext";
+import { useSettings } from "./context/SettingsContext";
 import { DataManagementSection } from "./components/Settings/DataManagementSection";
 import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptCategory, PromptConfig } from "./types";
 
@@ -27,6 +29,7 @@ const categoryColors: Record<PromptCategory, { bg: string; text: string; label: 
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
     const { notes, refreshAiConfigs, refreshPromptConfigs } = useApp();
+    const { backgroundImage, backgroundSettings, setBackgroundImage, updateBackgroundSettings, resetBackgroundSettings } = useSettings();
     const [activeTab, setActiveTab] = useState<SettingsTab>("general");
     const [trayEnabled, setTrayEnabled] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -105,6 +108,38 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             console.error("Failed to update tray:", error);
         }
     };
+
+    const handlePickBackgroundImage = useCallback(async () => {
+        try {
+            const selected = await open({
+                multiple: false,
+                filters: [{
+                    name: "图片文件",
+                    extensions: ["jpg", "jpeg", "png", "webp", "gif", "bmp"],
+                }],
+            });
+            if (selected) {
+                setBackgroundImage(selected);
+            }
+        } catch (error) {
+            console.error("Failed to pick background image:", error);
+        }
+    }, [setBackgroundImage]);
+
+    const previewOverlayStyle = useMemo(() => ({
+        backdropFilter: `blur(${backgroundSettings.blur}px)`,
+        backgroundColor: `rgb(248 250 252 / ${backgroundSettings.overlayOpacity}%)`,
+    }), [backgroundSettings]);
+
+    const previewPanelStyle = useMemo(() => ({
+        backgroundColor: `rgb(248 250 252 / ${backgroundSettings.contentOpacity}%)`,
+        backdropFilter: `blur(${Math.max(0, backgroundSettings.blur - 2)}px)`,
+        boxShadow: "0 18px 40px rgba(15, 23, 42, 0.08)",
+    }), [backgroundSettings]);
+
+    const previewGlowStyle = useMemo(() => ({
+        background: "linear-gradient(135deg, rgb(255 255 255 / 48%) 0%, rgb(255 255 255 / 8%) 42%, rgb(59 130 246 / 16%) 100%)",
+    }), []);
 
     // AI Config handlers
     const createEmptyAiConfig = (): AiConfig => ({
@@ -558,15 +593,22 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         onCancel: () => void;
         onConfirm: () => void;
     }) => (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onCancel}>
-            <div className="bg-white dark:bg-vnote-card rounded-2xl p-6 w-[360px] max-w-[90vw] shadow-2xl" onClick={e => e.stopPropagation()}>
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 mb-2">确认删除</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6">
-                    确定要删除配置「{title}」吗？此操作无法撤销。
-                </p>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/34 backdrop-blur-md" onClick={onCancel}>
+            <div className="w-[360px] max-w-[90vw] rounded-[24px] border border-white/45 dark:border-vnote-border/80 bg-white/74 dark:bg-vnote-card/46 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.26)]" onClick={e => e.stopPropagation()}>
+                <div className="flex items-start gap-3 mb-5">
+                    <div className="mt-0.5 h-10 w-10 rounded-2xl bg-red-50 dark:bg-red-500/12 border border-red-100 dark:border-red-500/20 flex items-center justify-center">
+                        <Trash2 size={16} className="text-red-500 dark:text-red-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">确认删除</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                            确定要删除配置「{title}」吗？此操作无法撤销。
+                        </p>
+                    </div>
+                </div>
                 <div className="flex gap-3">
-                    <button onClick={onCancel} className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer">取消</button>
-                    <button onClick={onConfirm} className="flex-1 px-4 py-2.5 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-sm cursor-pointer">删除</button>
+                    <button onClick={onCancel} className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-300 border border-slate-200/80 dark:border-vnote-border/80 bg-white/45 dark:bg-white/5 hover:bg-white/70 dark:hover:bg-white/10 rounded-xl transition-colors cursor-pointer">取消</button>
+                    <button onClick={onConfirm} className="flex-1 px-4 py-2.5 text-sm font-medium bg-red-500 text-white rounded-xl hover:bg-red-600 transition-colors shadow-sm cursor-pointer">删除</button>
                 </div>
             </div>
         </div>
@@ -695,6 +737,252 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     <button onClick={handleTrayToggle} className={["relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer", trayEnabled ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-600"].join(" ")}>
                                         <span className={["inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform", trayEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
                                     </button>
+                                </div>
+                                {/* 背景图片设置 */}
+                                <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/70 dark:bg-vnote-card/40 backdrop-blur-xl shadow-soft overflow-hidden">
+                                    <div className="flex items-center gap-4 p-5 border-b border-slate-200/70 dark:border-vnote-border/70">
+                                        <div className="h-10 w-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 flex items-center justify-center shadow-sm">
+                                            <ImagePlus size={18} className="text-blue-500 dark:text-blue-400" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">背景图片</div>
+                                            <div className="text-sm text-slate-500 dark:text-slate-400">左侧预览实际视觉效果，右侧实时调整背景强度与布局参数</div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={resetBackgroundSettings}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 rounded-lg transition-colors cursor-pointer"
+                                            >
+                                                <RefreshCw size={13} />
+                                                恢复默认
+                                            </button>
+                                            {backgroundImage && (
+                                                <button
+                                                    onClick={() => setBackgroundImage(null)}
+                                                    className="px-3 py-1.5 text-xs font-medium text-red-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors cursor-pointer"
+                                                >
+                                                    清除
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,420px)_1fr] gap-5 p-5">
+                                        <div className="space-y-3">
+                                            <div className="text-xs font-semibold tracking-[0.18em] uppercase text-slate-400 dark:text-slate-500">Preview</div>
+                                            {backgroundImage ? (
+                                                <div className="group rounded-[26px] overflow-hidden border border-slate-200/80 dark:border-vnote-border/80 bg-slate-100/80 dark:bg-vnote-surface/70 shadow-soft transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_24px_60px_rgba(15,23,42,0.18)]">
+                                                    <div className="relative aspect-[4/3] overflow-hidden">
+                                                        <img
+                                                            src={convertFileSrc(backgroundImage)}
+                                                            alt="背景预览"
+                                                            className="absolute inset-0 w-full h-full object-cover"
+                                                            style={{
+                                                                objectFit: backgroundSettings.size,
+                                                                objectPosition: backgroundSettings.position,
+                                                            }}
+                                                        />
+                                                        <div className="absolute inset-0" style={previewOverlayStyle} />
+                                                        <div className="absolute inset-0 opacity-90" style={previewGlowStyle} />
+                                                        <div className="absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/35 via-white/10 to-transparent dark:from-white/10 dark:via-white/0 dark:to-transparent" />
+                                                        <div className="relative z-10 h-full p-4 flex flex-col justify-between">
+                                                            <div className="rounded-2xl border border-white/45 dark:border-white/10 px-4 py-3 shadow-soft ring-1 ring-white/20 dark:ring-white/5" style={previewPanelStyle}>
+                                                                <div className="flex items-center justify-between gap-3">
+                                                                    <div>
+                                                                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">VNote Preview</div>
+                                                                        <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">全局背景效果</div>
+                                                                    </div>
+                                                                    <div className="h-8 w-8 rounded-xl bg-blue-500/15 text-blue-500 dark:text-blue-400 flex items-center justify-center">
+                                                                        <SlidersHorizontal size={15} />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="grid grid-cols-2 gap-3">
+                                                                <div className="rounded-2xl border border-white/35 dark:border-white/10 p-3 shadow-soft ring-1 ring-white/15 dark:ring-white/5" style={previewPanelStyle}>
+                                                                    <div className="flex items-center justify-between gap-2">
+                                                                        <div className="text-[11px] text-slate-500 dark:text-slate-400">阅读卡片</div>
+                                                                        <div className="h-1.5 w-1.5 rounded-full bg-emerald-400/80" />
+                                                                    </div>
+                                                                    <div className="mt-2 h-2 rounded-full bg-slate-900/10 dark:bg-white/10" />
+                                                                    <div className="mt-2 h-2 w-3/4 rounded-full bg-slate-900/10 dark:bg-white/10" />
+                                                                    <div className="mt-2 h-2 w-1/2 rounded-full bg-slate-900/10 dark:bg-white/10" />
+                                                                </div>
+                                                                <div className="rounded-2xl border border-white/35 dark:border-white/10 p-3 shadow-soft ring-1 ring-white/15 dark:ring-white/5" style={previewPanelStyle}>
+                                                                    <div className="text-[11px] text-slate-500 dark:text-slate-400">氛围强度</div>
+                                                                    <div className="mt-3 flex items-end justify-between gap-3">
+                                                                        <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{backgroundSettings.overlayOpacity}%</div>
+                                                                        <div className="text-[11px] px-2 py-1 rounded-full bg-white/45 dark:bg-white/10 text-slate-500 dark:text-slate-400">Blur {backgroundSettings.blur}px</div>
+                                                                    </div>
+                                                                    <div className="mt-3 h-1.5 rounded-full bg-white/40 dark:bg-white/10 overflow-hidden">
+                                                                        <div className="h-full rounded-full bg-gradient-to-r from-blue-400 via-cyan-400 to-violet-400" style={{ width: `${backgroundSettings.overlayOpacity}%` }} />
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                        <button
+                                                            onClick={() => setBackgroundImage(null)}
+                                                            className="absolute top-3 right-3 z-20 p-2 bg-black/45 hover:bg-red-500/85 text-white rounded-full transition-colors cursor-pointer"
+                                                        >
+                                                            <XIcon size={12} />
+                                                        </button>
+                                                    </div>
+                                                    <div className="px-4 py-3 border-t border-slate-200/70 dark:border-vnote-border/70 bg-white/60 dark:bg-vnote-card/30">
+                                                        <div className="flex items-center justify-between gap-3">
+                                                            <div className="min-w-0">
+                                                                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Current file</div>
+                                                                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">{backgroundImage}</div>
+                                                            </div>
+                                                            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/5 dark:bg-white/5 text-[11px] text-slate-500 dark:text-slate-400">
+                                                                <SlidersHorizontal size={11} />
+                                                                实时预览
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={handlePickBackgroundImage}
+                                                    className="w-full aspect-[4/3] rounded-2xl border-2 border-dashed border-slate-300 dark:border-slate-600 hover:border-blue-400 dark:hover:border-blue-500 bg-slate-50/80 dark:bg-vnote-surface/40 flex flex-col items-center justify-center gap-3 text-slate-400 dark:text-slate-500 hover:text-blue-500 dark:hover:text-blue-400 transition-colors cursor-pointer"
+                                                >
+                                                    <div className="h-14 w-14 rounded-2xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center">
+                                                        <ImagePlus size={22} />
+                                                    </div>
+                                                    <div className="text-center">
+                                                        <div className="text-sm font-medium">选择一张背景图片</div>
+                                                        <div className="text-xs mt-1">推荐横向高清图片，视觉效果更好</div>
+                                                    </div>
+                                                </button>
+                                            )}
+                                        </div>
+
+                                        <div className="space-y-4">
+                                            <div className="text-xs font-semibold tracking-[0.18em] uppercase text-slate-400 dark:text-slate-500">Controls</div>
+                                            <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/75 dark:bg-vnote-card/35 backdrop-blur-lg p-4 space-y-4 shadow-soft">
+                                                <div className="flex items-center justify-between gap-3">
+                                                    <div>
+                                                        <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">图片来源</div>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">更换后会立即应用到所有支持背景透出的页面</div>
+                                                    </div>
+                                                    <button
+                                                        onClick={handlePickBackgroundImage}
+                                                        className="inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/10 hover:bg-blue-100 dark:hover:bg-blue-500/15 rounded-xl transition-colors cursor-pointer"
+                                                    >
+                                                        <ImagePlus size={15} />
+                                                        {backgroundImage ? "更换图片" : "选择图片"}
+                                                    </button>
+                                                </div>
+
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    <div className="space-y-2 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-slate-50/80 dark:bg-vnote-surface/45 p-3">
+                                                        <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                                                            <ScanText size={14} className="text-blue-500" />
+                                                            背景遮罩强度
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <input type="range" min="20" max="90" value={backgroundSettings.overlayOpacity} onChange={(e) => updateBackgroundSettings({ overlayOpacity: parseInt(e.target.value, 10) })} className="flex-1 h-2 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-blue-500" />
+                                                            <span className="w-10 text-right text-sm font-semibold text-slate-700 dark:text-slate-200">{backgroundSettings.overlayOpacity}%</span>
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400">数值越高，背景越柔和，阅读更稳定</div>
+                                                    </div>
+
+                                                    <div className="space-y-2 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-slate-50/80 dark:bg-vnote-surface/45 p-3">
+                                                        <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                                                            <Focus size={14} className="text-emerald-500" />
+                                                            内容底板强度
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <input type="range" min="10" max="85" value={backgroundSettings.contentOpacity} onChange={(e) => updateBackgroundSettings({ contentOpacity: parseInt(e.target.value, 10) })} className="flex-1 h-2 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-emerald-500" />
+                                                            <span className="w-10 text-right text-sm font-semibold text-slate-700 dark:text-slate-200">{backgroundSettings.contentOpacity}%</span>
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400">调高后正文面板更稳重，调低后背景更有氛围</div>
+                                                    </div>
+
+                                                    <div className="space-y-2 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-slate-50/80 dark:bg-vnote-surface/45 p-3">
+                                                        <div className="flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+                                                            <Sparkles size={14} className="text-violet-500" />
+                                                            背景模糊
+                                                        </div>
+                                                        <div className="flex items-center gap-3">
+                                                            <input type="range" min="0" max="24" value={backgroundSettings.blur} onChange={(e) => updateBackgroundSettings({ blur: parseInt(e.target.value, 10) })} className="flex-1 h-2 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-violet-500" />
+                                                            <span className="w-10 text-right text-sm font-semibold text-slate-700 dark:text-slate-200">{backgroundSettings.blur}px</span>
+                                                        </div>
+                                                        <div className="text-xs text-slate-500 dark:text-slate-400">轻微模糊能保留氛围感，同时减少背景干扰</div>
+                                                    </div>
+
+                                                    <div className="space-y-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-slate-50/80 dark:bg-vnote-surface/45 p-3">
+                                                        <div className="text-sm font-medium text-slate-700 dark:text-slate-300">布局方式</div>
+                                                        <div className="space-y-2">
+                                                            <div className="text-xs text-slate-500 dark:text-slate-400">填充</div>
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                {([
+                                                                    { label: "铺满", value: "cover" },
+                                                                    { label: "完整", value: "contain" },
+                                                                ] as const).map((item) => (
+                                                                    <button
+                                                                        key={item.value}
+                                                                        onClick={() => updateBackgroundSettings({ size: item.value })}
+                                                                        className={[
+                                                                            "px-3 py-2 text-xs font-medium rounded-lg border transition-colors cursor-pointer",
+                                                                            backgroundSettings.size === item.value
+                                                                                ? "border-blue-500 bg-blue-500 text-white"
+                                                                                : "border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                                                                        ].join(" ")}
+                                                                    >
+                                                                        {item.label}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <div className="text-xs text-slate-500 dark:text-slate-400">定位</div>
+                                                            <div className="grid grid-cols-3 gap-2">
+                                                                {([
+                                                                    { label: "顶部", value: "top" },
+                                                                    { label: "居中", value: "center" },
+                                                                    { label: "底部", value: "bottom" },
+                                                                ] as const).map((item) => (
+                                                                    <button
+                                                                        key={item.value}
+                                                                        onClick={() => updateBackgroundSettings({ position: item.value })}
+                                                                        className={[
+                                                                            "px-3 py-2 text-xs font-medium rounded-lg border transition-colors cursor-pointer",
+                                                                            backgroundSettings.position === item.value
+                                                                                ? "border-slate-900 dark:border-slate-100 bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
+                                                                                : "border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                                                                        ].join(" ")}
+                                                                    >
+                                                                        {item.label}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <div className="text-xs text-slate-500 dark:text-slate-400">附着</div>
+                                                            <div className="grid grid-cols-2 gap-2">
+                                                                {([
+                                                                    { label: "固定", value: "fixed" },
+                                                                    { label: "滚动", value: "scroll" },
+                                                                ] as const).map((item) => (
+                                                                    <button
+                                                                        key={item.value}
+                                                                        onClick={() => updateBackgroundSettings({ attachment: item.value })}
+                                                                        className={[
+                                                                            "px-3 py-2 text-xs font-medium rounded-lg border transition-colors cursor-pointer",
+                                                                            backgroundSettings.attachment === item.value
+                                                                                ? "border-violet-500 bg-violet-500 text-white"
+                                                                                : "border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                                                                        ].join(" ")}
+                                                                    >
+                                                                        {item.label}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>

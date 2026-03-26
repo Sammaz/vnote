@@ -54,7 +54,7 @@ export function KnowledgeBaseSearch() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="输入关键词进行语义搜索..."
-          className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-slate-800 dark:text-slate-200 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
+          className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/48 backdrop-blur-md text-slate-800 dark:text-slate-200 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400"
           autoFocus
         />
       </div>
@@ -100,7 +100,7 @@ function SearchResultCard({
   onNavigate: (noteId: string) => void;
 }) {
   return (
-    <div className="p-4 rounded-lg border border-slate-200 dark:border-neutral-700 bg-white dark:bg-neutral-800/80 hover:border-blue-300 dark:hover:border-blue-600/50 transition-colors">
+    <div className="p-4 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/68 dark:bg-vnote-card/42 backdrop-blur-lg hover:border-blue-300 dark:hover:border-blue-600/40 transition-colors shadow-soft">
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <FileText className="w-3.5 h-3.5 text-blue-400" />

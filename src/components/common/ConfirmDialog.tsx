@@ -41,14 +41,14 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/30"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/34 backdrop-blur-md"
       onClick={onCancel}
     >
       <div
-        className="bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border rounded-2xl shadow-2xl w-[420px] max-w-[90vw] overflow-hidden"
+        className="w-[420px] max-w-[90vw] overflow-hidden rounded-[24px] border border-white/45 dark:border-vnote-border/80 bg-white/74 dark:bg-vnote-card/46 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_24px_70px_rgba(15,23,42,0.26)]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between p-6 border-b border-slate-200 dark:border-vnote-border">
+        <div className="flex items-center justify-between p-6 border-b border-slate-200/80 dark:border-vnote-border/80 bg-white/16 dark:bg-black/8 backdrop-blur-md">
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h3>
           <button
             onClick={onCancel}
@@ -61,10 +61,10 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         <div className="p-6">
           <p className="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{message}</p>
         </div>
-        <div className="flex justify-end gap-3 px-6 py-4 bg-slate-50 dark:bg-vnote-surface">
+        <div className="flex justify-end gap-3 px-6 py-4 bg-white/10 dark:bg-black/8 backdrop-blur-md">
           <button
             onClick={onCancel}
-            className="px-5 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border rounded-lg hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
+            className="px-5 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white/50 dark:bg-white/5 border border-slate-200/80 dark:border-vnote-border/80 rounded-xl hover:bg-white/75 dark:hover:bg-white/10 transition-colors cursor-pointer"
             data-tauri-drag-region="false"
           >
             {cancelText}

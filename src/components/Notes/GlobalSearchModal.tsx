@@ -259,23 +259,26 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/34 backdrop-blur-md"
       onClick={onClose}
     >
       <div
         className={cn(
-          "relative flex w-full max-w-5xl mx-4 rounded-2xl shadow-2xl overflow-hidden",
-          "bg-white dark:bg-vnote-bg",
-          "border border-slate-200/60 dark:border-vnote-border",
+          "relative flex w-full max-w-5xl mx-4 rounded-[26px] shadow-[0_28px_90px_rgba(15,23,42,0.30)] overflow-hidden",
+          "bg-white/70 dark:bg-vnote-card/44 backdrop-blur-2xl",
+          "border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5",
           "animate-fade-in"
         )}
         style={{ height: "80vh" }}
         onClick={(e) => e.stopPropagation()}
       >
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-white/32 via-transparent to-blue-500/10 dark:from-white/6 dark:via-transparent dark:to-blue-500/8" />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-white/40 via-white/12 to-transparent dark:from-white/8 dark:via-transparent dark:to-transparent" />
+
         {/* 左侧面板 */}
-        <div className="w-[38%] flex flex-col border-r border-slate-200 dark:border-vnote-border">
+        <div className="relative w-[38%] flex flex-col border-r border-slate-200/70 dark:border-vnote-border/80 bg-white/22 dark:bg-black/6">
           {/* 搜索框 */}
-          <div className="flex-shrink-0 p-4 border-b border-slate-200 dark:border-vnote-border">
+          <div className="flex-shrink-0 p-4 border-b border-slate-200/70 dark:border-vnote-border/80 bg-white/18 dark:bg-black/8 backdrop-blur-md">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input
@@ -394,9 +397,9 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
         </div>
 
         {/* 右侧面板 */}
-        <div className="w-[62%] flex flex-col">
+        <div className="relative w-[62%] flex flex-col bg-white/10 dark:bg-black/4">
           {/* 标题栏 + 关闭按钮 */}
-          <div className="flex-shrink-0 px-5 py-3 border-b border-slate-200 dark:border-vnote-border">
+          <div className="flex-shrink-0 px-5 py-3 border-b border-slate-200/70 dark:border-vnote-border/80 bg-white/16 dark:bg-black/8 backdrop-blur-md">
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0 mr-3">
                 {selectedNote ? (
@@ -449,7 +452,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
           </div>
 
           {/* 预览内容 */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 text-slate-700 dark:text-slate-300">
+          <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 text-slate-700 dark:text-slate-300 bg-white/8 dark:bg-transparent">
             {!selectedNote ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-400 dark:text-slate-500">
                 <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-vnote-surface flex items-center justify-center mb-4">

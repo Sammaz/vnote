@@ -1,9 +1,10 @@
-import { useEffect, useState, lazy, Suspense, useCallback } from "react";
+import { useEffect, useState, lazy, Suspense, useCallback, useMemo } from "react";
 import { Sun, Moon, Minus, Square, X, Settings } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import SettingsPage from "./SettingsPage";
 import { AppProvider, useApp } from "./context/AppContext";
+import { useSettings } from "./context/SettingsContext";
 import { InitializationQueueProvider } from "./context/InitializationQueueContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
@@ -23,7 +24,7 @@ const KnowledgeBasePage = lazy(() => import("./components/KnowledgeBase").then(m
 // 加载占位组件
 function PageLoadingFallback() {
   return (
-    <div className="flex-1 flex items-center justify-center bg-slate-50 dark:bg-vnote-bg">
+    <div className="flex-1 flex items-center justify-center">
       <div className="flex flex-col items-center gap-3">
         <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
         <span className="text-sm text-slate-500 dark:text-slate-400">加载中...</span>
@@ -34,6 +35,7 @@ function PageLoadingFallback() {
 
 function AppContent() {
   const { currentView, setCurrentView } = useApp();
+  const { backgroundImage, backgroundSettings } = useSettings();
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [previousView, setPreviousView] = useState<NavigableViewType>(VIEW_TYPES.HOME);
 
@@ -150,11 +152,49 @@ function AppContent() {
     setCurrentView(previousView);
   }, [previousView, setCurrentView]);
 
+  const bgStyle = useMemo(() => {
+    if (!backgroundImage) return undefined;
+    return {
+      backgroundImage: `url("${convertFileSrc(backgroundImage)}")`,
+      backgroundSize: backgroundSettings.size,
+      backgroundPosition: backgroundSettings.position,
+      backgroundRepeat: "no-repeat",
+      backgroundAttachment: backgroundSettings.attachment,
+    } as React.CSSProperties;
+  }, [backgroundImage, backgroundSettings]);
+
+  const overlayStyle = useMemo(() => {
+    if (!backgroundImage) return undefined;
+    return {
+      backdropFilter: `blur(${backgroundSettings.blur}px)`,
+      backgroundColor: theme === "dark"
+        ? `rgb(10 10 10 / ${backgroundSettings.overlayOpacity}%)`
+        : `rgb(248 250 252 / ${backgroundSettings.overlayOpacity}%)`,
+    } as React.CSSProperties;
+  }, [backgroundImage, backgroundSettings, theme]);
+
+  const mainSurfaceStyle = useMemo(() => {
+    if (!backgroundImage) return undefined;
+    return {
+      backdropFilter: `blur(${Math.max(0, backgroundSettings.blur - 2)}px)`,
+      backgroundColor: theme === "dark"
+        ? `rgb(10 10 10 / ${backgroundSettings.contentOpacity}%)`
+        : `rgb(248 250 252 / ${backgroundSettings.contentOpacity}%)`,
+    } as React.CSSProperties;
+  }, [backgroundImage, backgroundSettings, theme]);
+
   return (
-    <div className="flex flex-col h-screen w-screen bg-slate-50 dark:bg-vnote-bg text-slate-900 dark:text-slate-100 font-sans overflow-hidden transition-colors duration-300">
+    <div
+      className="flex flex-col h-screen w-screen bg-slate-50 dark:bg-vnote-bg text-slate-900 dark:text-slate-100 font-sans overflow-hidden transition-colors duration-300 relative"
+      style={bgStyle}
+    >
+      {/* 背景图遮罩层 - 磨砂玻璃效果保证文字可读性 */}
+      {backgroundImage && (
+        <div className="absolute inset-0 pointer-events-none z-0" style={overlayStyle} />
+      )}
       {/* Title Bar */}
       <header
-        className="flex items-center h-9 border-b border-slate-200/60 dark:border-vnote-border/60 bg-white/70 dark:bg-vnote-card/70 backdrop-blur-2xl flex-shrink-0 shadow-sm"
+        className="relative z-10 flex items-center h-9 border-b border-slate-200/60 dark:border-vnote-border/60 bg-white/70 dark:bg-vnote-card/70 backdrop-blur-2xl flex-shrink-0 shadow-sm"
         data-tauri-drag-region
         onMouseDown={handleTitleBarMouseDown}
       >
@@ -209,12 +249,18 @@ function AppContent() {
       </header>
 
       {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="relative z-10 flex-1 flex overflow-hidden">
         {/* Sidebar - 仅在非设置页面显示 */}
         {!isSettingsView && <Sidebar />}
 
         {/* Main View */}
-        <main className="flex-1 flex overflow-hidden bg-slate-50 dark:bg-vnote-bg">
+        <main
+          className={cn(
+            "flex-1 flex overflow-hidden",
+            backgroundImage ? "border-l border-white/20 dark:border-white/8" : "bg-slate-50 dark:bg-vnote-bg"
+          )}
+          style={mainSurfaceStyle}
+        >
           {/* 设置页面 - 条件渲染 */}
           {isSettingsView && (
             <SettingsPage

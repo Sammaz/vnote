@@ -33,9 +33,9 @@ export function KnowledgeBasePage() {
   ];
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 dark:bg-vnote-bg overflow-hidden">
+    <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-slate-50/12 dark:bg-vnote-bg/8 backdrop-blur-[2px]">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-vnote-border bg-white/80 dark:bg-vnote-card/50 backdrop-blur-xl">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/36 backdrop-blur-xl">
         <div className="flex items-center gap-3">
           <BookOpen className="w-5 h-5 text-blue-500" />
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
@@ -50,7 +50,7 @@ export function KnowledgeBasePage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 px-6 pt-3 pb-0 bg-white/60 dark:bg-vnote-card/30">
+      <div className="flex gap-1 px-6 pt-3 pb-0 border-b border-slate-200/60 dark:border-vnote-border/60 bg-white/42 dark:bg-vnote-card/20 backdrop-blur-md">
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -69,7 +69,7 @@ export function KnowledgeBasePage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden bg-slate-50 dark:bg-neutral-800/30">
+      <div className="flex-1 overflow-hidden bg-white/16 dark:bg-black/8 backdrop-blur-[3px]">
         {activeTab === "search" && <KnowledgeBaseSearch />}
         {activeTab === "chat" && <KnowledgeBaseChat />}
         {activeTab === "manage" && <KnowledgeBaseManage onStatsChange={loadStats} />}
