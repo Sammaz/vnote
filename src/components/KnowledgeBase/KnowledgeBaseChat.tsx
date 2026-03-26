@@ -1258,7 +1258,7 @@ export function KnowledgeBaseChat() {
                 </span>
               </div>
               <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">
-                语料严格来自 visual_summary
+                回答严格基于当前知识库内容
               </div>
             </div>
 
@@ -1311,7 +1311,7 @@ export function KnowledgeBaseChat() {
                     <div className="rounded-2xl border border-white/60 dark:border-white/8 bg-white/70 dark:bg-white/5 p-4">
                       <div className="text-xs font-medium text-slate-700 dark:text-slate-200">当前回答范围</div>
                       <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">
-                        只基于 visual_summary 检索结果回答；如果证据不足，会明确告诉你缺少哪些依据。
+                        只基于当前知识库检索结果回答；如果证据不足，会明确说明缺少哪些依据。
                       </div>
                     </div>
                   </div>
