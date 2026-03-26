@@ -7,7 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "./context/AppContext";
 import { useSettings } from "./context/SettingsContext";
 import { DataManagementSection } from "./components/Settings/DataManagementSection";
-import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptCategory, PromptConfig } from "./types";
+import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptConfig } from "./types";
 
 interface SettingsPageProps {
     currentTheme: "light" | "dark";
@@ -17,15 +17,6 @@ interface SettingsPageProps {
 
 type SettingsTab = "general" | "model" | "prompt" | "data-management";
 type EditingType = "ai" | "embedding" | "reranker" | null;
-
-// 分类颜色映射
-const categoryColors: Record<PromptCategory, { bg: string; text: string; label: string }> = {
-    summary: { bg: "bg-blue-100 dark:bg-blue-900/30", text: "text-blue-600 dark:text-blue-400", label: "总结类" },
-    analysis: { bg: "bg-purple-100 dark:bg-purple-900/30", text: "text-purple-600 dark:text-purple-400", label: "分析类" },
-    qa: { bg: "bg-green-100 dark:bg-green-900/30", text: "text-green-600 dark:text-green-400", label: "问答类" },
-    creative: { bg: "bg-orange-100 dark:bg-orange-900/30", text: "text-orange-600 dark:text-orange-400", label: "创作类" },
-    other: { bg: "bg-slate-100 dark:bg-slate-700/30", text: "text-slate-600 dark:text-slate-400", label: "其他" },
-};
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
     const { notes, refreshAiConfigs, refreshPromptConfigs } = useApp();
@@ -62,7 +53,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
     // Prompt filter state
     const [promptSearchQuery, setPromptSearchQuery] = useState("");
-    const [promptCategoryFilter, setPromptCategoryFilter] = useState<PromptCategory | "all">("all");
     const [promptSortBy, setPromptSortBy] = useState<"recent" | "name">("recent");
 
     // Load settings from database on mount
@@ -354,8 +344,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         title: "",
         description: null,
         content: "",
-        category: "other",
-        recommended_model_id: null,
         sort_order: promptConfigs.length,
         is_default: false,
         created_at: new Date().toISOString(),
@@ -410,11 +398,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             );
         }
 
-        // Apply category filter
-        if (promptCategoryFilter !== "all") {
-            filtered = filtered.filter(p => p.category === promptCategoryFilter);
-        }
-
         // Apply sorting
         switch (promptSortBy) {
             case "name":
@@ -425,7 +408,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                     new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
                 );
         }
-    }, [promptConfigs, promptSearchQuery, promptCategoryFilter, promptSortBy]);
+    }, [promptConfigs, promptSearchQuery, promptSortBy]);
 
     const closeEditor = () => {
         setEditingType(null);
@@ -1043,36 +1026,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     <p className="text-sm text-slate-500 mt-2">编写清晰、详细的 Prompt 指令，让 AI 能够准确理解你的需求</p>
                                 </div>
 
-                                <div className="flex flex-col w-full">
-                                    <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">分类</div>
-                                    <select
-                                        value={editingPromptConfig.category}
-                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, category: e.target.value as PromptCategory })}
-                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
-                                    >
-                                        <option value="summary">总结类</option>
-                                        <option value="analysis">分析类</option>
-                                        <option value="qa">问答类</option>
-                                        <option value="creative">创作类</option>
-                                        <option value="other">其他</option>
-                                    </select>
-                                    <p className="text-sm text-slate-500 mt-2">选择提示词的类型，便于分类管理</p>
-                                </div>
-
-                                <div className="flex flex-col w-full">
-                                    <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">推荐模型</div>
-                                    <select
-                                        value={editingPromptConfig.recommended_model_id || ""}
-                                        onChange={e => setEditingPromptConfig({ ...editingPromptConfig, recommended_model_id: e.target.value || null })}
-                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
-                                    >
-                                        <option value="">无</option>
-                                        {aiConfigs.map(config => (
-                                            <option key={config.id} value={config.id.toString()}>{config.title}</option>
-                                        ))}
-                                    </select>
-                                    <p className="text-sm text-slate-500 mt-2">可选，指定使用此提示词时推荐的模型</p>
-                                </div>
                             </div>
                             <div className="flex gap-3 pt-6">
                                 <button
@@ -1106,18 +1059,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     />
                                 </div>
                                 <select
-                                    value={promptCategoryFilter}
-                                    onChange={e => setPromptCategoryFilter(e.target.value as PromptCategory | "all")}
-                                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                >
-                                    <option value="all">全部分类</option>
-                                    <option value="summary">总结类</option>
-                                    <option value="analysis">分析类</option>
-                                    <option value="qa">问答类</option>
-                                    <option value="creative">创作类</option>
-                                    <option value="other">其他</option>
-                                </select>
-                                <select
                                     value={promptSortBy}
                                     onChange={e => setPromptSortBy(e.target.value as "recent" | "name")}
                                     className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -1138,16 +1079,12 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                             {filteredPrompts.length > 0 ? (
                                 <div className="grid grid-cols-3 gap-4">
                                     {filteredPrompts.map((prompt) => {
-                                        const colors = categoryColors[prompt.category];
                                         return (
                                             <div
                                                 key={prompt.id}
                                                 className="group relative rounded-xl overflow-hidden p-5 bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 flex flex-col h-full"
                                             >
-                                                <span className={`px-2 py-0.5 text-xs rounded ${colors.bg} ${colors.text} self-start`}>
-                                                    {colors.label}
-                                                </span>
-                                                <h3 className="text-slate-900 dark:text-slate-100 font-medium mt-3 line-clamp-1">
+                                                <h3 className="text-slate-900 dark:text-slate-100 font-medium line-clamp-1">
                                                     {prompt.title}
                                                 </h3>
                                                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 line-clamp-2 flex-1">
@@ -1176,7 +1113,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     <MessageSquareText size={48} className="mx-auto text-slate-600 mb-4" />
                                     <h3 className="text-lg font-medium text-slate-500 dark:text-slate-400 mb-2">暂无提示词</h3>
                                     <p className="text-sm text-slate-500 mb-4">
-                                        {promptSearchQuery || promptCategoryFilter !== "all"
+                                        {promptSearchQuery
                                             ? "没有找到匹配的提示词"
                                             : "创建您的第一个提示词模板，提升笔记生成效率"}
                                     </p>

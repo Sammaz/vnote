@@ -822,7 +822,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return "";
   }, [currentModelId, note.model_id, aiConfigs]);
 
-  const customSummaryPromptConfigs = promptConfigs.filter(p => p.category === "summary");
+  const customSummaryPromptConfigs = promptConfigs;
 
   // 自定义下拉框状态
   const [showModelDropdown, setShowModelDropdown] = useState(false);

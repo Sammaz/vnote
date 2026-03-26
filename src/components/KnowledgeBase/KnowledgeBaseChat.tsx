@@ -253,17 +253,14 @@ export function KnowledgeBaseChat() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadedImagesRef = useRef<UploadedImage[]>([]);
 
-  const qaPromptConfigs = useMemo(
-    () => promptConfigs.filter((config) => config.category === "qa"),
-    [promptConfigs]
-  );
+  const availablePromptConfigs = useMemo(() => promptConfigs, [promptConfigs]);
   const activeModel = useMemo(
     () => aiConfigs.find((config) => config.id === localModelId) ?? null,
     [aiConfigs, localModelId]
   );
   const activePrompt = useMemo(
-    () => qaPromptConfigs.find((config) => config.id === selectedPromptId) ?? null,
-    [qaPromptConfigs, selectedPromptId]
+    () => availablePromptConfigs.find((config) => config.id === selectedPromptId) ?? null,
+    [availablePromptConfigs, selectedPromptId]
   );
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
@@ -1539,7 +1536,7 @@ export function KnowledgeBaseChat() {
                         >
                           无提示词
                         </button>
-                        {qaPromptConfigs.map((config) => (
+                        {availablePromptConfigs.map((config) => (
                           <button
                             key={config.id}
                             onClick={() => void handlePromptChange(config.id)}

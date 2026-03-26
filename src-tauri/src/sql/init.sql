@@ -86,13 +86,10 @@ CREATE TABLE IF NOT EXISTS prompt_configs (
     title TEXT NOT NULL,
     description TEXT,
     content TEXT NOT NULL,
-    category TEXT NOT NULL DEFAULT 'other',
-    recommended_model_id TEXT,
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_default INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
-    FOREIGN KEY (recommended_model_id) REFERENCES ai_configs(id) ON DELETE SET NULL
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS optimized_subtitles (

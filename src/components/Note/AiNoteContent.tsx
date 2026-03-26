@@ -146,9 +146,7 @@ export function AiNoteContent({
   const aiNoteMeta = parseAiNoteMeta(note.ai_note_meta);
   const aiNoteStyle = parseAiNoteStyle(aiNoteMeta?.style) ?? "detailed";
   const hasCustomPrompt = Boolean(aiNoteMeta?.custom_prompt?.trim());
-  const aiNotePromptConfigs = promptConfigs.filter(
-    (prompt) => prompt.category === "summary" || prompt.category === "analysis"
-  );
+  const aiNotePromptConfigs = promptConfigs;
 
   const getDefaultModelId = useCallback(() => {
     if (currentModelId) return currentModelId;

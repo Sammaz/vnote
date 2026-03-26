@@ -216,8 +216,6 @@ pub struct PromptConfig {
     pub title: String,
     pub description: Option<String>,
     pub content: String,
-    pub category: String,
-    pub recommended_model_id: Option<String>,
     pub sort_order: i32,
     pub is_default: bool,
     pub created_at: String,
@@ -1407,8 +1405,7 @@ impl Database {
     pub fn get_all_prompt_configs(&self) -> SqliteResult<Vec<PromptConfig>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, description, content, category, recommended_model_id,
-                    sort_order, is_default, created_at, updated_at
+            "SELECT id, title, description, content, sort_order, is_default, created_at, updated_at
              FROM prompt_configs ORDER BY is_default DESC, updated_at DESC"
         )?;
 
@@ -1418,12 +1415,10 @@ impl Database {
                 title: row.get(1)?,
                 description: row.get(2)?,
                 content: row.get(3)?,
-                category: row.get(4)?,
-                recommended_model_id: row.get(5)?,
-                sort_order: row.get(6)?,
-                is_default: row.get::<_, i64>(7)? != 0,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                sort_order: row.get(4)?,
+                is_default: row.get::<_, i64>(5)? != 0,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
             })
         })?;
 
@@ -1434,15 +1429,13 @@ impl Database {
         let conn = self.connection();
         let new_id = snowflake::generate_id_string();
         conn.execute(
-            "INSERT INTO prompt_configs (id, title, description, content, category, recommended_model_id, sort_order, is_default)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO prompt_configs (id, title, description, content, sort_order, is_default)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             (
                 &new_id,
                 &config.title,
                 &config.description,
                 &config.content,
-                &config.category,
-                &config.recommended_model_id,
                 config.sort_order,
                 config.is_default as i32
             ),
@@ -1454,16 +1447,13 @@ impl Database {
         let conn = self.connection();
         conn.execute(
             "UPDATE prompt_configs SET
-                title = ?1, description = ?2, content = ?3, category = ?4,
-                recommended_model_id = ?5, sort_order = ?6, is_default = ?7,
+                title = ?1, description = ?2, content = ?3, sort_order = ?4, is_default = ?5,
                 updated_at = datetime('now', 'localtime')
-             WHERE id = ?8",
+             WHERE id = ?6",
             (
                 &config.title,
                 &config.description,
                 &config.content,
-                &config.category,
-                &config.recommended_model_id,
                 config.sort_order,
                 config.is_default as i32,
                 &config.id

@@ -174,22 +174,12 @@ export interface VideoToolbarSettings {
   captionsEnabled: boolean; // 字幕开关状态，默认 true
 }
 
-// 提示词分类
-export type PromptCategory =
-  | "summary"    // 总结类
-  | "analysis"   // 分析类
-  | "qa"         // 问答类
-  | "creative"   // 创作类
-  | "other";     // 其他
-
 // 提示词配置
 export interface PromptConfig {
   id: string;
   title: string;
   description: string | null;
   content: string;
-  category: PromptCategory;
-  recommended_model_id: string | null;
   sort_order: number;
   is_default: boolean;
   created_at: string;
