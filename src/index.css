@@ -366,11 +366,17 @@ input[type="password"]::-ms-clear {
   }
 }
 
-/* ===== 聊天窗口 Markdown 样式 ===== */
-.chat-markdown {
+/* ===== 聊天窗口 Markdown / 流式文本样式 ===== */
+.chat-markdown,
+.chat-streaming-content {
   font-size: 0.875rem;
   line-height: 1.6;
   color: inherit;
+}
+
+.chat-streaming-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* 段落 */

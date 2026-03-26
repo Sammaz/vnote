@@ -2230,6 +2230,14 @@ pub fn run() {
             knowledge_base::knowledge_base_search,
             knowledge_base::knowledge_base_chat,
             knowledge_base::knowledge_base_abort_chat,
+            knowledge_base::knowledge_base_list_chat_sessions,
+            knowledge_base::knowledge_base_get_chat_session,
+            knowledge_base::knowledge_base_delete_chat_session,
+            knowledge_base::knowledge_base_rename_chat_session,
+            knowledge_base::knowledge_base_set_chat_session_pinned,
+            knowledge_base::knowledge_base_update_chat_session,
+            knowledge_base::knowledge_base_get_chat_preferences,
+            knowledge_base::knowledge_base_save_chat_preferences,
             knowledge_base::knowledge_base_get_stats,
         ])
         .on_window_event(|window, event| {

@@ -188,3 +188,105 @@ CREATE TABLE IF NOT EXISTS knowledge_index_status (
 );
 
 CREATE INDEX IF NOT EXISTS idx_knowledge_index_status_status ON knowledge_index_status(status);
+
+CREATE TABLE IF NOT EXISTS knowledge_chat_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    mode TEXT NOT NULL CHECK(mode IN ('standard', 'agent')),
+    model_id TEXT,
+    prompt_id TEXT,
+    is_pinned INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    last_message_at TEXT,
+    FOREIGN KEY (model_id) REFERENCES ai_configs(id) ON DELETE SET NULL,
+    FOREIGN KEY (prompt_id) REFERENCES prompt_configs(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chat_sessions_updated_at ON knowledge_chat_sessions(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chat_sessions_last_message_at ON knowledge_chat_sessions(last_message_at DESC);
+
+CREATE TABLE IF NOT EXISTS knowledge_chat_messages (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('user', 'assistant', 'system')),
+    content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('streaming', 'completed', 'error', 'aborted')),
+    request_id TEXT,
+    parent_message_id TEXT,
+    model_id TEXT,
+    prompt_id TEXT,
+    error_message TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (session_id) REFERENCES knowledge_chat_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (parent_message_id) REFERENCES knowledge_chat_messages(id) ON DELETE SET NULL,
+    FOREIGN KEY (model_id) REFERENCES ai_configs(id) ON DELETE SET NULL,
+    FOREIGN KEY (prompt_id) REFERENCES prompt_configs(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chat_messages_session_id ON knowledge_chat_messages(session_id, created_at ASC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_chat_messages_request_id ON knowledge_chat_messages(request_id);
+
+CREATE TABLE IF NOT EXISTS knowledge_chat_message_sources (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    chunk_id TEXT NOT NULL,
+    note_id TEXT NOT NULL,
+    rank INTEGER NOT NULL,
+    score REAL,
+    query_text TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (message_id) REFERENCES knowledge_chat_messages(id) ON DELETE CASCADE,
+    FOREIGN KEY (chunk_id) REFERENCES knowledge_chunks(id) ON DELETE CASCADE,
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chat_message_sources_message_id ON knowledge_chat_message_sources(message_id, rank ASC);
+
+CREATE TABLE IF NOT EXISTS knowledge_agent_runs (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('running', 'completed', 'failed', 'aborted')),
+    iteration_count INTEGER NOT NULL DEFAULT 0,
+    plan_summary TEXT,
+    final_summary TEXT,
+    error_message TEXT,
+    started_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    completed_at TEXT,
+    FOREIGN KEY (session_id) REFERENCES knowledge_chat_sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (message_id) REFERENCES knowledge_chat_messages(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_agent_runs_session_id ON knowledge_agent_runs(session_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_knowledge_agent_runs_message_id ON knowledge_agent_runs(message_id);
+
+CREATE TABLE IF NOT EXISTS knowledge_agent_trace_steps (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    step_index INTEGER NOT NULL,
+    step_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    metadata_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (run_id) REFERENCES knowledge_agent_runs(id) ON DELETE CASCADE,
+    UNIQUE(run_id, step_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_agent_trace_steps_run_id ON knowledge_agent_trace_steps(run_id, step_index ASC);
+
+CREATE TABLE IF NOT EXISTS knowledge_chat_preferences (
+    id TEXT PRIMARY KEY,
+    default_mode TEXT NOT NULL DEFAULT 'agent' CHECK(default_mode IN ('standard', 'agent')),
+    default_model_id TEXT,
+    default_prompt_id TEXT,
+    show_agent_trace INTEGER NOT NULL DEFAULT 1,
+    show_sources_expanded INTEGER NOT NULL DEFAULT 1,
+    compact_message_density INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (default_model_id) REFERENCES ai_configs(id) ON DELETE SET NULL,
+    FOREIGN KEY (default_prompt_id) REFERENCES prompt_configs(id) ON DELETE SET NULL
+);

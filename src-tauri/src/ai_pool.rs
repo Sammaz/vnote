@@ -53,7 +53,7 @@ pub struct ImageData {
 }
 
 /// 流式事件（与chat.rs保持兼容）
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type")]
 pub enum StreamEvent {
     Start { message_id: String },
@@ -616,6 +616,53 @@ fn calculate_retry_delay(attempt: u32) -> std::time::Duration {
     std::time::Duration::from_millis(delay_ms)
 }
 
+#[derive(Debug, Clone)]
+struct StreamingAttemptError {
+    message: String,
+    emitted_content: bool,
+}
+
+fn normalize_stream_delta(accumulated: &mut String, incoming: &str) -> String {
+    if incoming.is_empty() {
+        return String::new();
+    }
+
+    if accumulated.is_empty() {
+        accumulated.push_str(incoming);
+        return incoming.to_string();
+    }
+
+    if incoming.starts_with(accumulated.as_str()) {
+        let suffix = incoming[accumulated.len()..].to_string();
+        accumulated.clear();
+        accumulated.push_str(incoming);
+        return suffix;
+    }
+
+    if accumulated.starts_with(incoming) || accumulated.ends_with(incoming) {
+        return String::new();
+    }
+
+    let max_overlap = accumulated.len().min(incoming.len());
+    let mut overlap = 0;
+
+    for candidate in (1..=max_overlap).rev() {
+        let accumulated_start = accumulated.len() - candidate;
+        if !accumulated.is_char_boundary(accumulated_start) || !incoming.is_char_boundary(candidate) {
+            continue;
+        }
+
+        if accumulated[accumulated_start..] == incoming[..candidate] {
+            overlap = candidate;
+            break;
+        }
+    }
+
+    let suffix = incoming[overlap..].to_string();
+    accumulated.push_str(&suffix);
+    suffix
+}
+
 /// 实际的流式API调用实现（带重试）
 async fn execute_streaming_chat_impl(
     pool: &AiPoolManager,
@@ -634,17 +681,22 @@ async fn execute_streaming_chat_impl(
 
         match execute_streaming_chat_single_attempt(pool, &req, &rag_context, &abort_flag).await {
             Ok(()) => return Ok(()),
-            Err(e) => {
-                last_error = e.clone();
+            Err(error) => {
+                last_error = error.message.clone();
+
+                // 如果已经输出过内容，则不要重试，避免新一次请求重复输出前缀内容
+                if error.emitted_content {
+                    return Err(error.message);
+                }
 
                 // 如果是取消请求，不重试
-                if e.contains("请求已取消") {
-                    return Err(e);
+                if error.message.contains("请求已取消") {
+                    return Err(error.message);
                 }
 
                 // 如果错误不可重试，直接返回
-                if !is_retryable_error(&e) {
-                    return Err(e);
+                if !is_retryable_error(&error.message) {
+                    return Err(error.message);
                 }
 
                 // 如果还有重试机会，等待后重试
@@ -654,7 +706,7 @@ async fn execute_streaming_chat_impl(
                         "流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
                         attempt,
                         max_retries,
-                        e,
+                        error.message,
                         delay.as_millis()
                     );
                     tokio::time::sleep(delay).await;
@@ -675,7 +727,7 @@ async fn execute_streaming_chat_single_attempt(
     req: &StreamingChatRequest,
     rag_context: &Option<String>,
     abort_flag: &Arc<AtomicBool>,
-) -> Result<(), String> {
+) -> Result<(), StreamingAttemptError> {
     let client = pool.get_or_create_http_client(&req.config.id, req.config.request_timeout).await;
 
     // 构建消息数组
@@ -745,17 +797,26 @@ async fn execute_streaming_chat_single_attempt(
         .json(&body)
         .send()
         .await
-        .map_err(|e| format!("请求失败: {}", e))?;
+        .map_err(|e| StreamingAttemptError {
+            message: format!("请求失败: {}", e),
+            emitted_content: false,
+        })?;
 
     // 再次检查中止
     if abort_flag.load(Ordering::Relaxed) {
-        return Err("请求已取消".to_string());
+        return Err(StreamingAttemptError {
+            message: "请求已取消".to_string(),
+            emitted_content: false,
+        });
     }
 
     if !response.status().is_success() {
         let status = response.status();
         let error_text = response.text().await.unwrap_or_default();
-        return Err(format!("API错误 {}: {}", status, error_text));
+        return Err(StreamingAttemptError {
+            message: format!("API错误 {}: {}", status, error_text),
+            emitted_content: false,
+        });
     }
 
     // 发送开始事件
@@ -770,14 +831,22 @@ async fn execute_streaming_chat_single_attempt(
     // 处理SSE流
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
+    let mut normalized_content = String::new();
+    let mut emitted_content = false;
 
     while let Some(chunk_result) = stream.next().await {
         // 检查中止
         if abort_flag.load(Ordering::Relaxed) {
-            return Err("请求已取消".to_string());
+            return Err(StreamingAttemptError {
+                message: "请求已取消".to_string(),
+                emitted_content,
+            });
         }
 
-        let chunk = chunk_result.map_err(|e| format!("流错误: {}", e))?;
+        let chunk = chunk_result.map_err(|e| StreamingAttemptError {
+            message: format!("流错误: {}", e),
+            emitted_content,
+        })?;
         let chunk_str = String::from_utf8_lossy(&chunk);
         buffer.push_str(&chunk_str);
 
@@ -793,11 +862,13 @@ async fn execute_streaming_chat_single_attempt(
             if let Some(data) = line.strip_prefix("data: ") {
                 if let Ok(json) = serde_json::from_str::<Value>(data) {
                     if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
-                        if !content.is_empty() {
+                        let delta = normalize_stream_delta(&mut normalized_content, content);
+                        if !delta.is_empty() {
+                            emitted_content = true;
                             let _ = req.app.emit(
                                 &req.event_name,
                                 StreamEvent::Delta {
-                                    content: content.to_string(),
+                                    content: delta,
                                 },
                             );
                         }

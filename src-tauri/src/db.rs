@@ -109,6 +109,86 @@ pub struct KnowledgeIndexStatus {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeChatSession {
+    pub id: String,
+    pub title: String,
+    pub mode: String,
+    pub model_id: Option<String>,
+    pub prompt_id: Option<String>,
+    pub is_pinned: bool,
+    pub created_at: String,
+    pub updated_at: String,
+    pub last_message_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeChatMessage {
+    pub id: String,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub status: String,
+    pub request_id: Option<String>,
+    pub parent_message_id: Option<String>,
+    pub model_id: Option<String>,
+    pub prompt_id: Option<String>,
+    pub error_message: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeChatMessageSource {
+    pub id: String,
+    pub message_id: String,
+    pub chunk_id: String,
+    pub note_id: String,
+    pub rank: i32,
+    pub score: Option<f32>,
+    pub query_text: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeAgentRun {
+    pub id: String,
+    pub session_id: String,
+    pub message_id: String,
+    pub status: String,
+    pub iteration_count: i32,
+    pub plan_summary: Option<String>,
+    pub final_summary: Option<String>,
+    pub error_message: Option<String>,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeAgentTraceStep {
+    pub id: String,
+    pub run_id: String,
+    pub step_index: i32,
+    pub step_type: String,
+    pub title: String,
+    pub content: String,
+    pub metadata_json: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeChatPreferences {
+    pub id: String,
+    pub default_mode: String,
+    pub default_model_id: Option<String>,
+    pub default_prompt_id: Option<String>,
+    pub show_agent_trace: bool,
+    pub show_sources_expanded: bool,
+    pub compact_message_density: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EmbeddingConfig {
     pub id: String,
     pub title: String,
@@ -2129,6 +2209,521 @@ impl Database {
         let conn = self.connection();
         let count: i32 = conn.query_row("SELECT COUNT(*) FROM knowledge_chunks", [], |row| row.get(0))?;
         Ok(count)
+    }
+
+    pub fn get_knowledge_chat_sessions(&self) -> SqliteResult<Vec<KnowledgeChatSession>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, mode, model_id, prompt_id, is_pinned, created_at, updated_at, last_message_at
+             FROM knowledge_chat_sessions
+             ORDER BY is_pinned DESC, COALESCE(last_message_at, updated_at) DESC, created_at DESC"
+        )?;
+        let sessions = stmt.query_map([], |row| {
+            Ok(KnowledgeChatSession {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                mode: row.get(2)?,
+                model_id: row.get(3)?,
+                prompt_id: row.get(4)?,
+                is_pinned: row.get::<_, i64>(5)? != 0,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                last_message_at: row.get(8)?,
+            })
+        })?;
+        sessions.collect()
+    }
+
+    pub fn get_knowledge_chat_session_by_id(&self, session_id: &str) -> SqliteResult<Option<KnowledgeChatSession>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, mode, model_id, prompt_id, is_pinned, created_at, updated_at, last_message_at
+             FROM knowledge_chat_sessions WHERE id = ?1"
+        )?;
+        let result = stmt.query_row([session_id], |row| {
+            Ok(KnowledgeChatSession {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                mode: row.get(2)?,
+                model_id: row.get(3)?,
+                prompt_id: row.get(4)?,
+                is_pinned: row.get::<_, i64>(5)? != 0,
+                created_at: row.get(6)?,
+                updated_at: row.get(7)?,
+                last_message_at: row.get(8)?,
+            })
+        }).optional()?;
+        Ok(result)
+    }
+
+    pub fn create_knowledge_chat_session(
+        &self,
+        title: &str,
+        mode: &str,
+        model_id: Option<&str>,
+        prompt_id: Option<&str>,
+    ) -> SqliteResult<KnowledgeChatSession> {
+        let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
+        conn.execute(
+            "INSERT INTO knowledge_chat_sessions (id, title, mode, model_id, prompt_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![&new_id, title, mode, model_id, prompt_id],
+        )?;
+        self.get_knowledge_chat_session_by_id(&new_id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn update_knowledge_chat_session(
+        &self,
+        session_id: &str,
+        title: &str,
+        mode: &str,
+        model_id: Option<&str>,
+        prompt_id: Option<&str>,
+        is_pinned: bool,
+    ) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "UPDATE knowledge_chat_sessions
+             SET title = ?2,
+                 mode = ?3,
+                 model_id = ?4,
+                 prompt_id = ?5,
+                 is_pinned = ?6,
+                 updated_at = datetime('now', 'localtime')
+             WHERE id = ?1",
+            rusqlite::params![session_id, title, mode, model_id, prompt_id, is_pinned as i32],
+        )?;
+        Ok(())
+    }
+
+    pub fn rename_knowledge_chat_session(&self, session_id: &str, title: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "UPDATE knowledge_chat_sessions
+             SET title = ?2,
+                 updated_at = datetime('now', 'localtime')
+             WHERE id = ?1",
+            rusqlite::params![session_id, title],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_knowledge_chat_session_pinned(&self, session_id: &str, is_pinned: bool) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "UPDATE knowledge_chat_sessions
+             SET is_pinned = ?2,
+                 updated_at = datetime('now', 'localtime')
+             WHERE id = ?1",
+            rusqlite::params![session_id, is_pinned as i32],
+        )?;
+        Ok(())
+    }
+
+    pub fn touch_knowledge_chat_session(&self, session_id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "UPDATE knowledge_chat_sessions
+             SET updated_at = datetime('now', 'localtime'),
+                 last_message_at = datetime('now', 'localtime')
+             WHERE id = ?1",
+            rusqlite::params![session_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_knowledge_chat_session(&self, session_id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("DELETE FROM knowledge_chat_sessions WHERE id = ?1", [session_id])?;
+        Ok(())
+    }
+
+    pub fn get_knowledge_chat_messages(&self, session_id: &str) -> SqliteResult<Vec<KnowledgeChatMessage>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message, created_at, updated_at
+             FROM knowledge_chat_messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
+        )?;
+        let messages = stmt.query_map([session_id], |row| {
+            Ok(KnowledgeChatMessage {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                status: row.get(4)?,
+                request_id: row.get(5)?,
+                parent_message_id: row.get(6)?,
+                model_id: row.get(7)?,
+                prompt_id: row.get(8)?,
+                error_message: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        })?;
+        messages.collect()
+    }
+
+    pub fn get_knowledge_chat_message_by_id(&self, message_id: &str) -> SqliteResult<Option<KnowledgeChatMessage>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message, created_at, updated_at
+             FROM knowledge_chat_messages WHERE id = ?1"
+        )?;
+        let result = stmt.query_row([message_id], |row| {
+            Ok(KnowledgeChatMessage {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                status: row.get(4)?,
+                request_id: row.get(5)?,
+                parent_message_id: row.get(6)?,
+                model_id: row.get(7)?,
+                prompt_id: row.get(8)?,
+                error_message: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+            })
+        }).optional()?;
+        Ok(result)
+    }
+
+    pub fn create_knowledge_chat_message(
+        &self,
+        session_id: &str,
+        role: &str,
+        content: &str,
+        status: &str,
+        request_id: Option<&str>,
+        parent_message_id: Option<&str>,
+        model_id: Option<&str>,
+        prompt_id: Option<&str>,
+        error_message: Option<&str>,
+    ) -> SqliteResult<KnowledgeChatMessage> {
+        let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
+        conn.execute(
+            "INSERT INTO knowledge_chat_messages (
+                id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                &new_id,
+                session_id,
+                role,
+                content,
+                status,
+                request_id,
+                parent_message_id,
+                model_id,
+                prompt_id,
+                error_message,
+            ],
+        )?;
+        self.touch_knowledge_chat_session(session_id)?;
+        self.get_knowledge_chat_message_by_id(&new_id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn update_knowledge_chat_message_content(
+        &self,
+        message_id: &str,
+        content: &str,
+        status: &str,
+        error_message: Option<&str>,
+    ) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "UPDATE knowledge_chat_messages
+             SET content = ?2,
+                 status = ?3,
+                 error_message = ?4,
+                 updated_at = datetime('now', 'localtime')
+             WHERE id = ?1",
+            rusqlite::params![message_id, content, status, error_message],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_knowledge_chat_message_sources(&self, message_id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("DELETE FROM knowledge_chat_message_sources WHERE message_id = ?1", [message_id])?;
+        Ok(())
+    }
+
+    pub fn create_knowledge_chat_message_source(
+        &self,
+        message_id: &str,
+        chunk_id: &str,
+        note_id: &str,
+        rank: i32,
+        score: Option<f32>,
+        query_text: Option<&str>,
+    ) -> SqliteResult<KnowledgeChatMessageSource> {
+        let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
+        conn.execute(
+            "INSERT INTO knowledge_chat_message_sources (id, message_id, chunk_id, note_id, rank, score, query_text)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![&new_id, message_id, chunk_id, note_id, rank, score, query_text],
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT id, message_id, chunk_id, note_id, rank, score, query_text, created_at
+             FROM knowledge_chat_message_sources WHERE id = ?1"
+        )?;
+        stmt.query_row([&new_id], |row| {
+            Ok(KnowledgeChatMessageSource {
+                id: row.get(0)?,
+                message_id: row.get(1)?,
+                chunk_id: row.get(2)?,
+                note_id: row.get(3)?,
+                rank: row.get(4)?,
+                score: row.get(5)?,
+                query_text: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })
+    }
+
+    pub fn get_knowledge_chat_message_sources(&self, message_id: &str) -> SqliteResult<Vec<KnowledgeChatMessageSource>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, message_id, chunk_id, note_id, rank, score, query_text, created_at
+             FROM knowledge_chat_message_sources WHERE message_id = ?1 ORDER BY rank ASC, rowid ASC"
+        )?;
+        let sources = stmt.query_map([message_id], |row| {
+            Ok(KnowledgeChatMessageSource {
+                id: row.get(0)?,
+                message_id: row.get(1)?,
+                chunk_id: row.get(2)?,
+                note_id: row.get(3)?,
+                rank: row.get(4)?,
+                score: row.get(5)?,
+                query_text: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        sources.collect()
+    }
+
+    pub fn create_knowledge_agent_run(
+        &self,
+        session_id: &str,
+        message_id: &str,
+        status: &str,
+        iteration_count: i32,
+        plan_summary: Option<&str>,
+    ) -> SqliteResult<KnowledgeAgentRun> {
+        let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
+        conn.execute(
+            "INSERT INTO knowledge_agent_runs (id, session_id, message_id, status, iteration_count, plan_summary)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![&new_id, session_id, message_id, status, iteration_count, plan_summary],
+        )?;
+        self.get_knowledge_agent_run_by_id(&new_id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn get_knowledge_agent_run_by_id(&self, run_id: &str) -> SqliteResult<Option<KnowledgeAgentRun>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, message_id, status, iteration_count, plan_summary, final_summary, error_message, started_at, completed_at
+             FROM knowledge_agent_runs WHERE id = ?1"
+        )?;
+        let result = stmt.query_row([run_id], |row| {
+            Ok(KnowledgeAgentRun {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                message_id: row.get(2)?,
+                status: row.get(3)?,
+                iteration_count: row.get(4)?,
+                plan_summary: row.get(5)?,
+                final_summary: row.get(6)?,
+                error_message: row.get(7)?,
+                started_at: row.get(8)?,
+                completed_at: row.get(9)?,
+            })
+        }).optional()?;
+        Ok(result)
+    }
+
+    pub fn get_knowledge_agent_run_by_message_id(&self, message_id: &str) -> SqliteResult<Option<KnowledgeAgentRun>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, session_id, message_id, status, iteration_count, plan_summary, final_summary, error_message, started_at, completed_at
+             FROM knowledge_agent_runs WHERE message_id = ?1 ORDER BY started_at DESC LIMIT 1"
+        )?;
+        let result = stmt.query_row([message_id], |row| {
+            Ok(KnowledgeAgentRun {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                message_id: row.get(2)?,
+                status: row.get(3)?,
+                iteration_count: row.get(4)?,
+                plan_summary: row.get(5)?,
+                final_summary: row.get(6)?,
+                error_message: row.get(7)?,
+                started_at: row.get(8)?,
+                completed_at: row.get(9)?,
+            })
+        }).optional()?;
+        Ok(result)
+    }
+
+    pub fn update_knowledge_agent_run(
+        &self,
+        run_id: &str,
+        status: &str,
+        iteration_count: i32,
+        plan_summary: Option<&str>,
+        final_summary: Option<&str>,
+        error_message: Option<&str>,
+        completed: bool,
+    ) -> SqliteResult<()> {
+        let conn = self.connection();
+        let completed_at = if completed { Some("datetime('now', 'localtime')") } else { None };
+        if completed_at.is_some() {
+            conn.execute(
+                "UPDATE knowledge_agent_runs
+                 SET status = ?2,
+                     iteration_count = ?3,
+                     plan_summary = ?4,
+                     final_summary = ?5,
+                     error_message = ?6,
+                     completed_at = datetime('now', 'localtime')
+                 WHERE id = ?1",
+                rusqlite::params![run_id, status, iteration_count, plan_summary, final_summary, error_message],
+            )?;
+        } else {
+            conn.execute(
+                "UPDATE knowledge_agent_runs
+                 SET status = ?2,
+                     iteration_count = ?3,
+                     plan_summary = ?4,
+                     final_summary = ?5,
+                     error_message = ?6
+                 WHERE id = ?1",
+                rusqlite::params![run_id, status, iteration_count, plan_summary, final_summary, error_message],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn get_knowledge_agent_trace_steps(&self, run_id: &str) -> SqliteResult<Vec<KnowledgeAgentTraceStep>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, step_index, step_type, title, content, metadata_json, created_at
+             FROM knowledge_agent_trace_steps WHERE run_id = ?1 ORDER BY step_index ASC"
+        )?;
+        let steps = stmt.query_map([run_id], |row| {
+            Ok(KnowledgeAgentTraceStep {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                step_index: row.get(2)?,
+                step_type: row.get(3)?,
+                title: row.get(4)?,
+                content: row.get(5)?,
+                metadata_json: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })?;
+        steps.collect()
+    }
+
+    pub fn create_knowledge_agent_trace_step(
+        &self,
+        run_id: &str,
+        step_index: i32,
+        step_type: &str,
+        title: &str,
+        content: &str,
+        metadata_json: Option<&str>,
+    ) -> SqliteResult<KnowledgeAgentTraceStep> {
+        let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
+        conn.execute(
+            "INSERT INTO knowledge_agent_trace_steps (id, run_id, step_index, step_type, title, content, metadata_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![&new_id, run_id, step_index, step_type, title, content, metadata_json],
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT id, run_id, step_index, step_type, title, content, metadata_json, created_at
+             FROM knowledge_agent_trace_steps WHERE id = ?1"
+        )?;
+        stmt.query_row([&new_id], |row| {
+            Ok(KnowledgeAgentTraceStep {
+                id: row.get(0)?,
+                run_id: row.get(1)?,
+                step_index: row.get(2)?,
+                step_type: row.get(3)?,
+                title: row.get(4)?,
+                content: row.get(5)?,
+                metadata_json: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        })
+    }
+
+    pub fn get_knowledge_chat_preferences(&self) -> SqliteResult<Option<KnowledgeChatPreferences>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, default_mode, default_model_id, default_prompt_id, show_agent_trace, show_sources_expanded, compact_message_density, created_at, updated_at
+             FROM knowledge_chat_preferences ORDER BY created_at ASC LIMIT 1"
+        )?;
+        let result = stmt.query_row([], |row| {
+            Ok(KnowledgeChatPreferences {
+                id: row.get(0)?,
+                default_mode: row.get(1)?,
+                default_model_id: row.get(2)?,
+                default_prompt_id: row.get(3)?,
+                show_agent_trace: row.get::<_, i64>(4)? != 0,
+                show_sources_expanded: row.get::<_, i64>(5)? != 0,
+                compact_message_density: row.get::<_, i64>(6)? != 0,
+                created_at: row.get(7)?,
+                updated_at: row.get(8)?,
+            })
+        }).optional()?;
+        Ok(result)
+    }
+
+    pub fn upsert_knowledge_chat_preferences(
+        &self,
+        id: Option<&str>,
+        default_mode: &str,
+        default_model_id: Option<&str>,
+        default_prompt_id: Option<&str>,
+        show_agent_trace: bool,
+        show_sources_expanded: bool,
+        compact_message_density: bool,
+    ) -> SqliteResult<KnowledgeChatPreferences> {
+        let conn = self.connection();
+        let pref_id = id.map(str::to_string).unwrap_or_else(snowflake::generate_id_string);
+        conn.execute(
+            "INSERT INTO knowledge_chat_preferences (
+                id, default_mode, default_model_id, default_prompt_id, show_agent_trace, show_sources_expanded, compact_message_density
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT(id) DO UPDATE SET
+                default_mode = excluded.default_mode,
+                default_model_id = excluded.default_model_id,
+                default_prompt_id = excluded.default_prompt_id,
+                show_agent_trace = excluded.show_agent_trace,
+                show_sources_expanded = excluded.show_sources_expanded,
+                compact_message_density = excluded.compact_message_density,
+                updated_at = datetime('now', 'localtime')",
+            rusqlite::params![
+                &pref_id,
+                default_mode,
+                default_model_id,
+                default_prompt_id,
+                show_agent_trace as i32,
+                show_sources_expanded as i32,
+                compact_message_density as i32,
+            ],
+        )?;
+        self.get_knowledge_chat_preferences()?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
     }
 }
 

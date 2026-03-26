@@ -1,20 +1,25 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { createPortal } from "react-dom";
+import { Fragment, useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Send,
   Square,
-  FileText,
-  ChevronDown,
-  Trash2,
-  ScrollText,
   Bot,
   Paperclip,
   X,
-  Copy,
-  Check,
+  ChevronDown,
+  MessageSquarePlus,
+  FileText,
+  Pin,
+  Trash2,
   Pencil,
-  RefreshCw,
-  Save,
+  Check,
+  PanelRightClose,
+  PanelRightOpen,
+  Copy,
+  Sparkles,
+  Search,
+  ScrollText,
+  RotateCcw,
+  AlertCircle,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -22,23 +27,36 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useCollections } from "../../context/CollectionsContext";
 import type {
+  KnowledgeAgentRunRecord,
   KnowledgeChatEvent,
   KnowledgeChatImageData,
+  KnowledgeChatMessageRecord,
+  KnowledgeChatMode,
+  KnowledgeChatPreferences,
   KnowledgeChatRequest,
+  KnowledgeChatSession,
+  KnowledgeChatSessionDetail,
+  KnowledgeChatSubmitResponse,
   KnowledgeSearchResult,
 } from "./types";
 
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  sources?: KnowledgeSearchResult[];
-  imageUrls?: string[];
-}
+type MessageRole = "user" | "assistant" | "system";
 
-function generateMessageId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+type MessageStatus = "streaming" | "completed" | "error" | "aborted";
+
+interface UiMessage {
+  id: string;
+  role: MessageRole;
+  content: string;
+  status: MessageStatus;
+  sources: KnowledgeSearchResult[];
+  agentRun: KnowledgeAgentRunRecord | null;
+  parentMessageId?: string | null;
+  errorMessage?: string | null;
+  createdAt?: string;
+  imageUrls?: string[];
 }
 
 interface UploadedImage {
@@ -47,53 +65,287 @@ interface UploadedImage {
   previewUrl: string;
 }
 
+interface TraceMetadataSection {
+  label: string;
+  value: string[];
+}
+
 const ACCEPTED_IMAGE_TYPES = "image/jpeg,image/png,image/gif,image/webp,image/svg+xml,image/bmp,image/tiff,image/heic,image/heif,image/avif";
 
-export function KnowledgeBaseChat() {
-  const { aiConfigs, promptConfigs, selectedModelId } = useApp();
+const DEFAULT_PREFERENCES: KnowledgeChatPreferences = {
+  default_mode: "standard",
+  default_model_id: null,
+  default_prompt_id: null,
+  show_agent_trace: true,
+  show_sources_expanded: true,
+  compact_message_density: false,
+};
 
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+function generateTempId() {
+  return `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function mapRecordToUiMessage(record: KnowledgeChatMessageRecord): UiMessage {
+  return {
+    id: record.message.id,
+    role: record.message.role,
+    content: record.message.content,
+    status: record.message.status,
+    sources: record.sources
+      .map((item) => item.result)
+      .filter((item): item is KnowledgeSearchResult => Boolean(item)),
+    agentRun: record.agent_run,
+    parentMessageId: record.message.parent_message_id,
+    errorMessage: record.message.error_message,
+    createdAt: record.message.created_at,
+  };
+}
+
+function buildRunningAgentRun(runId: string): KnowledgeAgentRunRecord {
+  return {
+    run: {
+      id: runId,
+      session_id: "",
+      message_id: "",
+      status: "running",
+      iteration_count: 0,
+      plan_summary: null,
+      final_summary: null,
+      error_message: null,
+      started_at: new Date().toISOString(),
+      completed_at: null,
+    },
+    trace_steps: [],
+  };
+}
+
+function mergeStreamingContent(accumulated: string, incoming: string) {
+  if (!incoming) {
+    return { nextContent: accumulated, appendedDelta: "" };
+  }
+
+  if (!accumulated) {
+    return { nextContent: incoming, appendedDelta: incoming };
+  }
+
+  if (incoming.startsWith(accumulated)) {
+    return {
+      nextContent: incoming,
+      appendedDelta: incoming.slice(accumulated.length),
+    };
+  }
+
+  if (accumulated.startsWith(incoming) || accumulated.endsWith(incoming)) {
+    return { nextContent: accumulated, appendedDelta: "" };
+  }
+
+  const maxOverlap = Math.min(accumulated.length, incoming.length);
+  let overlap = 0;
+
+  for (let candidate = maxOverlap; candidate > 0; candidate -= 1) {
+    if (accumulated.slice(-candidate) === incoming.slice(0, candidate)) {
+      overlap = candidate;
+      break;
+    }
+  }
+
+  const appendedDelta = incoming.slice(overlap);
+  return {
+    nextContent: accumulated + appendedDelta,
+    appendedDelta,
+  };
+}
+
+function isDefaultSessionTitle(title: string) {
+  return title === "新建知识库对话" || title === "新建 Agent 对话";
+}
+
+function buildSessionTitleFromMessage(content: string, mode: KnowledgeChatMode) {
+  const normalized = content
+    .trim()
+    .split(/\r?\n/)
+    .find((line) => line.trim().length > 0)
+    ?.trim()
+    .replace(/\s+/g, " ");
+
+  if (!normalized) return null;
+
+  const base = normalized.length > 26 ? `${normalized.slice(0, 26)}…` : normalized;
+  return mode === "agent" ? `Agent：${base}` : base;
+}
+
+function parseTraceMetadata(metadataJson: string | null): TraceMetadataSection[] {
+  if (!metadataJson) return [];
+
+  try {
+    const parsed = JSON.parse(metadataJson) as Record<string, unknown>;
+    return Object.entries(parsed)
+      .map(([key, value]) => {
+        if (value == null) return null;
+        const values = Array.isArray(value)
+          ? value.map((item) => String(item)).filter(Boolean)
+          : [String(value)].filter(Boolean);
+        if (values.length === 0) return null;
+        return {
+          label: key.replace(/_/g, " "),
+          value: values,
+        };
+      })
+      .filter((item): item is TraceMetadataSection => Boolean(item));
+  } catch {
+    return [{ label: "metadata", value: [metadataJson] }];
+  }
+}
+
+export function KnowledgeBaseChat() {
+  const {
+    aiConfigs,
+    promptConfigs,
+    selectedModelId,
+    setSelectedNoteId,
+    setCurrentView,
+  } = useApp();
+  const { expandCollectionPathForNote } = useCollections();
+
+  const [sessions, setSessions] = useState<KnowledgeChatSession[]>([]);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState<string | null>(null);
-  const [thinkingStage, setThinkingStage] = useState<"searching" | "thinking" | null>(null);
-
-  // Model & prompt selection
+  const [statusQueries, setStatusQueries] = useState<string[]>([]);
+  const [mode, setMode] = useState<KnowledgeChatMode>("standard");
   const [localModelId, setLocalModelId] = useState<string | null>(null);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPromptDropdown, setShowPromptDropdown] = useState(false);
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [inspectorMessageId, setInspectorMessageId] = useState<string | null>(null);
+  const [showRightPanel, setShowRightPanel] = useState(true);
+  const [showAgentTrace, setShowAgentTrace] = useState(DEFAULT_PREFERENCES.show_agent_trace);
+  const [showSourcesExpanded, setShowSourcesExpanded] = useState(DEFAULT_PREFERENCES.show_sources_expanded);
+  const [compactMessageDensity, setCompactMessageDensity] = useState(DEFAULT_PREFERENCES.compact_message_density);
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editingSessionTitle, setEditingSessionTitle] = useState("");
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingMessageValue, setEditingMessageValue] = useState("");
+  const [composerError, setComposerError] = useState<string | null>(null);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null);
+  const [pendingDeleteSessionTitle, setPendingDeleteSessionTitle] = useState("");
+  const [deleteConfirmPosition, setDeleteConfirmPosition] = useState<{
+    top: number;
+    left: number;
+    arrowTop: number;
+    arrowSide: "left" | "right";
+  } | null>(null);
+  const [deleteConfirmPanelMinWidth, setDeleteConfirmPanelMinWidth] = useState<number | null>(null);
+  const [preferencesReady, setPreferencesReady] = useState(false);
 
+  const initializedRef = useRef(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const deleteConfirmAnchorRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const promptDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadedImagesRef = useRef<UploadedImage[]>([]);
 
-  // Image upload state
-  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const qaPromptConfigs = useMemo(
+    () => promptConfigs.filter((config) => config.category === "qa"),
+    [promptConfigs]
+  );
+  const activeModel = useMemo(
+    () => aiConfigs.find((config) => config.id === localModelId) ?? null,
+    [aiConfigs, localModelId]
+  );
+  const activePrompt = useMemo(
+    () => qaPromptConfigs.find((config) => config.id === selectedPromptId) ?? null,
+    [qaPromptConfigs, selectedPromptId]
+  );
+  const selectedSession = useMemo(
+    () => sessions.find((session) => session.id === selectedSessionId) ?? null,
+    [sessions, selectedSessionId]
+  );
+  const selectedInspectorMessage = useMemo(() => {
+    if (inspectorMessageId) {
+      const matched = messages.find((message) => message.id === inspectorMessageId);
+      if (matched) return matched;
+    }
+    return [...messages].reverse().find((message) => message.role === "assistant") ?? null;
+  }, [messages, inspectorMessageId]);
+  const streamingAssistantIndex = useMemo(() => {
+    const reversedIndex = [...messages].reverse().findIndex(
+      (message) => message.role === "assistant" && message.status === "streaming"
+    );
+    return reversedIndex === -1 ? -1 : messages.length - 1 - reversedIndex;
+  }, [messages]);
 
-  // Sync global selectedModelId as initial value
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  const refreshSessions = useCallback(async () => {
+    const data = await invoke<KnowledgeChatSession[]>("knowledge_base_list_chat_sessions");
+    setSessions(data);
+    return data;
+  }, []);
+
+  const loadSessionDetail = useCallback(async (sessionId: string) => {
+    const detail = await invoke<KnowledgeChatSessionDetail>("knowledge_base_get_chat_session", { sessionId });
+    const nextMessages = detail.messages.map(mapRecordToUiMessage);
+    setSelectedSessionId(detail.session.id);
+    setMessages(nextMessages);
+    setMode(detail.session.mode);
+    setLocalModelId(detail.session.model_id);
+    setSelectedPromptId(detail.session.prompt_id);
+    const latestAssistant = [...nextMessages].reverse().find((message) => message.role === "assistant") ?? null;
+    setInspectorMessageId(latestAssistant?.id ?? null);
+    return detail;
+  }, []);
+
+  const resetDraft = useCallback((preferred?: KnowledgeChatPreferences | null) => {
+    setSelectedSessionId(null);
+    setMessages([]);
+    setInspectorMessageId(null);
+    setStatusText(null);
+    setStatusQueries([]);
+    setRequestId(null);
+    setInput("");
+    setEditingMessageId(null);
+    setEditingMessageValue("");
+    setComposerError(null);
+    const prefs = preferred ?? null;
+    setMode(prefs?.default_mode ?? DEFAULT_PREFERENCES.default_mode);
+    setLocalModelId(prefs?.default_model_id ?? selectedModelId ?? null);
+    setSelectedPromptId(prefs?.default_prompt_id ?? null);
+    requestAnimationFrame(() => inputRef.current?.focus());
+  }, [selectedModelId]);
+
   useEffect(() => {
-    if (selectedModelId && !localModelId) {
+    if (selectedModelId && !localModelId && !selectedSessionId) {
       setLocalModelId(selectedModelId);
     }
-  }, [selectedModelId, localModelId]);
+  }, [selectedModelId, localModelId, selectedSessionId]);
 
-  // Close dropdowns on outside click
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        modelDropdownRef.current &&
-        !modelDropdownRef.current.contains(e.target as Node)
-      ) {
+    uploadedImagesRef.current = uploadedImages;
+  }, [uploadedImages]);
+
+  useEffect(() => {
+    return () => {
+      uploadedImagesRef.current.forEach((image) => URL.revokeObjectURL(image.previewUrl));
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelDropdownRef.current && !modelDropdownRef.current.contains(event.target as Node)) {
         setShowModelDropdown(false);
       }
-      if (
-        promptDropdownRef.current &&
-        !promptDropdownRef.current.contains(e.target as Node)
-      ) {
+      if (promptDropdownRef.current && !promptDropdownRef.current.contains(event.target as Node)) {
         setShowPromptDropdown(false);
       }
     };
@@ -101,940 +353,1553 @@ export function KnowledgeBaseChat() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Auto scroll to bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, statusText]);
+    scrollToBottom();
+  }, [messages, statusText, scrollToBottom]);
 
-  // Listen to chat events
+  useEffect(() => {
+    let cancelled = false;
+
+    const bootstrap = async () => {
+      try {
+        const [prefs, sessionList] = await Promise.all([
+          invoke<KnowledgeChatPreferences | null>("knowledge_base_get_chat_preferences"),
+          refreshSessions(),
+        ]);
+        if (cancelled) return;
+
+        const mergedPrefs = prefs ?? DEFAULT_PREFERENCES;
+        setShowAgentTrace(mergedPrefs.show_agent_trace);
+        setShowSourcesExpanded(mergedPrefs.show_sources_expanded);
+        setCompactMessageDensity(mergedPrefs.compact_message_density);
+        setMode(mergedPrefs.default_mode);
+        setLocalModelId(mergedPrefs.default_model_id ?? selectedModelId ?? null);
+        setSelectedPromptId(mergedPrefs.default_prompt_id ?? null);
+        setPreferencesReady(true);
+
+        if (!initializedRef.current) {
+          initializedRef.current = true;
+          if (sessionList.length > 0) {
+            await loadSessionDetail(sessionList[0].id);
+          } else {
+            resetDraft(mergedPrefs);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to bootstrap knowledge chat:", error);
+        setPreferencesReady(true);
+      }
+    };
+
+    void bootstrap();
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSessionDetail, refreshSessions, resetDraft, selectedModelId]);
+
+  useEffect(() => {
+    if (!preferencesReady) return;
+    void invoke("knowledge_base_save_chat_preferences", {
+      payload: {
+        default_mode: mode,
+        default_model_id: localModelId,
+        default_prompt_id: selectedPromptId,
+        show_agent_trace: showAgentTrace,
+        show_sources_expanded: showSourcesExpanded,
+        compact_message_density: compactMessageDensity,
+      },
+    }).catch((error) => {
+      console.error("Failed to save knowledge chat preferences:", error);
+    });
+  }, [
+    compactMessageDensity,
+    localModelId,
+    mode,
+    preferencesReady,
+    selectedPromptId,
+    showAgentTrace,
+    showSourcesExpanded,
+  ]);
+
   useEffect(() => {
     if (!requestId) return;
 
     const eventName = `knowledge-chat-${requestId}`;
-    let currentContent = "";
+    let accumulatedContent = "";
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
 
-    const unlisten = listen<KnowledgeChatEvent>(eventName, (event) => {
+    void listen<KnowledgeChatEvent>(eventName, (event) => {
       const data = event.payload;
+
+      setMessages((prev) => {
+        const next = [...prev];
+        const assistantIndex = [...next].reverse().findIndex((message) => message.role === "assistant");
+        if (assistantIndex === -1) return prev;
+        const targetIndex = next.length - 1 - assistantIndex;
+        const current = next[targetIndex];
+
+        switch (data.status) {
+          case "ContextFound":
+            next[targetIndex] = {
+              ...current,
+              sources: data.sources,
+            };
+            return next;
+          case "TraceStep": {
+            const currentRun = current.agentRun ?? buildRunningAgentRun(data.run_id);
+            const existingSteps = currentRun.trace_steps.filter((step) => step.id !== data.step.id);
+            next[targetIndex] = {
+              ...current,
+              agentRun: {
+                run: {
+                  ...currentRun.run,
+                  id: data.run_id,
+                  status: "running",
+                },
+                trace_steps: [...existingSteps, data.step].sort((a, b) => a.step_index - b.step_index),
+              },
+            };
+            return next;
+          }
+          case "Streaming": {
+            const merged = mergeStreamingContent(accumulatedContent, data.content);
+            accumulatedContent = merged.nextContent;
+            if (!merged.appendedDelta && current.content === accumulatedContent) {
+              return prev;
+            }
+            next[targetIndex] = {
+              ...current,
+              content: accumulatedContent,
+              status: "streaming",
+            };
+            return next;
+          }
+          case "Completed":
+            next[targetIndex] = {
+              ...current,
+              content: data.full_content,
+              status: "completed",
+              agentRun:
+                data.run_id && current.agentRun
+                  ? {
+                      ...current.agentRun,
+                      run: {
+                        ...current.agentRun.run,
+                        id: data.run_id,
+                        status: "completed",
+                        final_summary: data.full_content,
+                        completed_at: new Date().toISOString(),
+                      },
+                    }
+                  : current.agentRun,
+            };
+            return next;
+          case "Error":
+            next[targetIndex] = {
+              ...current,
+              content: current.content || `错误: ${data.error}`,
+              status: "error",
+            };
+            return next;
+          case "Aborted":
+            next[targetIndex] = {
+              ...current,
+              status: "aborted",
+            };
+            return next;
+          default:
+            return prev;
+        }
+      });
 
       switch (data.status) {
         case "Searching":
-          setThinkingStage("searching");
+        case "Planning":
           setStatusText(data.message);
+          setStatusQueries([]);
+          break;
+        case "Retrieving":
+          setStatusText(data.message);
+          setStatusQueries(data.queries);
           break;
         case "ContextFound":
-          setThinkingStage("thinking");
-          setStatusText(null);
-          setMessages((prev) => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            if (last && last.role === "assistant") {
-              updated[updated.length - 1] = {
-                ...last,
-                sources: data.sources,
-              };
-            }
-            return updated;
-          });
+          setStatusText(mode === "agent" ? "正在整理证据与组织回答..." : "正在整理证据并生成回答...");
+          setStatusQueries([]);
           break;
         case "Streaming":
-          setThinkingStage(null);
-          currentContent += data.content;
-          setMessages((prev) => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            if (last && last.role === "assistant") {
-              updated[updated.length - 1] = {
-                ...last,
-                content: currentContent,
-              };
-            }
-            return updated;
-          });
+          setStatusText(null);
+          setStatusQueries([]);
           break;
         case "Completed":
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
-          setThinkingStage(null);
+          setStatusQueries([]);
+          void refreshSessions();
+          void loadSessionDetail(data.session_id);
           break;
         case "Error":
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
-          setThinkingStage(null);
-          setMessages((prev) => {
-            const updated = [...prev];
-            const last = updated[updated.length - 1];
-            if (last && last.role === "assistant") {
-              updated[updated.length - 1] = {
-                ...last,
-                content: `错误: ${data.error}`,
-              };
-            }
-            return updated;
-          });
+          setStatusQueries([]);
+          setComposerError(`本次回答失败：${data.error}`);
+          void refreshSessions();
+          if (selectedSessionId) {
+            void loadSessionDetail(selectedSessionId).catch(() => undefined);
+          }
           break;
         case "Aborted":
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
-          setThinkingStage(null);
+          setStatusQueries([]);
+          setComposerError("已停止当前回答。你可以直接修改问题后重新发送。");
+          void refreshSessions();
+          if (selectedSessionId) {
+            void loadSessionDetail(selectedSessionId).catch(() => undefined);
+          }
+          break;
+        default:
           break;
       }
+    }).then((fn) => {
+      if (disposed) {
+        fn();
+        return;
+      }
+      unlisten = fn;
     });
 
     return () => {
-      unlisten.then((fn) => fn());
+      disposed = true;
+      unlisten?.();
     };
-  }, [requestId]);
+  }, [loadSessionDetail, mode, refreshSessions, requestId, selectedSessionId]);
 
-  const activeModel = aiConfigs.find((c) => c.id === localModelId);
-  const qaPromptConfigs = promptConfigs.filter((c) => c.category === "qa");
-  const activePrompt = qaPromptConfigs.find((c) => c.id === selectedPromptId);
+  const handleNavigateToNote = useCallback(async (noteId: string) => {
+    await expandCollectionPathForNote(noteId);
+    setSelectedNoteId(noteId);
+    setCurrentView("note");
+  }, [expandCollectionPathForNote, setCurrentView, setSelectedNoteId]);
 
-  // Image handlers
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
+  const persistCurrentSessionMeta = useCallback(async (
+    next: Partial<Pick<KnowledgeChatSession, "mode" | "model_id" | "prompt_id" | "is_pinned" | "title">>
+  ) => {
+    if (!selectedSessionId) return;
+    const currentSession = sessions.find((session) => session.id === selectedSessionId);
+    if (!currentSession) return;
+
+    await invoke("knowledge_base_update_chat_session", {
+      request: {
+        session_id: selectedSessionId,
+        title: next.title ?? currentSession.title,
+        mode: next.mode ?? currentSession.mode,
+        model_id: next.model_id ?? localModelId,
+        prompt_id: next.prompt_id ?? selectedPromptId,
+        is_pinned: next.is_pinned ?? currentSession.is_pinned,
+      },
+    });
+    await refreshSessions();
+  }, [localModelId, refreshSessions, selectedPromptId, selectedSessionId, sessions]);
+
+  const handleSelectSession = useCallback(async (sessionId: string) => {
+    if (streaming) return;
+    try {
+      uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      setUploadedImages([]);
+      setEditingMessageId(null);
+      setEditingMessageValue("");
+      await loadSessionDetail(sessionId);
+      setStatusText(null);
+      setStatusQueries([]);
+      setComposerError(null);
+    } catch (error) {
+      console.error("Failed to load knowledge chat session:", error);
+    }
+  }, [loadSessionDetail, streaming, uploadedImages]);
+
+  const handleCreateSession = useCallback(() => {
+    if (streaming) return;
+    uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    setUploadedImages([]);
+    resetDraft();
+  }, [resetDraft, streaming, uploadedImages]);
+
+  const handleRenameSession = useCallback(async (sessionId: string) => {
+    const title = editingSessionTitle.trim();
+    if (!title) {
+      setEditingSessionId(null);
+      return;
+    }
+    try {
+      await invoke("knowledge_base_rename_chat_session", { sessionId, title });
+      await refreshSessions();
+      if (selectedSessionId === sessionId) {
+        await loadSessionDetail(sessionId);
+      }
+    } catch (error) {
+      console.error("Failed to rename knowledge chat session:", error);
+    } finally {
+      setEditingSessionId(null);
+      setEditingSessionTitle("");
+    }
+  }, [editingSessionTitle, loadSessionDetail, refreshSessions, selectedSessionId]);
+
+  const handleRequestDeleteSession = useCallback((
+    sessionId: string,
+    sessionTitle: string,
+    triggerRect?: DOMRect | null,
+  ) => {
+    if (streaming) return;
+
+    if (triggerRect && deleteConfirmAnchorRef.current) {
+      const anchorRect = deleteConfirmAnchorRef.current.getBoundingClientRect();
+      const horizontalPadding = 12;
+      const verticalPadding = 12;
+      const panelWidth = Math.min(420, Math.max(320, anchorRect.width - horizontalPadding * 2));
+      const panelHeight = 220;
+      const gap = 10;
+      const arrowSize = 14;
+      const triggerLeft = triggerRect.left - anchorRect.left;
+      const triggerRight = triggerRect.right - anchorRect.left;
+      const triggerTop = triggerRect.top - anchorRect.top;
+      const triggerBottom = triggerRect.bottom - anchorRect.top;
+      const triggerCenterY = (triggerTop + triggerBottom) / 2;
+      const spaceOnLeft = triggerLeft - horizontalPadding;
+      const spaceOnRight = anchorRect.width - triggerRight - horizontalPadding;
+      const placeOnRight = spaceOnRight >= panelWidth || spaceOnRight >= spaceOnLeft;
+
+      const preferredLeft = placeOnRight
+        ? triggerRight + gap
+        : triggerLeft - panelWidth - gap;
+      const preferredTop = triggerCenterY - panelHeight / 2;
+      const maxLeft = anchorRect.width - panelWidth - horizontalPadding;
+      const maxTop = anchorRect.height - panelHeight - verticalPadding;
+      const top = Math.max(verticalPadding, Math.min(preferredTop, Math.max(verticalPadding, maxTop)));
+      const left = Math.max(horizontalPadding, Math.min(preferredLeft, Math.max(horizontalPadding, maxLeft)));
+      const arrowTop = Math.max(
+        22,
+        Math.min(triggerCenterY - top - arrowSize / 2, panelHeight - arrowSize - 22)
+      );
+
+      setDeleteConfirmPanelMinWidth(panelWidth);
+      setDeleteConfirmPosition({
+        top,
+        left,
+        arrowTop,
+        arrowSide: placeOnRight ? "left" : "right",
+      });
+    } else {
+      setDeleteConfirmPanelMinWidth(360);
+      setDeleteConfirmPosition({ top: 16, left: 16, arrowTop: 40, arrowSide: "left" });
+    }
+
+    setPendingDeleteSessionId(sessionId);
+    setPendingDeleteSessionTitle(sessionTitle);
+    setDeleteConfirmOpen(true);
+  }, [streaming]);
+
+  const handleCancelDeleteSession = useCallback(() => {
+    setDeleteConfirmOpen(false);
+    setPendingDeleteSessionId(null);
+    setPendingDeleteSessionTitle("");
+    setDeleteConfirmPosition(null);
+    setDeleteConfirmPanelMinWidth(null);
+  }, []);
+
+  const handleConfirmDeleteSession = useCallback(async () => {
+    if (!pendingDeleteSessionId) return;
+    try {
+      await invoke("knowledge_base_delete_chat_session", { sessionId: pendingDeleteSessionId });
+      const nextSessions = await refreshSessions();
+      if (selectedSessionId === pendingDeleteSessionId) {
+        if (nextSessions[0]) {
+          await loadSessionDetail(nextSessions[0].id);
+        } else {
+          resetDraft();
+        }
+      }
+      setDeleteConfirmOpen(false);
+      setPendingDeleteSessionId(null);
+      setPendingDeleteSessionTitle("");
+      setDeleteConfirmPosition(null);
+      setDeleteConfirmPanelMinWidth(null);
+    } catch (error) {
+      console.error("Failed to delete knowledge chat session:", error);
+    }
+  }, [loadSessionDetail, pendingDeleteSessionId, refreshSessions, resetDraft, selectedSessionId]);
+
+  const handleTogglePinSession = useCallback(async (session: KnowledgeChatSession) => {
+    try {
+      await invoke("knowledge_base_set_chat_session_pinned", {
+        sessionId: session.id,
+        isPinned: !session.is_pinned,
+      });
+      await refreshSessions();
+    } catch (error) {
+      console.error("Failed to pin knowledge chat session:", error);
+    }
+  }, [refreshSessions]);
+
+  const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
     if (!files || files.length === 0) return;
 
-    const newImages: UploadedImage[] = [];
+    const nextImages: UploadedImage[] = [];
     Array.from(files).forEach((file) => {
-      if (file.type.startsWith("image/")) {
-        const previewUrl = URL.createObjectURL(file);
-        newImages.push({
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          file,
-          previewUrl,
-        });
-      }
+      if (!file.type.startsWith("image/")) return;
+      nextImages.push({
+        id: generateTempId(),
+        file,
+        previewUrl: URL.createObjectURL(file),
+      });
     });
 
-    setUploadedImages((prev) => [...prev, ...newImages]);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
-  };
+    setUploadedImages((prev) => [...prev, ...nextImages]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
 
-  const handleRemoveImage = (imageId: string) => {
+  const handleRemoveImage = useCallback((imageId: string) => {
     setUploadedImages((prev) => {
-      const imageToRemove = prev.find((img) => img.id === imageId);
-      if (imageToRemove) {
-        URL.revokeObjectURL(imageToRemove.previewUrl);
-      }
-      return prev.filter((img) => img.id !== imageId);
+      const matched = prev.find((item) => item.id === imageId);
+      if (matched) URL.revokeObjectURL(matched.previewUrl);
+      return prev.filter((item) => item.id !== imageId);
     });
-  };
+  }, []);
 
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
+  const fileToBase64 = useCallback((file: File) => {
+    return new Promise<string>((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(reader.result as string);
       reader.onerror = reject;
       reader.readAsDataURL(file);
     });
-  };
+  }, []);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
+  const handleSend = useCallback(async (overrideText?: string, overrideEditMessageId?: string | null) => {
+    const normalizedOverride = typeof overrideText === "string" ? overrideText : undefined;
+    const text = (normalizedOverride ?? input).trim();
+    const effectiveEditMessageId = overrideEditMessageId ?? editingMessageId;
+    const usingOverride = typeof normalizedOverride === "string";
     if ((!text && uploadedImages.length === 0) || streaming) return;
 
-    // Capture image preview URLs for display in user message
-    const currentImageUrls = uploadedImages.map((img) => img.previewUrl);
+    if (!localModelId && aiConfigs.length === 0) {
+      setComposerError("当前没有可用模型，请先到设置页配置 AI 模型。");
+      return;
+    }
 
-    // Convert images to base64 before clearing
-    let imageDataArray: KnowledgeChatImageData[] | undefined;
-    if (uploadedImages.length > 0) {
-      imageDataArray = await Promise.all(
-        uploadedImages.map(async (img) => ({
-          data: await fileToBase64(img.file),
-        }))
+    setComposerError(null);
+
+    const userImageUrls = usingOverride ? [] : uploadedImages.map((item) => item.previewUrl);
+    let imagePayload: KnowledgeChatImageData[] | undefined;
+    if (!usingOverride && uploadedImages.length > 0) {
+      imagePayload = await Promise.all(
+        uploadedImages.map(async (item) => ({ data: await fileToBase64(item.file) }))
       );
     }
 
-    setInput("");
-    setUploadedImages([]);
-    setStreaming(true);
-    setThinkingStage("searching");
-
-    const userMsg: ChatMessage = {
-      id: generateMessageId(),
+    const tempUserId = generateTempId();
+    const tempAssistantId = generateTempId();
+    const optimisticUserMessage: UiMessage = {
+      id: tempUserId,
       role: "user",
       content: text,
-      imageUrls: currentImageUrls.length > 0 ? currentImageUrls : undefined,
+      status: "completed",
+      sources: [],
+      agentRun: null,
+      imageUrls: userImageUrls.length > 0 ? userImageUrls : undefined,
     };
-    const assistantMsg: ChatMessage = {
-      id: generateMessageId(),
+    const optimisticAssistantMessage: UiMessage = {
+      id: tempAssistantId,
       role: "assistant",
       content: "",
+      status: "streaming",
+      sources: [],
+      agentRun: null,
     };
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
 
-    const apiMessages = [...messages, { role: userMsg.role, content: userMsg.content }].map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    const editTargetIndex = usingOverride && effectiveEditMessageId
+      ? messages.findIndex((message) => message.id === effectiveEditMessageId)
+      : -1;
+    const baseMessages = usingOverride && editTargetIndex >= 0
+      ? messages.slice(0, editTargetIndex)
+      : messages;
+
+    const apiMessages = [...baseMessages, optimisticUserMessage]
+      .filter((message) => message.role === "user" || message.role === "assistant")
+      .map((message) => ({
+        role: message.role as "user" | "assistant",
+        content: message.content,
+      }));
+
+    setMessages((prev) => {
+      const targetIndex = usingOverride && effectiveEditMessageId
+        ? prev.findIndex((message) => message.id === effectiveEditMessageId)
+        : -1;
+      const nextBase = usingOverride && targetIndex >= 0 ? prev.slice(0, targetIndex) : prev;
+      return [...nextBase, optimisticUserMessage, optimisticAssistantMessage];
+    });
+    setInspectorMessageId(tempAssistantId);
+    setInput("");
+    uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+    setUploadedImages([]);
+    setEditingMessageId(null);
+    setEditingMessageValue("");
+    setStreaming(true);
+    setStatusText(mode === "agent" ? "正在拆解问题与规划检索步骤..." : "正在检索相关知识...");
+    setStatusQueries([]);
 
     try {
       const request: KnowledgeChatRequest = {
+        session_id: selectedSessionId ?? undefined,
         messages: apiMessages,
-        model_id: localModelId || undefined,
-        system_prompt: activePrompt?.content || undefined,
-        images: imageDataArray,
+        model_id: localModelId ?? undefined,
+        system_prompt: activePrompt?.content ?? undefined,
+        prompt_id: selectedPromptId ?? undefined,
+        images: imagePayload,
+        mode,
+        step_budget: mode === "agent" ? 3 : undefined,
       };
-      const rid = await invoke<string>("knowledge_base_chat", { request });
-      setRequestId(rid);
-    } catch (e) {
+
+      const response = await invoke<KnowledgeChatSubmitResponse>("knowledge_base_chat", { request });
+      setRequestId(response.request_id);
+      setSelectedSessionId(response.session_id);
+      setMessages((prev) =>
+        prev.map((message) => {
+          if (message.id === tempUserId) {
+            return { ...message, id: response.user_message_id };
+          }
+          if (message.id === tempAssistantId) {
+            return { ...message, id: response.assistant_message_id };
+          }
+          return message;
+        })
+      );
+      setInspectorMessageId(response.assistant_message_id);
+      await refreshSessions();
+    } catch (error) {
+      console.error("Failed to send knowledge chat message:", error);
       setStreaming(false);
-      setThinkingStage(null);
-      setMessages((prev) => [
-        ...prev,
-        { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
-      ]);
+      setStatusText(null);
+      setStatusQueries([]);
+      setComposerError(`发送失败：${String(error)}`);
+      setMessages((prev) =>
+        prev.map((message) =>
+          message.id === tempAssistantId
+            ? {
+                ...message,
+                content: `错误: ${error}`,
+                status: "error",
+              }
+            : message
+        )
+      );
     }
-  }, [input, streaming, messages, localModelId, activePrompt, uploadedImages]);
+  }, [
+    activePrompt,
+    aiConfigs.length,
+    editingMessageId,
+    fileToBase64,
+    input,
+    localModelId,
+    messages,
+    mode,
+    refreshSessions,
+    selectedPromptId,
+    selectedSessionId,
+    streaming,
+    uploadedImages,
+  ]);
 
   const handleAbort = useCallback(async () => {
-    if (requestId) {
-      try {
-        await invoke("knowledge_base_abort_chat", { requestId });
-      } catch (e) {
-        console.error("Failed to abort chat:", e);
-      }
+    if (!requestId) return;
+    try {
+      await invoke("knowledge_base_abort_chat", { requestId });
+    } catch (error) {
+      console.error("Failed to abort knowledge chat:", error);
     }
-    setThinkingStage(null);
   }, [requestId]);
 
-  const handleClearChat = useCallback(() => {
-    if (streaming) return;
-    setMessages([]);
-    setStatusText(null);
-    uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
-    setUploadedImages([]);
-  }, [streaming, uploadedImages]);
-
-  const handleCopyMessage = useCallback((content: string) => {
-    navigator.clipboard.writeText(content);
+  const handleEditMessage = useCallback((message: UiMessage) => {
+    setEditingMessageId(message.id);
+    setEditingMessageValue(message.content);
+    setInput(message.content);
+    setComposerError(null);
+    requestAnimationFrame(() => inputRef.current?.focus());
   }, []);
 
-  const handleEditMessage = useCallback(async (msgId: string, newContent: string, imageUrls?: string[]) => {
-    if (streaming) return;
+  const handleRetryMessage = useCallback((message: UiMessage) => {
+    setComposerError(null);
+    void handleSend(message.content, message.id);
+  }, [handleSend]);
 
-    const msgIndex = messages.findIndex((m) => m.id === msgId);
-    if (msgIndex === -1) return;
+  const handleCancelEdit = useCallback(() => {
+    setEditingMessageId(null);
+    setEditingMessageValue("");
+    setInput("");
+    setComposerError(null);
+  }, []);
 
-    const editedMsg: ChatMessage = { ...messages[msgIndex], content: newContent, imageUrls: imageUrls ?? messages[msgIndex].imageUrls };
-    const assistantMsg: ChatMessage = { id: generateMessageId(), role: "assistant", content: "" };
-    const truncated = [...messages.slice(0, msgIndex), editedMsg, assistantMsg];
-    setMessages(truncated);
+  const handleCopyMessage = useCallback((content: string) => {
+    void navigator.clipboard.writeText(content);
+  }, []);
 
-    setStreaming(true);
-    setThinkingStage("searching");
-    const apiMessages = [...messages.slice(0, msgIndex), editedMsg].map((m) => ({ role: m.role, content: m.content }));
-    try {
-      const request: KnowledgeChatRequest = {
-        messages: apiMessages,
-        model_id: localModelId || undefined,
-        system_prompt: activePrompt?.content || undefined,
-      };
-      const rid = await invoke<string>("knowledge_base_chat", { request });
-      setRequestId(rid);
-    } catch (e) {
-      setStreaming(false);
-      setThinkingStage(null);
-      setMessages((prev) => [
-        ...prev,
-        { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
-      ]);
-    }
-  }, [streaming, messages, localModelId, activePrompt]);
-
-  const handleSaveEditMessage = useCallback((msgId: string, newContent: string, imageUrls?: string[]) => {
-    if (streaming) return;
-    setMessages((prev) => prev.map((m) => m.id === msgId ? { ...m, content: newContent, imageUrls: imageUrls ?? m.imageUrls } : m));
-  }, [streaming]);
-
-  const handleDeleteMessage = useCallback((msgId: string) => {
-    if (streaming) return;
-    setMessages((prev) => {
-      const idx = prev.findIndex((m) => m.id === msgId);
-      if (idx === -1) return prev;
-      const next = prev[idx + 1];
-      if (next && next.role === "assistant") {
-        return [...prev.slice(0, idx), ...prev.slice(idx + 2)];
+  const handleModeChange = useCallback(async (nextMode: KnowledgeChatMode) => {
+    setMode(nextMode);
+    if (selectedSessionId) {
+      try {
+        await persistCurrentSessionMeta({ mode: nextMode });
+      } catch (error) {
+        console.error("Failed to update session mode:", error);
       }
-      return [...prev.slice(0, idx), ...prev.slice(idx + 1)];
-    });
-  }, [streaming]);
-
-  const handleRegenerateMessage = useCallback(async (msgId: string) => {
-    if (streaming) return;
-
-    const msgIndex = messages.findIndex((m) => m.id === msgId);
-    if (msgIndex === -1) return;
-
-    const truncated = messages.slice(0, msgIndex + 1);
-    const assistantMsg: ChatMessage = { id: generateMessageId(), role: "assistant", content: "" };
-    setMessages([...truncated, assistantMsg]);
-
-    setStreaming(true);
-    setThinkingStage("searching");
-    const apiMessages = truncated.map((m) => ({ role: m.role, content: m.content }));
-    try {
-      const request: KnowledgeChatRequest = {
-        messages: apiMessages,
-        model_id: localModelId || undefined,
-        system_prompt: activePrompt?.content || undefined,
-      };
-      const rid = await invoke<string>("knowledge_base_chat", { request });
-      setRequestId(rid);
-    } catch (e) {
-      setStreaming(false);
-      setThinkingStage(null);
-      setMessages((prev) => [
-        ...prev,
-        { id: generateMessageId(), role: "assistant", content: `错误: ${e}` },
-      ]);
     }
-  }, [streaming, messages, localModelId, activePrompt]);
+  }, [persistCurrentSessionMeta, selectedSessionId]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {messages.length === 0 && !statusText && (
-          <div className="flex flex-col items-center justify-center py-20 gap-3">
-            <div className="w-12 h-12 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
-              <Bot className="w-6 h-6 text-blue-500" />
-            </div>
-            <div className="text-slate-400 text-sm text-center leading-relaxed">
-              基于知识库内容进行对话
-              <br />
-              <span className="text-xs text-slate-400/70">
-                AI 会自动检索相关笔记作为上下文
-              </span>
-            </div>
-          </div>
-        )}
-
-        {messages.map((msg, i) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            streaming={streaming}
-            thinkingStage={thinkingStage}
-            isLast={i === messages.length - 1}
-            onCopy={handleCopyMessage}
-            onEdit={handleEditMessage}
-            onSaveEdit={handleSaveEditMessage}
-            onDelete={handleDeleteMessage}
-            onRegenerate={handleRegenerateMessage}
-          />
-        ))}
-
-        {statusText && (
-          <div className="flex items-center gap-2 text-sm text-slate-400">
-            <div className="w-3 h-3 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
-            {statusText}
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input Area */}
-      <div className="p-4 border-t border-slate-200 dark:border-neutral-700">
-        {/* Hidden file input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={ACCEPTED_IMAGE_TYPES}
-          multiple
-          onChange={handleFileSelect}
-          className="hidden"
-        />
-
-        <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/70 dark:bg-vnote-card/44 backdrop-blur-xl overflow-hidden focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-400 transition-shadow shadow-soft">
-          {/* Image preview */}
-          {uploadedImages.length > 0 && (
-            <div className="px-4 pt-3 flex flex-wrap gap-2">
-              {uploadedImages.map((image) => (
-                <div key={image.id} className="relative group">
-                  <img
-                    src={image.previewUrl}
-                    alt="预览"
-                    className="w-16 h-16 object-cover rounded-lg border border-slate-200 dark:border-neutral-600"
-                  />
-                  <button
-                    onClick={() => handleRemoveImage(image.id)}
-                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors cursor-pointer"
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Textarea */}
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="输入问题，Enter 发送，Shift+Enter 换行..."
-            rows={3}
-            className="w-full px-4 pt-3 pb-1 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 resize-none focus:outline-none"
-          />
-
-          {/* Toolbar */}
-          <div className="flex items-center justify-between px-3 py-2">
-            <div className="flex items-center gap-1">
-              {/* Attach Image */}
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-neutral-700 rounded-lg transition-colors cursor-pointer border border-transparent"
-                title="上传图片"
-              >
-                <Paperclip className="w-3.5 h-3.5" />
-              </button>
-
-              {/* Model Selector */}
-              <div ref={modelDropdownRef} className="relative">
-                <button
-                  onClick={() => {
-                    setShowModelDropdown(!showModelDropdown);
-                    setShowPromptDropdown(false);
-                  }}
-                  className={cn(
-                    "flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors cursor-pointer",
-                    showModelDropdown
-                      ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800"
-                      : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-neutral-700 border border-transparent"
-                  )}
-                  title="选择 AI 模型"
-                >
-                  <Bot className="w-3.5 h-3.5" />
-                  <span className="max-w-[120px] truncate">
-                    {activeModel?.title || "选择模型"}
-                  </span>
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-
-                {showModelDropdown && (
-                  <div className="absolute bottom-full left-0 mb-2 w-56 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 py-1 max-h-60 overflow-y-auto">
-                    {aiConfigs.length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-slate-400">
-                        未配置 AI 模型，请在设置中添加
-                      </div>
-                    ) : (
-                      aiConfigs.map((config) => (
-                        <button
-                          key={config.id}
-                          onClick={() => {
-                            setLocalModelId(config.id);
-                            setShowModelDropdown(false);
-                          }}
-                          className={cn(
-                            "w-full text-left px-3 py-2 text-xs transition-colors cursor-pointer",
-                            config.id === localModelId
-                              ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
-                              : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700"
-                          )}
-                        >
-                          <div className="font-medium truncate">
-                            {config.title}
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Prompt Selector */}
-              <div ref={promptDropdownRef} className="relative">
-                <button
-                  onClick={() => {
-                    setShowPromptDropdown(!showPromptDropdown);
-                    setShowModelDropdown(false);
-                  }}
-                  className={cn(
-                    "flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-lg transition-colors cursor-pointer",
-                    selectedPromptId
-                      ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
-                      : showPromptDropdown
-                        ? "bg-slate-100 dark:bg-neutral-700 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-neutral-600"
-                        : "text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-neutral-700 border border-transparent"
-                  )}
-                  title="选择提示词"
-                >
-                  <ScrollText className="w-3.5 h-3.5" />
-                  <span className="max-w-[120px] truncate">
-                    {activePrompt?.title || "提示词"}
-                  </span>
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-
-                {showPromptDropdown && (
-                  <div className="absolute bottom-full left-0 mb-2 w-64 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 py-1 max-h-60 overflow-y-auto">
-                    {/* Clear selection */}
-                    <button
-                      onClick={() => {
-                        setSelectedPromptId(null);
-                        setShowPromptDropdown(false);
-                      }}
-                      className={cn(
-                        "w-full text-left px-3 py-2 text-xs transition-colors cursor-pointer",
-                        !selectedPromptId
-                          ? "bg-slate-50 dark:bg-neutral-700 text-slate-600 dark:text-slate-300"
-                          : "text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-neutral-700"
-                      )}
-                    >
-                      <div className="font-medium">无提示词</div>
-                      <div className="text-slate-400 dark:text-slate-500 mt-0.5">
-                        使用默认 RAG 对话模式
-                      </div>
-                    </button>
-
-                    {qaPromptConfigs.length === 0 ? (
-                      <div className="px-3 py-2 text-xs text-slate-400">
-                        未配置提示词，请在设置中添加
-                      </div>
-                    ) : (
-                      qaPromptConfigs.map((prompt) => (
-                        <button
-                          key={prompt.id}
-                          onClick={() => {
-                            setSelectedPromptId(prompt.id);
-                            setShowPromptDropdown(false);
-                          }}
-                          className={cn(
-                            "w-full text-left px-3 py-2 text-xs transition-colors cursor-pointer",
-                            prompt.id === selectedPromptId
-                              ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400"
-                              : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700"
-                          )}
-                        >
-                          <div className="font-medium truncate">
-                            {prompt.title}
-                          </div>
-                          {prompt.description && (
-                            <div className="text-slate-400 dark:text-slate-500 truncate mt-0.5">
-                              {prompt.description}
-                            </div>
-                          )}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Clear Chat */}
-              {messages.length > 0 && !streaming && (
-                <button
-                  onClick={handleClearChat}
-                  className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-500 dark:hover:text-red-400 rounded-lg transition-colors cursor-pointer border border-transparent"
-                  title="清空对话"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Send / Stop */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-slate-400 dark:text-slate-500 hidden sm:inline">
-                ⏎ 发送 · ⇧⏎ 换行
-              </span>
-              {streaming ? (
-                <button
-                  onClick={handleAbort}
-                  className="w-8 h-8 flex items-center justify-center rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer"
-                  title="停止生成"
-                >
-                  <Square className="w-3.5 h-3.5 fill-current" />
-                </button>
-              ) : (
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim() && uploadedImages.length === 0}
-                  className={cn(
-                    "w-8 h-8 flex items-center justify-center rounded-lg transition-colors cursor-pointer",
-                    input.trim() || uploadedImages.length > 0
-                      ? "bg-blue-500 hover:bg-blue-600 text-white"
-                      : "bg-slate-100 dark:bg-neutral-700 text-slate-400 cursor-not-allowed"
-                  )}
-                  title="发送"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ActionButton({ icon, tooltip, onClick }: { icon: React.ReactNode; tooltip: string; onClick: () => void }) {
-  const [showTooltip, setShowTooltip] = useState(false);
-  return (
-    <div className="relative">
-      <button
-        onClick={onClick}
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-        className="w-6 h-6 flex items-center justify-center rounded text-slate-400 dark:text-slate-500 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-neutral-600 transition-colors cursor-pointer"
-      >
-        {icon}
-      </button>
-      {showTooltip && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 text-xs text-white bg-slate-800 dark:bg-neutral-600 rounded whitespace-nowrap pointer-events-none z-10">
-          {tooltip}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MessageBubble({
-  message,
-  streaming,
-  thinkingStage,
-  isLast,
-  onCopy,
-  onEdit,
-  onSaveEdit,
-  onDelete,
-  onRegenerate,
-}: {
-  message: ChatMessage;
-  streaming: boolean;
-  thinkingStage: "searching" | "thinking" | null;
-  isLast: boolean;
-  onCopy: (content: string) => void;
-  onEdit: (msgId: string, newContent: string, imageUrls?: string[]) => void;
-  onSaveEdit: (msgId: string, newContent: string, imageUrls?: string[]) => void;
-  onDelete: (msgId: string) => void;
-  onRegenerate: (msgId: string) => void;
-}) {
-  const isUser = message.role === "user";
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [editContent, setEditContent] = useState(message.content);
-  const [editImages, setEditImages] = useState<UploadedImage[]>([]);
-  const [editExistingImageUrls, setEditExistingImageUrls] = useState<string[]>([]);
-  const [copied, setCopied] = useState(false);
-  const editFileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleCopy = () => {
-    onCopy(message.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const getEditImageUrls = () => [...editExistingImageUrls, ...editImages.map((img) => img.previewUrl)];
-
-  const handleConfirmEdit = () => {
-    const trimmed = editContent.trim();
-    const urls = getEditImageUrls();
-    if (!trimmed && urls.length === 0) return;
-    setIsEditing(false);
-    cleanupEditImages();
-    onEdit(message.id, trimmed, urls.length > 0 ? urls : undefined);
-  };
-
-  const handleSaveOnly = () => {
-    const trimmed = editContent.trim();
-    const urls = getEditImageUrls();
-    if (!trimmed && urls.length === 0) return;
-    setIsEditing(false);
-    cleanupEditImages();
-    onSaveEdit(message.id, trimmed, urls.length > 0 ? urls : undefined);
-  };
-
-  const handleCancelEdit = () => {
-    setIsEditing(false);
-    setEditContent(message.content);
-    setEditExistingImageUrls([]);
-    cleanupEditImages();
-  };
-
-  const handleEditFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const newImages: UploadedImage[] = [];
-    Array.from(files).forEach((file) => {
-      if (file.type.startsWith("image/")) {
-        const previewUrl = URL.createObjectURL(file);
-        newImages.push({
-          id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          file,
-          previewUrl,
-        });
+  const handleModelChange = useCallback(async (nextModelId: string | null) => {
+    setLocalModelId(nextModelId);
+    setShowModelDropdown(false);
+    if (selectedSessionId) {
+      try {
+        await persistCurrentSessionMeta({ model_id: nextModelId });
+      } catch (error) {
+        console.error("Failed to update session model:", error);
       }
+    }
+  }, [persistCurrentSessionMeta, selectedSessionId]);
+
+  const handlePromptChange = useCallback(async (nextPromptId: string | null) => {
+    setSelectedPromptId(nextPromptId);
+    setShowPromptDropdown(false);
+    if (selectedSessionId) {
+      try {
+        await persistCurrentSessionMeta({ prompt_id: nextPromptId });
+      } catch (error) {
+        console.error("Failed to update session prompt:", error);
+      }
+    }
+  }, [persistCurrentSessionMeta, selectedSessionId]);
+
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void handleSend(editingMessageId ? editingMessageValue : undefined, editingMessageId);
+    }
+  }, [editingMessageId, editingMessageValue, handleSend]);
+
+  const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
+
+  useEffect(() => {
+    if (!selectedSessionId || messages.length === 0 || streaming) return;
+    const firstUserMessage = messages.find((message) => message.role === "user");
+    const session = sessions.find((item) => item.id === selectedSessionId);
+    if (!firstUserMessage || !session || !isDefaultSessionTitle(session.title)) return;
+
+    const nextTitle = buildSessionTitleFromMessage(firstUserMessage.content, session.mode);
+    if (!nextTitle || nextTitle === session.title) return;
+
+    void persistCurrentSessionMeta({ title: nextTitle }).catch((error) => {
+      console.error("Failed to auto update session title:", error);
     });
-    setEditImages((prev) => [...prev, ...newImages]);
-    if (editFileInputRef.current) editFileInputRef.current.value = "";
-  };
-
-  const handleRemoveEditImage = (imageId: string) => {
-    setEditImages((prev) => {
-      const img = prev.find((i) => i.id === imageId);
-      if (img) URL.revokeObjectURL(img.previewUrl);
-      return prev.filter((i) => i.id !== imageId);
-    });
-  };
-
-  const cleanupEditImages = () => {
-    editImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
-    setEditImages([]);
-  };
-
-  const showActions = isUser && !streaming && !isEditing;
+  }, [messages, persistCurrentSessionMeta, selectedSessionId, sessions, streaming]);
 
   return (
-    <>
-      {/* Edit mode - full-width standalone editor */}
-      {isUser && isEditing ? (
-        <div className="w-full">
-          <input
-            ref={editFileInputRef}
-            type="file"
-            accept={ACCEPTED_IMAGE_TYPES}
-            multiple
-            onChange={handleEditFileSelect}
-            className="hidden"
-          />
-          <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/70 dark:bg-vnote-card/44 backdrop-blur-xl overflow-hidden shadow-soft">
-            {/* Image previews - existing + newly uploaded */}
-            {(editExistingImageUrls.length > 0 || editImages.length > 0) && (
-              <div className="px-4 pt-3 flex flex-wrap gap-2">
-                {editExistingImageUrls.map((url, idx) => (
-                  <div key={`existing-${idx}`} className="relative group/img">
-                    <img
-                      src={url}
-                      alt="预览"
-                      className="w-16 h-16 object-cover rounded-lg border border-slate-200 dark:border-neutral-600"
-                    />
-                    <button
-                      onClick={() => setEditExistingImageUrls((prev) => prev.filter((_, i) => i !== idx))}
-                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors cursor-pointer"
-                    >
-                      <X className="w-2.5 h-2.5" />
-                    </button>
-                  </div>
-                ))}
-                {editImages.map((image) => (
-                  <div key={image.id} className="relative group/img">
-                    <img
-                      src={image.previewUrl}
-                      alt="预览"
-                      className="w-16 h-16 object-cover rounded-lg border border-slate-200 dark:border-neutral-600"
-                    />
-                    <button
-                      onClick={() => handleRemoveEditImage(image.id)}
-                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-700 dark:bg-slate-600 text-white rounded-full flex items-center justify-center hover:bg-red-500 transition-colors cursor-pointer"
-                    >
-                      <X className="w-2.5 h-2.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <textarea
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              className="w-full bg-transparent text-slate-800 dark:text-slate-100 text-sm px-4 pt-3 pb-2 resize-none focus:outline-none min-h-[60px]"
-              rows={3}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  handleConfirmEdit();
-                }
-                if (e.key === "Escape") handleCancelEdit();
-              }}
-            />
-            <div className="flex items-center justify-between px-3 py-2 border-t border-slate-200/60 dark:border-neutral-700/60">
-              <button
-                onClick={() => editFileInputRef.current?.click()}
-                className="p-1.5 rounded-lg text-slate-400 dark:text-neutral-500 hover:text-slate-600 dark:hover:text-neutral-300 hover:bg-slate-200/60 dark:hover:bg-neutral-700/60 transition-colors cursor-pointer"
-                title="附件"
-              >
-                <Paperclip className="w-4 h-4" />
-              </button>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={handleCancelEdit}
-                  className="p-1.5 rounded-lg text-slate-400 dark:text-neutral-500 hover:text-slate-600 dark:hover:text-neutral-300 hover:bg-slate-200/60 dark:hover:bg-neutral-700/60 transition-colors cursor-pointer"
-                  title="取消"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={handleSaveOnly}
-                  className="p-1.5 rounded-lg text-slate-400 dark:text-neutral-500 hover:text-slate-600 dark:hover:text-neutral-300 hover:bg-slate-200/60 dark:hover:bg-neutral-700/60 transition-colors cursor-pointer"
-                  title="保存"
-                >
-                  <Save className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={handleConfirmEdit}
-                  className="p-1.5 rounded-lg text-blue-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-500/10 transition-colors cursor-pointer"
-                  title="发送"
-                >
-                  <Send className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "")}>
-          {/* Avatar */}
-          <div
-            className={cn(
-              "w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0",
-              isUser
-                ? "bg-gradient-to-br from-blue-500 to-purple-500"
-                : "bg-gradient-to-br from-orange-400 to-orange-500"
-            )}
+    <div ref={rootRef} className="flex h-full overflow-hidden bg-white/20 dark:bg-black/10">
+      <aside className="w-[280px] border-r border-slate-200/70 dark:border-vnote-border/70 bg-white/58 dark:bg-vnote-card/36 backdrop-blur-xl flex flex-col">
+        <div className="p-4 border-b border-slate-200/70 dark:border-vnote-border/70">
+          <button
+            onClick={handleCreateSession}
+            disabled={streaming}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 dark:disabled:bg-neutral-700 text-white text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
-            <span className="text-white text-[10px] font-medium">
-              {isUser ? "我" : "AI"}
-            </span>
-          </div>
+            <MessageSquarePlus className="w-4 h-4" />
+            新建对话
+          </button>
+        </div>
 
-          {/* Content wrapper with group for hover */}
-          <div className={cn("max-w-[80%] group", isUser ? "flex flex-col items-end" : "flex flex-col items-start")}>
-            {/* Bubble */}
-            <div
+        <div className="px-4 pt-4 space-y-3 border-b border-slate-200/70 dark:border-vnote-border/70 pb-4">
+          <div className="flex items-center gap-2 rounded-xl bg-slate-100/80 dark:bg-black/20 p-1">
+            <button
+              onClick={() => void handleModeChange("standard")}
               className={cn(
-                "rounded-xl px-4 py-3",
-                isUser
-                  ? "bg-slate-200 dark:bg-neutral-700 text-slate-800 dark:text-slate-100 rounded-tr-sm"
-                  : "bg-white/78 dark:bg-vnote-card/56 backdrop-blur-lg border border-slate-200/80 dark:border-vnote-border/80 text-slate-700 dark:text-slate-200 rounded-tl-sm shadow-soft"
+                "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer",
+                mode === "standard"
+                  ? "bg-white dark:bg-neutral-800 text-blue-600 dark:text-blue-400 shadow-sm"
+                  : "text-slate-500 dark:text-slate-400"
               )}
             >
-              {/* Sources */}
-              {!isUser && message.sources && message.sources.length > 0 && (
-                <div className="mb-2 pb-2 border-b border-slate-100 dark:border-neutral-700">
-                  <div className="text-xs text-slate-400 mb-1">引用来源:</div>
-                  <div className="flex flex-wrap gap-1">
-                    {message.sources.map((s, i) => (
-                      <span
-                        key={i}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-xs text-blue-600 dark:text-blue-400"
-                      >
-                        <FileText className="w-3 h-3" />
-                        {s.note_title}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+              标准模式
+            </button>
+            <button
+              onClick={() => void handleModeChange("agent")}
+              className={cn(
+                "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer",
+                mode === "agent"
+                  ? "bg-white dark:bg-neutral-800 text-violet-600 dark:text-violet-400 shadow-sm"
+                  : "text-slate-500 dark:text-slate-400"
               )}
+            >
+              Agent 模式
+            </button>
+          </div>
 
-              {/* Message content */}
-              {isUser ? (
-                <div className="text-sm whitespace-pre-wrap leading-relaxed">
-                  {message.imageUrls && message.imageUrls.length > 0 && (
-                    <div className="mb-2 flex flex-wrap gap-1.5">
-                      {message.imageUrls.map((url, idx) => (
-                        <img
-                          key={idx}
-                          src={url}
-                          alt="附件"
-                          className="w-16 h-16 object-cover rounded-lg border border-slate-300 dark:border-neutral-600"
-                        />
-                      ))}
-                    </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+            {mode === "agent"
+              ? "适合复杂问题：自动规划、多轮检索、证据汇总与轨迹展示。"
+              : "适合快速问答：单次检索、直接回答、重点展示引用来源。"}
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-2">
+          {sessions.length === 0 ? (
+            <div className="px-3 py-10 text-center text-sm text-slate-400 dark:text-slate-500">
+              还没有历史会话
+            </div>
+          ) : (
+            sessions.map((session) => {
+              const isSelected = session.id === selectedSessionId;
+              const isEditing = session.id === editingSessionId;
+              return (
+                <div
+                  key={session.id}
+                  className={cn(
+                    "group rounded-2xl border transition-colors",
+                    isSelected
+                      ? "border-blue-300/80 dark:border-blue-700/70 bg-blue-50/70 dark:bg-blue-900/10"
+                      : "border-transparent hover:border-slate-200/80 dark:hover:border-vnote-border/80 hover:bg-white/55 dark:hover:bg-white/5"
                   )}
-                  {message.content}
-                </div>
-              ) : message.content ? (
-                <div className="text-sm leading-relaxed chat-markdown">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {message.content}
-                  </ReactMarkdown>
-                </div>
-              ) : streaming && isLast ? (
-                <div className="flex items-center gap-2 py-1 text-slate-500 dark:text-slate-400">
-                  <div className="flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                    <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                    <span className="w-1.5 h-1.5 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce" />
+                >
+                  <div className="p-3">
+                    <div className="flex items-start gap-2">
+                      <button
+                        onClick={() => void handleSelectSession(session.id)}
+                        disabled={streaming}
+                        className="flex-1 min-w-0 text-left cursor-pointer disabled:cursor-not-allowed"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
+                              session.mode === "agent"
+                                ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
+                                : "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
+                            )}
+                          >
+                            {session.mode === "agent" ? "Agent" : "标准"}
+                          </span>
+                          {session.is_pinned && <Pin className="w-3 h-3 text-amber-500" />}
+                        </div>
+                        {isEditing ? (
+                          <input
+                            value={editingSessionTitle}
+                            onChange={(event) => setEditingSessionTitle(event.target.value)}
+                            onClick={(event) => event.stopPropagation()}
+                            onBlur={() => void handleRenameSession(session.id)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void handleRenameSession(session.id);
+                              }
+                              if (event.key === "Escape") {
+                                setEditingSessionId(null);
+                                setEditingSessionTitle("");
+                              }
+                            }}
+                            className="w-full px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-800 bg-white/90 dark:bg-neutral-900/80 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                            autoFocus
+                          />
+                        ) : (
+                          <div className="text-sm font-medium text-slate-700 dark:text-slate-200 truncate">
+                            {session.title}
+                          </div>
+                        )}
+                        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                          {session.last_message_at ?? session.updated_at}
+                        </div>
+                      </button>
+
+                      {!isEditing && (
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => void handleTogglePinSession(session)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10 cursor-pointer transition-colors"
+                            title={session.is_pinned ? "取消固定" : "固定会话"}
+                          >
+                            <Pin className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingSessionId(session.id);
+                              setEditingSessionTitle(session.title);
+                            }}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 cursor-pointer transition-colors"
+                            title="重命名"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={(event) => handleRequestDeleteSession(
+                              session.id,
+                              session.title,
+                              event.currentTarget.getBoundingClientRect()
+                            )}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 cursor-pointer transition-colors"
+                            title="删除"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-xs animate-pulse">
-                    {thinkingStage === "searching" ? "检索中..." : "思考中..."}
-                  </span>
                 </div>
-              ) : (
-                <span className="text-sm text-slate-400 italic">生成中...</span>
-              )}
-            </div>
-
-            {/* Action buttons - below bubble, only for user messages */}
-            {showActions && (
-              <div className="flex gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <ActionButton icon={<RefreshCw className="w-3.5 h-3.5" />} tooltip="重新生成" onClick={() => onRegenerate(message.id)} />
-                <ActionButton icon={<Pencil className="w-3.5 h-3.5" />} tooltip="编辑" onClick={() => { setIsEditing(true); setEditContent(message.content); setEditExistingImageUrls(message.imageUrls ?? []); }} />
-                <ActionButton
-                  icon={copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
-                  tooltip={copied ? "已复制" : "复制"}
-                  onClick={handleCopy}
-                />
-                <ActionButton icon={<Trash2 className="w-3.5 h-3.5" />} tooltip="删除" onClick={() => setShowDeleteConfirm(true)} />
-              </div>
-            )}
-          </div>
-
-          {/* Delete confirm dialog */}
-          {showDeleteConfirm && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-slate-950/34 backdrop-blur-md"
-            onClick={() => setShowDeleteConfirm(false)}
-          />
-          <div className="relative w-full max-w-md mx-4 p-6 rounded-[24px] border border-white/45 dark:border-vnote-border/80 bg-white/74 dark:bg-vnote-card/46 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_24px_70px_rgba(15,23,42,0.26)]">
-            <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-              确定要删除这条消息吗？
-            </h3>
-            <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">
-              删除后，对应的 AI 回复也会一并移除，且无法撤销。
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setShowDeleteConfirm(false)}
-                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-white/50 dark:bg-white/5 border border-slate-200/80 dark:border-vnote-border/80 hover:bg-white/75 dark:hover:bg-white/10 rounded-xl transition-colors cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                onClick={() => {
-                  setShowDeleteConfirm(false);
-                  onDelete(message.id);
-                }}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-xl transition-colors cursor-pointer shadow-sm"
-              >
-                删除
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
+              );
+            })
           )}
         </div>
-      )}
-    </>
+      </aside>
+
+      <div ref={deleteConfirmAnchorRef} className="flex-1 min-w-0 flex relative">
+        {deleteConfirmOpen && deleteConfirmPosition && (
+          <div
+            className="absolute z-20 w-[420px] max-w-[calc(100%-1.5rem)] rounded-[22px] border border-slate-200/80 dark:border-vnote-border/80 bg-white/96 dark:bg-vnote-card/92 shadow-[0_24px_80px_rgba(15,23,42,0.16)] overflow-visible animate-fade-in"
+            style={{ top: deleteConfirmPosition.top, left: deleteConfirmPosition.left, minWidth: deleteConfirmPanelMinWidth ?? undefined }}
+          >
+            <div
+              className={cn(
+                "absolute h-3.5 w-3.5 border-t border-l border-slate-200/80 dark:border-vnote-border/80 bg-white/96 dark:bg-vnote-card/92",
+                deleteConfirmPosition.arrowSide === "left"
+                  ? "-left-[7px] rotate-[-45deg]"
+                  : "-right-[7px] rotate-[135deg]"
+              )}
+              style={{ top: deleteConfirmPosition.arrowTop }}
+            />
+            <div className="overflow-hidden rounded-[22px]">
+              <div className="flex items-start justify-between gap-4 border-b border-slate-200/70 bg-white/80 px-5 py-4 dark:border-vnote-border/70 dark:bg-white/5">
+                <div className="min-w-0">
+                  <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-red-500/80 dark:text-red-300/80">
+                    Danger Zone
+                  </div>
+                  <div className="mt-1 text-lg font-semibold text-slate-900 dark:text-slate-50">
+                    确认删除对话
+                  </div>
+                </div>
+                <button
+                  onClick={handleCancelDeleteSession}
+                  className="cursor-pointer rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-white/5 dark:hover:text-slate-200"
+                  data-tauri-drag-region="false"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-4 px-5 py-4">
+                <div className="rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 dark:border-red-900/40 dark:bg-red-950/20">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-red-500 text-white shadow-sm">
+                      <Trash2 className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                        删除后将无法恢复
+                      </div>
+                      <div className="mt-1 break-all text-sm leading-6 text-slate-500 dark:text-slate-400">
+                        {pendingDeleteSessionTitle ? (
+                          <>
+                            你将删除对话
+                            <span
+                              className="mx-1 inline-flex max-w-[240px] truncate rounded-lg bg-white/80 px-2 py-0.5 align-bottom font-medium text-slate-700 dark:bg-black/20 dark:text-slate-200"
+                              title={pendingDeleteSessionTitle}
+                            >
+                              “{pendingDeleteSessionTitle}”
+                            </span>
+                          </>
+                        ) : "你将删除当前对话。"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    onClick={handleCancelDeleteSession}
+                    className="cursor-pointer rounded-xl border border-slate-200/80 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 dark:border-vnote-border/80 dark:text-slate-300 dark:hover:bg-white/5"
+                    data-tauri-drag-region="false"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={() => void handleConfirmDeleteSession()}
+                    className="cursor-pointer rounded-xl bg-red-500 px-4 py-2.5 text-sm font-medium text-white shadow-[0_10px_24px_rgba(239,68,68,0.28)] transition-colors hover:bg-red-600"
+                    data-tauri-drag-region="false"
+                  >
+                    确认删除
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 min-w-0 flex flex-col">
+          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-200/70 dark:border-vnote-border/70 bg-white/54 dark:bg-vnote-card/28 backdrop-blur-xl">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+                  {selectedSession?.title ?? (mode === "agent" ? "新建 Agent 对话" : "新建知识库对话")}
+                </h3>
+                <span
+                  className={cn(
+                    "inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    mode === "agent"
+                      ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300"
+                      : "bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300"
+                  )}
+                >
+                  {mode === "agent" ? "多步检索" : "快速问答"}
+                </span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">
+                语料严格来自 visual_summary
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCompactMessageDensity((prev) => !prev)}
+                className={cn(
+                  "px-2.5 py-1.5 rounded-lg text-xs border transition-colors cursor-pointer",
+                  compactMessageDensity
+                    ? "border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                    : "border-slate-200/80 dark:border-vnote-border/80 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5"
+                )}
+              >
+                紧凑显示
+              </button>
+              <button
+                onClick={() => setShowRightPanel((prev) => !prev)}
+                className="p-2 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                title={showRightPanel ? "隐藏侧栏" : "显示侧栏"}
+              >
+                {showRightPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
+              </button>
+            </div>
+          </div>
+
+          <div className={cn("flex-1 overflow-y-auto px-5", compactMessageDensity ? "py-3 space-y-3" : "py-5 space-y-4") }>
+            {messages.length === 0 && !streaming ? (
+              <div className="h-full flex items-center justify-center">
+                <div className="max-w-xl text-center">
+                  <div className="mx-auto w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500/15 to-violet-500/20 text-blue-500 flex items-center justify-center mb-4">
+                    {mode === "agent" ? <Sparkles className="w-7 h-7" /> : <Bot className="w-7 h-7" />}
+                  </div>
+                  <div className="text-base font-semibold text-slate-800 dark:text-slate-100 mb-2">
+                    {mode === "agent" ? "让 Agent 在本地知识库中多步检索与分析" : "基于本地知识库快速问答"}
+                  </div>
+                  <div className="text-sm text-slate-500 dark:text-slate-400 leading-7">
+                    {mode === "agent"
+                      ? "适合比较、归纳、找差异、查证据缺口等复杂问题。右侧会展示检索轨迹与证据汇总。"
+                      : "适合快速追问某个主题。系统会先检索知识片段，再基于证据生成回答。"}
+                  </div>
+                  <div className="mt-5 grid gap-3 text-left sm:grid-cols-2">
+                    <div className="rounded-2xl border border-white/60 dark:border-white/8 bg-white/70 dark:bg-white/5 p-4">
+                      <div className="text-xs font-medium text-slate-700 dark:text-slate-200">推荐提问方式</div>
+                      <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">
+                        {mode === "agent"
+                          ? "例如：比较几篇笔记对同一主题的共识与差异，指出证据缺口。"
+                          : "例如：这组笔记里如何定义某个概念？有哪些关键结论？"}
+                      </div>
+                    </div>
+                    <div className="rounded-2xl border border-white/60 dark:border-white/8 bg-white/70 dark:bg-white/5 p-4">
+                      <div className="text-xs font-medium text-slate-700 dark:text-slate-200">当前回答范围</div>
+                      <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">
+                        只基于 visual_summary 检索结果回答；如果证据不足，会明确告诉你缺少哪些依据。
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {messages.map((message, index) => (
+                  <Fragment key={message.id}>
+                    {statusText && index === streamingAssistantIndex && (
+                      <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/42 backdrop-blur-xl px-4 py-3 shadow-soft">
+                        <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                          <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                          <span>{statusText}</span>
+                        </div>
+                        {statusQueries.length > 0 && (
+                          <>
+                            <div className="mt-3 text-xs text-slate-400 dark:text-slate-500">
+                              当前检索子问题
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {statusQueries.map((query) => (
+                                <span
+                                  key={query}
+                                  className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-500 dark:text-slate-400"
+                                >
+                                  {query}
+                                </span>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
+                    <MessageCard
+                      message={message}
+                      compact={compactMessageDensity}
+                      isSelected={selectedInspectorMessage?.id === message.id}
+                      onSelect={() => {
+                        if (message.role === "assistant") {
+                          setInspectorMessageId(message.id);
+                        }
+                      }}
+                      onCopy={handleCopyMessage}
+                      onEdit={handleEditMessage}
+                      onRetry={handleRetryMessage}
+                      canEdit={!streaming && message.role === "user"}
+                      canRetry={!streaming && message.role === "user"}
+                    />
+                  </Fragment>
+                ))}
+                {statusText && streamingAssistantIndex === -1 && (
+                  <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/42 backdrop-blur-xl px-4 py-3 shadow-soft">
+                    <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                      <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                      <span>{statusText}</span>
+                    </div>
+                    {statusQueries.length > 0 && (
+                      <>
+                        <div className="mt-3 text-xs text-slate-400 dark:text-slate-500">
+                          当前检索子问题
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {statusQueries.map((query) => (
+                            <span
+                              key={query}
+                              className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-500 dark:text-slate-400"
+                            >
+                              {query}
+                            </span>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="p-4 border-t border-slate-200/70 dark:border-vnote-border/70 bg-white/42 dark:bg-vnote-card/18 backdrop-blur-xl">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPTED_IMAGE_TYPES}
+              multiple
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            <div className="rounded-[24px] border border-slate-200/80 dark:border-vnote-border/80 bg-white/78 dark:bg-vnote-card/44 backdrop-blur-xl overflow-hidden shadow-soft focus-within:ring-2 focus-within:ring-blue-500/20">
+              {editingMessageId && (
+                <div className="px-4 pt-4 pb-1 flex items-center justify-between gap-3">
+                  <div className="text-xs text-amber-600 dark:text-amber-300">
+                    正在编辑上一条提问，发送后会从这里重新生成后续回答。
+                  </div>
+                  <button
+                    onClick={handleCancelEdit}
+                    className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+                  >
+                    取消编辑
+                  </button>
+                </div>
+              )}
+              {uploadedImages.length > 0 && (
+                <div className="px-4 pt-4 flex flex-wrap gap-2">
+                  {uploadedImages.map((image) => (
+                    <div key={image.id} className="relative">
+                      <img
+                        src={image.previewUrl}
+                        alt="预览"
+                        className="w-16 h-16 rounded-xl object-cover border border-slate-200/80 dark:border-vnote-border/80"
+                      />
+                      <button
+                        onClick={() => handleRemoveImage(image.id)}
+                        className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-slate-700 text-white flex items-center justify-center hover:bg-red-500 transition-colors cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(event) => {
+                  setInput(event.target.value);
+                  if (editingMessageId) {
+                    setEditingMessageValue(event.target.value);
+                  }
+                  if (composerError) {
+                    setComposerError(null);
+                  }
+                }}
+                onKeyDown={handleKeyDown}
+                rows={4}
+                placeholder={mode === "agent" ? "输入复杂问题，Agent 会自动规划、多轮检索并给出结论..." : "输入问题，系统会检索知识库并回答..."}
+                className="w-full px-4 pt-4 pb-2 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 resize-none focus:outline-none"
+              />
+
+              {composerError && (
+                <div className="mx-4 mt-1 mb-0 rounded-2xl border border-red-200/80 dark:border-red-900/60 bg-red-50/80 dark:bg-red-900/10 px-3 py-2">
+                  <div className="flex items-start gap-2 text-xs text-red-600 dark:text-red-300">
+                    <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+                    <span>{composerError}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between gap-3 px-3 py-3 border-t border-slate-200/60 dark:border-vnote-border/60">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                    title="上传图片"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </button>
+
+                  <div ref={modelDropdownRef} className="relative">
+                    <button
+                      onClick={() => {
+                        setShowModelDropdown((prev) => !prev);
+                        setShowPromptDropdown(false);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs border border-slate-200/80 dark:border-vnote-border/80 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                    >
+                      <Bot className="w-3.5 h-3.5" />
+                      <span className="max-w-[140px] truncate">{activeModel?.title ?? "选择模型"}</span>
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                    {showModelDropdown && (
+                      <div className="absolute bottom-full left-0 mb-2 w-60 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/90 dark:bg-vnote-card/68 backdrop-blur-2xl shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 p-1 max-h-64 overflow-y-auto">
+                        {aiConfigs.length === 0 ? (
+                          <div className="px-3 py-2 text-xs text-slate-400">未配置 AI 模型</div>
+                        ) : (
+                          aiConfigs.map((config) => (
+                            <button
+                              key={config.id}
+                              onClick={() => void handleModelChange(config.id)}
+                              className={cn(
+                                "w-full text-left px-3 py-2 rounded-xl text-xs cursor-pointer transition-colors",
+                                config.id === localModelId
+                                  ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-300"
+                                  : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5"
+                              )}
+                            >
+                              {config.title}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div ref={promptDropdownRef} className="relative">
+                    <button
+                      onClick={() => {
+                        setShowPromptDropdown((prev) => !prev);
+                        setShowModelDropdown(false);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs border border-slate-200/80 dark:border-vnote-border/80 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                    >
+                      <ScrollText className="w-3.5 h-3.5" />
+                      <span className="max-w-[140px] truncate">{activePrompt?.title ?? "提示词"}</span>
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
+                    {showPromptDropdown && (
+                      <div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/90 dark:bg-vnote-card/68 backdrop-blur-2xl shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 p-1 max-h-72 overflow-y-auto">
+                        <button
+                          onClick={() => void handlePromptChange(null)}
+                          className={cn(
+                            "w-full text-left px-3 py-2 rounded-xl text-xs cursor-pointer transition-colors",
+                            !selectedPromptId
+                              ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-300"
+                              : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5"
+                          )}
+                        >
+                          无提示词
+                        </button>
+                        {qaPromptConfigs.map((config) => (
+                          <button
+                            key={config.id}
+                            onClick={() => void handlePromptChange(config.id)}
+                            className={cn(
+                              "w-full text-left px-3 py-2 rounded-xl text-xs cursor-pointer transition-colors",
+                              config.id === selectedPromptId
+                                ? "bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-300"
+                                : "text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5"
+                            )}
+                          >
+                            <div className="font-medium truncate">{config.title}</div>
+                            {config.description && (
+                              <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                                {config.description}
+                              </div>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="hidden md:inline text-[11px] text-slate-400 dark:text-slate-500">
+                    Enter 发送 · Shift+Enter 换行
+                  </span>
+                  {streaming ? (
+                    <button
+                      onClick={handleAbort}
+                      className="w-10 h-10 rounded-xl bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors cursor-pointer"
+                      title="停止生成"
+                    >
+                      <Square className="w-4 h-4 fill-current" />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => void handleSend(editingMessageId ? editingMessageValue : undefined, editingMessageId)}
+                      disabled={!(editingMessageId ? editingMessageValue.trim() : input.trim()) && uploadedImages.length === 0}
+                      className={cn(
+                        "w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer",
+                        (editingMessageId ? editingMessageValue.trim() : input.trim()) || uploadedImages.length > 0
+                          ? "bg-blue-500 hover:bg-blue-600 text-white"
+                          : "bg-slate-100 dark:bg-neutral-700 text-slate-400 cursor-not-allowed"
+                      )}
+                      title="发送"
+                    >
+                      <Send className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {showRightPanel && (
+          <aside className="w-[340px] border-l border-slate-200/70 dark:border-vnote-border/70 bg-white/56 dark:bg-vnote-card/28 backdrop-blur-xl flex flex-col">
+            <div className="px-4 py-4 border-b border-slate-200/70 dark:border-vnote-border/70">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">证据与轨迹</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    {selectedInspectorMessage ? "查看当前回答的引用与执行过程" : "选择一条 AI 回答查看详情"}
+                  </div>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  onClick={() => setShowSourcesExpanded((prev) => !prev)}
+                  className={cn(
+                    "px-2.5 py-1.5 rounded-lg text-xs border cursor-pointer transition-colors",
+                    showSourcesExpanded
+                      ? "border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                      : "border-slate-200/80 dark:border-vnote-border/80 text-slate-500 dark:text-slate-400"
+                  )}
+                >
+                  来源展开
+                </button>
+                <button
+                  onClick={() => setShowAgentTrace((prev) => !prev)}
+                  className={cn(
+                    "px-2.5 py-1.5 rounded-lg text-xs border cursor-pointer transition-colors",
+                    showAgentTrace
+                      ? "border-violet-200 bg-violet-50 text-violet-600 dark:border-violet-800 dark:bg-violet-900/20 dark:text-violet-300"
+                      : "border-slate-200/80 dark:border-vnote-border/80 text-slate-500 dark:text-slate-400"
+                  )}
+                >
+                  轨迹展示
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              <section className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/38 backdrop-blur-xl overflow-hidden shadow-soft">
+                <div className="px-4 py-3 border-b border-slate-200/60 dark:border-vnote-border/60 flex items-center gap-2">
+                  <Search className="w-4 h-4 text-blue-500" />
+                  <div className="text-sm font-medium text-slate-700 dark:text-slate-200">引用来源</div>
+                  <div className="ml-auto text-xs text-slate-400 dark:text-slate-500">
+                    {selectedInspectorMessage?.sources.length ?? latestAssistantMessage?.sources.length ?? 0} 条
+                  </div>
+                </div>
+                <div className="p-3 space-y-2">
+                  {(selectedInspectorMessage?.sources ?? latestAssistantMessage?.sources ?? []).length === 0 ? (
+                    <div className="px-2 py-6 text-center text-xs text-slate-400 dark:text-slate-500 leading-6">
+                      {selectedInspectorMessage?.status === "error"
+                        ? "这次回答在生成阶段报错，还没有成功落库来源。"
+                        : selectedInspectorMessage?.status === "aborted"
+                          ? "这次回答已中止，系统没有保留完整来源。"
+                          : "当前回答暂无可展示来源，可能是检索未命中或结果仍在整理中。"}
+                    </div>
+                  ) : (
+                    (selectedInspectorMessage?.sources ?? latestAssistantMessage?.sources ?? []).map((source) => (
+                      <button
+                        key={source.chunk_id}
+                        onClick={() => void handleNavigateToNote(source.note_id)}
+                        className="w-full text-left p-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 hover:border-blue-300 dark:hover:border-blue-700 bg-white/70 dark:bg-black/10 transition-colors cursor-pointer"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
+                              <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                              <span className="truncate">{source.note_title}</span>
+                            </div>
+                            {showSourcesExpanded && (
+                              <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400 line-clamp-5">
+                                {source.content}
+                              </div>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-slate-400 dark:text-slate-500 flex-shrink-0">
+                            {(source.score * 100).toFixed(1)}%
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </section>
+
+              {showAgentTrace && (
+                <section className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/38 backdrop-blur-xl overflow-hidden shadow-soft">
+                  <div className="px-4 py-3 border-b border-slate-200/60 dark:border-vnote-border/60 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-violet-500" />
+                    <div className="text-sm font-medium text-slate-700 dark:text-slate-200">Agent 轨迹</div>
+                    <div className="ml-auto text-xs text-slate-400 dark:text-slate-500">
+                      {selectedInspectorMessage?.agentRun?.trace_steps.length ?? 0} 步
+                    </div>
+                  </div>
+                  <div className="p-3 space-y-2">
+                    {!selectedInspectorMessage?.agentRun ? (
+                      <div className="px-2 py-6 text-center text-xs text-slate-400 dark:text-slate-500 leading-6">
+                        {selectedInspectorMessage?.status === "error"
+                          ? "这次 Agent 执行在完成前出错，轨迹可能只有部分步骤。"
+                          : "当前回答不是 Agent 结果，或轨迹尚未生成。"}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="px-1 pb-2 text-[11px] text-slate-400 dark:text-slate-500">
+                          状态：{selectedInspectorMessage.agentRun.run.status} · 检索轮次预算：{selectedInspectorMessage.agentRun.run.iteration_count}
+                        </div>
+                        {selectedInspectorMessage.agentRun.trace_steps.map((step) => {
+                          const metadataSections = parseTraceMetadata(step.metadata_json);
+                          return (
+                            <div
+                              key={step.id}
+                              className="p-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-white/70 dark:bg-black/10"
+                            >
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                                <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
+                                  {step.step_index + 1}
+                                </span>
+                                <div className="text-xs font-medium text-slate-700 dark:text-slate-200">{step.title}</div>
+                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400">
+                                  {step.step_type}
+                                </span>
+                              </div>
+                              <div className="text-xs leading-6 text-slate-500 dark:text-slate-400 whitespace-pre-wrap">
+                                {step.content}
+                              </div>
+                              {metadataSections.length > 0 && (
+                                <div className="mt-3 space-y-2 border-t border-slate-200/60 dark:border-vnote-border/60 pt-3">
+                                  {metadataSections.map((section) => (
+                                    <div key={`${step.id}-${section.label}`}>
+                                      <div className="text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                                        {section.label}
+                                      </div>
+                                      <div className="mt-1 flex flex-wrap gap-2">
+                                        {section.value.map((item, index) => (
+                                          <span
+                                            key={`${step.id}-${section.label}-${index}`}
+                                            className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-500 dark:text-slate-400 max-w-full break-all"
+                                          >
+                                            {item}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
+                </section>
+              )}
+            </div>
+          </aside>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MessageCard({
+  message,
+  compact,
+  isSelected,
+  onSelect,
+  onCopy,
+  onEdit,
+  onRetry,
+  canEdit,
+  canRetry,
+}: {
+  message: UiMessage;
+  compact: boolean;
+  isSelected: boolean;
+  onSelect: () => void;
+  onCopy: (content: string) => void;
+  onEdit: (message: UiMessage) => void;
+  onRetry: (message: UiMessage) => void;
+  canEdit: boolean;
+  canRetry: boolean;
+}) {
+  const isUser = message.role === "user";
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    if (!message.content) return;
+    onCopy(message.content);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1200);
+  };
+
+  return (
+    <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "", compact ? "" : "") }>
+      <div
+        className={cn(
+          "w-8 h-8 rounded-2xl flex items-center justify-center flex-shrink-0 text-white text-[11px] font-semibold",
+          isUser ? "bg-gradient-to-br from-blue-500 to-indigo-500" : "bg-gradient-to-br from-orange-400 to-amber-500"
+        )}
+      >
+        {isUser ? "我" : "AI"}
+      </div>
+
+      <div className={cn("min-w-0 max-w-[82%] group", isUser ? "items-end" : "items-start") }>
+        <div
+          onClick={onSelect}
+          className={cn(
+            "rounded-2xl px-4 transition-all",
+            compact ? "py-3" : "py-3.5",
+            isUser
+              ? "bg-slate-200 dark:bg-neutral-700 text-slate-800 dark:text-slate-100 rounded-tr-sm"
+              : "bg-white/82 dark:bg-vnote-card/56 border border-slate-200/80 dark:border-vnote-border/80 text-slate-700 dark:text-slate-200 rounded-tl-sm shadow-soft cursor-pointer",
+            !isUser && isSelected && "border-blue-300 dark:border-blue-700 ring-2 ring-blue-500/10"
+          )}
+        >
+          {isUser ? (
+            <div className="text-sm leading-7 whitespace-pre-wrap">
+              {message.imageUrls && message.imageUrls.length > 0 && (
+                <div className="mb-3 flex flex-wrap gap-2">
+                  {message.imageUrls.map((url) => (
+                    <img
+                      key={url}
+                      src={url}
+                      alt="附件"
+                      className="w-20 h-20 object-cover rounded-xl border border-slate-300 dark:border-neutral-600"
+                    />
+                  ))}
+                </div>
+              )}
+              {message.content}
+            </div>
+          ) : message.content ? (
+            message.status === "streaming" ? (
+              <div className="chat-streaming-content text-sm leading-7 whitespace-pre-wrap break-words">
+                {message.content}
+              </div>
+            ) : (
+              <div className="chat-markdown text-sm leading-7">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+              </div>
+            )
+          ) : (
+            <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 py-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.25s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.12s]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" />
+            </div>
+          )}
+        </div>
+
+        <div className="mt-1 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity flex-wrap">
+          {!isUser && (
+            <button
+              onClick={handleCopy}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? "已复制" : "复制"}
+            </button>
+          )}
+          {isUser && canEdit && (
+            <button
+              onClick={() => onEdit(message)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-400 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              编辑后重问
+            </button>
+          )}
+          {isUser && canRetry && (
+            <button
+              onClick={() => onRetry(message)}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-400 hover:text-violet-600 dark:hover:text-violet-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              重新生成
+            </button>
+          )}
+          {message.agentRun && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-300">
+              <Sparkles className="w-3.5 h-3.5" />
+              Agent
+            </span>
+          )}
+          {message.sources.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300">
+              <FileText className="w-3.5 h-3.5" />
+              {message.sources.length} 条来源
+            </span>
+          )}
+          {message.status === "error" && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-300">
+              <AlertCircle className="w-3.5 h-3.5" />
+              生成失败
+            </span>
+          )}
+          {message.status === "aborted" && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-300">
+              <Square className="w-3 h-3 fill-current" />
+              已中止
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
