@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, memo } from "react";
+import { useState, useRef, useEffect, memo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Sparkles,
@@ -23,6 +23,7 @@ import { CollectionSection } from "../Collection";
 import { CreateCollectionModal } from "../Collection/CreateCollectionModal";
 import { EditNoteModal } from "../Notes/EditNoteModal";
 import { GlobalSearchModal } from "../Notes/GlobalSearchModal";
+import { ConfirmDialog } from "../common/ConfirmDialog";
 import type { Note, Collection } from "../../types";
 import { VIEW_TYPES } from "../../types";
 import logoImg from "../../assets/logo.png";
@@ -134,8 +135,11 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
   const [submenuAlignBottom, setSubmenuAlignBottom] = useState(false);
   const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false);
   const [showEditNoteModal, setShowEditNoteModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteTriggerRect, setDeleteTriggerRect] = useState<DOMRect | null>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
+  const noteItemRef = useRef<HTMLButtonElement>(null);
   const menuTriggerRef = useRef<HTMLDivElement>(null);
   const collectionMenuRef = useRef<HTMLDivElement>(null);
   const isSelected = selectedNoteId === note.id;
@@ -155,13 +159,24 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
     }
   }, [showMenu]);
 
-  const handleDelete = async (e: React.MouseEvent) => {
+  const handleDeleteClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
+    setDeleteTriggerRect(noteItemRef.current?.getBoundingClientRect() ?? null);
     setShowMenu(false);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleCancelDelete = useCallback(() => {
+    setShowDeleteConfirm(false);
+    setDeleteTriggerRect(null);
+  }, []);
+
+  const handleConfirmDelete = async () => {
     try {
       // 先从初始化队列移除（包括中止正在运行的任务）
       await removeNoteFromQueue(note.id);
       await deleteNote(note.id);
+      handleCancelDelete();
     } catch (error) {
       console.error("Failed to delete note:", error);
     }
@@ -217,6 +232,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
         }}
       >
         <button
+          ref={noteItemRef}
           onClick={() => {
             setSelectedFolder(null); // 清除文件夹选中
             setSelectedNoteId(note.id);
@@ -323,7 +339,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
           <div className="my-1 border-t border-slate-100 dark:border-neutral-700" />
 
           <button
-            onClick={handleDelete}
+            onClick={handleDeleteClick}
             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -344,6 +360,19 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
       {showEditNoteModal && (
         <EditNoteModal note={note} onClose={() => setShowEditNoteModal(false)} />
       )}
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="确认删除"
+        message={`你将删除笔记“${note.title}”。\n删除后将无法恢复。`}
+        confirmText="确认删除"
+        cancelText="取消"
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        danger
+        placement="anchored"
+        triggerRect={deleteTriggerRect}
+      />
     </>
   );
 });

@@ -242,6 +242,7 @@ export function KnowledgeBaseChat() {
   const [deleteConfirmPanelMinWidth, setDeleteConfirmPanelMinWidth] = useState<number | null>(null);
   const [preferencesReady, setPreferencesReady] = useState(false);
 
+  const deleteConfirmPanelRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const deleteConfirmAnchorRef = useRef<HTMLDivElement>(null);
@@ -705,6 +706,19 @@ export function KnowledgeBaseChat() {
     setDeleteConfirmPanelMinWidth(null);
   }, []);
 
+  useEffect(() => {
+    if (!deleteConfirmOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (deleteConfirmPanelRef.current?.contains(target)) return;
+      handleCancelDeleteSession();
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [deleteConfirmOpen, handleCancelDeleteSession]);
+
   const handleConfirmDeleteSession = useCallback(async () => {
     if (!pendingDeleteSessionId) return;
     try {
@@ -1159,6 +1173,7 @@ export function KnowledgeBaseChat() {
       <div ref={deleteConfirmAnchorRef} className="flex-1 min-w-0 flex relative">
         {deleteConfirmOpen && deleteConfirmPosition && (
           <div
+            ref={deleteConfirmPanelRef}
             className="absolute z-20 w-[420px] max-w-[calc(100%-1.5rem)] rounded-[22px] border border-slate-200/80 dark:border-vnote-border/80 bg-white/96 dark:bg-vnote-card/92 shadow-[0_24px_80px_rgba(15,23,42,0.16)] overflow-visible animate-fade-in"
             style={{ top: deleteConfirmPosition.top, left: deleteConfirmPosition.left, minWidth: deleteConfirmPanelMinWidth ?? undefined }}
           >

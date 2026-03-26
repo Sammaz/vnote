@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { MoreHorizontal, Edit2, Trash2, BookOpen, GripVertical, CheckSquare, Square, Plus, FolderOpen, ArrowLeft } from "lucide-react";
@@ -27,6 +27,7 @@ import { AddNotesToCollectionModal } from "./AddNotesToCollectionModal";
 import { BatchActionBar } from "./BatchActionBar";
 import { MoveToCollectionModal } from "./MoveToCollectionModal";
 import { NoteCard } from "../Notes/NoteCard";
+import { ConfirmDialog } from "../common/ConfirmDialog";
 import type { CollectionItem as CollectionItemType, Note, Collection } from "../../types";
 
 interface NoteWithDetails extends CollectionItemType {
@@ -51,11 +52,12 @@ function SortableMixedCard({
   item: MixedItem;
   onOpenNote: (noteId: string) => void;
   onOpenCollection: (collectionId: string) => void;
-  onDeleteNote: (item: NoteWithDetails) => void;
+  onDeleteNote: (item: NoteWithDetails, triggerRect?: DOMRect | null) => void;
   isSelecting: boolean;
   isSelected: boolean;
   onToggleSelect: (noteId: string) => void;
 }) {
+  const noteCardRef = useRef<HTMLDivElement>(null);
   const {
     attributes,
     listeners,
@@ -169,7 +171,7 @@ function SortableMixedCard({
           )}
         </div>
       )}
-      <div onClick={handleClick} className="cursor-pointer">
+      <div ref={noteCardRef} onClick={handleClick} className="cursor-pointer">
         <NoteCard note={noteItem.note} onClick={() => {}} />
       </div>
       {!isSelecting && (
@@ -191,7 +193,7 @@ function SortableMixedCard({
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onDeleteNote(noteItem);
+              onDeleteNote(noteItem, noteCardRef.current?.getBoundingClientRect() ?? null);
             }}
             className={cn(
               "absolute top-2 right-2 p-1.5 rounded-lg transition-all cursor-pointer z-10",
@@ -234,6 +236,7 @@ export function CollectionPage() {
   const [showAddNotesModal, setShowAddNotesModal] = useState(false);
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [noteToDelete, setNoteToDelete] = useState<NoteWithDetails | null>(null);
+  const [noteDeleteTriggerRect, setNoteDeleteTriggerRect] = useState<DOMRect | null>(null);
   const [showMenu, setShowMenu] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -399,6 +402,11 @@ export function CollectionPage() {
     }
   };
 
+  const handleCancelDeleteNote = useCallback(() => {
+    setNoteToDelete(null);
+    setNoteDeleteTriggerRect(null);
+  }, []);
+
   const handleDeleteNote = async () => {
     if (!noteToDelete) return;
     try {
@@ -409,7 +417,7 @@ export function CollectionPage() {
     } catch (error) {
       console.error("Failed to delete note:", error);
     } finally {
-      setNoteToDelete(null);
+      handleCancelDeleteNote();
     }
   };
 
@@ -581,7 +589,10 @@ export function CollectionPage() {
                       item={item}
                       onOpenNote={handleOpenNote}
                       onOpenCollection={handleOpenChildCollection}
-                      onDeleteNote={setNoteToDelete}
+                      onDeleteNote={(item, triggerRect) => {
+                        setNoteToDelete(item);
+                        setNoteDeleteTriggerRect(triggerRect ?? null);
+                      }}
                       isSelecting={batchSelection.isSelecting}
                       isSelected={item.type === "note" && batchSelection.selectedNoteIds.has(item.data.note_id)}
                       onToggleSelect={toggleNoteSelection}
@@ -679,38 +690,18 @@ export function CollectionPage() {
         document.body
       )}
 
-      {/* 删除笔记确认弹窗 */}
-      {noteToDelete && createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center">
-          <div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-            onClick={() => setNoteToDelete(null)}
-          />
-          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
-            <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-              确定要删除笔记吗?
-            </h3>
-            <p className="mt-2 text-sm text-slate-500 dark:text-neutral-400">
-              确定要永久删除「{noteToDelete.note.title}」吗？此操作无法撤销。
-            </p>
-            <div className="mt-6 flex justify-end gap-3">
-              <button
-                onClick={() => setNoteToDelete(null)}
-                className="px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-neutral-800 hover:bg-slate-200 dark:hover:bg-neutral-700 rounded-md transition-colors cursor-pointer"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleDeleteNote}
-                className="px-4 py-2 text-sm font-medium text-white bg-red-500 hover:bg-red-600 rounded-md transition-colors cursor-pointer"
-              >
-                删除
-              </button>
-            </div>
-          </div>
-        </div>,
-        document.body
-      )}
+      <ConfirmDialog
+        open={noteToDelete !== null}
+        title="确认删除"
+        message={noteToDelete ? `你将删除笔记“${noteToDelete.note.title}”。\n删除后将无法恢复。` : ""}
+        confirmText="确认删除"
+        cancelText="取消"
+        onConfirm={handleDeleteNote}
+        onCancel={handleCancelDeleteNote}
+        danger
+        placement="anchored"
+        triggerRect={noteDeleteTriggerRect}
+      />
 
       {/* 添加笔记弹窗 */}
       {showAddNotesModal && selectedCollectionId && (

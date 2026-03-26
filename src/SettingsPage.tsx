@@ -7,6 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "./context/AppContext";
 import { useSettings } from "./context/SettingsContext";
 import { DataManagementSection } from "./components/Settings/DataManagementSection";
+import { message } from "./utils/message";
 import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptConfig } from "./types";
 
 interface SettingsPageProps {
@@ -44,7 +45,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const [editingType, setEditingType] = useState<EditingType>(null);
     const [apiKeyVisible, setApiKeyVisible] = useState(false);
     const [testingApi, setTestingApi] = useState(false);
-    const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
     // Prompt config state
     const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
@@ -417,7 +417,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         setEditingRerankerConfig(null);
         setEditingPromptConfig(null);
         setApiKeyVisible(false);
-        setTestResult(null);
     };
 
     const openAiEditor = (config: AiConfig) => {
@@ -440,7 +439,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         if (!config?.base_url || !config?.model) return;
 
         setTestingApi(true);
-        setTestResult(null);
 
         try {
             await invoke("test_api_connection", {
@@ -449,9 +447,9 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 model: config.model,
                 configType: editingType || "ai",
             });
-            setTestResult({ success: true, message: "连接成功" });
+            message.success("连接成功");
         } catch (error) {
-            setTestResult({ success: false, message: String(error) });
+            message.error(String(error));
         } finally {
             setTestingApi(false);
         }
@@ -1242,12 +1240,6 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         </span>
                                     </div>
                                     <p className="text-sm text-slate-500 mt-3">API 请求超时时间，范围0-600秒，0表示不设置超时，默认180秒</p>
-                                </div>
-                            )}
-
-                            {testResult && (
-                                <div className={`p-3 rounded-md text-sm text-center ${testResult.success ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800' : 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 border border-red-200 dark:border-red-800'}`}>
-                                    {testResult.message}
                                 </div>
                             )}
 

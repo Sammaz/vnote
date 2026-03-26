@@ -9,7 +9,7 @@ interface NoteCardProps {
   note: Note;
   onClick?: () => void;
   onEdit?: () => void;
-  onDelete?: () => void;
+  onDelete?: (triggerRect?: DOMRect | null) => void;
 }
 
 function formatDate(dateStr: string): string {
@@ -61,6 +61,7 @@ export const NoteCard = memo(function NoteCard({ note, onClick, onEdit, onDelete
 
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{ visible: boolean; x: number; y: number }>({ visible: false, x: 0, y: 0 });
+  const cardRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -95,6 +96,7 @@ export const NoteCard = memo(function NoteCard({ note, onClick, onEdit, onDelete
   return (
     <>
       <div
+        ref={cardRef}
         onClick={onClick}
         onContextMenu={handleContextMenu}
         className={cn(
@@ -156,7 +158,11 @@ export const NoteCard = memo(function NoteCard({ note, onClick, onEdit, onDelete
           )}
           {onDelete && (
             <button
-              onClick={() => { setContextMenu(prev => ({ ...prev, visible: false })); onDelete(); }}
+              onClick={() => {
+                const triggerRect = cardRef.current?.getBoundingClientRect() ?? null;
+                setContextMenu(prev => ({ ...prev, visible: false }));
+                onDelete(triggerRect);
+              }}
               className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
             >
               <Trash2 className="w-4 h-4" />

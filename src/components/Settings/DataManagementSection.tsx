@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, Check, ChevronDown, Database, FolderOpen, HardDrive, Loader2, RefreshCw, ShieldAlert, Trash2, Video } from "lucide-react";
 
 import { ConfirmDialog } from "../common/ConfirmDialog";
+import { message } from "../../utils/message";
 import type {
   CleanupPreview,
   CleanupRequest,
@@ -42,7 +43,6 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
   const [scanning, setScanning] = useState(false);
   const [previewingCategory, setPreviewingCategory] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
-  const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pendingRequest, setPendingRequest] = useState<CleanupRequest | null>(null);
   const [showNoteDropdown, setShowNoteDropdown] = useState(false);
@@ -72,7 +72,6 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
 
   const loadOverview = async () => {
     setLoading(true);
-    setMessage(null);
     try {
       const [overviewData, scanData] = await Promise.all([
         invoke<DataManagementOverview>("get_data_management_overview", { noteIds }),
@@ -82,7 +81,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
       setScanResult(scanData);
     } catch (error) {
       console.error("Failed to load data management overview:", error);
-      setMessage({ type: "error", text: `数据管理加载失败：${String(error)}` });
+      message.error(`数据管理加载失败：${String(error)}`);
     } finally {
       setLoading(false);
     }
@@ -105,15 +104,14 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
 
   const handleRefreshScan = async () => {
     setScanning(true);
-    setMessage(null);
     try {
       const scanData = await invoke<DataManagementScanResult>("scan_data_management", { noteIds });
       setScanResult(scanData);
       setOverview(scanData.overview);
-      setMessage({ type: "success", text: "数据扫描已刷新" });
+      message.success("数据扫描已刷新");
     } catch (error) {
       console.error("Failed to scan data management:", error);
-      setMessage({ type: "error", text: `扫描失败：${String(error)}` });
+      message.error(`扫描失败：${String(error)}`);
     } finally {
       setScanning(false);
     }
@@ -121,7 +119,6 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
 
   const handlePreviewCleanup = async (key: string, mode: "category" | "integrity" = "category") => {
     setPreviewingCategory(key);
-    setMessage(null);
     try {
       const request: CleanupRequest = {
         categories: mode === "category" ? [key] : [],
@@ -134,7 +131,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
       setConfirmOpen(true);
     } catch (error) {
       console.error("Failed to preview cleanup:", error);
-      setMessage({ type: "error", text: `预览失败：${String(error)}` });
+      message.error(`预览失败：${String(error)}`);
     } finally {
       setPreviewingCategory(null);
     }
@@ -144,19 +141,15 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
     if (!pendingRequest) return;
     setExecuting(true);
     setConfirmOpen(false);
-    setMessage(null);
     try {
       const result = await invoke<CleanupResult>("execute_data_cleanup", { request: pendingRequest });
-      setMessage({
-        type: "success",
-        text: `处理完成，共处理 ${result.processed_items} 项，释放 ${formatBytes(result.cleared_bytes)}`,
-      });
+      message.success(`处理完成，共处理 ${result.processed_items} 项，释放 ${formatBytes(result.cleared_bytes)}`);
       setPreview(null);
       setPendingRequest(null);
       await loadOverview();
     } catch (error) {
       console.error("Failed to execute cleanup:", error);
-      setMessage({ type: "error", text: `清理失败：${String(error)}` });
+      message.error(`清理失败：${String(error)}`);
     } finally {
       setExecuting(false);
     }
@@ -263,15 +256,6 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
           </div>
         </div>
       </div>
-
-      {message && (
-        <div className={`rounded-lg border px-4 py-3 text-sm ${message.type === "success"
-          ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-300"
-          : "border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300"
-          }`}>
-          {message.text}
-        </div>
-      )}
 
       <div className="rounded-xl border border-slate-200 dark:border-vnote-border overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 dark:border-vnote-border font-medium text-slate-900 dark:text-slate-100">

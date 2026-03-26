@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronUp, ChevronDown, MoreHorizontal, Trash2, Edit3, Video, Library, ChevronRight, FolderPlus } from "lucide-react";
@@ -7,6 +7,7 @@ import { useApp } from "../../context/AppContext";
 import { useInitializationQueue } from "../../context/InitializationQueueContext";
 import { CreateCollectionModal } from "./CreateCollectionModal";
 import { EditNoteModal } from "../Notes/EditNoteModal";
+import { ConfirmDialog } from "../common/ConfirmDialog";
 import type { Collection, CollectionItem as CollectionItemType, Note } from "../../types";
 
 // 合集图标组件
@@ -132,8 +133,11 @@ function CollectionNoteItem({
   const [showCollectionSubmenu, setShowCollectionSubmenu] = useState(false);
   const [showCreateCollectionModal, setShowCreateCollectionModal] = useState(false);
   const [showEditNoteModal, setShowEditNoteModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteTriggerRect, setDeleteTriggerRect] = useState<DOMRect | null>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
+  const noteItemRef = useRef<HTMLButtonElement>(null);
   const menuTriggerRef = useRef<HTMLDivElement>(null);
   const isSelected = selectedNoteId === item.note_id;
 
@@ -179,14 +183,26 @@ function CollectionNoteItem({
     }
   };
 
-  const handleDelete = async () => {
+  const handleDeleteClick = () => {
+    setDeleteTriggerRect(noteItemRef.current?.getBoundingClientRect() ?? null);
     setShowMenu(false);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleCancelDelete = useCallback(() => {
+    setShowDeleteConfirm(false);
+    setDeleteTriggerRect(null);
+  }, []);
+
+  const handleDelete = async () => {
     try {
       // 先从初始化队列移除（包括中止正在运行的任务）
       await removeNoteFromQueue(item.note_id);
       await deleteNote(item.note_id);
     } catch (error) {
       console.error("Failed to delete note:", error);
+    } finally {
+      handleCancelDelete();
     }
   };
 
@@ -202,6 +218,7 @@ function CollectionNoteItem({
         data-note-id={item.note_id}
       >
         <button
+          ref={noteItemRef}
           onClick={() => {
             setSelectedNoteId(item.note_id);
             setSelectedCollection(currentCollectionId);
@@ -310,7 +327,7 @@ function CollectionNoteItem({
           <div className="my-1 border-t border-slate-100 dark:border-neutral-700" />
 
           <button
-            onClick={handleDelete}
+            onClick={handleDeleteClick}
             className="w-full flex items-center gap-2 px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors cursor-pointer"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -327,6 +344,19 @@ function CollectionNoteItem({
       {showEditNoteModal && (
         <EditNoteModal note={item.note} onClose={() => setShowEditNoteModal(false)} />
       )}
+
+      <ConfirmDialog
+        open={showDeleteConfirm}
+        title="确认删除"
+        message={`你将删除笔记“${item.note.title}”。\n删除后将无法恢复。`}
+        confirmText="确认删除"
+        cancelText="取消"
+        onConfirm={handleDelete}
+        onCancel={handleCancelDelete}
+        danger
+        placement="anchored"
+        triggerRect={deleteTriggerRect}
+      />
     </>
   );
 }

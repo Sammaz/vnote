@@ -16,7 +16,7 @@ interface VirtualizedNoteGridProps {
   notes: Note[];
   onNoteClick: (noteId: string) => void;
   onNoteEdit?: (note: Note) => void;
-  onNoteDelete?: (noteId: string) => void;
+  onNoteDelete?: (noteId: string, triggerRect?: DOMRect | null) => void;
   /** 每行列数，默认根据容器宽度自动计算 */
   columns?: number;
   /** 容器类名 */
@@ -98,7 +98,7 @@ export function VirtualizedNoteGrid({
               note={note}
               onClick={() => handleClick(note.id)}
               onEdit={onNoteEdit ? () => onNoteEdit(note) : undefined}
-              onDelete={onNoteDelete ? () => onNoteDelete(note.id) : undefined}
+              onDelete={onNoteDelete ? (triggerRect) => onNoteDelete(note.id, triggerRect) : undefined}
             />
           ))}
         </div>
@@ -142,7 +142,7 @@ export function VirtualizedNoteGrid({
                     note={note}
                     onClick={() => handleClick(note.id)}
                     onEdit={onNoteEdit ? () => onNoteEdit(note) : undefined}
-                    onDelete={onNoteDelete ? () => onNoteDelete(note.id) : undefined}
+                    onDelete={onNoteDelete ? (triggerRect) => onNoteDelete(note.id, triggerRect) : undefined}
                   />
                 ))}
               </div>

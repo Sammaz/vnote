@@ -1,12 +1,19 @@
+import { useCallback, useState } from "react";
 import { ArrowLeft, FileText } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
+import { useInitializationQueue } from "../../context/InitializationQueueContext";
 import { VirtualizedNoteGrid } from "./VirtualizedNoteGrid";
+import { ConfirmDialog } from "../common/ConfirmDialog";
+import type { Note } from "../../types";
 
 export function RecentNotesPage() {
-  const { notes, setSelectedNoteId, setCurrentView } = useApp();
+  const { notes, setSelectedNoteId, setCurrentView, deleteNote } = useApp();
   const { expandCollectionPathForNote } = useCollections();
+  const { removeNoteFromQueue } = useInitializationQueue();
+  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
+  const [deleteTriggerRect, setDeleteTriggerRect] = useState<DOMRect | null>(null);
 
   // 显示所有笔记（不再限制12条，虚拟滚动可以处理大量数据）
   const recentNotes = notes;
@@ -15,6 +22,23 @@ export function RecentNotesPage() {
     await expandCollectionPathForNote(noteId);
     setSelectedNoteId(noteId);
     setCurrentView("note");
+  };
+
+  const handleCancelDelete = useCallback(() => {
+    setNoteToDelete(null);
+    setDeleteTriggerRect(null);
+  }, []);
+
+  const handleConfirmDelete = async () => {
+    if (!noteToDelete) return;
+
+    try {
+      await removeNoteFromQueue(noteToDelete.id);
+      await deleteNote(noteToDelete.id);
+      handleCancelDelete();
+    } catch (error) {
+      console.error("Failed to delete note:", error);
+    }
   };
 
   return (
@@ -55,8 +79,28 @@ export function RecentNotesPage() {
         <VirtualizedNoteGrid
           notes={recentNotes}
           onNoteClick={handleOpenNote}
+          onNoteDelete={(noteId, triggerRect) => {
+            const targetNote = recentNotes.find((note) => note.id === noteId);
+            if (targetNote) {
+              setDeleteTriggerRect(triggerRect ?? null);
+              setNoteToDelete(targetNote);
+            }
+          }}
         />
       )}
+
+      <ConfirmDialog
+        open={noteToDelete !== null}
+        title="确认删除"
+        message={noteToDelete ? `你将删除笔记“${noteToDelete.title}”。\n删除后将无法恢复。` : ""}
+        confirmText="确认删除"
+        cancelText="取消"
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        danger
+        placement="anchored"
+        triggerRect={deleteTriggerRect}
+      />
     </div>
   );
 }
