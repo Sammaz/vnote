@@ -21,6 +21,8 @@ const CollectionPage = lazy(() => import("./components/Collection").then(m => ({
 const RecentNotesPage = lazy(() => import("./components/Notes").then(m => ({ default: m.RecentNotesPage })));
 const KnowledgeBasePage = lazy(() => import("./components/KnowledgeBase").then(m => ({ default: m.KnowledgeBasePage })));
 
+let hasRequestedInitialWindowShow = false;
+
 // 加载占位组件
 function PageLoadingFallback() {
   return (
@@ -56,7 +58,10 @@ function AppContent() {
         document.documentElement.classList.add("dark");
         setTheme("dark");
       }
-      invoke("show_window").catch(console.error);
+      if (!hasRequestedInitialWindowShow) {
+        hasRequestedInitialWindowShow = true;
+        invoke("show_window").catch(console.error);
+      }
     };
     init();
   }, []);

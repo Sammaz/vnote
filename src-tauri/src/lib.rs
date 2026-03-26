@@ -62,6 +62,25 @@ fn get_db() -> &'static Database {
     DATABASE.get().expect("Database not initialized")
 }
 
+fn activate_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let was_visible = window.is_visible().unwrap_or(false);
+        let was_minimized = window.is_minimized().unwrap_or(false);
+
+        if was_minimized {
+            let _ = window.unminimize();
+        }
+
+        if !was_visible {
+            let _ = window.show();
+        }
+
+        if was_minimized || !was_visible || !window.is_focused().unwrap_or(false) {
+            let _ = window.set_focus();
+        }
+    }
+}
+
 /// Create async ffmpeg command with hidden console window on Windows
 #[cfg(windows)]
 fn async_ffmpeg_command() -> TokioCommand {
@@ -308,10 +327,7 @@ fn create_tray(app: &AppHandle) -> Result<(), String> {
         .tooltip("VNote - AI视频笔记")
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                }
+                activate_main_window(app);
             }
             "quit" => {
                 app.exit(0);
@@ -327,10 +343,7 @@ fn create_tray(app: &AppHandle) -> Result<(), String> {
             {
                 if button == MouseButton::Left && button_state == MouseButtonState::Up {
                     let app = tray.app_handle();
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    activate_main_window(&app);
                 }
             }
         })
@@ -372,14 +385,7 @@ fn get_tray_enabled() -> bool {
 
 #[tauri::command]
 fn show_window(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("main") {
-        #[cfg(target_os = "windows")]
-        {
-            let _ = window.set_decorations(false);
-        }
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
+    activate_main_window(&app);
     Ok(())
 }
 
@@ -2058,10 +2064,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             // 当第二个实例启动时，聚焦到已有窗口
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            activate_main_window(app);
         }))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -2085,6 +2088,11 @@ pub fn run() {
 
             // 设置窗口图标和大小
             if let Some(window) = app.get_webview_window("main") {
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = window.set_decorations(false);
+                }
+
                 if let Ok(icon) = Image::from_bytes(TRAY_ICON) {
                     let _ = window.set_icon(icon);
                 }
