@@ -9,6 +9,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  NodeResizeControl,
   addEdge,
   useNodesState,
   useEdgesState,
@@ -22,14 +23,148 @@ import {
   MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { Type, StickyNote as StickyNoteIcon, Image as ImageIcon, FileText, Code, Square, Circle, Diamond, Copy, Trash2, Fullscreen, Minimize } from "lucide-react";
+import { Type, StickyNote as StickyNoteIcon, Image as ImageIcon, FileText, Code, Square, Circle, Diamond, Copy, Trash2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../../utils/cn";
 import ReactMarkdown from "react-markdown";
 
 // 自定义节点组件（带选中状态和内联编辑）
-function TextNode({ data, selected }: { data: any; selected?: boolean }) {
+const resizeHandleClassName = "!w-3 !h-3 !rounded-full !bg-blue-500 dark:!bg-blue-400 !border-2 !border-white dark:!border-slate-950 !shadow-[0_0_0_2px_rgba(59,130,246,0.18)]";
+
+function CornerResizeControls({
+  visible,
+  minWidth,
+  minHeight,
+}: {
+  visible?: boolean;
+  minWidth?: number;
+  minHeight?: number;
+}) {
+  if (!visible) return null;
+
+  return (
+    <>
+      <NodeResizeControl position="top-left" className={resizeHandleClassName} minWidth={minWidth} minHeight={minHeight} />
+      <NodeResizeControl position="top-right" className={resizeHandleClassName} minWidth={minWidth} minHeight={minHeight} />
+      <NodeResizeControl position="bottom-left" className={resizeHandleClassName} minWidth={minWidth} minHeight={minHeight} />
+      <NodeResizeControl position="bottom-right" className={resizeHandleClassName} minWidth={minWidth} minHeight={minHeight} />
+    </>
+  );
+}
+
+const DEFAULT_NODE_SIZES = {
+  textNode: { width: 220, height: 72 },
+  stickyNote: { width: 220, height: 140 },
+  imageNode: { width: 240, height: 160 },
+  markdownNode: { width: 320, height: 200 },
+  codeNode: { width: 360, height: 220 },
+  shapeRectangle: { width: 160, height: 96 },
+  shapeCircle: { width: 120, height: 120 },
+  shapeDiamond: { width: 120, height: 120 },
+} as const;
+
+const MIN_NODE_SIZES = {
+  textNode: { width: 160, height: 56 },
+  stickyNote: { width: 180, height: 100 },
+  imageNode: { width: 180, height: 120 },
+  markdownNode: { width: 220, height: 140 },
+  codeNode: { width: 240, height: 150 },
+  shapeRectangle: { width: 120, height: 72 },
+  shapeCircle: { width: 96, height: 96 },
+  shapeDiamond: { width: 96, height: 96 },
+} as const;
+
+function getDefaultNodeSize(type: string, shape?: string) {
+  switch (type) {
+    case "textNode":
+      return DEFAULT_NODE_SIZES.textNode;
+    case "stickyNote":
+      return DEFAULT_NODE_SIZES.stickyNote;
+    case "imageNode":
+      return DEFAULT_NODE_SIZES.imageNode;
+    case "markdownNode":
+      return DEFAULT_NODE_SIZES.markdownNode;
+    case "codeNode":
+      return DEFAULT_NODE_SIZES.codeNode;
+    case "shapeNode":
+      if (shape === "circle") return DEFAULT_NODE_SIZES.shapeCircle;
+      if (shape === "diamond") return DEFAULT_NODE_SIZES.shapeDiamond;
+      return DEFAULT_NODE_SIZES.shapeRectangle;
+    default:
+      return { width: 220, height: 100 };
+  }
+}
+
+function getMinNodeSize(type: string, shape?: string) {
+  switch (type) {
+    case "textNode":
+      return MIN_NODE_SIZES.textNode;
+    case "stickyNote":
+      return MIN_NODE_SIZES.stickyNote;
+    case "imageNode":
+      return MIN_NODE_SIZES.imageNode;
+    case "markdownNode":
+      return MIN_NODE_SIZES.markdownNode;
+    case "codeNode":
+      return MIN_NODE_SIZES.codeNode;
+    case "shapeNode":
+      if (shape === "circle") return MIN_NODE_SIZES.shapeCircle;
+      if (shape === "diamond") return MIN_NODE_SIZES.shapeDiamond;
+      return MIN_NODE_SIZES.shapeRectangle;
+    default:
+      return { width: 160, height: 80 };
+  }
+}
+
+function shouldResetNodeSize(node: Node, defaultSize: { width: number; height: number }, minSize: { width: number; height: number }) {
+  const currentWidth = typeof node.width === "number"
+    ? node.width
+    : typeof node.style?.width === "number"
+      ? node.style.width
+      : undefined;
+  const currentHeight = typeof node.height === "number"
+    ? node.height
+    : typeof node.style?.height === "number"
+      ? node.style.height
+      : undefined;
+
+  if (!currentWidth || !currentHeight) {
+    return true;
+  }
+
+  if (currentWidth < minSize.width || currentHeight < minSize.height) {
+    return true;
+  }
+
+  if (node.type === "shapeNode") {
+    return currentWidth < 72 && currentHeight >= currentWidth;
+  }
+
+  return currentWidth < defaultSize.width * 0.55 && currentHeight >= currentWidth;
+}
+
+function normalizeCanvasNode(node: Node): Node {
+  const shape = typeof node.data?.shape === "string" ? node.data.shape : undefined;
+  const defaultSize = getDefaultNodeSize(node.type ?? "", shape);
+  const minSize = getMinNodeSize(node.type ?? "", shape);
+  if (!shouldResetNodeSize(node, defaultSize, minSize)) {
+    return node;
+  }
+
+  return {
+    ...node,
+    style: {
+      ...node.style,
+      width: Math.max(minSize.width, defaultSize.width),
+      height: Math.max(minSize.height, defaultSize.height),
+    },
+  };
+}
+
+function TextNode({ data, selected, width, height }: { data: any; selected?: boolean; width?: number; height?: number }) {
   const [isEditing, setIsEditing] = useState(false);
+  const nodeWidth = width ?? 220;
+  const nodeHeight = height ?? 72;
   const [value, setValue] = useState(data.label || '');
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -65,20 +200,22 @@ function TextNode({ data, selected }: { data: any; selected?: boolean }) {
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-target" />
-      <Handle type="source" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-source" />
-      <Handle type="target" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-target" />
-      <Handle type="source" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-source" />
-      <Handle type="target" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-target" />
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-source" />
-      <Handle type="target" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-target" />
-      <Handle type="source" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-source" />
+      <CornerResizeControls visible={selected} minWidth={MIN_NODE_SIZES.textNode.width} minHeight={MIN_NODE_SIZES.textNode.height} />
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-target" />
+      <Handle type="source" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-source" />
+      <Handle type="target" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-target" />
+      <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-source" />
+      <Handle type="target" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-target" />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-source" />
+      <Handle type="target" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-target" />
+      <Handle type="source" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-source" />
       <div
+        style={{ width: nodeWidth, height: nodeHeight }}
         className={cn(
-          "px-4 py-2 bg-white dark:bg-slate-800 border-2 rounded-lg shadow-sm transition-all",
+          "box-border px-4 py-2 bg-white/96 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] transition-all backdrop-blur-sm overflow-hidden flex items-center",
           isEditing ? "cursor-text" : "cursor-pointer",
           selected
-            ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200 dark:ring-blue-800"
+            ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200/80 dark:ring-blue-400/45"
             : "border-slate-300 dark:border-slate-600"
         )}
         onDoubleClick={handleDoubleClick}
@@ -96,20 +233,22 @@ function TextNode({ data, selected }: { data: any; selected?: boolean }) {
             onChange={(e) => setValue(e.target.value)}
             onBlur={handleBlur}
             onKeyDown={handleKeyDown}
-            className="text-sm text-slate-800 dark:text-slate-200 bg-transparent border-none outline-none w-full"
+            className="text-sm text-slate-800 dark:text-slate-200 bg-transparent border-none outline-none w-full min-w-0"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           />
         ) : (
-          <div className="text-sm text-slate-800 dark:text-slate-200">{value || '双击编辑'}</div>
+          <div className="text-sm text-slate-800 dark:text-slate-200 w-full min-w-0 truncate">{value || '双击编辑'}</div>
         )}
       </div>
     </>
   );
 }
 
-function StickyNoteNode({ data, selected }: { data: any; selected?: boolean }) {
+function StickyNoteNode({ data, selected, width, height }: { data: any; selected?: boolean; width?: number; height?: number }) {
   const [isEditing, setIsEditing] = useState(false);
+  const nodeWidth = width ?? 220;
+  const nodeHeight = height ?? 140;
   const [title, setTitle] = useState(data.title || '');
   const [content, setContent] = useState(data.content || '');
   const titleRef = useRef<HTMLInputElement>(null);
@@ -141,21 +280,23 @@ function StickyNoteNode({ data, selected }: { data: any; selected?: boolean }) {
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-target" />
-      <Handle type="source" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-source" />
-      <Handle type="target" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-target" />
-      <Handle type="source" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-source" />
-      <Handle type="target" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-target" />
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-source" />
-      <Handle type="target" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-target" />
-      <Handle type="source" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-source" />
+      <CornerResizeControls visible={selected} minWidth={MIN_NODE_SIZES.stickyNote.width} minHeight={MIN_NODE_SIZES.stickyNote.height} />
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-target" />
+      <Handle type="source" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-source" />
+      <Handle type="target" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-target" />
+      <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-source" />
+      <Handle type="target" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-target" />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-source" />
+      <Handle type="target" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-target" />
+      <Handle type="source" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-source" />
       <div
         ref={containerRef}
+        style={{ width: nodeWidth, height: nodeHeight }}
         className={cn(
-          "w-48 bg-yellow-100 dark:bg-yellow-900/30 border-2 rounded-lg shadow-md p-3 transition-all",
+          "box-border bg-yellow-100/96 dark:bg-[rgba(120,88,20,0.34)] border-2 rounded-lg shadow-[0_10px_28px_rgba(146,64,14,0.12)] dark:shadow-[0_12px_30px_rgba(0,0,0,0.34)] p-3 transition-all backdrop-blur-sm overflow-hidden flex flex-col",
           isEditing ? "cursor-text" : "cursor-pointer",
           selected
-            ? "border-blue-500 dark:border-blue-400 shadow-xl ring-2 ring-blue-200 dark:ring-blue-800"
+            ? "border-blue-500 dark:border-blue-400 shadow-xl ring-2 ring-blue-200/80 dark:ring-blue-400/45"
             : "border-yellow-300 dark:border-yellow-700"
         )}
         onDoubleClick={handleDoubleClick}
@@ -174,7 +315,7 @@ function StickyNoteNode({ data, selected }: { data: any; selected?: boolean }) {
               onChange={(e) => setTitle(e.target.value)}
               onBlur={handleBlur}
               placeholder="标题"
-              className="text-xs font-semibold text-yellow-800 dark:text-yellow-200 mb-2 bg-transparent border-none outline-none w-full"
+              className="text-xs font-semibold text-yellow-800 dark:text-yellow-200 mb-2 bg-transparent border-none outline-none w-full min-w-0"
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             />
@@ -185,15 +326,15 @@ function StickyNoteNode({ data, selected }: { data: any; selected?: boolean }) {
               onBlur={handleBlur}
               placeholder="内容"
               rows={3}
-              className="text-sm text-yellow-900 dark:text-yellow-100 bg-transparent border-none outline-none w-full resize-none"
+              className="flex-1 min-h-0 text-sm text-yellow-900 dark:text-yellow-100 bg-transparent border-none outline-none w-full resize-none"
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
             />
           </>
         ) : (
           <>
-            <div className="text-xs font-semibold text-yellow-800 dark:text-yellow-200 mb-2">📌 {title || "便签"}</div>
-            <div className="text-sm text-yellow-900 dark:text-yellow-100 whitespace-pre-wrap">{content || "双击编辑"}</div>
+            <div className="text-xs font-semibold text-yellow-800 dark:text-yellow-100 mb-2 truncate">📌 {title || "便签"}</div>
+            <div className="flex-1 min-h-0 text-sm text-yellow-900 dark:text-yellow-100 whitespace-pre-wrap overflow-hidden">{content || "双击编辑"}</div>
           </>
         )}
       </div>
@@ -201,31 +342,39 @@ function StickyNoteNode({ data, selected }: { data: any; selected?: boolean }) {
   );
 }
 
-function ImageNode({ data, selected }: { data: any; selected?: boolean }) {
+function ImageNode({ data, selected, width, height }: { data: any; selected?: boolean; width?: number; height?: number }) {
+  const nodeWidth = width ?? data.width ?? 240;
+  const nodeHeight = height ?? data.height ?? 160;
+
   return (
     <>
-      <Handle type="target" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-target" />
-      <Handle type="source" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-source" />
-      <Handle type="target" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-target" />
-      <Handle type="source" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-source" />
-      <Handle type="target" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-target" />
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-source" />
-      <Handle type="target" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-target" />
-      <Handle type="source" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-source" />
+      <CornerResizeControls visible={selected} minWidth={MIN_NODE_SIZES.imageNode.width} minHeight={MIN_NODE_SIZES.imageNode.height} />
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-target" />
+      <Handle type="source" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-source" />
+      <Handle type="target" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-target" />
+      <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-source" />
+      <Handle type="target" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-target" />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-source" />
+      <Handle type="target" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-target" />
+      <Handle type="source" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-source" />
       <div
+        style={{ width: nodeWidth, height: nodeHeight }}
         className={cn(
-          "bg-white dark:bg-slate-800 border-2 rounded-lg shadow-sm overflow-hidden transition-all cursor-pointer",
+          "bg-white/96 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] overflow-hidden transition-all cursor-pointer backdrop-blur-sm",
           selected
-            ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200 dark:ring-blue-800"
+            ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200/80 dark:ring-blue-400/45"
             : "border-slate-300 dark:border-slate-600"
         )}
       >
         {data.url ? (
-          <img src={data.url} alt={data.alt || "图片"} className="max-w-xs max-h-64 object-contain" />
+          <img src={data.url} alt={data.alt || "图片"} className="w-full h-full object-contain bg-slate-50 dark:bg-slate-900/40" />
         ) : (
-          <div className="w-48 h-32 flex items-center justify-center bg-slate-100 dark:bg-slate-700">
-            <ImageIcon className="w-8 h-8 text-slate-400" />
-            <span className="ml-2 text-sm text-slate-500">右键插入图片</span>
+          <div
+            style={{ width: nodeWidth, height: nodeHeight }}
+            className="flex flex-col items-center justify-center gap-2 bg-slate-100 dark:bg-slate-800/90 px-3 text-center overflow-hidden"
+          >
+            <ImageIcon className="w-8 h-8 shrink-0 text-slate-400 dark:text-slate-500" />
+            <span className="text-sm text-slate-500 dark:text-slate-300 truncate max-w-full">右键插入图片</span>
           </div>
         )}
       </div>
@@ -233,8 +382,10 @@ function ImageNode({ data, selected }: { data: any; selected?: boolean }) {
   );
 }
 
-function MarkdownNode({ data, selected }: { data: any; selected?: boolean }) {
+function MarkdownNode({ data, selected, width, height }: { data: any; selected?: boolean; width?: number; height?: number }) {
   const [isEditing, setIsEditing] = useState(false);
+  const nodeWidth = width ?? 320;
+  const nodeHeight = height ?? 200;
   const [content, setContent] = useState(data.content || '');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -256,20 +407,22 @@ function MarkdownNode({ data, selected }: { data: any; selected?: boolean }) {
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-target" />
-      <Handle type="source" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-source" />
-      <Handle type="target" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-target" />
-      <Handle type="source" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-source" />
-      <Handle type="target" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-target" />
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-source" />
-      <Handle type="target" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-target" />
-      <Handle type="source" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-source" />
+      <CornerResizeControls visible={selected} minWidth={MIN_NODE_SIZES.markdownNode.width} minHeight={MIN_NODE_SIZES.markdownNode.height} />
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-target" />
+      <Handle type="source" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-source" />
+      <Handle type="target" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-target" />
+      <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-source" />
+      <Handle type="target" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-target" />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-source" />
+      <Handle type="target" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-target" />
+      <Handle type="source" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-source" />
       <div
+        style={{ width: nodeWidth, height: nodeHeight }}
         className={cn(
-          "w-64 bg-white dark:bg-slate-800 border-2 rounded-lg shadow-sm p-4 transition-all",
+          "box-border bg-white/96 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] p-4 transition-all backdrop-blur-sm overflow-hidden flex flex-col",
           isEditing ? "cursor-text" : "cursor-pointer",
           selected
-            ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200 dark:ring-blue-800"
+            ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200/80 dark:ring-blue-400/45"
             : "border-slate-300 dark:border-slate-600"
         )}
         onDoubleClick={handleDoubleClick}
@@ -287,12 +440,12 @@ function MarkdownNode({ data, selected }: { data: any; selected?: boolean }) {
             onBlur={handleBlur}
             rows={8}
             placeholder="Markdown内容"
-            className="w-full text-sm bg-transparent border border-slate-300 dark:border-slate-600 rounded p-2 outline-none font-mono text-slate-800 dark:text-slate-200"
+            className="flex-1 min-h-0 w-full text-sm bg-transparent border border-slate-300 dark:border-white/10 rounded p-2 outline-none font-mono text-slate-800 dark:text-slate-100 resize-none"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           />
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="flex-1 min-h-0 overflow-hidden prose prose-sm dark:prose-invert max-w-none">
             <ReactMarkdown>{content || "# Markdown\n\n双击编辑"}</ReactMarkdown>
           </div>
         )}
@@ -301,11 +454,13 @@ function MarkdownNode({ data, selected }: { data: any; selected?: boolean }) {
   );
 }
 
-function CodeNode({ data, selected }: { data: any; selected?: boolean }) {
+function CodeNode({ data, selected, width, height }: { data: any; selected?: boolean; width?: number; height?: number }) {
   const [isEditing, setIsEditing] = useState(false);
   const [code, setCode] = useState(data.code || '');
   const [language, setLanguage] = useState(data.language || 'javascript');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const nodeWidth = width ?? 360;
+  const nodeHeight = height ?? 220;
 
   useEffect(() => {
     if (isEditing && textareaRef.current) {
@@ -326,21 +481,23 @@ function CodeNode({ data, selected }: { data: any; selected?: boolean }) {
 
   return (
     <>
-      <Handle type="target" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-target" />
-      <Handle type="source" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-source" />
-      <Handle type="target" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-target" />
-      <Handle type="source" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-source" />
-      <Handle type="target" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-target" />
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-source" />
-      <Handle type="target" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-target" />
-      <Handle type="source" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-source" />
+      <CornerResizeControls visible={selected} minWidth={MIN_NODE_SIZES.codeNode.width} minHeight={MIN_NODE_SIZES.codeNode.height} />
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-target" />
+      <Handle type="source" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-source" />
+      <Handle type="target" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-target" />
+      <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-source" />
+      <Handle type="target" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-target" />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-source" />
+      <Handle type="target" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-target" />
+      <Handle type="source" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-source" />
       <div
+        style={{ width: nodeWidth, height: nodeHeight }}
         className={cn(
-          "w-80 bg-slate-100 dark:bg-slate-950 border-2 rounded-lg shadow-md overflow-hidden transition-all",
+          "flex flex-col bg-slate-100 dark:bg-[rgba(10,10,10,0.96)] border-2 rounded-lg shadow-[0_10px_28px_rgba(15,23,42,0.12)] dark:shadow-[0_14px_34px_rgba(0,0,0,0.46)] overflow-hidden transition-all backdrop-blur-sm",
           isEditing ? "cursor-text" : "cursor-pointer",
           selected
-            ? "border-blue-500 dark:border-blue-400 shadow-xl ring-2 ring-blue-200 dark:ring-blue-800"
-            : "border-slate-300 dark:border-slate-700"
+            ? "border-blue-500 dark:border-blue-400 shadow-xl ring-2 ring-blue-200/80 dark:ring-blue-400/45"
+            : "border-slate-300 dark:border-white/8"
         )}
         onDoubleClick={handleDoubleClick}
         onMouseDown={(e) => {
@@ -349,7 +506,7 @@ function CodeNode({ data, selected }: { data: any; selected?: boolean }) {
           }
         }}
       >
-        <div className="px-3 py-2 bg-slate-200 dark:bg-slate-900 border-b border-slate-300 dark:border-slate-700 flex items-center gap-2">
+        <div className="px-3 py-2 bg-slate-200 dark:bg-white/4 border-b border-slate-300 dark:border-white/8 flex items-center gap-2">
           <Code className="w-3 h-3 text-slate-600 dark:text-slate-400" />
           {isEditing ? (
             <input
@@ -373,12 +530,14 @@ function CodeNode({ data, selected }: { data: any; selected?: boolean }) {
             onBlur={handleBlur}
             rows={10}
             placeholder="代码内容"
-            className="w-full p-3 text-xs text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-slate-950 font-mono outline-none resize-none"
+            className="flex-1 min-h-0 w-full p-3 text-xs text-slate-800 dark:text-slate-100 bg-slate-100 dark:bg-transparent font-mono outline-none resize-none"
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => e.stopPropagation()}
           />
         ) : (
-          <pre className="p-3 text-xs text-slate-800 dark:text-slate-100 overflow-x-auto">
+          <pre
+            className="flex-1 min-h-0 p-3 text-xs text-slate-800 dark:text-slate-100 overflow-auto"
+          >
             <code>{code || "// 双击编辑代码"}</code>
           </pre>
         )}
@@ -387,12 +546,14 @@ function CodeNode({ data, selected }: { data: any; selected?: boolean }) {
   );
 }
 
-function ShapeNode({ data, selected }: { data: any; selected?: boolean }) {
+function ShapeNode({ data, selected, width, height }: { data: any; selected?: boolean; width?: number; height?: number }) {
   const [isEditing, setIsEditing] = useState(false);
   const [label, setLabel] = useState(data.label || '');
   const inputRef = useRef<HTMLInputElement>(null);
   const shapeType = data.shape || "rectangle";
   const bgColor = data.color || "#3b82f6";
+  const nodeWidth = width ?? (shapeType === "rectangle" ? 160 : 120);
+  const nodeHeight = height ?? 96;
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -424,15 +585,16 @@ function ShapeNode({ data, selected }: { data: any; selected?: boolean }) {
   if (shapeType === "circle") {
     return (
       <>
-        <Handle type="target" position={Position.Top} className="w-3 h-3" />
-        <Handle type="source" position={Position.Bottom} className="w-3 h-3" />
+        <CornerResizeControls visible={selected} minWidth={MIN_NODE_SIZES.shapeCircle.width} minHeight={MIN_NODE_SIZES.shapeCircle.height} />
+        <Handle type="target" position={Position.Top} className="w-3 h-3 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" />
+        <Handle type="source" position={Position.Bottom} className="w-3 h-3 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" />
         <div
           className={cn(
-            "w-24 h-24 rounded-full flex items-center justify-center text-white text-sm font-medium shadow-lg transition-all",
+            "rounded-full flex items-center justify-center text-white text-sm font-medium shadow-lg transition-all",
             isEditing ? "cursor-text" : "cursor-pointer",
-            selected && "ring-4 ring-blue-300 dark:ring-blue-700 shadow-xl"
+            selected && "ring-4 ring-blue-300/85 dark:ring-blue-400/40 shadow-xl"
           )}
-          style={{ backgroundColor: bgColor }}
+          style={{ width: nodeWidth, height: nodeHeight, backgroundColor: bgColor }}
           onDoubleClick={handleDoubleClick}
           onMouseDown={(e) => {
             if (isEditing) {
@@ -463,10 +625,12 @@ function ShapeNode({ data, selected }: { data: any; selected?: boolean }) {
   if (shapeType === "diamond") {
     return (
       <>
-        <Handle type="target" position={Position.Top} className="w-3 h-3" style={{ top: -6 }} />
-        <Handle type="source" position={Position.Bottom} className="w-3 h-3" style={{ bottom: -6 }} />
+        <CornerResizeControls visible={selected} minWidth={MIN_NODE_SIZES.shapeDiamond.width} minHeight={MIN_NODE_SIZES.shapeDiamond.height} />
+        <Handle type="target" position={Position.Top} className="w-3 h-3 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" style={{ top: -6 }} />
+        <Handle type="source" position={Position.Bottom} className="w-3 h-3 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" style={{ bottom: -6 }} />
         <div
-          className={cn("relative w-24 h-24", selected && "scale-110 transition-transform")}
+          className="relative transition-transform"
+          style={{ width: nodeWidth, height: nodeHeight }}
           onDoubleClick={handleDoubleClick}
           onMouseDown={(e) => {
             if (isEditing) {
@@ -478,7 +642,7 @@ function ShapeNode({ data, selected }: { data: any; selected?: boolean }) {
             className={cn(
               "absolute inset-0 rotate-45 flex items-center justify-center text-white text-sm font-medium shadow-lg",
               isEditing ? "cursor-text" : "cursor-pointer",
-              selected && "ring-4 ring-blue-300 dark:ring-blue-700 shadow-xl"
+              selected && "ring-4 ring-blue-300/85 dark:ring-blue-400/40 shadow-xl"
             )}
             style={{ backgroundColor: bgColor }}
           >
@@ -508,21 +672,22 @@ function ShapeNode({ data, selected }: { data: any; selected?: boolean }) {
   // rectangle (default)
   return (
     <>
-      <Handle type="target" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-target" />
-      <Handle type="source" position={Position.Top} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="top-source" />
-      <Handle type="target" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-target" />
-      <Handle type="source" position={Position.Right} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="right-source" />
-      <Handle type="target" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-target" />
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="bottom-source" />
-      <Handle type="target" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-target" />
-      <Handle type="source" position={Position.Left} className="w-2 h-2 opacity-0 hover:opacity-100 transition-opacity" id="left-source" />
+      <CornerResizeControls visible={selected} minWidth={MIN_NODE_SIZES.shapeRectangle.width} minHeight={MIN_NODE_SIZES.shapeRectangle.height} />
+      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-target" />
+      <Handle type="source" position={Position.Top} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="top-source" />
+      <Handle type="target" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-target" />
+      <Handle type="source" position={Position.Right} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="right-source" />
+      <Handle type="target" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-target" />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="bottom-source" />
+      <Handle type="target" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-target" />
+      <Handle type="source" position={Position.Left} className="w-2 h-2 !bg-blue-500/90 dark:!bg-blue-400/90 !border-2 !border-white dark:!border-slate-950 opacity-0 hover:opacity-100 transition-opacity shadow-[0_0_0_2px_rgba(59,130,246,0.12)] dark:shadow-[0_0_0_2px_rgba(96,165,250,0.18)]" id="left-source" />
       <div
         className={cn(
-          "w-32 h-20 rounded-lg flex items-center justify-center text-white text-sm font-medium shadow-lg transition-all",
+          "rounded-lg flex items-center justify-center text-white text-sm font-medium shadow-lg transition-all",
           isEditing ? "cursor-text" : "cursor-pointer",
-          selected && "ring-4 ring-blue-300 dark:ring-blue-700 shadow-xl"
+          selected && "ring-4 ring-blue-300/85 dark:ring-blue-400/40 shadow-xl"
         )}
-        style={{ backgroundColor: bgColor }}
+        style={{ width: nodeWidth, height: nodeHeight, backgroundColor: bgColor }}
         onDoubleClick={handleDoubleClick}
         onMouseDown={(e) => {
           if (isEditing) {
@@ -584,6 +749,9 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
   const [selectedTool, setSelectedTool] = useState<string>("select");
   const [selectedEdgeType] = useState<EdgeType>('smoothstep');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId?: string; edgeId?: string } | null>(null);
+  const CONTEXT_MENU_WIDTH = 192;
+  const CONTEXT_MENU_HEIGHT = 260;
+  const CONTEXT_MENU_PADDING = 12;
   const [selectedNodes, setSelectedNodes] = useState<string[]>([]);
   const [history, setHistory] = useState<{ nodes: Node[]; edges: Edge[] }[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -600,7 +768,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
     if (initialData) {
       try {
         const data = JSON.parse(initialData);
-        if (data.nodes) setNodes(data.nodes);
+        if (data.nodes) setNodes(data.nodes.map(normalizeCanvasNode));
         if (data.edges) setEdges(data.edges);
       } catch (e) {
         console.error("Failed to parse canvas data:", e);
@@ -711,7 +879,14 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
       ...params,
       type: selectedEdgeType,
       animated: false,
-      markerEnd: { type: MarkerType.ArrowClosed },
+      style: {
+        stroke: "rgba(59, 130, 246, 0.9)",
+        strokeWidth: 2,
+      },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: "rgba(59, 130, 246, 0.95)",
+      },
     }, eds)),
     [setEdges, selectedEdgeType]
   );
@@ -737,32 +912,67 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
         data = { code: "// 代码内容\nconsole.log('Hello World');", language: "javascript" };
         break;
       case "shapeNode":
-        data = { label: "形状", shape: shape || "rectangle", color: "#3b82f6" };
+        data = { label: "形状", shape: shape || "rectangle", color: "#cbd5e1" };
         break;
       default:
         data = { label: "节点" };
     }
 
+    const defaultSize = getDefaultNodeSize(type, shape);
+    const wrapperRect = reactFlowWrapper.current?.getBoundingClientRect();
+    const centerX = wrapperRect ? wrapperRect.left + wrapperRect.width / 2 : window.innerWidth / 2;
+    const centerY = wrapperRect ? wrapperRect.top + wrapperRect.height / 2 : window.innerHeight / 2;
+    const flowCenter = reactFlowInstanceRef.current?.screenToFlowPosition
+      ? reactFlowInstanceRef.current.screenToFlowPosition({ x: centerX, y: centerY })
+      : { x: 250, y: 250 };
+
     const newNode: Node = {
       id: `${type}-${Date.now()}`,
       type,
-      position: { x: 250, y: 250 },
+      position: {
+        x: flowCenter.x - defaultSize.width / 2,
+        y: flowCenter.y - defaultSize.height / 2,
+      },
       data,
+      style: {
+        width: defaultSize.width,
+        height: defaultSize.height,
+      },
+      selected: true,
     };
-    setNodes((nds) => [...nds, newNode]);
+    setNodes((nds) => [...nds.map((node) => ({ ...node, selected: false })), newNode]);
     setSelectedTool("select");
   }, [setNodes]);
+
+  const getContextMenuPosition = useCallback((clientX: number, clientY: number) => {
+    const wrapperRect = reactFlowWrapper.current?.getBoundingClientRect();
+    if (!wrapperRect) {
+      return { x: clientX, y: clientY };
+    }
+
+    const relativeX = clientX - wrapperRect.left;
+    const relativeY = clientY - wrapperRect.top;
+    const maxX = Math.max(CONTEXT_MENU_PADDING, wrapperRect.width - CONTEXT_MENU_WIDTH - CONTEXT_MENU_PADDING);
+    const maxY = Math.max(CONTEXT_MENU_PADDING, wrapperRect.height - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_PADDING);
+
+    return {
+      x: Math.min(Math.max(relativeX, CONTEXT_MENU_PADDING), maxX),
+      y: Math.min(Math.max(relativeY, CONTEXT_MENU_PADDING), maxY),
+    };
+  }, [CONTEXT_MENU_HEIGHT, CONTEXT_MENU_PADDING, CONTEXT_MENU_WIDTH]);
 
   // 右键菜单
   const onNodeContextMenu = useCallback((event: React.MouseEvent, node: Node) => {
     event.preventDefault();
-    setContextMenu({ x: event.clientX, y: event.clientY, nodeId: node.id });
-  }, []);
+    const position = getContextMenuPosition(event.clientX, event.clientY);
+    setContextMenu({ ...position, nodeId: node.id });
+  }, [getContextMenuPosition]);
 
   const onEdgeContextMenu = useCallback((event: React.MouseEvent, edge: Edge) => {
     event.preventDefault();
-    setContextMenu({ x: event.clientX, y: event.clientY, edgeId: edge.id });
-  }, []);
+    const position = getContextMenuPosition(event.clientX, event.clientY);
+    setContextMenu({ ...position, edgeId: edge.id });
+  }, [getContextMenuPosition]);
 
   const onPaneContextMenu = useCallback((event: React.MouseEvent | MouseEvent) => {
     event.preventDefault();
@@ -922,11 +1132,6 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
     };
   }, []);
 
-  // 全屏控制
-  const handleFullscreen = useCallback(() => {
-    setIsFullscreen((prev) => !prev);
-  }, []);
-
   // 全屏切换后重新适配视图
   useEffect(() => {
     if (reactFlowInstanceRef.current) {
@@ -974,7 +1179,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
         }}
       >
         {/* 浮动工具栏 */}
-        <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-2 rounded-xl bg-white/80 dark:bg-slate-800/80 backdrop-blur-md shadow-lg border border-slate-200/50 dark:border-slate-700/50">
+        <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-2 rounded-xl bg-white/88 dark:bg-[rgba(20,20,20,0.88)] backdrop-blur-md shadow-[0_12px_32px_rgba(15,23,42,0.14)] dark:shadow-[0_14px_36px_rgba(0,0,0,0.45)] border border-slate-200/60 dark:border-white/8">
           <button
             onClick={() => addNode("textNode")}
             title="文本"
@@ -982,7 +1187,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
               "p-2 rounded-lg transition-all cursor-pointer hover:scale-110",
               selectedTool === "textNode"
                 ? "bg-blue-500 text-white shadow-md"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                : "text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/8"
             )}
           >
             <Type className="w-5 h-5" />
@@ -994,7 +1199,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
               "p-2 rounded-lg transition-all cursor-pointer hover:scale-110",
               selectedTool === "stickyNote"
                 ? "bg-blue-500 text-white shadow-md"
-                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+                : "text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/8"
             )}
           >
             <StickyNoteIcon className="w-5 h-5" />
@@ -1002,21 +1207,21 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
           <button
             onClick={() => addNode("imageNode")}
             title="图片"
-            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/8"
           >
             <ImageIcon className="w-5 h-5" />
           </button>
           <button
             onClick={() => addNode("markdownNode")}
             title="Markdown"
-            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/8"
           >
             <FileText className="w-5 h-5" />
           </button>
           <button
             onClick={() => addNode("codeNode")}
             title="代码"
-            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/8"
           >
             <Code className="w-5 h-5" />
           </button>
@@ -1027,21 +1232,21 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
           <button
             onClick={() => addNode("shapeNode", "rectangle")}
             title="矩形"
-            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/8"
           >
             <Square className="w-5 h-5" />
           </button>
           <button
             onClick={() => addNode("shapeNode", "circle")}
             title="圆形"
-            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/8"
           >
             <Circle className="w-5 h-5" />
           </button>
           <button
             onClick={() => addNode("shapeNode", "diamond")}
             title="菱形"
-            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
+            className="p-2 rounded-lg transition-all cursor-pointer hover:scale-110 text-slate-600 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-white/8"
           >
             <Diamond className="w-5 h-5" />
           </button>
@@ -1064,27 +1269,20 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
           className="bg-slate-50 dark:bg-slate-900"
           deleteKeyCode={null}
         >
-          <Background />
-          <Controls>
-            <button
-              onClick={handleFullscreen}
-              className="react-flow__controls-button"
-              title={isFullscreen ? "退出全屏" : "全屏"}
-            >
-              {isFullscreen ? (
-                <Minimize className="w-4 h-4" />
-              ) : (
-                <Fullscreen className="w-4 h-4" />
-              )}
-            </button>
-          </Controls>
+          <Background
+            color="rgba(148, 163, 184, 0.24)"
+            gap={20}
+            size={1.2}
+            className="dark:opacity-70"
+          />
+          <Controls />
           <MiniMap />
         </ReactFlow>
 
         {/* 右键菜单 */}
         {contextMenu && (
           <div
-            className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1 z-50 min-w-[160px]"
+            className="absolute bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1 z-50 w-48"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             {contextMenu.nodeId && (

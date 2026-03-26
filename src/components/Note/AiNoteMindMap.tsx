@@ -1,6 +1,6 @@
 import { useMemo, useEffect, useRef, useState, useCallback, type ChangeEvent } from "react";
 import { createPortal } from "react-dom";
-import { BarChart3, ZoomIn, ZoomOut, Maximize2, Fullscreen, Minimize } from "lucide-react";
+import { BarChart3, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { Transformer, type IMarkmapJSONOptions } from "markmap-lib";
 import { Markmap, loadCSS, loadJS } from "markmap-view";
 import type { INode, IPureNode } from "markmap-common";
@@ -426,6 +426,7 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
     existingSvg.setAttribute("width", "100%");
     existingSvg.setAttribute("height", "100%");
     existingSvg.style.background = "transparent";
+    existingSvg.style.color = isDarkMode ? "#ffffff" : "#0f172a";
 
     if (!svgRef.current) {
       containerRef.current.innerHTML = "";
@@ -448,6 +449,11 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
         const uid = typeof node?.payload?.uid === "string" ? node.payload.uid : null;
         const seekTime = typeof node?.payload?.seekTime === "number" ? node.payload.seekTime : null;
         group.style.cursor = uid && seekTime !== null && syncUidSet.has(uid) ? "pointer" : "default";
+      });
+
+      const texts = existingSvg.querySelectorAll<SVGTextElement>("text");
+      texts.forEach((text) => {
+        text.style.fill = isDarkMode ? "#ffffff" : "#0f172a";
       });
     };
 
@@ -632,15 +638,17 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
 
   return (
     <div
-      className={isFullscreen ? "fixed inset-0 z-50" : "relative w-full h-full"}
-      style={{
-        backgroundImage: isDarkMode
-          ? "radial-gradient(circle, #333333 1px, transparent 1px)"
-          : "radial-gradient(circle, #cbd5e1 1px, transparent 1px)",
-        backgroundSize: "20px 20px",
-        backgroundColor: isDarkMode ? "#0d0d0d" : "#f8fafc",
-      }}
+      className={`relative overflow-hidden ${isFullscreen ? "fixed inset-0 z-50" : "w-full h-full"}`}
     >
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage: "radial-gradient(circle, rgba(148, 163, 184, 0.24) 1.2px, transparent 1.2px)",
+          backgroundSize: "20px 20px",
+          backgroundColor: "transparent",
+          opacity: isDarkMode ? 0.7 : 1,
+        }}
+      />
       {depthControl && depthControlContainer ? createPortal(depthControl, depthControlContainer) : null}
       <div className="absolute bottom-4 left-4 z-10 flex flex-col items-center gap-2 rounded-xl bg-white/85 p-1.5 shadow-sm backdrop-blur-sm dark:bg-slate-900/85">
         <button
@@ -663,13 +671,6 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
           title="重置视图"
         >
           <Maximize2 className="h-4 w-4" />
-        </button>
-        <button
-          onClick={() => setIsFullscreen((value) => !value)}
-          className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"
-          title={isFullscreen ? "退出全屏" : "全屏"}
-        >
-          {isFullscreen ? <Minimize className="h-4 w-4" /> : <Fullscreen className="h-4 w-4" />}
         </button>
       </div>
 

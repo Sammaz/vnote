@@ -4,7 +4,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Network, ZoomIn, ZoomOut, Maximize2, Download, Palette, ChevronDown, Fullscreen, Minimize, X } from "lucide-react";
+import { Network, ZoomIn, ZoomOut, Maximize2, Download, Palette, ChevronDown, X } from "lucide-react";
 import MindMap from "simple-mind-map";
 import Drag from "simple-mind-map/src/plugins/Drag.js";
 import KeyboardNavigation from "simple-mind-map/src/plugins/KeyboardNavigation.js";
@@ -184,14 +184,14 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         },
         second: {
           fillColor: "#1e293b",
-          color: "#e2e8f0",
+          color: "#ffffff",
           borderColor: "#475569",
           borderWidth: 2,
           fontSize: 14,
         },
         node: {
           fillColor: "#1e293b",
-          color: "#e2e8f0",
+          color: "#ffffff",
           borderColor: "#475569",
           borderWidth: 1,
           fontSize: 12,
@@ -276,6 +276,10 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
       if (svg) {
         svg.style.background = "transparent";
         svg.style.backgroundColor = "transparent";
+        const texts = svg.querySelectorAll<SVGTextElement>("text");
+        texts.forEach((text) => {
+          text.style.fill = isDarkMode ? "#ffffff" : "#0f172a";
+        });
       }
     };
 
@@ -396,11 +400,6 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
       }
     }
   }, [noteTitle]);
-
-  // 全屏控制
-  const handleFullscreen = useCallback(() => {
-    setIsFullscreen((prev) => !prev);
-  }, []);
 
   // 处理右键菜单操作
   const handleMenuAction = useCallback((action: string) => {
@@ -565,19 +564,21 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
 
   return (
     <div
-      className={`${
+      className={`relative overflow-hidden ${
         isFullscreen
           ? "fixed inset-0 z-50 flex flex-col"
           : "flex flex-col h-full"
       }`}
-      style={{
-        backgroundImage: isDarkMode
-          ? "radial-gradient(circle, #333333 1px, transparent 1px)"
-          : "radial-gradient(circle, #cbd5e1 1px, transparent 1px)",
-        backgroundSize: "20px 20px",
-        backgroundColor: isDarkMode ? "#0d0d0d" : "#f8fafc",
-      }}
     >
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage: "radial-gradient(circle, rgba(148, 163, 184, 0.24) 1.2px, transparent 1.2px)",
+          backgroundSize: "20px 20px",
+          backgroundColor: "transparent",
+          opacity: isDarkMode ? 0.7 : 1,
+        }}
+      />
       {/* 工具栏 */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
         <div className="flex items-center gap-3">
@@ -671,17 +672,6 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
             title="放大"
           >
             <ZoomIn className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-          </button>
-          <button
-            onClick={handleFullscreen}
-            className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors cursor-pointer"
-            title={isFullscreen ? "退出全屏" : "全屏"}
-          >
-            {isFullscreen ? (
-              <Minimize className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-            ) : (
-              <Fullscreen className="w-4 h-4 text-slate-600 dark:text-slate-300" />
-            )}
           </button>
         </div>
       </div>
