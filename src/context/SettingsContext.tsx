@@ -200,13 +200,20 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         invoke<string | null>("get_setting", { key: "background_attachment" }),
       ]);
 
+      const parseNumberSetting = (value: string | null, min: number, max: number, fallback: number) => {
+        if (value === null) return fallback;
+        const parsed = parseInt(value, 10);
+        if (Number.isNaN(parsed)) return fallback;
+        return Math.max(min, Math.min(max, parsed));
+      };
+
       setBackgroundSettingsState({
-        overlayOpacity: overlayOpacity ? Math.max(20, Math.min(90, parseInt(overlayOpacity, 10) || DEFAULT_BACKGROUND_SETTINGS.overlayOpacity)) : DEFAULT_BACKGROUND_SETTINGS.overlayOpacity,
-        contentOpacity: contentOpacity ? Math.max(10, Math.min(85, parseInt(contentOpacity, 10) || DEFAULT_BACKGROUND_SETTINGS.contentOpacity)) : DEFAULT_BACKGROUND_SETTINGS.contentOpacity,
-        blur: blur ? Math.max(0, Math.min(24, parseInt(blur, 10) || DEFAULT_BACKGROUND_SETTINGS.blur)) : DEFAULT_BACKGROUND_SETTINGS.blur,
-        size: size === "contain" ? "contain" : DEFAULT_BACKGROUND_SETTINGS.size,
-        position: position === "top" || position === "bottom" ? position : DEFAULT_BACKGROUND_SETTINGS.position,
-        attachment: attachment === "scroll" ? "scroll" : DEFAULT_BACKGROUND_SETTINGS.attachment,
+        overlayOpacity: parseNumberSetting(overlayOpacity, 20, 90, DEFAULT_BACKGROUND_SETTINGS.overlayOpacity),
+        contentOpacity: parseNumberSetting(contentOpacity, 10, 85, DEFAULT_BACKGROUND_SETTINGS.contentOpacity),
+        blur: parseNumberSetting(blur, 0, 24, DEFAULT_BACKGROUND_SETTINGS.blur),
+        size: size === "contain" || size === "cover" ? size : DEFAULT_BACKGROUND_SETTINGS.size,
+        position: position === "top" || position === "bottom" || position === "center" ? position : DEFAULT_BACKGROUND_SETTINGS.position,
+        attachment: attachment === "scroll" || attachment === "fixed" ? attachment : DEFAULT_BACKGROUND_SETTINGS.attachment,
       });
     } catch (error) {
       console.error("Failed to load background settings:", error);
