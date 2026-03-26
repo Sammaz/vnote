@@ -21,9 +21,8 @@ import {
   RotateCcw,
   AlertCircle,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
+import { MarkdownRenderer } from "../Markdown/MarkdownRenderer";
 import { listen } from "@tauri-apps/api/event";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
@@ -1830,9 +1829,11 @@ function MessageCard({
                 {message.content}
               </div>
             ) : (
-              <div className="chat-markdown text-sm leading-7">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
-              </div>
+              <MarkdownRenderer
+                content={message.content}
+                variant="chat"
+                className="text-sm leading-7"
+              />
             )
           ) : (
             <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 py-1">

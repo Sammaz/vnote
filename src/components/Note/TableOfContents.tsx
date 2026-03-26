@@ -1,23 +1,12 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { List, ChevronRight } from "lucide-react";
+import { cleanMarkdownText, generateHeadingId, getTextFromReactNode } from "../../utils/markdownRendererUtils";
 
 const NOTE_MARKDOWN_SELECTOR = ".note-markdown";
 const HEADING_SELECTOR = "h1, h2, h3";
 
 // Helper to strip markdown syntax for display text
-export const cleanMarkdown = (text: string) => {
-  return text
-    .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "") // Remove timestamps
-    .replace(/⏱\s*\d{1,2}:\d{2}(?::\d{2})?/g, "")
-    .replace(/（时间：\d{1,2}:\d{2}(?::\d{2})?）/g, "")
-    .replace(/\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\)/g, "") // Remove time ranges
-    .replace(/!\[.*?\]\(.*?\)/g, "") // Remove images
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // Remove links
-    .replace(/`([^`]+)`/g, "$1") // Remove code
-    .replace(/[*_~]+/g, "") // Remove formatting
-    .replace(/^\s+#+\s+/, "") // Remove leading hashes if caught
-    .trim();
-};
+export const cleanMarkdown = cleanMarkdownText;
 
 export interface TOCItem {
   level: number;
@@ -317,18 +306,6 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
 }
 
 // Retain helpers export to match imports in other files, even if unused internally now
-export const generateId = (text: string, prefix: string = "heading") => {
-  const clean = text
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^\w\u4e00-\u9fa5\-]+/g, "");
-  return `${prefix}-${clean || "untitled"}`;
-};
+export const generateId = generateHeadingId;
 
-export const getTextFromChildren = (children: React.ReactNode): string => {
-  if (typeof children === "string") return children;
-  if (typeof children === "number") return children.toString();
-  if (Array.isArray(children)) return children.map(getTextFromChildren).join("");
-  if (React.isValidElement(children)) return getTextFromChildren((children.props as { children?: React.ReactNode }).children);
-  return "";
-};
+export const getTextFromChildren = getTextFromReactNode;

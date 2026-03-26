@@ -26,7 +26,7 @@ import "@xyflow/react/dist/style.css";
 import { Type, StickyNote as StickyNoteIcon, Image as ImageIcon, FileText, Code, Square, Circle, Diamond, Copy, Trash2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../../utils/cn";
-import ReactMarkdown from "react-markdown";
+import { MarkdownRenderer } from "../../Markdown/MarkdownRenderer";
 
 // 自定义节点组件（带选中状态和内联编辑）
 const resizeHandleClassName = "!w-3 !h-3 !rounded-full !bg-blue-500 dark:!bg-blue-400 !border-2 !border-white dark:!border-slate-950 !shadow-[0_0_0_2px_rgba(59,130,246,0.18)]";
@@ -445,8 +445,11 @@ function MarkdownNode({ data, selected, width, height }: { data: any; selected?:
             onMouseDown={(e) => e.stopPropagation()}
           />
         ) : (
-          <div className="flex-1 min-h-0 overflow-hidden prose prose-sm dark:prose-invert max-w-none">
-            <ReactMarkdown>{content || "# Markdown\n\n双击编辑"}</ReactMarkdown>
+          <div className="flex-1 min-h-0 overflow-auto">
+            <MarkdownRenderer
+              content={content || "# Markdown\n\n双击编辑"}
+              variant="compact"
+            />
           </div>
         )}
       </div>

@@ -903,6 +903,113 @@ input[type="password"]::-ms-clear {
   accent-color: #3b82f6;
 }
 
+/* ===== 统一 Markdown 增强样式 ===== */
+.chat-markdown pre,
+.note-markdown pre {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  overflow: visible;
+}
+
+.chat-markdown pre code,
+.note-markdown pre code {
+  background: transparent !important;
+  padding: 0 !important;
+  border-radius: 0;
+}
+
+.markdown-code-block {
+  margin: 1em 0;
+  overflow: hidden;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+
+.dark .markdown-code-block {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(15, 23, 42, 0.88);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
+}
+
+.markdown-code-block-header {
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.markdown-code-block-body {
+  overflow-x: auto;
+  background: rgba(248, 250, 252, 0.88);
+}
+
+.dark .markdown-code-block-body {
+  background: rgba(15, 23, 42, 0.96);
+}
+
+.markdown-code-block-body > div {
+  margin: 0 !important;
+  padding: 1rem 1.1rem !important;
+}
+
+.markdown-code-block-body code {
+  font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', Consolas, monospace !important;
+}
+
+.markdown-code-block-chat {
+  margin: 0.75em 0;
+  border-radius: 12px;
+}
+
+.markdown-code-block-chat .markdown-code-block-body > div {
+  padding: 0.875rem 0.95rem !important;
+}
+
+.markdown-compact {
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.markdown-compact h1 { font-size: 1.2em; }
+.markdown-compact h2 { font-size: 1.1em; }
+.markdown-compact h3 { font-size: 1em; }
+.markdown-compact h4,
+.markdown-compact h5,
+.markdown-compact h6 { font-size: 0.95em; }
+
+.markdown-compact h1,
+.markdown-compact h2,
+.markdown-compact h3,
+.markdown-compact h4,
+.markdown-compact h5,
+.markdown-compact h6 {
+  margin: 0.9em 0 0.45em;
+}
+
+.markdown-compact p,
+.markdown-compact ul,
+.markdown-compact ol,
+.markdown-compact blockquote,
+.markdown-compact table,
+.markdown-compact .markdown-code-block {
+  margin: 0.55em 0;
+}
+
+.markdown-compact ul,
+.markdown-compact ol {
+  padding-left: 1.35em;
+}
+
+.markdown-compact table {
+  font-size: 0.82rem;
+}
+
+.markdown-compact .timestamp {
+  font-size: 0.72em;
+}
+
 /* 播放位置恢复提示动画 */
 @keyframes slideInFromBottom {
   from {

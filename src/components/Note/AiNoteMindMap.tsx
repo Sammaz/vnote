@@ -5,6 +5,7 @@ import { Transformer, type IMarkmapJSONOptions } from "markmap-lib";
 import { Markmap, loadCSS, loadJS } from "markmap-view";
 import type { INode, IPureNode } from "markmap-common";
 import { deriveOptions } from "markmap-view";
+import { cleanMarkdownText, extractFirstTimestamp } from "../../utils/markdownRendererUtils";
 
 interface AiNoteMindMapProps {
   markdown: string;
@@ -31,46 +32,6 @@ interface NormalizedMindmapMarkdownResult {
 const transformer = new Transformer();
 const MINDMAP_DEPTH_STORAGE_KEY = "ai-note-mindmap-depth";
 const HEADING_RE = /^\s{0,3}(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/;
-const TIMESTAMP_PATTERNS = [
-  /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/,
-  /⏱\s*(\d{1,2}:\d{2}(?::\d{2})?)/,
-  /（时间：(\d{1,2}:\d{2}(?::\d{2})?)）/,
-  /\((\d{1,2}:\d{2}(?::\d{2})?)\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\)/,
-];
-
-function parseTimestamp(value: string): number | null {
-  const parts = value.trim().split(":").map(Number);
-  if (parts.length < 2 || parts.length > 3 || parts.some(Number.isNaN)) {
-    return null;
-  }
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  }
-  return parts[0] * 3600 + parts[1] * 60 + parts[2];
-}
-
-function findFirstTimestamp(text: string): number | null {
-  for (const pattern of TIMESTAMP_PATTERNS) {
-    const match = text.match(pattern);
-    if (match?.[1]) {
-      return parseTimestamp(match[1]);
-    }
-  }
-  return null;
-}
-
-function cleanMarkdownText(text: string): string {
-  return text
-    .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "")
-    .replace(/⏱\s*\d{1,2}:\d{2}(?::\d{2})?/g, "")
-    .replace(/（时间：\d{1,2}:\d{2}(?::\d{2})?）/g, "")
-    .replace(/\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\)/g, "")
-    .replace(/!\[.*?\]\(.*?\)/g, "")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/[*_~]+/g, "")
-    .trim();
-}
 
 function isSummaryHeading(text: string): boolean {
   const normalized = text.replace(/\s+/g, "");
@@ -186,7 +147,7 @@ function collectOutlineItems(markdown: string): OutlineItem[] {
   });
 
   return headings.map((heading, index) => {
-    const seekTime = findFirstTimestamp(heading.rawText);
+    const seekTime = extractFirstTimestamp(heading.rawText);
     const text = cleanMarkdownText(heading.rawText) || `节点 ${index + 1}`;
     return {
       level: heading.level,

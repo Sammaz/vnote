@@ -4,11 +4,10 @@ import { markdown as markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { EditorView } from "@codemirror/view";
 import { githubDark, githubLight } from "@uiw/codemirror-theme-github";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { Loader2 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { TableOfContents, generateId, getTextFromChildren } from "./TableOfContents";
+import { TableOfContents } from "./TableOfContents";
+import { MarkdownRenderer } from "../Markdown/MarkdownRenderer";
 import { convertJsonToMarkdown } from "../../utils/markdownUtils";
 
 type TabType = "full_summary" | "detailed_reading" | "highlights" | "visual_summary" | "custom_summary" | "ai_note" | "panoramic_blueprint";
@@ -47,8 +46,6 @@ export function EditableMarkdown({
 
   // 用于跟踪checkbox选中状态的本地状态（不保存到markdown）
   const [checkedItems, setCheckedItems] = useState<Set<number>>(new Set());
-  const checkboxIndexRef = useRef(0);
-  const slugCountsRef = useRef<Record<string, number>>({});
 
   // 当内容变化时重置checkbox状态
   useEffect(() => {
@@ -158,191 +155,34 @@ export function EditableMarkdown({
     );
   }
 
-  // 预览模式（使用现有的 ReactMarkdown 样式）
-  // 在每次渲染前重置checkbox索引和标题ID计数
-  checkboxIndexRef.current = 0;
-  slugCountsRef.current = {};
-
-  const generateHeaderId = (children: React.ReactNode) => {
-    const rawText = getTextFromChildren(children)
-      .replace(/\[\d{1,2}:\d{2}(?::\d{2})?\]/g, "")
-      .replace(/⏱\s*\d{1,2}:\d{2}(?::\d{2})?/g, "")
-      .replace(/（时间：\d{1,2}:\d{2}(?::\d{2})?）/g, "")
-      .trim();
-    let id = generateId(rawText, "doc");
-    if (slugCountsRef.current[id]) {
-        slugCountsRef.current[id]++;
-        id = `${id}-${slugCountsRef.current[id]}`;
-    } else {
-        slugCountsRef.current[id] = 1;
-    }
-    return id;
-  };
-
+  // 预览模式
   return (
     <div className="relative h-full flex flex-row group">
-      <div className="note-markdown flex-1 overflow-y-auto overflow-x-hidden px-4 h-full custom-scrollbar">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            // 自定义checkbox渲染
-            input: ({ node, ...props }) => {
-              if (props.type === 'checkbox') {
-                const currentIndex = checkboxIndexRef.current++;
-                const isChecked = checkedItems.has(currentIndex);
-
-                return (
-                  <input
-                    type="checkbox"
-                    checked={isChecked}
-                    onChange={() => {
-                      setCheckedItems(prev => {
-                        const newSet = new Set(prev);
-                        if (newSet.has(currentIndex)) {
-                          newSet.delete(currentIndex);
-                        } else {
-                          newSet.add(currentIndex);
-                        }
-                        return newSet;
-                      });
-                    }}
-                    className="cursor-pointer mr-2"
-                  />
-                );
+      <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 h-full custom-scrollbar">
+        <MarkdownRenderer
+          content={markdown}
+          variant="note"
+          headingIdPrefix="doc"
+          enableHeadingAnchors
+          enableSeekTimestamps
+          enableHashtags
+          enableLocalImages
+          interactiveTaskList
+          checkedItems={checkedItems}
+          onToggleCheckbox={(currentIndex) => {
+            setCheckedItems((prev) => {
+              const newSet = new Set(prev);
+              if (newSet.has(currentIndex)) {
+                newSet.delete(currentIndex);
+              } else {
+                newSet.add(currentIndex);
               }
-              return <input {...props} />;
-            },
-            // 处理标题中的时间戳并添加ID
-            h1: ({ children }) => {
-              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-              const id = generateHeaderId(children);
-              return <h1 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h1>;
-            },
-            h2: ({ children }) => {
-              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-              const id = generateHeaderId(children);
-              return <h2 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h2>;
-            },
-            h3: ({ children }) => {
-              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-              const id = generateHeaderId(children);
-              return <h3 id={id} style={{ scrollMarginTop: "100px" }} className="scroll-mt-24">{renderWithTimestamp(content)}</h3>;
-            },
-            // 处理段落中的时间戳
-            p: ({ children }) => {
-              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-              return <p>{renderWithTimestamp(content)}</p>;
-            },
-            // 处理强调文本中的时间戳
-            strong: ({ children }) => {
-              const content = Array.isArray(children) ? children as React.ReactNode[] : [children];
-              return <strong>{renderWithTimestamp(content)}</strong>;
-            },
-            img: ({ src, alt }) => {
-              if (!src) return null;
-
-              let resolvedSrc = src;
-              if (/^[a-zA-Z]:[\\/]/.test(src) || src.startsWith("\\\\")) {
-                try {
-                  resolvedSrc = convertFileSrc(src);
-                } catch (error) {
-                  console.error("转换本地图片路径失败:", error);
-                }
-              }
-
-              return <img src={resolvedSrc} alt={alt || ""} className="max-w-full h-auto rounded-xl my-4" />;
-            },
+              return newSet;
+            });
           }}
-        >
-          {markdown}
-        </ReactMarkdown>
+        />
       </div>
       <TableOfContents markdown={markdown} idPrefix="doc" />
     </div>
   );
-}
-
-// 渲染带时间戳和标签样式的内容
-function renderWithTimestamp(children: React.ReactNode[]): React.ReactNode {
-  return children.map((child, index) => {
-    if (typeof child === 'string') {
-      const combinedRegex = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(#[^\s]+)/g;
-
-      if (combinedRegex.test(child)) {
-        combinedRegex.lastIndex = 0;
-
-        const result: React.ReactNode[] = [];
-        let lastIndex = 0;
-        let match;
-        let partIndex = 0;
-
-        while ((match = combinedRegex.exec(child)) !== null) {
-          if (match.index > lastIndex) {
-            result.push(
-              <span key={`${index}-${partIndex++}`}>
-                {child.slice(lastIndex, match.index)}
-              </span>
-            );
-          }
-
-          const matchedText = match[0];
-
-          if (match[1] || match[2] || match[3]) {
-            const timeText = match[1]
-              ? matchedText.slice(1, -1)
-              : matchedText.replace(/^⏱\s*/, "").replace(/^（时间：/, "").replace(/）$/, "");
-            const seekTime = parseTimestampToSeconds(timeText);
-            result.push(
-              <button
-                key={`${index}-${partIndex++}`}
-                type="button"
-                className="timestamp cursor-pointer hover:opacity-80"
-                onClick={() => {
-                  if (seekTime === null) return;
-                  window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: seekTime } }));
-                }}
-              >
-                {timeText}
-              </button>
-            );
-          } else if (match[4]) {
-            result.push(
-              <span
-                key={`${index}-${partIndex++}`}
-                className="inline-flex items-center px-2 py-0.5 mx-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
-              >
-                {matchedText}
-              </span>
-            );
-          }
-
-          lastIndex = match.index + matchedText.length;
-        }
-
-        if (lastIndex < child.length) {
-          result.push(
-            <span key={`${index}-${partIndex++}`}>
-              {child.slice(lastIndex)}
-            </span>
-          );
-        }
-
-        return result;
-      }
-    }
-    return <span key={index}>{child}</span>;
-  });
-}
-
-function parseTimestampToSeconds(value: string): number | null {
-  const parts = value.trim().split(":").map(Number);
-  if (parts.length < 2 || parts.length > 3 || parts.some(Number.isNaN)) {
-    return null;
-  }
-
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1];
-  }
-
-  return parts[0] * 3600 + parts[1] * 60 + parts[2];
 }

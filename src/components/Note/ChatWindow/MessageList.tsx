@@ -3,9 +3,8 @@
  */
 
 import { useRef, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { cn } from "../../../utils/cn";
+import { MarkdownRenderer } from "../../Markdown/MarkdownRenderer";
 import type { Message } from "./types";
 
 interface MessageListProps {
@@ -71,11 +70,10 @@ export function MessageList({
                 <span className="w-2 h-2 bg-slate-400 dark:bg-slate-500 rounded-full animate-bounce"></span>
               </div>
             ) : message.role === "assistant" ? (
-              <div className="chat-markdown">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {message.content}
-                </ReactMarkdown>
-              </div>
+              <MarkdownRenderer
+                content={message.content}
+                variant="chat"
+              />
             ) : (
               <span className="whitespace-pre-wrap">{message.content}</span>
             )}

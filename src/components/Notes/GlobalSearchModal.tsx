@@ -1,10 +1,10 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Search, X, FileText, Calendar, Video, ArrowUpRight } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { MarkdownRenderer } from "../Markdown/MarkdownRenderer";
 import { cn } from "../../utils/cn";
+import { highlightText } from "../../utils/markdownRendererUtils";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 
@@ -55,38 +55,6 @@ function getSnippet(note: Note, maxLen = 80): string {
     if (plain.length > 0) return plain.length > maxLen ? plain.slice(0, maxLen) + "…" : plain;
   }
   return "暂无摘要";
-}
-
-// 高亮文本中的搜索关键词（返回 React 元素数组）
-function highlightText(text: string, query: string): React.ReactNode {
-  if (!query.trim()) return text;
-  const escaped = query.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const regex = new RegExp(`(${escaped})`, "gi");
-  const parts = text.split(regex);
-  if (parts.length === 1) return text;
-  // split 带捕获组：奇数索引是匹配项
-  return parts.map((part, i) =>
-    i % 2 === 1 ? (
-      <mark key={i} className="bg-yellow-200 dark:bg-yellow-500/30 text-inherit rounded-sm px-0.5">
-        {part}
-      </mark>
-    ) : (
-      part
-    )
-  );
-}
-
-// 递归高亮 React children 中的字符串节点
-function highlightChildren(children: React.ReactNode, query: string): React.ReactNode {
-  if (!query.trim()) return children;
-  if (typeof children === "string") return highlightText(children, query);
-  if (Array.isArray(children)) {
-    return children.map((child, i) => {
-      if (typeof child === "string") return <React.Fragment key={i}>{highlightText(child, query)}</React.Fragment>;
-      return child;
-    });
-  }
-  return children;
 }
 
 // 提取视觉化总结内容（仅 Markdown）
@@ -471,20 +439,11 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
                 <p className="text-sm font-medium">该笔记暂无视觉化总结</p>
               </div>
             ) : (
-              <div className="note-markdown">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={searchQuery.trim() ? {
-                    text: ({ children }) => <>{highlightText(String(children), searchQuery)}</>,
-                    p: ({ children, ...props }) => <p {...props}>{highlightChildren(children, searchQuery)}</p>,
-                    li: ({ children, ...props }) => <li {...props}>{highlightChildren(children, searchQuery)}</li>,
-                    td: ({ children, ...props }) => <td {...props}>{highlightChildren(children, searchQuery)}</td>,
-                    th: ({ children, ...props }) => <th {...props}>{highlightChildren(children, searchQuery)}</th>,
-                  } : undefined}
-                >
-                  {preview.content}
-                </ReactMarkdown>
-              </div>
+              <MarkdownRenderer
+                content={preview.content}
+                variant="note"
+                searchQuery={searchQuery.trim() || undefined}
+              />
             )}
           </div>
         </div>
