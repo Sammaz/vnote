@@ -103,7 +103,6 @@ struct ExecutionContext {
     model_id: String,
     video_path: String,
     subtitle_path: Option<String>,
-    persist_model_id: bool,
 }
 
 // ============================================================================
@@ -460,13 +459,18 @@ async fn run_initialization(
     let model_override_id = detail.run.as_ref().and_then(|run| run.model_override_id.clone());
     let resolved_model_id = model_override_id
         .clone()
-        .or_else(|| note.model_id.clone())
         .or_else(|| {
             if params.model_id.trim().is_empty() {
                 None
             } else {
                 Some(params.model_id.clone())
             }
+        })
+        .or_else(|| {
+            db.get_default_ai_config()
+                .ok()
+                .flatten()
+                .map(|config| config.id)
         })
         .ok_or_else(|| "未配置AI模型".to_string())?;
 
@@ -532,7 +536,6 @@ async fn run_initialization(
         model_id: resolved_model_id.clone(),
         video_path: params.video_path.clone(),
         subtitle_path: params.subtitle_path.clone().or(note.subtitle_path.clone()),
-        persist_model_id: model_override_id.is_none(),
     };
 
     let mut item_map: HashMap<String, NoteInitializationItem> = detail
@@ -1031,7 +1034,6 @@ async fn execute_note_tab_generation(
             style: config_string(config, "style"),
             custom_prompt: config_string(config, "custom_prompt"),
             screenshot_density: config_string(config, "screenshot_density"),
-            persist_model_id: context.persist_model_id,
         },
     };
 

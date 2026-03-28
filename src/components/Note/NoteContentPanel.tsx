@@ -132,6 +132,7 @@ interface NoteContentPanelProps {
   onGenerationComplete?: () => void;
   aiConfigs: AiConfig[];
   currentModelId?: string | null;
+  defaultAiConfigId?: string | null;
   promptConfigs?: PromptConfig[];
 }
 
@@ -155,7 +156,7 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
   }
 }
 
-export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, promptConfigs = [] }: NoteContentPanelProps) {
+export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, defaultAiConfigId, promptConfigs = [] }: NoteContentPanelProps) {
 
   // 当前激活的标签页
   const [activeTab, setActiveTab] = useState<TabId>("summary");
@@ -798,18 +799,15 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [dialogTab, setDialogTab] = useState<"default" | "custom">("default");
   const [selectedModelId, setSelectedModelId] = useState("");
 
-  // 获取默认 AI 配置或使用笔记的 model_id
+  // 获取默认 AI 配置
   const getDefaultModelId = useCallback(() => {
     if (currentModelId) return currentModelId;
-    if (note.model_id) return note.model_id;
-
-    const defaultConfig = aiConfigs.find(c => c.is_default);
-    if (defaultConfig) return defaultConfig.id;
+    if (defaultAiConfigId) return defaultAiConfigId;
 
     if (aiConfigs.length > 0) return aiConfigs[0].id;
 
     return "";
-  }, [currentModelId, note.model_id, aiConfigs]);
+  }, [currentModelId, defaultAiConfigId, aiConfigs]);
 
   const customSummaryPromptConfigs = promptConfigs;
 
@@ -1273,7 +1271,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 辅助模式下使用截图标记生成章节
   const generateChaptersWithMarkers = useCallback(async (markers: ScreenshotMarker[]) => {
-    const effectiveModelId = currentModelId || note.model_id;
+    const effectiveModelId = currentModelId || defaultAiConfigId;
     if (!effectiveModelId || !note.subtitle_path) {
       message.error("缺少必要参数：模型ID或字幕路径");
       console.error("[generateChaptersWithMarkers] 缺少必要参数");
@@ -1387,7 +1385,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setChapterGenerating(note.id, false);
       unregisterActiveGenerationId(note.id, generationId);
     }
-  }, [note.id, note.video_path, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete]);
+  }, [note.id, note.video_path, note.subtitle_path, currentModelId, defaultAiConfigId, onGenerationComplete]);
 
   // 用于存储 generateHighlightsDirectly 的 ref，避免循环依赖
   const generateHighlightsDirectlyRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -1399,7 +1397,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       return;
     }
 
-    const effectiveModelId = currentModelId || note.model_id;
+    const effectiveModelId = currentModelId || defaultAiConfigId;
     if (!effectiveModelId || !note.subtitle_path) {
       return;
     }
@@ -1442,7 +1440,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setHighlightIsGenerating(false);
       setHighlightGenerating(note.id, false);
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, detailedReadingData?.total_duration, onGenerationComplete, highlightIsGenerating]);
+  }, [note.id, note.subtitle_path, currentModelId, defaultAiConfigId, detailedReadingData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 用于存储 triggerVisualSummaryOptimizationSilent 的 ref，避免循环依赖
   const triggerVisualSummaryOptimizationSilentRef = useRef<(() => Promise<void>) | undefined>(undefined);
@@ -1463,12 +1461,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     // 检查必要条件
-    if (!detailedReadingData || !note.subtitle_path || !note.model_id) {
+    if (!detailedReadingData || !note.subtitle_path) {
       return;
     }
 
     // 静默执行字幕优化
-    const effectiveModelId = currentModelId || note.model_id;
+    const effectiveModelId = currentModelId || defaultAiConfigId;
     if (!effectiveModelId) {
       return;
     }
@@ -1551,7 +1549,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setSubtitleOptimizationProgress(null);
       setOptimizingChapterIds(new Set());
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, detailedReadingData, subtitleEntries, optimizedSubtitles.size, subtitleOptimizing, setupSubtitleOptimizationListener]);
+  }, [note.id, note.subtitle_path, currentModelId, defaultAiConfigId, detailedReadingData, subtitleEntries, optimizedSubtitles.size, subtitleOptimizing, setupSubtitleOptimizationListener]);
 
   // 更新 triggerVisualSummaryOptimizationSilent ref
   useEffect(() => {
@@ -1565,7 +1563,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       return;
     }
 
-    const effectiveModelId = currentModelId || note.model_id;
+    const effectiveModelId = currentModelId || defaultAiConfigId;
     if (!effectiveModelId || !note.subtitle_path) {
       return;
     }
@@ -1620,7 +1618,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setFlashcardIsGenerating(false);
       setFlashcardGenerating(note.id, false);
     }
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, onGenerationComplete, flashcardIsGenerating]);
+  }, [note.id, note.subtitle_path, currentModelId, defaultAiConfigId, onGenerationComplete, flashcardIsGenerating]);
 
   // 更新 generateFlashcardsDirectly ref
   useEffect(() => {
@@ -1629,7 +1627,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 生成全景深度重构蓝图
   const generatePanoramicBlueprint = useCallback(async () => {
-    if (blueprintIsGenerating || !note.model_id) return;
+    const effectiveModelId = currentModelId || defaultAiConfigId;
+    if (blueprintIsGenerating || !effectiveModelId) return;
 
     const generationId = crypto.randomUUID();
 
@@ -1651,7 +1650,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       await invoke('generate_panoramic_blueprint', {
         generationId,
         noteId: note.id,
-        modelId: note.model_id,
+        modelId: effectiveModelId,
       });
     } catch (error) {
       console.error('生成全景蓝图失败:', error);
@@ -1666,7 +1665,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           blueprintGenerationId: null
       });
     }
-  }, [note.id, note.model_id, blueprintIsGenerating, setupBlueprintListener]);
+  }, [note.id, currentModelId, defaultAiConfigId, blueprintIsGenerating, setupBlueprintListener]);
 
   // 字幕优化开关处理
   const handleSubtitleOptimizationToggle = useCallback(async () => {
@@ -1739,7 +1738,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     // 无缓存或缓存不匹配，开始优化
     // 优先使用视频播放器右上角选择的模型
-    const effectiveModelId = currentModelId || note.model_id;
+    const effectiveModelId = currentModelId || defaultAiConfigId;
     if (!detailedReadingData || !effectiveModelId || !note.subtitle_path) {
       message.warning("缺少必要的数据，无法进行字幕优化");
       return;
@@ -1836,7 +1835,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setSubtitleOptimizationProgress(null);
       setOptimizingChapterIds(new Set());
     }
-  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, detailedReadingData, note.model_id, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId]);
+  }, [subtitleOptimizing, subtitleOptimizationEnabled, optimizedSubtitles, detailedReadingData, note.subtitle_path, note.id, subtitleEntries, setupSubtitleOptimizationListener, currentModelId, defaultAiConfigId]);
 
   // 高光笔记重新生成处理
   const handleHighlightRegenerate = useCallback(async () => {
@@ -1847,7 +1846,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       onConfirm: async () => {
         setShowConfirmDialog(false);
 
-        if (!note.subtitle_path || !note.model_id) {
+        if (!note.subtitle_path || !(currentModelId || defaultAiConfigId)) {
           message.warning("缺少字幕文件或 AI 模型配置");
           return;
         }
@@ -1857,7 +1856,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         try {
           const generationId = await invoke<string>("generate_highlights", {
             noteId: note.id,
-            modelId: currentModelId || note.model_id,
+            modelId: currentModelId || defaultAiConfigId,
             subtitlePath: note.subtitle_path,
             highlightType: "default",
             totalDuration: detailedReadingData?.total_duration || 0,
@@ -1887,7 +1886,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       }
     });
     setShowConfirmDialog(true);
-  }, [note.id, note.subtitle_path, note.model_id, currentModelId, detailedReadingData?.total_duration, onGenerationComplete, highlightIsGenerating]);
+  }, [note.id, note.subtitle_path, currentModelId, defaultAiConfigId, detailedReadingData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 单章节重新优化字幕
   const handleReoptimizeChapter = useCallback(async (chapterId: string) => {
@@ -1897,7 +1896,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
 
     // 获取当前选择的模型
-    const effectiveModelId = currentModelId || note.model_id;
+    const effectiveModelId = currentModelId || defaultAiConfigId;
     if (!effectiveModelId) {
       message.warning("请先选择 AI 模型");
       return;
@@ -2041,7 +2040,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       });
       unlisten();
     }
-  }, [detailedReadingData, currentModelId, note.model_id, note.id, note.subtitle_path, subtitleEntries, optimizingChapterIds]);
+  }, [detailedReadingData, currentModelId, defaultAiConfigId, note.id, note.subtitle_path, subtitleEntries, optimizingChapterIds]);
 
   // 根据配置生成动态提示词（Markdown 格式）
   const generateDynamicPrompt = useCallback((): string => {
@@ -2115,7 +2114,7 @@ Video subtitles content:`;
   // 使用默认配置直接生成全文总结（空状态下的按钮使用）
   const handleGenerateFullSummaryWithDefaults = useCallback(async () => {
     // 获取有效的模型ID
-    const effectiveModelId = currentModelId || note.model_id || aiConfigs.find(c => c.is_default)?.id || aiConfigs[0]?.id;
+    const effectiveModelId = currentModelId || defaultAiConfigId || aiConfigs.find(c => c.is_default)?.id || aiConfigs[0]?.id;
     if (!effectiveModelId) {
       message.warning("请先配置 AI 模型");
       return;
@@ -2170,7 +2169,7 @@ Video subtitles content:`;
       setRegeneratingTabs(currentTabs as Set<TabType>);
       message.error(`生成失败: ${error}`);
     }
-  }, [note.id, note.model_id, currentModelId, aiConfigs, setupGenerationListener, generateDynamicPrompt]);
+  }, [note.id, currentModelId, defaultAiConfigId, aiConfigs, setupGenerationListener, generateDynamicPrompt]);
 
   // 执行生成（弹框中的重新生成）
   const handleCustomGenerate = async () => {
@@ -2592,7 +2591,7 @@ Video subtitles content:`;
                         await invoke("generate_note_content", {
                           generationId,
                           noteId: note.id,
-                          modelId: currentModelId || note.model_id,
+                          modelId: currentModelId || defaultAiConfigId,
                           concurrent: true,
                           regenerate: true,
                           tabsToGenerate: ["detailed_reading"],
@@ -3107,7 +3106,7 @@ Video subtitles content:`;
             ref={highlightGridRef}
             noteId={note.id}
             subtitlePath={note.subtitle_path}
-            modelId={currentModelId || note.model_id}
+            modelId={currentModelId || defaultAiConfigId || null}
             totalDuration={detailedReadingData?.total_duration || 0}
             initialHighlightData={parseHighlightData(note.highlights)}
             onGenerationComplete={() => {
@@ -3186,7 +3185,7 @@ Video subtitles content:`;
             noteId={note.id}
             noteName={note.title}
             subtitlePath={note.subtitle_path}
-            modelId={currentModelId || note.model_id}
+            modelId={currentModelId || defaultAiConfigId || null}
             flashcardData={parseFlashcardData(note.flashcards)}
             isGenerating={isTabGenerating("flashcard")}
             onGenerationComplete={onGenerationComplete}
@@ -3249,7 +3248,7 @@ Video subtitles content:`;
                 <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 max-w-md">
                   使用AI深度分析视频内容，生成5倍字数扩展的结构化知识文档
                 </p>
-                {note.model_id ? (
+                {(currentModelId || defaultAiConfigId) ? (
                   <button
                     onClick={generatePanoramicBlueprint}
                     disabled={blueprintIsGenerating || !note.subtitle_path}
@@ -3269,7 +3268,7 @@ Video subtitles content:`;
                     请先在视频播放器右上角选择AI模型
                   </p>
                 )}
-                {!note.subtitle_path && note.model_id && (
+                {!note.subtitle_path && (currentModelId || defaultAiConfigId) && (
                   <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
                     请先上传字幕文件
                   </p>

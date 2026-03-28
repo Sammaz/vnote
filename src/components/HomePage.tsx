@@ -1,4 +1,4 @@
-import { UploadZone, ModelSelector, GenerateButton } from "./Upload";
+import { UploadZone, GenerateButton } from "./Upload";
 import { RecentNotes } from "./Notes";
 import { StatsSection } from "./Stats";
 
@@ -21,9 +21,7 @@ export function HomePage() {
         <div className="space-y-4">
           <UploadZone />
 
-          {/* 模型选择和生成按钮 */}
-          <div className="flex items-center justify-center gap-4 flex-wrap">
-            <ModelSelector />
+          <div className="flex items-center justify-center">
             <GenerateButton />
           </div>
         </div>

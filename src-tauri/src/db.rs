@@ -38,7 +38,6 @@ pub struct Note {
     pub title: String,
     pub video_path: String,
     pub subtitle_path: Option<String>,
-    pub model_id: Option<String>, // AI model ID used for generating notes
     pub full_summary: Option<String>,
     pub detailed_reading: Option<String>,
     pub highlights: Option<String>,
@@ -62,7 +61,6 @@ pub struct CreateNoteRequest {
     pub title: String,
     pub video_path: String,
     pub subtitle_path: Option<String>,
-    pub model_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -187,7 +185,6 @@ pub struct NoteInitializationOverview {
     pub note_id: String,
     pub note_title: String,
     pub subtitle_path: Option<String>,
-    pub model_id: Option<String>,
     pub run_status: NoteInitializationRunStatus,
     pub selected_count: i32,
     pub completed_count: i32,
@@ -232,7 +229,6 @@ pub struct UpdateNoteMetadataRequest {
     pub title: String,
     pub video_path: String,
     pub subtitle_path: Option<String>,
-    pub model_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -733,23 +729,22 @@ impl Database {
             title: row.get(1)?,
             video_path: row.get(2)?,
             subtitle_path: row.get(3)?,
-            model_id: row.get(4)?,
-            full_summary: row.get(5)?,
-            detailed_reading: row.get(6)?,
-            highlights: row.get(7)?,
-            visual_summary: row.get(8)?,
-            custom_summary: row.get(9)?,
-            ai_note_markdown: row.get(10)?,
-            ai_note_meta: row.get(11)?,
-            flashcards: row.get(12)?,
-            panoramic_blueprint: row.get(13)?,
-            quick_notes: row.get(14)?,
-            quick_notes_mindmap: row.get(15)?,
-            quick_notes_canvas: row.get(16)?,
-            suggested_questions: row.get(17)?,
-            last_playback_position: row.get(18)?,
-            created_at: row.get(19)?,
-            updated_at: row.get(20)?,
+            full_summary: row.get(4)?,
+            detailed_reading: row.get(5)?,
+            highlights: row.get(6)?,
+            visual_summary: row.get(7)?,
+            custom_summary: row.get(8)?,
+            ai_note_markdown: row.get(9)?,
+            ai_note_meta: row.get(10)?,
+            flashcards: row.get(11)?,
+            panoramic_blueprint: row.get(12)?,
+            quick_notes: row.get(13)?,
+            quick_notes_mindmap: row.get(14)?,
+            quick_notes_canvas: row.get(15)?,
+            suggested_questions: row.get(16)?,
+            last_playback_position: row.get(17)?,
+            created_at: row.get(18)?,
+            updated_at: row.get(19)?,
         })
     }
 
@@ -801,7 +796,7 @@ impl Database {
     pub fn get_all_notes(&self) -> SqliteResult<Vec<Note>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
                     panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
                     suggested_questions, last_playback_position, created_at, updated_at
@@ -816,7 +811,7 @@ impl Database {
     pub fn get_note_by_id(&self, id: &str) -> SqliteResult<Option<Note>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
                     panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
                     suggested_questions, last_playback_position, created_at, updated_at
@@ -837,13 +832,13 @@ impl Database {
         let new_id = snowflake::generate_id_string();
 
         conn.execute(
-            "INSERT INTO notes (id, title, video_path, subtitle_path, model_id) VALUES (?1, ?2, ?3, ?4, ?5)",
-            (&new_id, &req.title, &req.video_path, &req.subtitle_path, &req.model_id),
+            "INSERT INTO notes (id, title, video_path, subtitle_path) VALUES (?1, ?2, ?3, ?4)",
+            (&new_id, &req.title, &req.video_path, &req.subtitle_path),
         )?;
 
         // Return the created note
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
                     panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
                     suggested_questions, last_playback_position, created_at, updated_at
@@ -857,16 +852,16 @@ impl Database {
         let conn = self.connection();
         conn.execute(
             "UPDATE notes SET
-                title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4,
-                full_summary = ?5, detailed_reading = ?6, highlights = ?7,
-                visual_summary = ?8, custom_summary = ?9, ai_note_markdown = ?10,
-                ai_note_meta = ?11, flashcards = ?12, panoramic_blueprint = ?13, quick_notes = ?14,
-                quick_notes_mindmap = ?15, quick_notes_canvas = ?16, suggested_questions = ?17,
-                last_playback_position = ?18,
+                title = ?1, video_path = ?2, subtitle_path = ?3,
+                full_summary = ?4, detailed_reading = ?5, highlights = ?6,
+                visual_summary = ?7, custom_summary = ?8, ai_note_markdown = ?9,
+                ai_note_meta = ?10, flashcards = ?11, panoramic_blueprint = ?12, quick_notes = ?13,
+                quick_notes_mindmap = ?14, quick_notes_canvas = ?15, suggested_questions = ?16,
+                last_playback_position = ?17,
                 updated_at = datetime('now', 'localtime')
-             WHERE id = ?19",
+             WHERE id = ?18",
             rusqlite::params![
-                &note.title, &note.video_path, &note.subtitle_path, &note.model_id,
+                &note.title, &note.video_path, &note.subtitle_path,
                 &note.full_summary, &note.detailed_reading, &note.highlights,
                 &note.visual_summary, &note.custom_summary, &note.ai_note_markdown,
                 &note.ai_note_meta, &note.flashcards, &note.panoramic_blueprint, &note.quick_notes,
@@ -881,8 +876,8 @@ impl Database {
     pub fn update_note_metadata(&self, req: &UpdateNoteMetadataRequest) -> SqliteResult<()> {
         let conn = self.connection();
         conn.execute(
-            "UPDATE notes SET title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4, updated_at = datetime('now', 'localtime') WHERE id = ?5",
-            rusqlite::params![&req.title, &req.video_path, &req.subtitle_path, &req.model_id, &req.id],
+            "UPDATE notes SET title = ?1, video_path = ?2, subtitle_path = ?3, updated_at = datetime('now', 'localtime') WHERE id = ?4",
+            rusqlite::params![&req.title, &req.video_path, &req.subtitle_path, &req.id],
         )?;
         Ok(())
     }
@@ -1085,7 +1080,6 @@ impl Database {
                 n.id,
                 n.title,
                 n.subtitle_path,
-                n.model_id,
                 COALESCE(r.status, 'idle') AS run_status,
                 COALESCE(SUM(CASE WHEN i.selected = 1 THEN 1 ELSE 0 END), 0) AS selected_count,
                 COALESCE(SUM(CASE WHEN i.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_count,
@@ -1097,25 +1091,24 @@ impl Database {
              FROM notes n
              LEFT JOIN note_initialization_runs r ON r.note_id = n.id
              LEFT JOIN note_initialization_items i ON i.note_id = n.id
-             GROUP BY n.id, n.title, n.subtitle_path, n.model_id, r.status, r.updated_at, n.updated_at
+             GROUP BY n.id, n.title, n.subtitle_path, r.status, r.updated_at, n.updated_at
              ORDER BY updated_at DESC, n.rowid DESC"
         )?;
 
         let rows = stmt.query_map([], |row| {
-            let run_status: String = row.get(4)?;
+            let run_status: String = row.get(3)?;
             Ok(NoteInitializationOverview {
                 note_id: row.get(0)?,
                 note_title: row.get(1)?,
                 subtitle_path: row.get(2)?,
-                model_id: row.get(3)?,
                 run_status: NoteInitializationRunStatus::from_str(&run_status),
-                selected_count: row.get(5)?,
-                completed_count: row.get(6)?,
-                skipped_count: row.get(7)?,
-                failed_count: row.get(8)?,
-                running_count: row.get(9)?,
-                output_count: row.get(10)?,
-                updated_at: row.get(11)?,
+                selected_count: row.get(4)?,
+                completed_count: row.get(5)?,
+                skipped_count: row.get(6)?,
+                failed_count: row.get(7)?,
+                running_count: row.get(8)?,
+                output_count: row.get(9)?,
+                updated_at: row.get(10)?,
             })
         })?;
 
@@ -3060,8 +3053,7 @@ mod tests {
             title: "Test Note".to_string(),
             video_path: "/test/video.mp4".to_string(),
             subtitle_path: Some("/test/subtitle.srt".to_string()),
-            model_id: None,
-        };
+                    };
         let note = db.create_note(&req).expect("Failed to create note");
         note.id
     }

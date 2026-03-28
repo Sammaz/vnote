@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS notes (
     title TEXT NOT NULL,
     video_path TEXT NOT NULL,
     subtitle_path TEXT,
-    model_id TEXT,
     full_summary TEXT,
     detailed_reading TEXT,
     highlights TEXT,

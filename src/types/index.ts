@@ -17,7 +17,6 @@ export interface Note {
   title: string;
   video_path: string;
   subtitle_path: string | null;
-  model_id: string | null; // AI model ID used for generating notes
   full_summary: string | null;
   detailed_reading: string | ChapterData | DetailedReadingData | null;  // 支持纯文本或章节数据
   highlights: string | null;
@@ -41,7 +40,6 @@ export interface CreateNoteRequest {
   title: string;
   video_path: string;
   subtitle_path: string | null;
-  model_id: string | null;
 }
 
 // 更新笔记元数据请求
@@ -50,7 +48,6 @@ export interface UpdateNoteMetadataRequest {
   title: string;
   video_path: string;
   subtitle_path: string | null;
-  model_id: string | null;
 }
 
 // 应用统计

@@ -47,7 +47,7 @@ type NoteFilter =
   | "completed"
   | "has_subtitle"
   | "no_subtitle";
-type OpenDropdown = "note-filter" | "reference-note" | "reference-model" | null;
+type OpenDropdown = "note-filter" | "reference-model" | null;
 
 interface InitializationItemDefinition {
   item_key: string;
@@ -62,7 +62,6 @@ interface NoteInitializationOverview {
   note_id: string;
   note_title: string;
   subtitle_path: string | null;
-  model_id: string | null;
   run_status: RunStatus;
   selected_count: number;
   completed_count: number;
@@ -298,6 +297,8 @@ const warningButtonClass =
   "px-3 py-2 text-sm rounded-xl border border-amber-200/90 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/20 disabled:opacity-50 flex items-center gap-2 cursor-pointer transition-all";
 const tertiaryButtonClass =
   "px-3 py-2 text-sm rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/80 dark:bg-slate-800/55 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 disabled:opacity-50 transition-all cursor-pointer";
+const wideTertiaryButtonClass =
+  `${tertiaryButtonClass} min-w-[132px] inline-flex items-center justify-center`;
 const tertiaryIconButtonClass =
   `${tertiaryButtonClass} flex items-center gap-2`;
 const chipButtonClass =
@@ -386,7 +387,7 @@ interface InitializationManagementSectionProps {
 export function InitializationManagementSection({
   notes,
 }: InitializationManagementSectionProps) {
-  const { aiConfigs, selectedModelId } = useApp();
+  const { aiConfigs, defaultAiConfigId } = useApp();
   const {
     runtimeQueue,
     currentTask,
@@ -404,11 +405,9 @@ export function InitializationManagementSection({
   const [searchQuery, setSearchQuery] = useState("");
   const [noteFilter, setNoteFilter] = useState<NoteFilter>("all");
   const [selectedNoteIds, setSelectedNoteIds] = useState<string[]>([]);
-  const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
   const [editingItems, setEditingItems] = useState<NoteInitializationItem[]>([]);
   const [editingExplicitKeys, setEditingExplicitKeys] = useState<Set<string>>(new Set());
   const [editingModelOverrideId, setEditingModelOverrideId] = useState<string | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [dashboardExpanded, setDashboardExpanded] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -416,7 +415,6 @@ export function InitializationManagementSection({
   const [openDropdown, setOpenDropdown] = useState<OpenDropdown>(null);
 
   const noteFilterDropdownRef = useRef<HTMLDivElement | null>(null);
-  const referenceNoteDropdownRef = useRef<HTMLDivElement | null>(null);
   const referenceModelDropdownRef = useRef<HTMLDivElement | null>(null);
 
   const noteMap = useMemo(() => {
@@ -427,18 +425,11 @@ export function InitializationManagementSection({
     return new Map(registry.map((item) => [item.item_key, item]));
   }, [registry]);
 
-  const defaultAiConfigId = useMemo(() => {
-    return (
-      aiConfigs.find((config) => config.is_default)?.id ?? aiConfigs[0]?.id ?? null
-    );
-  }, [aiConfigs]);
-
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
       const refs = [
         noteFilterDropdownRef.current,
-        referenceNoteDropdownRef.current,
         referenceModelDropdownRef.current,
       ];
 
@@ -464,15 +455,6 @@ export function InitializationManagementSection({
       setRegistry(registryData);
       setOverview(overviewData);
 
-      if (overviewData.length > 0) {
-        setActiveNoteId((prev) =>
-          prev && overviewData.some((item) => item.note_id === prev)
-            ? prev
-            : overviewData[0].note_id
-        );
-      } else {
-        setActiveNoteId(null);
-      }
     } catch (error) {
       console.error("Failed to load initialization overview:", error);
       message.error(`初始化管理加载失败：${String(error)}`);
@@ -485,67 +467,81 @@ export function InitializationManagementSection({
     loadOverview();
   }, [loadOverview]);
 
-  const loadNoteDetail = useCallback(
-    async (noteId: string) => {
-      setLoadingDetail(true);
-      try {
-        const detail = await invoke<NoteInitializationDetail>(
-          "get_note_initialization_plan",
-          { noteId }
-        );
-        const itemMap = new Map(detail.items.map((item) => [item.item_key, item]));
-        const normalizedItems = registry.map((definition) => {
-          const existing = itemMap.get(definition.item_key);
-          if (existing) return existing;
-          return {
-            id: "",
-            note_id: noteId,
-            item_key: definition.item_key,
-            selected: false,
-            locked: false,
-            status: "pending" as ItemStatus,
-            config_json: JSON.stringify(definition.default_config ?? {}),
-            depends_on: definition.dependencies,
-            last_model_id: null,
-            last_error: null,
-            output_present: false,
-            started_at: null,
-            completed_at: null,
-            updated_at: "",
-          };
-        });
-
-        const explicit = new Set(
-          normalizedItems
-            .filter((item) => item.selected && !item.locked)
-            .map((item) => item.item_key)
-        );
-
-        setEditingItems(normalizedItems);
-        setEditingExplicitKeys(explicit);
-        setEditingModelOverrideId(detail.run?.model_override_id ?? null);
-      } catch (error) {
-        console.error("Failed to load initialization plan:", error);
-        message.error(`加载笔记初始化计划失败：${String(error)}`);
-        setEditingItems([]);
-        setEditingExplicitKeys(new Set());
-        setEditingModelOverrideId(null);
-      } finally {
-        setLoadingDetail(false);
-      }
-    },
-    [registry]
-  );
-
   useEffect(() => {
-    if (!activeNoteId || registry.length === 0) {
+    if (registry.length === 0) {
       setEditingItems([]);
       setEditingExplicitKeys(new Set());
-      setEditingModelOverrideId(null);
       return;
     }
-    loadNoteDetail(activeNoteId);
-  }, [activeNoteId, loadNoteDetail, registry.length]);
+
+    const normalizedItems = registry.map((definition) => ({
+      id: "",
+      note_id: "",
+      item_key: definition.item_key,
+      selected: false,
+      locked: false,
+      status: "pending" as ItemStatus,
+      config_json: JSON.stringify(definition.default_config ?? {}),
+      depends_on: definition.dependencies,
+      last_model_id: null,
+      last_error: null,
+      output_present: false,
+      started_at: null,
+      completed_at: null,
+      updated_at: "",
+    }));
+
+    setEditingItems((prev) => {
+      if (prev.length === 0) {
+        return normalizedItems;
+      }
+
+      const prevMap = new Map(prev.map((item) => [item.item_key, item]));
+      return registry.map((definition) => {
+        const existing = prevMap.get(definition.item_key);
+        if (existing) {
+          return {
+            ...existing,
+            depends_on: definition.dependencies,
+            config_json:
+              existing.config_json ?? JSON.stringify(definition.default_config ?? {}),
+          };
+        }
+
+        return {
+          id: "",
+          note_id: "",
+          item_key: definition.item_key,
+          selected: false,
+          locked: false,
+          status: "pending" as ItemStatus,
+          config_json: JSON.stringify(definition.default_config ?? {}),
+          depends_on: definition.dependencies,
+          last_model_id: null,
+          last_error: null,
+          output_present: false,
+          started_at: null,
+          completed_at: null,
+          updated_at: "",
+        };
+      });
+    });
+
+    setEditingExplicitKeys((prev) => {
+      const validKeys = new Set(registry.map((item) => item.item_key));
+      const next = new Set(Array.from(prev).filter((key) => validKeys.has(key)));
+      return next;
+    });
+  }, [registry]);
+
+  useEffect(() => {
+    setEditingModelOverrideId((prev) => {
+      if (prev && aiConfigs.some((config) => config.id === prev)) {
+        return prev;
+      }
+      return defaultAiConfigId ?? null;
+    });
+  }, [aiConfigs, defaultAiConfigId]);
 
   const filteredOverview = useMemo(() => {
     return overview.filter((item) => {
@@ -576,10 +572,6 @@ export function InitializationManagementSection({
   }, [overview, searchQuery, noteFilter]);
 
   const selectedSet = useMemo(() => new Set(selectedNoteIds), [selectedNoteIds]);
-
-  const activeOverview = useMemo(() => {
-    return overview.find((item) => item.note_id === activeNoteId) ?? null;
-  }, [activeNoteId, overview]);
 
   const failedOverview = useMemo(() => {
     return overview.filter(
@@ -659,10 +651,8 @@ export function InitializationManagementSection({
     [editingItems]
   );
 
-  const referenceNoteTitle = activeOverview?.note_title ?? "未选择参考笔记";
-  const referenceModelTitle = editingModelOverrideId
-    ? aiConfigs.find((config) => config.id === editingModelOverrideId)?.title ?? "指定模型"
-    : "使用笔记默认模型";
+  const currentExecutionModel = aiConfigs.find((config) => config.id === editingModelOverrideId);
+  const executionModelTitle = currentExecutionModel?.title || "选择模型";
   const currentNoteFilterLabel =
     noteFilterOptions.find((option) => option.value === noteFilter)?.label ?? "全部笔记";
 
@@ -699,9 +689,10 @@ export function InitializationManagementSection({
       selectedNoteIds.length > 0
         ? `已选 ${selectedNoteIds.length} 条`
         : "先选择要处理的笔记";
-    const step2 = activeNoteId
-      ? `参考 ${referenceNoteTitle} · ${editingStatusSummary.selected} 项`
-      : "先指定参考笔记";
+    const step2 =
+      editingStatusSummary.selected > 0
+        ? `已选 ${editingStatusSummary.selected} 项`
+        : "先选择要同步的项目";
     const step3 = hasActiveTasks
       ? `运行中 ${runSummary.running} · 排队 ${runSummary.queued}`
       : selectedNoteIds.length > 0
@@ -710,10 +701,8 @@ export function InitializationManagementSection({
 
     return { step1, step2, step3 };
   }, [
-    activeNoteId,
     editingStatusSummary.selected,
     hasActiveTasks,
-    referenceNoteTitle,
     runSummary.queued,
     runSummary.running,
     selectedNoteIds.length,
@@ -733,7 +722,6 @@ export function InitializationManagementSection({
 
   const selectOnlyNote = useCallback((noteId: string) => {
     setSelectedNoteIds([noteId]);
-    setActiveNoteId(noteId);
     setActiveStep("items");
   }, []);
 
@@ -762,11 +750,10 @@ export function InitializationManagementSection({
   }, [overview]);
 
   const resolveModelId = useCallback(
-    (noteId: string, modelOverrideId: string | null): string | null => {
-      const note = noteMap.get(noteId);
-      return modelOverrideId ?? note?.model_id ?? selectedModelId ?? defaultAiConfigId;
+    (_noteId: string, modelOverrideId: string | null): string | null => {
+      return modelOverrideId ?? defaultAiConfigId;
     },
-    [defaultAiConfigId, noteMap, selectedModelId]
+    [defaultAiConfigId]
   );
 
   const applySelectionToEditingItems = useCallback(
@@ -817,45 +804,7 @@ export function InitializationManagementSection({
     );
   }, []);
 
-  const saveReferenceNotePlan = useCallback(async () => {
-    if (!activeNoteId) return false;
-
-    if (selectedItemsForSync.length === 0) {
-      message.warning("请至少选择一个初始化项目");
-      return false;
-    }
-
-    await invoke<NoteInitializationDetail>("save_note_initialization_plan", {
-      noteId: activeNoteId,
-      selectedItems: selectedItemsForSync,
-      lockedItems: lockedItemsForSync,
-      modelOverrideId: editingModelOverrideId,
-      items: editingItems.map((item) => ({
-        note_id: activeNoteId,
-        item_key: item.item_key,
-        selected: item.selected,
-        locked: item.locked,
-        status: item.status,
-        config_json: item.config_json,
-        depends_on: item.depends_on,
-        last_model_id: item.last_model_id,
-        last_error: item.last_error,
-        output_present: item.output_present,
-        started_at: item.started_at,
-        completed_at: item.completed_at,
-      })),
-    });
-
-    return true;
-  }, [
-    activeNoteId,
-    editingItems,
-    editingModelOverrideId,
-    lockedItemsForSync,
-    selectedItemsForSync,
-  ]);
-
-  const buildReferenceItemsForTarget = useCallback(
+  const buildItemsForTarget = useCallback(
     (
       noteId: string,
       detail: NoteInitializationDetail
@@ -889,112 +838,122 @@ export function InitializationManagementSection({
     [editingItems, registry]
   );
 
-  const syncReferenceToSelectedNotes = useCallback(
-    async (enqueue: boolean) => {
-      if (!activeNoteId) {
-        message.warning("请先选择一条参考笔记");
-        return;
+  const syncSelectedNotes = useCallback(async () => {
+    if (selectedNoteIds.length === 0) {
+      message.warning("请先在步骤 1 选择至少一条笔记");
+      return false;
+    }
+
+    if (registry.length === 0) {
+      message.warning("初始化项目尚未加载完成");
+      return false;
+    }
+
+    if (selectedItemsForSync.length === 0) {
+      message.warning("请至少选择一个初始化项目");
+      return false;
+    }
+
+    setActionLoading("sync");
+    try {
+      const uniqueNoteIds = Array.from(new Set(selectedNoteIds));
+
+      for (const noteId of uniqueNoteIds) {
+        const detail = await invoke<NoteInitializationDetail>(
+          "get_note_initialization_plan",
+          { noteId }
+        );
+        const items = buildItemsForTarget(noteId, detail);
+
+        await invoke<NoteInitializationDetail>("save_note_initialization_plan", {
+          noteId,
+          selectedItems: selectedItemsForSync,
+          lockedItems: lockedItemsForSync,
+          modelOverrideId: detail.run?.model_override_id ?? null,
+          items,
+        });
       }
 
-      if (selectedNoteIds.length === 0) {
-        message.warning("请先在步骤 1 选择至少一条笔记");
-        return;
-      }
+      message.success(`已同步到 ${uniqueNoteIds.length} 条笔记`);
+      await loadOverview();
+      return true;
+    } catch (error) {
+      console.error("Failed to sync initialization plan:", error);
+      message.error(`同步初始化配置失败：${String(error)}`);
+      return false;
+    } finally {
+      setActionLoading(null);
+    }
+  }, [
+    buildItemsForTarget,
+    loadOverview,
+    lockedItemsForSync,
+    registry.length,
+    selectedItemsForSync,
+    selectedNoteIds,
+  ]);
 
-      if (registry.length === 0) {
-        message.warning("初始化项目尚未加载完成");
-        return;
-      }
+  const executeSelectedNotes = useCallback(async () => {
+    if (selectedNoteIds.length === 0) {
+      message.warning("请先选择至少一条笔记");
+      return;
+    }
 
-      if (selectedItemsForSync.length === 0) {
-        message.warning("请至少选择一个初始化项目");
-        return;
-      }
+    setActionLoading("run");
+    try {
+      const uniqueNoteIds = Array.from(new Set(selectedNoteIds));
+      const tasks: InitializationTaskParams[] = [];
+      let skippedNoModel = 0;
 
-      setActionLoading(enqueue ? "sync-run" : "sync");
-      try {
-        const saved = await saveReferenceNotePlan();
-        if (!saved) return;
+      for (const noteId of uniqueNoteIds) {
+        const detail = await invoke<NoteInitializationDetail>(
+          "get_note_initialization_plan",
+          { noteId }
+        );
+        const note = noteMap.get(noteId);
+        if (!note) continue;
 
-        const uniqueNoteIds = Array.from(new Set(selectedNoteIds));
-        const tasks: InitializationTaskParams[] = [];
-        let skippedNoModel = 0;
-
-        for (const noteId of uniqueNoteIds) {
-          const detail = await invoke<NoteInitializationDetail>(
-            "get_note_initialization_plan",
-            { noteId }
-          );
-          const items = buildReferenceItemsForTarget(noteId, detail);
-
-          await invoke<NoteInitializationDetail>("save_note_initialization_plan", {
-            noteId,
-            selectedItems: selectedItemsForSync,
-            lockedItems: lockedItemsForSync,
-            modelOverrideId: editingModelOverrideId,
-            items,
-          });
-
-          if (!enqueue) continue;
-
-          const note = noteMap.get(noteId);
-          if (!note) continue;
-
-          const modelId = resolveModelId(noteId, editingModelOverrideId);
-          if (!modelId) {
-            skippedNoModel += 1;
-            continue;
-          }
-
-          tasks.push({
-            noteId,
-            noteTitle: note.title,
-            modelId,
-            videoPath: note.video_path,
-            subtitlePath: note.subtitle_path,
-          });
+        const modelId = resolveModelId(noteId, detail.run?.model_override_id ?? editingModelOverrideId);
+        if (!modelId) {
+          skippedNoModel += 1;
+          continue;
         }
 
-        if (enqueue) {
-          const accepted = addBatchToRuntime(tasks);
-          if (accepted > 0) {
-            message.success(`已同步配置，并加入队列 ${accepted} 条任务`);
-          } else {
-            message.info("配置已同步，但没有新的任务加入队列（可能已在队列中或正在运行）");
-          }
-
-          if (skippedNoModel > 0) {
-            message.warning(`${skippedNoModel} 条笔记未配置可用模型，已跳过`);
-          }
-        } else {
-          message.success(`已将参考配置同步到 ${uniqueNoteIds.length} 条笔记`);
-        }
-
-        await loadOverview();
-        await loadNoteDetail(activeNoteId);
-      } catch (error) {
-        console.error("Failed to sync reference initialization plan:", error);
-        message.error(`同步初始化配置失败：${String(error)}`);
-      } finally {
-        setActionLoading(null);
+        tasks.push({
+          noteId,
+          noteTitle: note.title,
+          modelId,
+          videoPath: note.video_path,
+          subtitlePath: note.subtitle_path,
+        });
       }
-    },
-    [
-      activeNoteId,
-      addBatchToRuntime,
-      buildReferenceItemsForTarget,
-      editingModelOverrideId,
-      loadNoteDetail,
-      loadOverview,
-      lockedItemsForSync,
-      noteMap,
-      registry.length,
-      resolveModelId,
-      saveReferenceNotePlan,
-      selectedItemsForSync,
-      selectedNoteIds,
-    ]
-  );
+
+      const accepted = addBatchToRuntime(tasks);
+      if (accepted > 0) {
+        message.success(`已加入队列 ${accepted} 条任务`);
+      } else {
+        message.info("没有新的任务加入队列（可能已在队列中或正在运行）");
+      }
+
+      if (skippedNoModel > 0) {
+        message.warning(`${skippedNoModel} 条笔记未配置可用模型，已跳过`);
+      }
+
+      await loadOverview();
+    } catch (error) {
+      console.error("Failed to execute initialization tasks:", error);
+      message.error(`执行初始化任务失败：${String(error)}`);
+    } finally {
+      setActionLoading(null);
+    }
+  }, [
+    addBatchToRuntime,
+    editingModelOverrideId,
+    loadOverview,
+    noteMap,
+    resolveModelId,
+    selectedNoteIds,
+  ]);
 
   const prepareRetryTask = useCallback(
     async (noteId: string, detail: NoteInitializationDetail, retryKeys: Set<string>) => {
@@ -1106,9 +1065,6 @@ export function InitializationManagementSection({
       const accepted = addBatchToRuntime(retryTasks);
 
       await loadOverview();
-      if (activeNoteId) {
-        await loadNoteDetail(activeNoteId);
-      }
 
       if (!hasRetriable) {
         message.info("所选笔记没有失败或阻塞项");
@@ -1128,9 +1084,7 @@ export function InitializationManagementSection({
       setActionLoading(null);
     }
   }, [
-    activeNoteId,
     addBatchToRuntime,
-    loadNoteDetail,
     loadOverview,
     prepareRetryTask,
     selectedNoteIds,
@@ -1146,7 +1100,7 @@ export function InitializationManagementSection({
               初始化管理
             </div>
             <div className="text-sm text-slate-500 dark:text-slate-400">
-              按三步完成初始化：先选笔记，再选择参考项目并同步，最后统一开始执行。
+              按三步完成初始化：先选笔记，再选择项目并同步，最后统一开始执行。
             </div>
           </div>
           <button
@@ -1199,7 +1153,7 @@ export function InitializationManagementSection({
               <StepCard
                 index={2}
                 title="选择初始化项目"
-                description="从参考笔记提取并同步配置"
+                description="统一设置项目并同步到已选笔记"
                 summary={stepSummaries.step2}
                 active={activeStep === "items"}
                 onClick={() => setActiveStep("items")}
@@ -1215,7 +1169,7 @@ export function InitializationManagementSection({
             </div>
 
             <HelperBlock tone="muted">
-              推荐流程：步骤 1 勾选目标笔记 → 步骤 2 选择参考笔记并调整项目 → 步骤 3 同步后开始执行。
+              推荐流程：步骤 1 勾选目标笔记 → 步骤 2 调整项目并同步 → 步骤 3 选择执行模型后开始执行。
             </HelperBlock>
           </div>
 
@@ -1227,12 +1181,11 @@ export function InitializationManagementSection({
                     <div className={sectionEyebrowClass}>Step 1</div>
                     <div className={sectionTitleClass}>第 1 步：选择笔记</div>
                     <div className={sectionDescriptionClass}>
-                      在右侧列表中勾选要初始化的笔记；点击卡片本身只会切换步骤 2 的参考笔记。
+                      在右侧列表中勾选要初始化的笔记，后续步骤会对这些已选笔记统一同步配置并执行。
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
                     <span>{noteListSummary}</span>
-                    {activeOverview && <MiniBadge tone="info">参考：{activeOverview.note_title}</MiniBadge>}
                   </div>
                 </div>
 
@@ -1299,7 +1252,7 @@ export function InitializationManagementSection({
                 </div>
 
                 <HelperBlock>
-                  当前参考笔记：<span className="font-medium text-slate-700 dark:text-slate-200">{referenceNoteTitle}</span>。进入步骤 2 后，将基于它的初始化项目进行调整和同步。
+                  已勾选的笔记会在步骤 2 接收统一的初始化项目配置，并在步骤 3 统一加入执行队列。
                 </HelperBlock>
 
                 <div className="max-h-[620px] overflow-y-auto pr-1 space-y-2.5">
@@ -1311,18 +1264,13 @@ export function InitializationManagementSection({
                       progressTotal > 0
                         ? Math.min(100, Math.round((progressDone / progressTotal) * 100))
                         : 0;
-                    const isActive = activeNoteId === item.note_id;
-
                     return (
                       <div
                         key={item.note_id}
-                        onClick={() => setActiveNoteId(item.note_id)}
-                        className={`rounded-[24px] border p-4 transition-all duration-200 cursor-pointer shadow-[0_10px_24px_rgba(15,23,42,0.04)] ${
-                          isActive
-                            ? "border-blue-400/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.97),rgba(219,234,254,0.78))] shadow-[0_18px_34px_rgba(59,130,246,0.12)] ring-1 ring-blue-200/80 dark:border-blue-500/70 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.24),rgba(15,23,42,0.8))] dark:ring-blue-900/40"
-                            : isSelected
-                              ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.72),rgba(219,234,254,0.38))] shadow-[0_12px_24px_rgba(59,130,246,0.05)] dark:border-blue-900/50 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.12),rgba(15,23,42,0.72))]"
-                              : "border-slate-200/80 dark:border-slate-700/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,250,252,0.82))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.5),rgba(15,23,42,0.74))] hover:bg-slate-50/95 dark:hover:bg-slate-800/78"
+                        className={`rounded-[24px] border p-4 transition-all duration-200 shadow-[0_10px_24px_rgba(15,23,42,0.04)] ${
+                          isSelected
+                            ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.72),rgba(219,234,254,0.38))] shadow-[0_12px_24px_rgba(59,130,246,0.05)] dark:border-blue-900/50 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.12),rgba(15,23,42,0.72))]"
+                            : "border-slate-200/80 dark:border-slate-700/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,250,252,0.82))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.5),rgba(15,23,42,0.74))]"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -1339,7 +1287,6 @@ export function InitializationManagementSection({
                                 <span className="text-sm font-medium text-slate-900 dark:text-slate-100 truncate">
                                   {item.note_title}
                                 </span>
-                                {isActive && <MiniBadge tone="info">当前参考</MiniBadge>}
                                 {item.subtitle_path ? (
                                   <MiniBadge tone="success">有字幕</MiniBadge>
                                 ) : (
@@ -1423,7 +1370,7 @@ export function InitializationManagementSection({
                 <div className="flex justify-end pt-1">
                   <button
                     onClick={() => setActiveStep("items")}
-                    disabled={!activeNoteId}
+                    disabled={selectedNoteIds.length === 0}
                     className={primaryButtonClass}
                   >
                     下一步：选择初始化项目
@@ -1434,174 +1381,112 @@ export function InitializationManagementSection({
 
             {activeStep === "items" && (
               <div className={`${softSurfaceClass} p-4 md:p-4.5 space-y-4`}>
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                <div className="flex flex-col gap-2.5 xl:flex-row xl:items-start xl:justify-between">
                   <div>
                     <div className={sectionEyebrowClass}>Step 2</div>
                     <div className={sectionTitleClass}>第 2 步：选择初始化项目</div>
                     <div className={sectionDescriptionClass}>
-                      从任意一条笔记中选择初始化项目作为参考，然后一键同步到步骤 1 中已选的目标笔记。
+                      这里的初始化项目是固定的。调整后可一键同步到步骤 1 中已选的目标笔记。
                     </div>
                   </div>
-                  <HelperBlock className="xl:max-w-sm">
+                  <HelperBlock className="xl:max-w-sm py-2">
                     当前将同步到 <span className="font-medium text-slate-700 dark:text-slate-200">{selectedNoteIds.length}</span> 条已选笔记。
                   </HelperBlock>
                 </div>
 
-                <div className="grid grid-cols-1 xl:grid-cols-[minmax(240px,0.7fr)_minmax(240px,0.6fr)_minmax(0,1fr)] gap-3">
-                  <div className="relative" ref={referenceNoteDropdownRef}>
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
-                      参考笔记
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setOpenDropdown((prev) => prev === "reference-note" ? null : "reference-note")}
-                      className={premiumDropdownButtonClass}
-                    >
-                      {referenceNoteTitle}
-                    </button>
-                    <ChevronDown className={`absolute right-3 top-[39px] -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${openDropdown === "reference-note" ? "rotate-180" : ""}`} />
-                    {openDropdown === "reference-note" && (
-                      <div className={premiumDropdownMenuClass}>
-                        {overview.map((item) => (
-                          <DropdownOptionButton
-                            key={item.note_id}
-                            selected={activeNoteId === item.note_id}
-                            label={item.note_title}
-                            onClick={() => {
-                              setActiveNoteId(item.note_id);
-                              setOpenDropdown(null);
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="relative" ref={referenceModelDropdownRef}>
-                    <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
-                      执行模型
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setOpenDropdown((prev) => prev === "reference-model" ? null : "reference-model")}
-                      className={premiumDropdownButtonClass}
-                    >
-                      {referenceModelTitle}
-                    </button>
-                    <ChevronDown className={`absolute right-3 top-[39px] -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${openDropdown === "reference-model" ? "rotate-180" : ""}`} />
-                    {openDropdown === "reference-model" && (
-                      <div className={premiumDropdownMenuClass}>
-                        <DropdownOptionButton
-                          selected={editingModelOverrideId === null}
-                          label="使用笔记默认模型"
-                          onClick={() => {
-                            setEditingModelOverrideId(null);
-                            setOpenDropdown(null);
-                          }}
-                        />
-                        {aiConfigs.map((config) => (
-                          <DropdownOptionButton
-                            key={config.id}
-                            selected={editingModelOverrideId === config.id}
-                            label={config.title}
-                            onClick={() => {
-                              setEditingModelOverrideId(config.id);
-                              setOpenDropdown(null);
-                            }}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className={`${summaryStripClass} flex flex-wrap items-center gap-2.5`}>
-                    <MiniBadge tone="info">参考：{referenceNoteTitle}</MiniBadge>
-                    <MiniBadge>已选 {editingStatusSummary.selected} 项</MiniBadge>
-                    <MiniBadge tone={editingStatusSummary.locked > 0 ? "warning" : "neutral"}>
-                      依赖锁定 {editingStatusSummary.locked}
-                    </MiniBadge>
-                    <MiniBadge tone={activeOverview?.subtitle_path ? "success" : "neutral"}>
-                      {activeOverview?.subtitle_path ? "有字幕" : "无字幕"}
-                    </MiniBadge>
-                  </div>
+                <div className={`${summaryStripClass} flex flex-wrap items-center gap-2 px-3.5 py-3`}>
+                  <MiniBadge>已选 {editingStatusSummary.selected} 项</MiniBadge>
+                  <MiniBadge tone={editingStatusSummary.locked > 0 ? "warning" : "neutral"}>
+                    依赖锁定 {editingStatusSummary.locked}
+                  </MiniBadge>
+                  <MiniBadge tone={editingStatusSummary.completed > 0 ? "success" : "neutral"}>
+                    已完成 {editingStatusSummary.completed}
+                  </MiniBadge>
+                  <MiniBadge tone={editingStatusSummary.failed > 0 ? "warning" : "neutral"}>
+                    失败/阻塞 {editingStatusSummary.failed}
+                  </MiniBadge>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2.5">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={selectAllEditingItems}
-                    disabled={registry.length === 0 || loadingDetail}
-                    className={tertiaryButtonClass}
+                    disabled={registry.length === 0}
+                    className={`${tertiaryButtonClass} py-1.5`}
                   >
                     全选项目
                   </button>
                   <button
                     onClick={clearEditingItems}
-                    disabled={registry.length === 0 || loadingDetail}
-                    className={tertiaryButtonClass}
+                    disabled={registry.length === 0}
+                    className={`${tertiaryButtonClass} py-1.5`}
                   >
                     清空项目
                   </button>
-                  <HelperBlock className="py-2.5 text-[11px]">
-                    当前模型：{referenceModelTitle}
-                  </HelperBlock>
+                  <button
+                    onClick={syncSelectedNotes}
+                    disabled={actionLoading !== null || selectedNoteIds.length === 0}
+                    className={`${tertiaryIconButtonClass} py-1.5`}
+                  >
+                    {actionLoading === "sync" ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}
+                    同步到已选笔记
+                  </button>
                 </div>
 
-                {loadingDetail ? (
-                  <div className="py-10 flex items-center justify-center text-slate-500 dark:text-slate-400">
-                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
-                    加载参考笔记初始化配置中...
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                    {registry.map((definition) => {
-                      const item = editingItems.find((it) => it.item_key === definition.item_key);
-                      if (!item) return null;
-                      const regenerate = getRegenerate(item);
-                      const dependencyNames = definition.dependencies
-                        .map(
-                          (dependencyKey) =>
-                            definitionMap.get(dependencyKey)?.display_name ?? dependencyKey
-                        )
-                        .join(" / ");
-                      const cardTone = item.selected
-                        ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.94),rgba(219,234,254,0.66))] dark:border-blue-900/50 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.18),rgba(15,23,42,0.76))]"
-                        : item.status === "failed" || item.status === "blocked"
-                          ? "border-red-200/90 bg-[linear-gradient(180deg,rgba(254,242,242,0.92),rgba(254,226,226,0.6))] dark:border-red-900/40 dark:bg-[linear-gradient(180deg,rgba(127,29,29,0.18),rgba(15,23,42,0.78))]"
-                          : item.status === "running" || item.status === "queued"
-                            ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.86),rgba(219,234,254,0.5))] dark:border-blue-900/40 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.14),rgba(15,23,42,0.76))]"
-                            : "border-slate-200/80 dark:border-slate-700/80 bg-white/85 dark:bg-slate-800/48";
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {registry.map((definition) => {
+                    const item = editingItems.find((it) => it.item_key === definition.item_key);
+                    if (!item) return null;
+                    const regenerate = getRegenerate(item);
+                    const dependencyNames = definition.dependencies
+                      .map(
+                        (dependencyKey) =>
+                          definitionMap.get(dependencyKey)?.display_name ?? dependencyKey
+                      )
+                      .join(" / ");
+                    const cardTone = item.selected
+                      ? "border-blue-300/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.96),rgba(219,234,254,0.72))] shadow-[0_16px_30px_rgba(59,130,246,0.10)] ring-1 ring-blue-100/80 dark:border-blue-800/60 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.22),rgba(15,23,42,0.78))] dark:ring-blue-900/35"
+                      : item.status === "failed" || item.status === "blocked"
+                        ? "border-red-200/90 bg-[linear-gradient(180deg,rgba(254,242,242,0.92),rgba(254,226,226,0.6))] dark:border-red-900/40 dark:bg-[linear-gradient(180deg,rgba(127,29,29,0.18),rgba(15,23,42,0.78))]"
+                        : item.status === "running" || item.status === "queued"
+                          ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.86),rgba(219,234,254,0.5))] dark:border-blue-900/40 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.14),rgba(15,23,42,0.76))]"
+                          : "border-slate-200/80 dark:border-slate-700/80 bg-white/85 dark:bg-slate-800/48 hover:border-slate-300/90 dark:hover:border-slate-600/80";
 
-                      return (
-                        <div
-                          key={definition.item_key}
-                          className={`rounded-[24px] border p-4 space-y-3 transition-all duration-200 shadow-[0_10px_24px_rgba(15,23,42,0.04)] ${cardTone}`}
-                        >
-                          <div className="flex items-start justify-between gap-2.5">
-                            <label className="inline-flex items-start gap-2.5 flex-1 cursor-pointer">
+                    return (
+                      <div
+                        key={definition.item_key}
+                        className={`rounded-[24px] border p-4 transition-all duration-200 shadow-[0_10px_24px_rgba(15,23,42,0.04)] flex h-full flex-col ${cardTone}`}
+                      >
+                        <div className="space-y-3 flex-1">
+                          <div className="flex items-start justify-between gap-2.5 min-h-[72px]">
+                            <label className="inline-flex items-start gap-3 flex-1 cursor-pointer min-w-0">
                               <input
                                 type="checkbox"
                                 checked={item.selected}
                                 disabled={item.locked}
                                 onChange={() => toggleEditingItemSelected(item.item_key)}
-                                className="mt-1"
+                                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/70"
                               />
                               <span className="min-w-0">
                                 <span className="block text-sm font-medium text-slate-900 dark:text-slate-100">
                                   {definition.display_name}
                                 </span>
-                                <span className="block text-xs text-slate-500 dark:text-slate-400 mt-1 leading-5">
+                                <span className="block text-xs text-slate-500 dark:text-slate-400 mt-1 leading-5 min-h-[40px]">
                                   {definition.description}
                                 </span>
                               </span>
                             </label>
                             <span
-                              className={`text-[11px] px-2 py-0.5 rounded border ${getItemStatusBadgeClass(item.status)}`}
+                              className={`inline-flex min-w-[64px] justify-center rounded-full border px-2.5 py-1 text-[11px] font-medium leading-none ${getItemStatusBadgeClass(item.status)}`}
                             >
                               {itemStatusLabelMap[item.status]}
                             </span>
                           </div>
 
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 min-h-[28px]">
                             {item.output_present ? (
                               <MiniBadge tone="success">已有结果</MiniBadge>
                             ) : (
@@ -1610,60 +1495,49 @@ export function InitializationManagementSection({
                             {item.locked && <MiniBadge tone="warning">依赖锁定</MiniBadge>}
                           </div>
 
-                          {dependencyNames && (
-                            <div className="text-[11px] leading-5 text-slate-500 dark:text-slate-400">
-                              依赖：{dependencyNames}
-                            </div>
-                          )}
-
-                          <div className="pt-3.5 border-t border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-2.5">
-                            <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={regenerate}
-                                onChange={(e) => updateEditingItemRegenerate(item.item_key, e.target.checked)}
-                              />
-                              覆盖已有结果
-                            </label>
-                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                              {item.selected ? "将同步到目标笔记" : "当前不参与同步"}
-                            </span>
+                          <div className="text-[11px] leading-5 text-slate-500 dark:text-slate-400 min-h-[20px]">
+                            {dependencyNames ? `依赖：${dependencyNames}` : "\u00a0"}
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
 
-                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between pt-1">
-                  <HelperBlock className="xl:max-w-xl">
-                    点击“同步到已选笔记”后，会把当前参考笔记的项目选择、覆盖策略和模型设置同步到步骤 1 中已勾选的笔记。
-                  </HelperBlock>
-                  <div className="flex flex-wrap items-center gap-2">
+                        <div className="mt-3 pt-3.5 border-t border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-2.5">
+                          <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={regenerate}
+                              onChange={(e) => updateEditingItemRegenerate(item.item_key, e.target.checked)}
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/70"
+                            />
+                            覆盖已有结果
+                          </label>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                            {item.selected ? "将同步到目标笔记" : "当前不参与同步"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-[auto_minmax(0,1fr)_auto] gap-3 items-center pt-1">
+                  <div className="justify-self-start">
                     <button
                       onClick={() => setActiveStep("notes")}
-                      className={tertiaryButtonClass}
+                      className={wideTertiaryButtonClass}
                     >
                       返回上一步
                     </button>
-                    <button
-                      onClick={() => syncReferenceToSelectedNotes(false)}
-                      disabled={actionLoading !== null || loadingDetail || selectedNoteIds.length === 0}
-                      className={tertiaryIconButtonClass}
-                    >
-                      {actionLoading === "sync" ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <RefreshCw size={14} />
-                      )}
-                      同步到已选笔记
-                    </button>
+                  </div>
+                  <HelperBlock className="w-full text-center xl:max-w-none">
+                    先同步项目配置，再到步骤 3 选择执行模型并开始执行。
+                  </HelperBlock>
+                  <div className="justify-self-start xl:justify-self-end">
                     <button
                       onClick={() => setActiveStep("run")}
                       disabled={selectedNoteIds.length === 0}
-                      className={primaryButtonClass}
+                      className={`${primaryButtonClass} min-w-[160px] justify-center`}
                     >
-                      下一步：开始执行
+                      下一步
                     </button>
                   </div>
                 </div>
@@ -1673,17 +1547,57 @@ export function InitializationManagementSection({
             {activeStep === "run" && (
               <div className="space-y-4">
                 <div className={`${softSurfaceClass} p-4 md:p-4.5 space-y-4`}>
-                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                  <div className="flex flex-col gap-2.5 xl:flex-row xl:items-start xl:justify-between">
                     <div>
                       <div className={sectionEyebrowClass}>Step 3</div>
                       <div className={sectionTitleClass}>第 3 步：开始执行</div>
                       <div className={sectionDescriptionClass}>
-                        执行前会先把步骤 2 当前参考配置同步到所有已选笔记，然后统一加入运行队列。
+                        这里仅负责执行。请选择模型后，将已同步的笔记统一加入运行队列。
                       </div>
                     </div>
-                    <HelperBlock className="xl:max-w-sm">
-                      目标笔记 <span className="font-medium text-slate-700 dark:text-slate-200">{selectedNoteIds.length}</span> 条，当前参考 <span className="font-medium text-slate-700 dark:text-slate-200">{referenceNoteTitle}</span>。
+                    <HelperBlock className="xl:max-w-sm py-2">
+                      目标笔记 <span className="font-medium text-slate-700 dark:text-slate-200">{selectedNoteIds.length}</span> 条，已选项目 <span className="font-medium text-slate-700 dark:text-slate-200">{editingStatusSummary.selected}</span> 项。
                     </HelperBlock>
+                  </div>
+
+                  <div className="grid grid-cols-1 xl:grid-cols-[minmax(240px,0.7fr)_minmax(0,1fr)] gap-3">
+                    <div className="relative" ref={referenceModelDropdownRef}>
+                      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+                        执行模型
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setOpenDropdown((prev) => prev === "reference-model" ? null : "reference-model")}
+                        className={premiumDropdownButtonClass}
+                      >
+                        {executionModelTitle}
+                      </button>
+                      <ChevronDown className={`absolute right-3 top-[39px] -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${openDropdown === "reference-model" ? "rotate-180" : ""}`} />
+                      {openDropdown === "reference-model" && (
+                        <div className={premiumDropdownMenuClass}>
+                          {aiConfigs.map((config) => (
+                            <DropdownOptionButton
+                              key={config.id}
+                              selected={editingModelOverrideId === config.id}
+                              label={config.title}
+                              onClick={() => {
+                                setEditingModelOverrideId(config.id);
+                                setOpenDropdown(null);
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className={`${summaryStripClass} flex flex-wrap items-center gap-2 px-3.5 py-3`}>
+                      <MiniBadge>模型：{executionModelTitle}</MiniBadge>
+                      <MiniBadge>已选 {selectedNoteIds.length} 条笔记</MiniBadge>
+                      <MiniBadge>已选 {editingStatusSummary.selected} 项</MiniBadge>
+                      <MiniBadge tone={runSummary.queued > 0 ? "warning" : "neutral"}>
+                        队列 {runSummary.queued}
+                      </MiniBadge>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
@@ -1706,35 +1620,22 @@ export function InitializationManagementSection({
                   <div className="flex flex-col gap-2.5 xl:flex-row xl:items-center xl:justify-between">
                     <div className="flex flex-wrap items-center gap-2">
                       <button
-                        onClick={() => syncReferenceToSelectedNotes(true)}
-                        disabled={actionLoading !== null || selectedNoteIds.length === 0 || loadingDetail}
-                        className={primaryButtonClass}
+                        onClick={executeSelectedNotes}
+                        disabled={actionLoading !== null || selectedNoteIds.length === 0}
+                        className={`${primaryButtonClass} min-w-[112px] justify-center`}
                       >
-                        {actionLoading === "sync-run" ? (
+                        {actionLoading === "run" ? (
                           <Loader2 size={14} className="animate-spin" />
                         ) : (
                           <Play size={14} />
                         )}
-                        同步配置并开始执行
-                      </button>
-
-                      <button
-                        onClick={() => syncReferenceToSelectedNotes(false)}
-                        disabled={actionLoading !== null || selectedNoteIds.length === 0 || loadingDetail}
-                        className={tertiaryIconButtonClass}
-                      >
-                        {actionLoading === "sync" ? (
-                          <Loader2 size={14} className="animate-spin" />
-                        ) : (
-                          <RefreshCw size={14} />
-                        )}
-                        仅同步配置
+                        执行
                       </button>
 
                       <button
                         onClick={handleRetryFailed}
                         disabled={actionLoading !== null || selectedNoteIds.length === 0}
-                        className={warningButtonClass}
+                        className={`${warningButtonClass} min-w-[132px] justify-center`}
                       >
                         {actionLoading === "retry" ? (
                           <Loader2 size={14} className="animate-spin" />

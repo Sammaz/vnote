@@ -90,6 +90,9 @@ interface AppContextType {
   // AI 模型选择
   selectedModelId: string | null;
   setSelectedModelId: (id: string | null) => void;
+  notePageModelSelections: Record<string, string>;
+  setNotePageModelSelection: (noteId: string, modelId: string | null) => void;
+  defaultAiConfigId: string | null;
 
   // 生成状态
   isGenerating: boolean;
@@ -175,6 +178,9 @@ function AppContextBridge({ children }: { children: ReactNode }) {
     refreshPromptConfigs: settingsContext.refreshPromptConfigs,
     selectedModelId: settingsContext.selectedModelId,
     setSelectedModelId: settingsContext.setSelectedModelId,
+    notePageModelSelections: settingsContext.notePageModelSelections,
+    setNotePageModelSelection: settingsContext.setNotePageModelSelection,
+    defaultAiConfigId: settingsContext.defaultAiConfigId,
     toolbarSettings: settingsContext.toolbarSettings,
     setVideoVisible: settingsContext.setVideoVisible,
     setAutoPlay: settingsContext.setAutoPlay,

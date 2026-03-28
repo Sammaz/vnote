@@ -13,7 +13,6 @@ export function GenerateButton() {
   const {
     isGenerating,
     setIsGenerating,
-    selectedModelId,
     createNote,
     setCurrentView,
     setSelectedNoteId,
@@ -22,7 +21,7 @@ export function GenerateButton() {
   const { uploadedItems, clearUploads } = useUpload();
 
   const itemCount = uploadedItems.length;
-  const canGenerate = itemCount > 0 && selectedModelId && !isGenerating;
+  const canGenerate = itemCount > 0 && !isGenerating;
 
   const handleGenerate = async () => {
     if (!canGenerate) return;
@@ -39,7 +38,6 @@ export function GenerateButton() {
           title: noteTitle,
           video_path: item.video.path,
           subtitle_path: item.subtitle?.path || null,
-          model_id: selectedModelId,
         });
 
         if (!firstNoteId) {

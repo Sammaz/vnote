@@ -56,7 +56,6 @@ export function EditNoteModal({ note, onClose }: EditNoteModalProps) {
         title: title.trim(),
         video_path: videoPath,
         subtitle_path: subtitlePath.trim() || null,
-        model_id: note.model_id,
       });
       onClose();
     } catch (err) {

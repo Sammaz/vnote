@@ -74,6 +74,9 @@ interface SettingsContextType {
   promptConfigs: PromptConfig[];
   selectedModelId: string | null;
   setSelectedModelId: (id: string | null) => void;
+  notePageModelSelections: Record<string, string>;
+  setNotePageModelSelection: (noteId: string, modelId: string | null) => void;
+  defaultAiConfigId: string | null;
   refreshAiConfigs: () => Promise<void>;
   refreshPromptConfigs: () => Promise<void>;
 
@@ -111,6 +114,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [aiConfigs, setAiConfigs] = useState<AiConfig[]>([]);
   const [promptConfigs, setPromptConfigs] = useState<PromptConfig[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string | null>(null);
+  const [notePageModelSelections, setNotePageModelSelections] = useState<Record<string, string>>({});
   const [stats, setStats] = useState<AppStats>(mockStats);
 
   const [toolbarSettings, setToolbarSettings] = useState<VideoToolbarSettings>({
@@ -375,6 +379,47 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     saveSetting(INITIALIZATION_TEMPLATE_MODEL_ID_KEY, "");
   }, [saveSetting]);
 
+  const defaultAiConfigId = useMemo(
+    () => aiConfigs.find((config) => config.is_default)?.id ?? aiConfigs[0]?.id ?? null,
+    [aiConfigs]
+  );
+
+  const setNotePageModelSelection = useCallback((noteId: string, modelId: string | null) => {
+    setNotePageModelSelections((prev) => {
+      if (!modelId) {
+        if (!(noteId in prev)) return prev;
+        const next = { ...prev };
+        delete next[noteId];
+        return next;
+      }
+
+      if (prev[noteId] === modelId) return prev;
+      return { ...prev, [noteId]: modelId };
+    });
+  }, []);
+
+  useEffect(() => {
+    if (aiConfigs.length === 0) {
+      setNotePageModelSelections({});
+      return;
+    }
+
+    setNotePageModelSelections((prev) => {
+      let changed = false;
+      const next: Record<string, string> = {};
+
+      for (const [noteId, modelId] of Object.entries(prev)) {
+        if (aiConfigs.some((config) => config.id === modelId)) {
+          next[noteId] = modelId;
+        } else {
+          changed = true;
+        }
+      }
+
+      return changed ? next : prev;
+    });
+  }, [aiConfigs]);
+
   // 加载 AI 配置
   const refreshAiConfigs = useCallback(async () => {
     try {
@@ -420,6 +465,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     promptConfigs,
     selectedModelId,
     setSelectedModelId,
+    notePageModelSelections,
+    setNotePageModelSelection,
+    defaultAiConfigId,
     refreshAiConfigs,
     refreshPromptConfigs,
     stats,
@@ -445,6 +493,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     aiConfigs,
     promptConfigs,
     selectedModelId,
+    notePageModelSelections,
+    setNotePageModelSelection,
+    defaultAiConfigId,
     refreshAiConfigs,
     refreshPromptConfigs,
     stats,

@@ -151,13 +151,12 @@ export function AiNoteContent({
   const getDefaultModelId = useCallback(() => {
     if (currentModelId) return currentModelId;
     if (aiNoteMeta?.model_id) return aiNoteMeta.model_id;
-    if (note.model_id) return note.model_id;
 
     const defaultConfig = aiConfigs.find((config) => config.is_default);
     if (defaultConfig) return defaultConfig.id;
 
     return aiConfigs[0]?.id || "";
-  }, [aiConfigs, aiNoteMeta?.model_id, currentModelId, note.model_id]);
+  }, [aiConfigs, aiNoteMeta?.model_id, currentModelId]);
 
   const openPromptDialog = useCallback(() => {
     setSelectedModelId(getDefaultModelId());

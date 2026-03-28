@@ -53,13 +53,13 @@ function Resizer({ onDrag, isDragging }: ResizerProps) {
 }
 
 export function NotePage() {
-  const { notes, selectedNoteId, selectedCollectionId, setCurrentView, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, toggleSidebar, sidebar, setSelectedNoteId } = useApp();
+  const { notes, selectedNoteId, selectedCollectionId, setCurrentView, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, toggleSidebar, sidebar, setSelectedNoteId, defaultAiConfigId, notePageModelSelections, setNotePageModelSelection } = useApp();
   const { expandCollectionPath } = useCollections();
 
   // 找到当前选中的笔记
   const currentNote = notes.find((note) => note.id === selectedNoteId);
 
-  // 当前笔记的模型ID（从笔记记录获取）
+  // 当前笔记的模型ID（默认使用设置中的默认模型，可由工具栏临时覆盖）
   const [currentModelId, setCurrentModelId] = useState<string | null>(null);
   const [showEditModal, setShowEditModal] = useState(false);
 
@@ -67,12 +67,21 @@ export function NotePage() {
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // 当笔记变化时，更新模型ID
+  // 当笔记或默认模型变化时，重置当前模型ID
   useEffect(() => {
-    if (currentNote?.model_id) {
-      setCurrentModelId(currentNote.model_id);
+    if (!currentNote) {
+      setCurrentModelId(defaultAiConfigId);
+      return;
     }
-  }, [currentNote?.model_id]);
+
+    const rememberedModelId = notePageModelSelections[currentNote.id];
+    setCurrentModelId(rememberedModelId ?? defaultAiConfigId);
+  }, [currentNote, defaultAiConfigId, notePageModelSelections]);
+
+  useEffect(() => {
+    if (!currentNote || !currentModelId) return;
+    setNotePageModelSelection(currentNote.id, currentModelId);
+  }, [currentNote, currentModelId, setNotePageModelSelection]);
 
   // 自动展开侧边栏
   useEffect(() => {
@@ -219,6 +228,7 @@ export function NotePage() {
         onGenerationComplete={refreshNotes}
         aiConfigs={aiConfigs}
         currentModelId={currentModelId}
+        defaultAiConfigId={defaultAiConfigId}
         promptConfigs={promptConfigs}
       />
     </div>

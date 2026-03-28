@@ -995,8 +995,8 @@ async fn generate_questions_for_note(note_id: String) -> Result<Vec<String>, Str
             return Ok(default_questions);
         }
     };
-    let model_id = match note.model_id {
-        Some(id) => id,
+    let model_id = match db.get_default_ai_config().map_err(|e| e.to_string())? {
+        Some(config) => config.id,
         None => {
             // No model, save and return default
             let questions_json = serde_json::to_string(&default_questions).map_err(|e| e.to_string())?;
@@ -1193,7 +1193,6 @@ async fn generate_note_content(
         style: None,
         custom_prompt,
         screenshot_density: None,
-        persist_model_id: true,
     };
 
     let request = GenerateNoteRequest {
@@ -1254,7 +1253,6 @@ async fn generate_ai_note_content(
             style,
             custom_prompt,
             screenshot_density,
-            persist_model_id: true,
         },
     };
 
