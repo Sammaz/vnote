@@ -1,15 +1,14 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Search, X, FileText, Calendar, Video, ArrowUpRight } from "lucide-react";
-import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { MarkdownRenderer } from "../Markdown/MarkdownRenderer";
 import { cn } from "../../utils/cn";
 import { highlightText } from "../../utils/markdownRendererUtils";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 
-import { parseDetailedReading, parseDetailedReadingData, type Note, type ChapterData, type DetailedReadingData, type SubtitleEntry, type OptimizedSubtitle } from "../../types";
-import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
+import { parseDetailedReading, type Note, type ChapterData, type DetailedReadingData } from "../../types";
 
 // 从 detailed_reading 中提取第一章的截图路径
 function getFirstChapterScreenshot(detailedReading: string | ChapterData | DetailedReadingData | null): string | null {
@@ -80,7 +79,7 @@ interface GlobalSearchModalProps {
 }
 
 export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
-  const { notes, setSelectedNoteId, setCurrentView, refreshNotes } = useApp();
+  const { notes, setSelectedNoteId, setCurrentView } = useApp();
   const { expandCollectionPathForNote } = useCollections();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
@@ -138,71 +137,6 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
-
-  // 选中笔记时，如果 visual_summary 为空但有章节数据和字幕文件，自动初始化视觉化总结
-  useEffect(() => {
-    if (!selectedNote) return;
-    if (selectedNote.visual_summary) return;
-    if (!selectedNote.subtitle_path) return;
-    const detailedReadingData = parseDetailedReadingData(selectedNote.detailed_reading);
-    if (!detailedReadingData || detailedReadingData.chapters.length === 0) return;
-
-    let cancelled = false;
-    (async () => {
-      try {
-        // 加载优化后的字幕
-        const savedSubtitles = await invoke<OptimizedSubtitle[]>("get_optimized_subtitles", { noteId: selectedNote.id });
-        if (cancelled) return;
-        const optimizedSubtitles = new Map<string, string>();
-        if (savedSubtitles && savedSubtitles.length > 0) {
-          savedSubtitles.forEach(s => optimizedSubtitles.set(s.chapter_id, s.optimized_text));
-        }
-
-        // 加载原始字幕
-        const subtitleEntries = await invoke<SubtitleEntry[]>("parse_subtitle_file", { path: selectedNote.subtitle_path });
-        if (cancelled) return;
-
-        // 按照 NoteContentPanel 的标准格式转换章节数据
-        const chapterData: ChapterData = {
-          chapters: detailedReadingData.chapters.map((chapter) => ({
-            id: chapter.id,
-            title: chapter.title,
-            start_time: chapter.start_time,
-            end_time: chapter.end_time,
-            content: "",  // 关键：设为空字符串，避免重复显示内容
-            screenshot_path: chapter.screenshot_path,
-            level: 1,
-            parent_id: null,
-          })),
-          total_duration: detailedReadingData.total_duration,
-          generated_at: detailedReadingData.generated_at,
-        };
-
-        const content = assembleChapterMarkdown({
-          chapters: chapterData.chapters,
-          optimizedSubtitles,
-          originalSubtitles: subtitleEntries,
-          showTimestamp: true,
-        });
-        if (!content) return;
-
-        // 保存到数据库
-        await invoke("update_note_content", {
-          noteId: selectedNote.id,
-          tabType: "visual_summary",
-          content,
-        });
-        if (cancelled) return;
-
-        // 刷新全局 notes 状态，使预览面板能获取到新数据
-        await refreshNotes();
-      } catch (error) {
-        console.error("[GlobalSearchModal] 初始化视觉化总结失败:", error);
-      }
-    })();
-
-    return () => { cancelled = true; };
-  }, [selectedNote?.id, selectedNote?.visual_summary, selectedNote?.subtitle_path, selectedNote?.detailed_reading, refreshNotes]);
 
   // 双击打开笔记
   const handleDoubleClick = useCallback(

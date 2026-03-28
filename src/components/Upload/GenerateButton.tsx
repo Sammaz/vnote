@@ -2,7 +2,6 @@ import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useUpload } from "../../context/UploadContext";
-import { useInitializationQueue } from "../../context/InitializationQueueContext";
 
 // 获取文件名（不含扩展名）
 function getBaseName(filename: string): string {
@@ -21,7 +20,6 @@ export function GenerateButton() {
   } = useApp();
 
   const { uploadedItems, clearUploads } = useUpload();
-  const { addToQueue } = useInitializationQueue();
 
   const itemCount = uploadedItems.length;
   const canGenerate = itemCount > 0 && selectedModelId && !isGenerating;
@@ -42,14 +40,6 @@ export function GenerateButton() {
           video_path: item.video.path,
           subtitle_path: item.subtitle?.path || null,
           model_id: selectedModelId,
-        });
-
-        addToQueue({
-          noteId: newNote.id,
-          noteTitle: noteTitle,
-          modelId: selectedModelId,
-          videoPath: item.video.path,
-          subtitlePath: item.subtitle?.path || null,
         });
 
         if (!firstNoteId) {

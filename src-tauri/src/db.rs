@@ -39,7 +39,6 @@ pub struct Note {
     pub video_path: String,
     pub subtitle_path: Option<String>,
     pub model_id: Option<String>, // AI model ID used for generating notes
-    pub init_status: i32, // Initialization status: 0=not started, 1-6=step completed, 7=fully initialized
     pub full_summary: Option<String>,
     pub detailed_reading: Option<String>,
     pub highlights: Option<String>,
@@ -64,6 +63,167 @@ pub struct CreateNoteRequest {
     pub video_path: String,
     pub subtitle_path: Option<String>,
     pub model_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteInitializationRunStatus {
+    Idle,
+    Queued,
+    Running,
+    Completed,
+    PartialFailed,
+    Failed,
+    Canceled,
+}
+
+impl NoteInitializationRunStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::PartialFailed => "partial_failed",
+            Self::Failed => "failed",
+            Self::Canceled => "canceled",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "queued" => Self::Queued,
+            "running" => Self::Running,
+            "completed" => Self::Completed,
+            "partial_failed" => Self::PartialFailed,
+            "failed" => Self::Failed,
+            "canceled" => Self::Canceled,
+            _ => Self::Idle,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteInitializationItemStatus {
+    Pending,
+    Queued,
+    Running,
+    Completed,
+    Skipped,
+    Failed,
+    Blocked,
+    Canceled,
+}
+
+impl NoteInitializationItemStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Skipped => "skipped",
+            Self::Failed => "failed",
+            Self::Blocked => "blocked",
+            Self::Canceled => "canceled",
+        }
+    }
+
+    fn from_str(value: &str) -> Self {
+        match value {
+            "queued" => Self::Queued,
+            "running" => Self::Running,
+            "completed" => Self::Completed,
+            "skipped" => Self::Skipped,
+            "failed" => Self::Failed,
+            "blocked" => Self::Blocked,
+            "canceled" => Self::Canceled,
+            _ => Self::Pending,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NoteInitializationRun {
+    pub id: String,
+    pub note_id: String,
+    pub status: NoteInitializationRunStatus,
+    pub selected_items: Vec<String>,
+    pub locked_items: Vec<String>,
+    pub model_override_id: Option<String>,
+    pub last_error: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NoteInitializationItem {
+    pub id: String,
+    pub note_id: String,
+    pub item_key: String,
+    pub selected: bool,
+    pub locked: bool,
+    pub status: NoteInitializationItemStatus,
+    pub config_json: Option<String>,
+    pub depends_on: Vec<String>,
+    pub last_model_id: Option<String>,
+    pub last_error: Option<String>,
+    pub output_present: bool,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NoteInitializationDetail {
+    pub run: Option<NoteInitializationRun>,
+    pub items: Vec<NoteInitializationItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NoteInitializationOverview {
+    pub note_id: String,
+    pub note_title: String,
+    pub subtitle_path: Option<String>,
+    pub model_id: Option<String>,
+    pub run_status: NoteInitializationRunStatus,
+    pub selected_count: i32,
+    pub completed_count: i32,
+    pub skipped_count: i32,
+    pub failed_count: i32,
+    pub running_count: i32,
+    pub output_count: i32,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UpsertNoteInitializationRunInput {
+    pub note_id: String,
+    pub status: NoteInitializationRunStatus,
+    pub selected_items: Vec<String>,
+    pub locked_items: Vec<String>,
+    pub model_override_id: Option<String>,
+    pub last_error: Option<String>,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UpsertNoteInitializationItemInput {
+    pub note_id: String,
+    pub item_key: String,
+    pub selected: bool,
+    pub locked: bool,
+    pub status: NoteInitializationItemStatus,
+    pub config_json: Option<String>,
+    pub depends_on: Vec<String>,
+    pub last_model_id: Option<String>,
+    pub last_error: Option<String>,
+    pub output_present: bool,
+    pub started_at: Option<String>,
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -558,43 +718,97 @@ impl Database {
         Ok(())
     }
 
+    fn parse_string_list_json(value: &str) -> Vec<String> {
+        serde_json::from_str::<Vec<String>>(value).unwrap_or_default()
+    }
+
+    fn to_string_list_json(values: &[String]) -> SqliteResult<String> {
+        serde_json::to_string(values)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))
+    }
+
+    fn row_to_note(row: &rusqlite::Row<'_>) -> SqliteResult<Note> {
+        Ok(Note {
+            id: row.get(0)?,
+            title: row.get(1)?,
+            video_path: row.get(2)?,
+            subtitle_path: row.get(3)?,
+            model_id: row.get(4)?,
+            full_summary: row.get(5)?,
+            detailed_reading: row.get(6)?,
+            highlights: row.get(7)?,
+            visual_summary: row.get(8)?,
+            custom_summary: row.get(9)?,
+            ai_note_markdown: row.get(10)?,
+            ai_note_meta: row.get(11)?,
+            flashcards: row.get(12)?,
+            panoramic_blueprint: row.get(13)?,
+            quick_notes: row.get(14)?,
+            quick_notes_mindmap: row.get(15)?,
+            quick_notes_canvas: row.get(16)?,
+            suggested_questions: row.get(17)?,
+            last_playback_position: row.get(18)?,
+            created_at: row.get(19)?,
+            updated_at: row.get(20)?,
+        })
+    }
+
+    fn row_to_note_initialization_run(row: &rusqlite::Row<'_>) -> SqliteResult<NoteInitializationRun> {
+        let status: String = row.get(2)?;
+        let selected_items_json: String = row.get(3)?;
+        let locked_items_json: String = row.get(4)?;
+
+        Ok(NoteInitializationRun {
+            id: row.get(0)?,
+            note_id: row.get(1)?,
+            status: NoteInitializationRunStatus::from_str(&status),
+            selected_items: Self::parse_string_list_json(&selected_items_json),
+            locked_items: Self::parse_string_list_json(&locked_items_json),
+            model_override_id: row.get(5)?,
+            last_error: row.get(6)?,
+            started_at: row.get(7)?,
+            completed_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    }
+
+    fn row_to_note_initialization_item(row: &rusqlite::Row<'_>) -> SqliteResult<NoteInitializationItem> {
+        let status: String = row.get(5)?;
+        let depends_on_json: Option<String> = row.get(7)?;
+
+        Ok(NoteInitializationItem {
+            id: row.get(0)?,
+            note_id: row.get(1)?,
+            item_key: row.get(2)?,
+            selected: row.get::<_, i64>(3)? != 0,
+            locked: row.get::<_, i64>(4)? != 0,
+            status: NoteInitializationItemStatus::from_str(&status),
+            config_json: row.get(6)?,
+            depends_on: depends_on_json
+                .as_deref()
+                .map(Self::parse_string_list_json)
+                .unwrap_or_default(),
+            last_model_id: row.get(8)?,
+            last_error: row.get(9)?,
+            output_present: row.get::<_, i64>(10)? != 0,
+            started_at: row.get(11)?,
+            completed_at: row.get(12)?,
+            updated_at: row.get(13)?,
+        })
+    }
+
     // Notes CRUD
     pub fn get_all_notes(&self) -> SqliteResult<Vec<Note>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
                     panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
                     suggested_questions, last_playback_position, created_at, updated_at
              FROM notes ORDER BY created_at DESC, rowid DESC"
         )?;
 
-        let notes = stmt.query_map([], |row| {
-            Ok(Note {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                video_path: row.get(2)?,
-                subtitle_path: row.get(3)?,
-                model_id: row.get(4)?,
-                init_status: row.get(5)?,
-                full_summary: row.get(6)?,
-                detailed_reading: row.get(7)?,
-                highlights: row.get(8)?,
-                visual_summary: row.get(9)?,
-                custom_summary: row.get(10)?,
-                ai_note_markdown: row.get(11)?,
-                ai_note_meta: row.get(12)?,
-                flashcards: row.get(13)?,
-                panoramic_blueprint: row.get(14)?,
-                quick_notes: row.get(15)?,
-                quick_notes_mindmap: row.get(16)?,
-                quick_notes_canvas: row.get(17)?,
-                suggested_questions: row.get(18)?,
-                last_playback_position: row.get(19)?,
-                created_at: row.get(20)?,
-                updated_at: row.get(21)?,
-            })
-        })?;
+        let notes = stmt.query_map([], Self::row_to_note)?;
 
         notes.collect()
     }
@@ -602,39 +816,14 @@ impl Database {
     pub fn get_note_by_id(&self, id: &str) -> SqliteResult<Option<Note>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
                     panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
                     suggested_questions, last_playback_position, created_at, updated_at
              FROM notes WHERE id = ?1"
         )?;
 
-        let result = stmt.query_row([id], |row| {
-            Ok(Note {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                video_path: row.get(2)?,
-                subtitle_path: row.get(3)?,
-                model_id: row.get(4)?,
-                init_status: row.get(5)?,
-                full_summary: row.get(6)?,
-                detailed_reading: row.get(7)?,
-                highlights: row.get(8)?,
-                visual_summary: row.get(9)?,
-                custom_summary: row.get(10)?,
-                ai_note_markdown: row.get(11)?,
-                ai_note_meta: row.get(12)?,
-                flashcards: row.get(13)?,
-                panoramic_blueprint: row.get(14)?,
-                quick_notes: row.get(15)?,
-                quick_notes_mindmap: row.get(16)?,
-                quick_notes_canvas: row.get(17)?,
-                suggested_questions: row.get(18)?,
-                last_playback_position: row.get(19)?,
-                created_at: row.get(20)?,
-                updated_at: row.get(21)?,
-            })
-        });
+        let result = stmt.query_row([id], Self::row_to_note);
 
         match result {
             Ok(note) => Ok(Some(note)),
@@ -648,45 +837,20 @@ impl Database {
         let new_id = snowflake::generate_id_string();
 
         conn.execute(
-            "INSERT INTO notes (id, title, video_path, subtitle_path, model_id, init_status) VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            "INSERT INTO notes (id, title, video_path, subtitle_path, model_id) VALUES (?1, ?2, ?3, ?4, ?5)",
             (&new_id, &req.title, &req.video_path, &req.subtitle_path, &req.model_id),
         )?;
 
         // Return the created note
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
+            "SELECT id, title, video_path, subtitle_path, model_id, full_summary, detailed_reading,
                     highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
                     panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
                     suggested_questions, last_playback_position, created_at, updated_at
              FROM notes WHERE id = ?1"
         )?;
 
-        stmt.query_row([&new_id], |row| {
-            Ok(Note {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                video_path: row.get(2)?,
-                subtitle_path: row.get(3)?,
-                model_id: row.get(4)?,
-                init_status: row.get(5)?,
-                full_summary: row.get(6)?,
-                detailed_reading: row.get(7)?,
-                highlights: row.get(8)?,
-                visual_summary: row.get(9)?,
-                custom_summary: row.get(10)?,
-                ai_note_markdown: row.get(11)?,
-                ai_note_meta: row.get(12)?,
-                flashcards: row.get(13)?,
-                panoramic_blueprint: row.get(14)?,
-                quick_notes: row.get(15)?,
-                quick_notes_mindmap: row.get(16)?,
-                quick_notes_canvas: row.get(17)?,
-                suggested_questions: row.get(18)?,
-                last_playback_position: row.get(19)?,
-                created_at: row.get(20)?,
-                updated_at: row.get(21)?,
-            })
-        })
+        stmt.query_row([&new_id], Self::row_to_note)
     }
 
     pub fn update_note(&self, note: &Note) -> SqliteResult<()> {
@@ -694,16 +858,16 @@ impl Database {
         conn.execute(
             "UPDATE notes SET
                 title = ?1, video_path = ?2, subtitle_path = ?3, model_id = ?4,
-                init_status = ?5, full_summary = ?6, detailed_reading = ?7, highlights = ?8,
-                visual_summary = ?9, custom_summary = ?10, ai_note_markdown = ?11,
-                ai_note_meta = ?12, flashcards = ?13, panoramic_blueprint = ?14, quick_notes = ?15,
-                quick_notes_mindmap = ?16, quick_notes_canvas = ?17, suggested_questions = ?18,
-                last_playback_position = ?19,
+                full_summary = ?5, detailed_reading = ?6, highlights = ?7,
+                visual_summary = ?8, custom_summary = ?9, ai_note_markdown = ?10,
+                ai_note_meta = ?11, flashcards = ?12, panoramic_blueprint = ?13, quick_notes = ?14,
+                quick_notes_mindmap = ?15, quick_notes_canvas = ?16, suggested_questions = ?17,
+                last_playback_position = ?18,
                 updated_at = datetime('now', 'localtime')
-             WHERE id = ?20",
+             WHERE id = ?19",
             rusqlite::params![
                 &note.title, &note.video_path, &note.subtitle_path, &note.model_id,
-                note.init_status, &note.full_summary, &note.detailed_reading, &note.highlights,
+                &note.full_summary, &note.detailed_reading, &note.highlights,
                 &note.visual_summary, &note.custom_summary, &note.ai_note_markdown,
                 &note.ai_note_meta, &note.flashcards, &note.panoramic_blueprint, &note.quick_notes,
                 &note.quick_notes_mindmap, &note.quick_notes_canvas, &note.suggested_questions,
@@ -747,56 +911,215 @@ impl Database {
         Ok(())
     }
 
-    /// Update note initialization status (0-6)
-    pub fn update_note_init_status(&self, note_id: &str, status: i32) -> SqliteResult<()> {
-        let conn = self.connection();
-        conn.execute(
-            "UPDATE notes SET init_status = ?1, updated_at = datetime('now', 'localtime') WHERE id = ?2",
-            rusqlite::params![status, note_id],
-        )?;
-        Ok(())
-    }
-
-    /// Get notes with incomplete initialization (init_status < 7 and has model_id)
-    /// This includes notes that haven't started (status=0) and notes in progress (status=1-6)
-    pub fn get_incomplete_notes(&self) -> SqliteResult<Vec<Note>> {
+    pub fn get_note_initialization_run(&self, note_id: &str) -> SqliteResult<Option<NoteInitializationRun>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, video_path, subtitle_path, model_id, init_status, full_summary, detailed_reading,
-                    highlights, visual_summary, custom_summary, ai_note_markdown, ai_note_meta, flashcards,
-                    panoramic_blueprint, quick_notes, quick_notes_mindmap, quick_notes_canvas,
-                    suggested_questions, last_playback_position, created_at, updated_at
-             FROM notes WHERE init_status < 7 AND model_id IS NOT NULL ORDER BY created_at ASC, rowid ASC"
+            "SELECT id, note_id, status, selected_items_json, locked_items_json, model_override_id,
+                    last_error, started_at, completed_at, updated_at
+             FROM note_initialization_runs WHERE note_id = ?1"
         )?;
 
-        let notes = stmt.query_map([], |row| {
-            Ok(Note {
-                id: row.get(0)?,
-                title: row.get(1)?,
-                video_path: row.get(2)?,
-                subtitle_path: row.get(3)?,
-                model_id: row.get(4)?,
-                init_status: row.get(5)?,
-                full_summary: row.get(6)?,
-                detailed_reading: row.get(7)?,
-                highlights: row.get(8)?,
-                visual_summary: row.get(9)?,
-                custom_summary: row.get(10)?,
-                ai_note_markdown: row.get(11)?,
-                ai_note_meta: row.get(12)?,
-                flashcards: row.get(13)?,
-                panoramic_blueprint: row.get(14)?,
-                quick_notes: row.get(15)?,
-                quick_notes_mindmap: row.get(16)?,
-                quick_notes_canvas: row.get(17)?,
-                suggested_questions: row.get(18)?,
-                last_playback_position: row.get(19)?,
-                created_at: row.get(20)?,
-                updated_at: row.get(21)?,
+        stmt.query_row([note_id], Self::row_to_note_initialization_run).optional()
+    }
+
+    pub fn upsert_note_initialization_run(&self, input: &UpsertNoteInitializationRunInput) -> SqliteResult<NoteInitializationRun> {
+        let conn = self.connection();
+        let selected_items_json = Self::to_string_list_json(&input.selected_items)?;
+        let locked_items_json = Self::to_string_list_json(&input.locked_items)?;
+        let run_id = self
+            .get_note_initialization_run(&input.note_id)?
+            .map(|run| run.id)
+            .unwrap_or_else(snowflake::generate_id_string);
+
+        conn.execute(
+            "INSERT INTO note_initialization_runs (
+                id, note_id, status, selected_items_json, locked_items_json, model_override_id,
+                last_error, started_at, completed_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now', 'localtime'))
+            ON CONFLICT(note_id) DO UPDATE SET
+                status = excluded.status,
+                selected_items_json = excluded.selected_items_json,
+                locked_items_json = excluded.locked_items_json,
+                model_override_id = excluded.model_override_id,
+                last_error = excluded.last_error,
+                started_at = excluded.started_at,
+                completed_at = excluded.completed_at,
+                updated_at = datetime('now', 'localtime')",
+            rusqlite::params![
+                &run_id,
+                &input.note_id,
+                input.status.as_str(),
+                &selected_items_json,
+                &locked_items_json,
+                &input.model_override_id,
+                &input.last_error,
+                &input.started_at,
+                &input.completed_at,
+            ],
+        )?;
+
+        self.get_note_initialization_run(&input.note_id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn get_note_initialization_items(&self, note_id: &str) -> SqliteResult<Vec<NoteInitializationItem>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, item_key, selected, locked, status, config_json, depends_on_json,
+                    last_model_id, last_error, output_present, started_at, completed_at, updated_at
+             FROM note_initialization_items
+             WHERE note_id = ?1
+             ORDER BY item_key ASC"
+        )?;
+
+        let items = stmt.query_map([note_id], Self::row_to_note_initialization_item)?;
+        items.collect()
+    }
+
+    pub fn upsert_note_initialization_item(&self, input: &UpsertNoteInitializationItemInput) -> SqliteResult<NoteInitializationItem> {
+        let conn = self.connection();
+        let item_id = conn.query_row(
+            "SELECT id FROM note_initialization_items WHERE note_id = ?1 AND item_key = ?2",
+            rusqlite::params![&input.note_id, &input.item_key],
+            |row| row.get::<_, String>(0),
+        ).optional()?.unwrap_or_else(snowflake::generate_id_string);
+        let depends_on_json = Self::to_string_list_json(&input.depends_on)?;
+
+        conn.execute(
+            "INSERT INTO note_initialization_items (
+                id, note_id, item_key, selected, locked, status, config_json, depends_on_json,
+                last_model_id, last_error, output_present, started_at, completed_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, datetime('now', 'localtime'))
+            ON CONFLICT(note_id, item_key) DO UPDATE SET
+                selected = excluded.selected,
+                locked = excluded.locked,
+                status = excluded.status,
+                config_json = excluded.config_json,
+                depends_on_json = excluded.depends_on_json,
+                last_model_id = excluded.last_model_id,
+                last_error = excluded.last_error,
+                output_present = excluded.output_present,
+                started_at = excluded.started_at,
+                completed_at = excluded.completed_at,
+                updated_at = datetime('now', 'localtime')",
+            rusqlite::params![
+                &item_id,
+                &input.note_id,
+                &input.item_key,
+                if input.selected { 1 } else { 0 },
+                if input.locked { 1 } else { 0 },
+                input.status.as_str(),
+                &input.config_json,
+                &depends_on_json,
+                &input.last_model_id,
+                &input.last_error,
+                if input.output_present { 1 } else { 0 },
+                &input.started_at,
+                &input.completed_at,
+            ],
+        )?;
+
+        let mut stmt = conn.prepare(
+            "SELECT id, note_id, item_key, selected, locked, status, config_json, depends_on_json,
+                    last_model_id, last_error, output_present, started_at, completed_at, updated_at
+             FROM note_initialization_items
+             WHERE note_id = ?1 AND item_key = ?2"
+        )?;
+
+        stmt.query_row(rusqlite::params![&input.note_id, &input.item_key], Self::row_to_note_initialization_item)
+    }
+
+    pub fn replace_note_initialization_items(
+        &self,
+        note_id: &str,
+        items: &[UpsertNoteInitializationItemInput],
+    ) -> SqliteResult<Vec<NoteInitializationItem>> {
+        let mut conn = self.connection();
+        let tx = conn.transaction()?;
+
+        tx.execute(
+            "DELETE FROM note_initialization_items WHERE note_id = ?1",
+            [note_id],
+        )?;
+
+        for item in items {
+            let depends_on_json = Self::to_string_list_json(&item.depends_on)?;
+            tx.execute(
+                "INSERT INTO note_initialization_items (
+                    id, note_id, item_key, selected, locked, status, config_json, depends_on_json,
+                    last_model_id, last_error, output_present, started_at, completed_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, datetime('now', 'localtime'))",
+                rusqlite::params![
+                    snowflake::generate_id_string(),
+                    &item.note_id,
+                    &item.item_key,
+                    if item.selected { 1 } else { 0 },
+                    if item.locked { 1 } else { 0 },
+                    item.status.as_str(),
+                    &item.config_json,
+                    &depends_on_json,
+                    &item.last_model_id,
+                    &item.last_error,
+                    if item.output_present { 1 } else { 0 },
+                    &item.started_at,
+                    &item.completed_at,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        self.get_note_initialization_items(note_id)
+    }
+
+    pub fn get_note_initialization_detail(&self, note_id: &str) -> SqliteResult<NoteInitializationDetail> {
+        Ok(NoteInitializationDetail {
+            run: self.get_note_initialization_run(note_id)?,
+            items: self.get_note_initialization_items(note_id)?,
+        })
+    }
+
+    pub fn get_note_initialization_overview(&self) -> SqliteResult<Vec<NoteInitializationOverview>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT
+                n.id,
+                n.title,
+                n.subtitle_path,
+                n.model_id,
+                COALESCE(r.status, 'idle') AS run_status,
+                COALESCE(SUM(CASE WHEN i.selected = 1 THEN 1 ELSE 0 END), 0) AS selected_count,
+                COALESCE(SUM(CASE WHEN i.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_count,
+                COALESCE(SUM(CASE WHEN i.status = 'skipped' THEN 1 ELSE 0 END), 0) AS skipped_count,
+                COALESCE(SUM(CASE WHEN i.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,
+                COALESCE(SUM(CASE WHEN i.status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
+                COALESCE(SUM(CASE WHEN i.output_present = 1 THEN 1 ELSE 0 END), 0) AS output_count,
+                COALESCE(r.updated_at, n.updated_at) AS updated_at
+             FROM notes n
+             LEFT JOIN note_initialization_runs r ON r.note_id = n.id
+             LEFT JOIN note_initialization_items i ON i.note_id = n.id
+             GROUP BY n.id, n.title, n.subtitle_path, n.model_id, r.status, r.updated_at, n.updated_at
+             ORDER BY updated_at DESC, n.rowid DESC"
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let run_status: String = row.get(4)?;
+            Ok(NoteInitializationOverview {
+                note_id: row.get(0)?,
+                note_title: row.get(1)?,
+                subtitle_path: row.get(2)?,
+                model_id: row.get(3)?,
+                run_status: NoteInitializationRunStatus::from_str(&run_status),
+                selected_count: row.get(5)?,
+                completed_count: row.get(6)?,
+                skipped_count: row.get(7)?,
+                failed_count: row.get(8)?,
+                running_count: row.get(9)?,
+                output_count: row.get(10)?,
+                updated_at: row.get(11)?,
             })
         })?;
 
-        notes.collect()
+        rows.collect()
     }
 
     // Get AI config by ID

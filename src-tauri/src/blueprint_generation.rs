@@ -6,7 +6,7 @@
 //! 3. 拼接完整markdown
 
 use crate::ai_pool::{execute_non_streaming_with_abort, NonStreamingRequest};
-use crate::db::AiConfig;
+use crate::db::{AiConfig, Note};
 use crate::subtitle::{parse_subtitle_file, format_timestamp};
 use crate::DATABASE;
 use futures::future::try_join_all;
@@ -607,5 +607,33 @@ pub async fn abort_blueprint_generation(generation_id: String) -> Result<(), Str
     if let Some(flag) = flags.get(&generation_id) {
         flag.store(true, Ordering::Relaxed);
     }
+    Ok(())
+}
+
+pub async fn generate_panoramic_blueprint_direct(
+    app: AppHandle,
+    note_id: String,
+    model_id: String,
+    abort_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    let blueprint_data = generate_blueprint_internal(
+        &app,
+        "initialization-blueprint-direct",
+        &note_id,
+        &model_id,
+        &abort_flag,
+    )
+    .await?;
+
+    let db = DATABASE.get().ok_or("数据库未初始化")?;
+    let mut note: Note = db
+        .get_note_by_id(&note_id)
+        .map_err(|e| format!("获取笔记失败: {}", e))?
+        .ok_or("笔记不存在")?;
+
+    note.panoramic_blueprint = Some(blueprint_data.content);
+    db.update_note(&note)
+        .map_err(|e| format!("保存深度蓝图失败: {}", e))?;
+
     Ok(())
 }

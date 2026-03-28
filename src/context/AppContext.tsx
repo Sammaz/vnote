@@ -112,9 +112,6 @@ interface AppContextType {
   // 累计观看时长
   addWatchTime: (seconds: number) => void;
 
-  // 笔记初始化
-  pendingInitialization: import("./UploadContext").PendingInitializationParams | null;
-  setPendingInitialization: (params: import("./UploadContext").PendingInitializationParams | null) => void;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -181,8 +178,6 @@ function AppContextBridge({ children }: { children: ReactNode }) {
     removeUploadedItem: uploadContext.removeUploadedItem,
     updateItemSubtitle: uploadContext.updateItemSubtitle,
     clearUploads: uploadContext.clearUploads,
-    pendingInitialization: uploadContext.pendingInitialization,
-    setPendingInitialization: uploadContext.setPendingInitialization,
 
     // 合集
     collections: collectionsContext.collections,

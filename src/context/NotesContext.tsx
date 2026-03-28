@@ -38,7 +38,7 @@ const NotesContext = createContext<NotesContextType | null>(null);
 interface NotesProviderProps {
   children: ReactNode;
   onStatsUpdate?: (stats: Partial<AppStats>) => void;
-  /** 删除笔记前的回调（用于清理初始化队列等） */
+  /** 删除笔记前的回调（用于清理初始化运行任务等） */
   onBeforeNoteDelete?: (noteId: string) => Promise<void>;
 }
 
@@ -104,7 +104,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
 
   // 删除笔记
   const deleteNote = useCallback(async (id: string): Promise<void> => {
-    // 先调用删除前回调（清理初始化队列等）
+    // 先调用删除前回调（清理初始化运行任务等）
     if (onBeforeNoteDelete) {
       await onBeforeNoteDelete(id);
     }

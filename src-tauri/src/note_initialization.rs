@@ -1,180 +1,386 @@
-//! 笔记数据初始化模块
+//! 笔记初始化模块（item 级执行）
 //!
-//! 负责在创建笔记后按顺序调用6个接口生成笔记所需的全部数据：
-//! 1. 推荐问题生成 (generate_questions_for_note)
-//! 2. 全文总结 (generate_note_content - full_summary)
-//! 3. 原文细读-章节生成 (generate_chapters)
-//! 4. 字幕优化 (optimize_chapter_subtitles)
-//! 5. 高光笔记 (generate_highlights)
-//! 6. 闪记卡 (generate_flashcards)
+//! 新语义：
+//! - 基于初始化项目（item）而非固定步骤断点
+//! - 状态持久化在 note_initialization_runs / note_initialization_items
+//! - 应用重启后仅展示状态，不自动恢复执行
 
 use crate::bcut_asr;
-use crate::chapter::DetailedReadingData;
+use crate::chapter::{Chapter, DetailedReadingData};
 use crate::chat;
+use crate::db::{
+    NoteInitializationItem,
+    NoteInitializationItemStatus,
+    NoteInitializationRunStatus,
+    UpsertNoteInitializationItemInput,
+    UpsertNoteInitializationRunInput,
+};
 use crate::note_generation;
 use crate::subtitle_optimizer::ChapterSubtitleInput;
 use crate::DATABASE;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::Mutex;
 
-// ============================================================================
-// 数据结构定义
-// ============================================================================
-
-/// 初始化步骤枚举
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum InitializationStep {
-    /// 字幕生成
-    SubtitleGeneration,
-    /// 推荐问题生成
-    Questions,
-    /// 全文总结
-    FullSummary,
-    /// 章节生成
-    Chapters,
-    /// 字幕优化
-    SubtitleOptimization,
-    /// 高光笔记
-    Highlights,
-    /// 闪记卡
-    Flashcards,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InitializationItemDefinition {
+    pub item_key: String,
+    pub display_name: String,
+    pub description: String,
+    pub dependencies: Vec<String>,
+    pub output_target: String,
+    pub default_config: serde_json::Value,
 }
 
-impl InitializationStep {
-    /// 获取步骤的显示名称
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::SubtitleGeneration => "字幕生成",
-            Self::Questions => "推荐问题",
-            Self::FullSummary => "全文总结",
-            Self::Chapters => "章节生成",
-            Self::SubtitleOptimization => "字幕优化",
-            Self::Highlights => "高光笔记",
-            Self::Flashcards => "闪记卡",
-        }
-    }
-
-    /// 获取步骤索引（0-6）
-    pub fn index(&self) -> usize {
-        match self {
-            Self::SubtitleGeneration => 0,
-            Self::Questions => 1,
-            Self::FullSummary => 2,
-            Self::Chapters => 3,
-            Self::SubtitleOptimization => 4,
-            Self::Highlights => 5,
-            Self::Flashcards => 6,
-        }
-    }
-
-    /// 获取所有步骤列表
-    pub fn all() -> Vec<Self> {
-        vec![
-            Self::SubtitleGeneration,
-            Self::Questions,
-            Self::FullSummary,
-            Self::Chapters,
-            Self::SubtitleOptimization,
-            Self::Highlights,
-            Self::Flashcards,
-        ]
-    }
-}
-
-/// 初始化事件
-#[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
-pub enum NoteInitializationEvent {
-    /// 初始化开始
-    Starting {
-        initialization_id: String,
-        total_steps: usize,
-        steps: Vec<String>,
-    },
-    /// 步骤开始
-    StepStarting {
-        step: InitializationStep,
-        step_index: usize,
-        step_name: String,
-    },
-    /// 步骤进度更新
-    StepProgress {
-        step: InitializationStep,
-        message: String,
-    },
-    /// 步骤完成
-    StepCompleted {
-        step: InitializationStep,
-        step_index: usize,
-        step_name: String,
-    },
-    /// 步骤被跳过
-    StepSkipped {
-        step: InitializationStep,
-        step_index: usize,
-        step_name: String,
-        reason: String,
-    },
-    /// 步骤失败
-    StepFailed {
-        step: InitializationStep,
-        step_index: usize,
-        step_name: String,
-        error: String,
-    },
-    /// 全部完成
-    Completed {
-        completed: usize,
-        skipped: usize,
-        failed: usize,
-        total: usize,
-    },
-    /// 致命错误（中止整个流程）
-    Error {
-        error: String,
-    },
-    /// 用户中止
-    Aborted,
-}
-
-/// 初始化参数
 #[derive(Debug, Clone, Deserialize)]
 pub struct InitializationParams {
     pub note_id: String,
     pub model_id: String,
     pub video_path: String,
     pub subtitle_path: Option<String>,
-    /// 从哪一步开始执行（用于断点恢复），0-5 对应 6 个步骤
-    #[serde(default)]
-    pub start_from_step: Option<usize>,
 }
 
-/// 步骤执行结果
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
+pub enum NoteInitializationEvent {
+    Starting {
+        initialization_id: String,
+        total_steps: usize,
+        steps: Vec<String>,
+    },
+    StepStarting {
+        step: String,
+        step_index: usize,
+        step_name: String,
+    },
+    StepProgress {
+        step: String,
+        message: String,
+    },
+    StepCompleted {
+        step: String,
+        step_index: usize,
+        step_name: String,
+    },
+    StepSkipped {
+        step: String,
+        step_index: usize,
+        step_name: String,
+        reason: String,
+    },
+    StepFailed {
+        step: String,
+        step_index: usize,
+        step_name: String,
+        error: String,
+    },
+    Completed {
+        completed: usize,
+        skipped: usize,
+        failed: usize,
+        total: usize,
+    },
+    Error {
+        error: String,
+    },
+    Aborted,
+}
+
 #[derive(Debug, Clone)]
-enum StepResult {
+enum ItemExecutionResult {
     Completed,
     Skipped(String),
     Failed(String),
 }
 
+#[derive(Debug, Clone)]
+struct ExecutionContext {
+    note_id: String,
+    model_id: String,
+    video_path: String,
+    subtitle_path: Option<String>,
+    persist_model_id: bool,
+}
+
 // ============================================================================
-// 全局中止标志管理
+// 注册表
 // ============================================================================
 
-static INITIALIZATION_ABORT_FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
-    OnceLock::new();
+pub fn get_initialization_registry() -> Vec<InitializationItemDefinition> {
+    vec![
+        InitializationItemDefinition {
+            item_key: "subtitle_generation".to_string(),
+            display_name: "字幕生成".to_string(),
+            description: "自动转录视频生成字幕文件。".to_string(),
+            dependencies: vec![],
+            output_target: "notes.subtitle_path".to_string(),
+            default_config: serde_json::json!({ "regenerate": false }),
+        },
+        InitializationItemDefinition {
+            item_key: "suggested_questions".to_string(),
+            display_name: "推荐问题".to_string(),
+            description: "根据字幕生成推荐提问。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string()],
+            output_target: "notes.suggested_questions".to_string(),
+            default_config: serde_json::json!({ "regenerate": false }),
+        },
+        InitializationItemDefinition {
+            item_key: "full_summary".to_string(),
+            display_name: "全文总结".to_string(),
+            description: "生成结构化全文总结。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string()],
+            output_target: "notes.full_summary".to_string(),
+            default_config: serde_json::json!({ "regenerate": false, "custom_prompt": null, "style": null }),
+        },
+        InitializationItemDefinition {
+            item_key: "detailed_reading".to_string(),
+            display_name: "原文细读".to_string(),
+            description: "生成章节化原文细读。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string()],
+            output_target: "notes.detailed_reading".to_string(),
+            default_config: serde_json::json!({ "regenerate": false }),
+        },
+        InitializationItemDefinition {
+            item_key: "subtitle_optimization".to_string(),
+            display_name: "字幕优化".to_string(),
+            description: "按章节优化字幕内容。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string(), "detailed_reading".to_string()],
+            output_target: "optimized_subtitles".to_string(),
+            default_config: serde_json::json!({ "regenerate": false }),
+        },
+        InitializationItemDefinition {
+            item_key: "highlights".to_string(),
+            display_name: "高光笔记".to_string(),
+            description: "生成高光片段与摘要。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string()],
+            output_target: "notes.highlights".to_string(),
+            default_config: serde_json::json!({ "regenerate": false, "highlight_type": "default" }),
+        },
+        InitializationItemDefinition {
+            item_key: "flashcards".to_string(),
+            display_name: "闪记卡".to_string(),
+            description: "生成记忆卡片内容。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string()],
+            output_target: "notes.flashcards".to_string(),
+            default_config: serde_json::json!({ "regenerate": false }),
+        },
+        InitializationItemDefinition {
+            item_key: "visual_summary".to_string(),
+            display_name: "视觉化总结".to_string(),
+            description: "根据章节与字幕生成视觉化总结。".to_string(),
+            dependencies: vec!["detailed_reading".to_string()],
+            output_target: "notes.visual_summary".to_string(),
+            default_config: serde_json::json!({ "regenerate": false, "show_timestamp": true, "prefer_optimized_subtitles": true }),
+        },
+        InitializationItemDefinition {
+            item_key: "custom_summary".to_string(),
+            display_name: "自定义总结".to_string(),
+            description: "按自定义提示词生成总结。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string()],
+            output_target: "notes.custom_summary".to_string(),
+            default_config: serde_json::json!({ "regenerate": false, "custom_prompt": null }),
+        },
+        InitializationItemDefinition {
+            item_key: "ai_note".to_string(),
+            display_name: "大纲笔记".to_string(),
+            description: "生成大纲式 AI 笔记。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string()],
+            output_target: "notes.ai_note_markdown".to_string(),
+            default_config: serde_json::json!({ "regenerate": false, "style": null, "custom_prompt": null, "screenshot_density": null }),
+        },
+        InitializationItemDefinition {
+            item_key: "panoramic_blueprint".to_string(),
+            display_name: "深度蓝图".to_string(),
+            description: "生成全景式深度蓝图。".to_string(),
+            dependencies: vec!["subtitle_generation".to_string()],
+            output_target: "notes.panoramic_blueprint".to_string(),
+            default_config: serde_json::json!({ "regenerate": false }),
+        },
+    ]
+}
+
+fn registry_map() -> HashMap<String, InitializationItemDefinition> {
+    get_initialization_registry()
+        .into_iter()
+        .map(|d| (d.item_key.clone(), d))
+        .collect()
+}
+
+// ============================================================================
+// 状态同步
+// ============================================================================
+
+pub fn detect_output_presence(note: &crate::db::Note, item_key: &str, db: &crate::db::Database) -> bool {
+    match item_key {
+        "subtitle_generation" => note.subtitle_path.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "suggested_questions" => note.suggested_questions.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "full_summary" => note.full_summary.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "detailed_reading" => note.detailed_reading.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "subtitle_optimization" => db
+            .get_optimized_subtitles(&note.id)
+            .map(|items| !items.is_empty())
+            .unwrap_or(false),
+        "highlights" => note.highlights.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "flashcards" => note.flashcards.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "visual_summary" => note.visual_summary.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "custom_summary" => note.custom_summary.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "ai_note" => note.ai_note_markdown.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "panoramic_blueprint" => note
+            .panoramic_blueprint
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty()),
+        _ => false,
+    }
+}
+
+pub fn sync_note_initialization_outputs(note_id: &str) -> Result<Vec<NoteInitializationItem>, String> {
+    let db = DATABASE.get().ok_or("数据库未初始化")?;
+    let note = db
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "笔记不存在".to_string())?;
+
+    let existing_items = db
+        .get_note_initialization_items(note_id)
+        .map_err(|e| e.to_string())?;
+    let mut existing_map: HashMap<String, NoteInitializationItem> = existing_items
+        .into_iter()
+        .map(|item| (item.item_key.clone(), item))
+        .collect();
+
+    let mut next_items = Vec::new();
+    for definition in get_initialization_registry() {
+        let output_present = detect_output_presence(&note, &definition.item_key, db);
+        let existing = existing_map.remove(&definition.item_key);
+
+        let status = if output_present {
+            NoteInitializationItemStatus::Completed
+        } else {
+            existing
+                .as_ref()
+                .map(|item| item.status.clone())
+                .unwrap_or(NoteInitializationItemStatus::Pending)
+        };
+
+        next_items.push(UpsertNoteInitializationItemInput {
+            note_id: note_id.to_string(),
+            item_key: definition.item_key.clone(),
+            selected: existing.as_ref().map(|item| item.selected).unwrap_or(false),
+            locked: existing.as_ref().map(|item| item.locked).unwrap_or(false),
+            status,
+            config_json: existing
+                .as_ref()
+                .and_then(|item| item.config_json.clone())
+                .or_else(|| Some(definition.default_config.to_string())),
+            depends_on: existing
+                .as_ref()
+                .map(|item| item.depends_on.clone())
+                .unwrap_or_else(|| definition.dependencies.clone()),
+            last_model_id: existing.as_ref().and_then(|item| item.last_model_id.clone()),
+            last_error: existing.as_ref().and_then(|item| item.last_error.clone()),
+            output_present,
+            started_at: existing.as_ref().and_then(|item| item.started_at.clone()),
+            completed_at: existing.as_ref().and_then(|item| item.completed_at.clone()),
+        });
+    }
+
+    db.replace_note_initialization_items(note_id, &next_items)
+        .map_err(|e| e.to_string())
+}
+
+pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
+    let db = DATABASE.get().ok_or("数据库未初始化")?;
+    let _note = db
+        .get_note_by_id(note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "笔记不存在".to_string())?;
+
+    let items = sync_note_initialization_outputs(note_id)?;
+    let selected_items: Vec<String> = items
+        .iter()
+        .filter(|item| item.selected)
+        .map(|item| item.item_key.clone())
+        .collect();
+    let locked_items: Vec<String> = items
+        .iter()
+        .filter(|item| item.locked)
+        .map(|item| item.item_key.clone())
+        .collect();
+
+    let running_count = items
+        .iter()
+        .filter(|item| matches!(item.status, NoteInitializationItemStatus::Running))
+        .count();
+    let queued_count = items
+        .iter()
+        .filter(|item| matches!(item.status, NoteInitializationItemStatus::Queued))
+        .count();
+    let failed_count = items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.status,
+                NoteInitializationItemStatus::Failed | NoteInitializationItemStatus::Blocked
+            )
+        })
+        .count();
+    let pending_count = items
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.status,
+                NoteInitializationItemStatus::Pending
+                    | NoteInitializationItemStatus::Queued
+                    | NoteInitializationItemStatus::Blocked
+            )
+        })
+        .count();
+
+    let status = if running_count > 0 {
+        NoteInitializationRunStatus::Running
+    } else if queued_count > 0 {
+        NoteInitializationRunStatus::Queued
+    } else if failed_count > 0 {
+        NoteInitializationRunStatus::PartialFailed
+    } else if !selected_items.is_empty() && pending_count == 0 {
+        NoteInitializationRunStatus::Completed
+    } else {
+        NoteInitializationRunStatus::Idle
+    };
+
+    db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
+        note_id: note_id.to_string(),
+        status,
+        selected_items,
+        locked_items,
+        model_override_id: db
+            .get_note_initialization_run(note_id)
+            .ok()
+            .flatten()
+            .and_then(|run| run.model_override_id),
+        last_error: None,
+        started_at: None,
+        completed_at: None,
+    })
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+// ============================================================================
+// 全局中止标志
+// ============================================================================
+
+static INITIALIZATION_ABORT_FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
 
 fn get_abort_flags() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     INITIALIZATION_ABORT_FLAGS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// 注册中止标志
 async fn register_abort_flag(initialization_id: &str) -> Arc<AtomicBool> {
     let mut flags = get_abort_flags().lock().await;
     let flag = Arc::new(AtomicBool::new(false));
@@ -182,18 +388,15 @@ async fn register_abort_flag(initialization_id: &str) -> Arc<AtomicBool> {
     flag
 }
 
-/// 清理中止标志
 async fn cleanup_abort_flag(initialization_id: &str) {
     let mut flags = get_abort_flags().lock().await;
     flags.remove(initialization_id);
 }
 
-/// 检查是否已中止
 fn is_aborted(abort_flag: &Arc<AtomicBool>) -> bool {
     abort_flag.load(Ordering::Relaxed)
 }
 
-/// 中止初始化
 pub async fn abort_initialization(initialization_id: &str) -> Result<(), String> {
     let flags = get_abort_flags().lock().await;
     if let Some(flag) = flags.get(initialization_id) {
@@ -205,205 +408,397 @@ pub async fn abort_initialization(initialization_id: &str) -> Result<(), String>
 }
 
 // ============================================================================
-// 主初始化函数
+// 主流程
 // ============================================================================
 
-/// 启动笔记数据初始化
-/// 返回 initialization_id 用于跟踪和中止
-pub async fn start_initialization(
-    app: AppHandle,
-    params: InitializationParams,
-) -> Result<String, String> {
-    // 生成唯一ID
+pub async fn start_initialization(app: AppHandle, params: InitializationParams) -> Result<String, String> {
     let initialization_id = format!("init-{}-{}", params.note_id, uuid::Uuid::new_v4());
     let event_name = format!("note-initialization-{}", initialization_id);
 
-    // 注册中止标志
+    ensure_note_initialization_state(&params.note_id)?;
+
     let abort_flag = register_abort_flag(&initialization_id).await;
-
-    // 发送开始事件
-    let steps: Vec<String> = InitializationStep::all()
-        .iter()
-        .map(|s| s.display_name().to_string())
-        .collect();
-
-    let _ = app.emit(
-        &event_name,
-        NoteInitializationEvent::Starting {
-            initialization_id: initialization_id.clone(),
-            total_steps: 7,
-            steps,
-        },
-    );
-
-    // 在后台执行初始化
     let init_id = initialization_id.clone();
     let event_name_clone = event_name.clone();
 
     tokio::spawn(async move {
-        // 等待前端设置好事件监听器
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let result = run_initialization(
-            app.clone(),
-            &event_name_clone,
-            params,
-            abort_flag.clone(),
-        )
-        .await;
+        let result = run_initialization(app.clone(), &event_name_clone, &init_id, params, abort_flag).await;
 
-        // 清理中止标志
         cleanup_abort_flag(&init_id).await;
 
-        // 如果有致命错误，发送错误事件
-        if let Err(e) = result {
-            let _ = app.emit(
-                &event_name_clone,
-                NoteInitializationEvent::Error { error: e },
-            );
+        if let Err(error) = result {
+            let _ = app.emit(&event_name_clone, NoteInitializationEvent::Error { error });
         }
     });
 
     Ok(initialization_id)
 }
 
-/// 执行初始化流程
 async fn run_initialization(
     app: AppHandle,
     event_name: &str,
+    initialization_id: &str,
     params: InitializationParams,
     abort_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let db = DATABASE.get().ok_or("数据库未初始化")?;
 
-    let mut params = params;
+    let registry = get_initialization_registry();
+    let registry_map = registry_map();
 
-    // 验证 AI 配置是否存在
-    let _ai_config = db
-        .get_ai_config_by_id(&params.model_id)
-        .map_err(|e| format!("获取 AI 配置失败: {}", e))?
-        .ok_or_else(|| "AI 配置不存在".to_string())?;
-
-    // 获取笔记信息
     let note = db
         .get_note_by_id(&params.note_id)
         .map_err(|e| format!("获取笔记失败: {}", e))?
         .ok_or_else(|| "笔记不存在".to_string())?;
 
-    if params.subtitle_path.is_none() {
-        params.subtitle_path = note.subtitle_path.clone();
-    }
+    let mut detail = db
+        .get_note_initialization_detail(&params.note_id)
+        .map_err(|e| e.to_string())?;
 
-    let mut has_subtitle = params.subtitle_path.is_some();
-    let mut completed = 0;
-    let mut skipped = 0;
-    let mut failed = 0;
-
-    // 获取起始步骤（用于断点恢复）
-    let start_step = params.start_from_step.unwrap_or(0);
-
-    // 用于存储章节数据（步骤3的结果，步骤4需要）
-    let mut chapter_data: Option<DetailedReadingData> = None;
-
-    // 如果从步骤4开始恢复，需要从数据库加载章节数据
-    if start_step >= 4 {
-        if let Some(detailed_reading) = &note.detailed_reading {
-            if let Ok(data) = serde_json::from_str::<DetailedReadingData>(detailed_reading) {
-                chapter_data = Some(data);
+    let model_override_id = detail.run.as_ref().and_then(|run| run.model_override_id.clone());
+    let resolved_model_id = model_override_id
+        .clone()
+        .or_else(|| note.model_id.clone())
+        .or_else(|| {
+            if params.model_id.trim().is_empty() {
+                None
+            } else {
+                Some(params.model_id.clone())
             }
+        })
+        .ok_or_else(|| "未配置AI模型".to_string())?;
+
+    let _ = db
+        .get_ai_config_by_id(&resolved_model_id)
+        .map_err(|e| format!("获取 AI 配置失败: {}", e))?
+        .ok_or_else(|| "AI 配置不存在".to_string())?;
+
+    let mut explicitly_selected: HashSet<String> = detail
+        .items
+        .iter()
+        .filter(|item| item.selected)
+        .map(|item| item.item_key.clone())
+        .collect();
+
+    if explicitly_selected.is_empty() {
+        if let Some(run) = &detail.run {
+            explicitly_selected = run
+                .selected_items
+                .iter()
+                .filter(|key| registry_map.contains_key(*key))
+                .cloned()
+                .collect();
         }
     }
 
-    // 按顺序执行6个步骤
-    for step in InitializationStep::all() {
-        let step_index = step.index();
+    let dependency_map: HashMap<String, Vec<String>> = registry
+        .iter()
+        .map(|d| (d.item_key.clone(), d.dependencies.clone()))
+        .collect();
+    let expanded_selected = expand_dependencies(&explicitly_selected, &dependency_map);
+    let auto_locked: HashSet<String> = expanded_selected
+        .difference(&explicitly_selected)
+        .cloned()
+        .collect();
 
-        // 跳过已完成的步骤（断点恢复）
-        if step_index < start_step {
-            skipped += 1;
-            let _ = app.emit(
-                event_name,
-                NoteInitializationEvent::StepSkipped {
-                    step,
-                    step_index,
-                    step_name: step.display_name().to_string(),
-                    reason: "已完成（断点恢复）".to_string(),
-                },
-            );
-            continue;
+    let execution_plan: Vec<InitializationItemDefinition> = registry
+        .iter()
+        .filter(|d| expanded_selected.contains(&d.item_key))
+        .cloned()
+        .collect();
+
+    if execution_plan.is_empty() {
+        return Err("没有可执行的初始化项目".to_string());
+    }
+
+    let plan_steps: Vec<String> = execution_plan
+        .iter()
+        .map(|item| item.display_name.clone())
+        .collect();
+
+    let _ = app.emit(
+        event_name,
+        NoteInitializationEvent::Starting {
+            initialization_id: initialization_id.to_string(),
+            total_steps: execution_plan.len(),
+            steps: plan_steps,
+        },
+    );
+
+    let mut context = ExecutionContext {
+        note_id: params.note_id.clone(),
+        model_id: resolved_model_id.clone(),
+        video_path: params.video_path.clone(),
+        subtitle_path: params.subtitle_path.clone().or(note.subtitle_path.clone()),
+        persist_model_id: model_override_id.is_none(),
+    };
+
+    let mut item_map: HashMap<String, NoteInitializationItem> = detail
+        .items
+        .drain(..)
+        .map(|item| (item.item_key.clone(), item))
+        .collect();
+
+    // 新一轮运行前，将参与运行的 item 置为 queued
+    for definition in &registry {
+        let mut item = item_map
+            .get(&definition.item_key)
+            .cloned()
+            .unwrap_or_else(|| create_default_item(&params.note_id, definition));
+
+        item.selected = expanded_selected.contains(&definition.item_key);
+        item.locked = auto_locked.contains(&definition.item_key);
+
+        if item.config_json.as_ref().is_none_or(|s| s.trim().is_empty()) {
+            item.config_json = Some(definition.default_config.to_string());
+        }
+        if item.depends_on.is_empty() {
+            item.depends_on = definition.dependencies.clone();
         }
 
-        // 检查中止
+        let latest_note = db
+            .get_note_by_id(&params.note_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "笔记不存在".to_string())?;
+        item.output_present = detect_output_presence(&latest_note, &definition.item_key, db);
+
+        if item.selected {
+            item.status = NoteInitializationItemStatus::Queued;
+            item.last_error = None;
+            item.started_at = None;
+            item.completed_at = None;
+            item.last_model_id = Some(resolved_model_id.clone());
+        }
+
+        item = upsert_item(db, &item)?;
+        item_map.insert(item.item_key.clone(), item);
+    }
+
+    db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
+        note_id: params.note_id.clone(),
+        status: NoteInitializationRunStatus::Running,
+        selected_items: expanded_selected.iter().cloned().collect(),
+        locked_items: auto_locked.iter().cloned().collect(),
+        model_override_id: model_override_id.clone(),
+        last_error: None,
+        started_at: Some(chrono::Local::now().to_rfc3339()),
+        completed_at: None,
+    })
+    .map_err(|e| e.to_string())?;
+
+    let mut completed = 0usize;
+    let mut skipped = 0usize;
+    let mut failed = 0usize;
+
+    let mut runtime_status: HashMap<String, NoteInitializationItemStatus> = HashMap::new();
+    for item in item_map.values() {
+        runtime_status.insert(item.item_key.clone(), item.status.clone());
+    }
+
+    for (step_index, definition) in execution_plan.iter().enumerate() {
         if is_aborted(&abort_flag) {
+            mark_remaining_as_canceled(
+                db,
+                &execution_plan,
+                step_index,
+                &mut item_map,
+                &mut runtime_status,
+                &resolved_model_id,
+            )?;
+
+            db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
+                note_id: params.note_id.clone(),
+                status: NoteInitializationRunStatus::Canceled,
+                selected_items: expanded_selected.iter().cloned().collect(),
+                locked_items: auto_locked.iter().cloned().collect(),
+                model_override_id: model_override_id.clone(),
+                last_error: Some("用户取消初始化任务".to_string()),
+                started_at: None,
+                completed_at: Some(chrono::Local::now().to_rfc3339()),
+            })
+            .map_err(|e| e.to_string())?;
+
             let _ = app.emit(event_name, NoteInitializationEvent::Aborted);
             return Ok(());
         }
 
-        let step_name = step.display_name().to_string();
+        let step_key = definition.item_key.clone();
+        let step_name = definition.display_name.clone();
 
-        // 发送步骤开始事件
         let _ = app.emit(
             event_name,
             NoteInitializationEvent::StepStarting {
-                step,
+                step: step_key.clone(),
                 step_index,
                 step_name: step_name.clone(),
             },
         );
 
-        // 执行步骤
-        let result = execute_step(
-            &app,
+        let mut item = item_map
+            .get(&step_key)
+            .cloned()
+            .ok_or_else(|| format!("初始化项目不存在: {}", step_key))?;
+
+        // 依赖失败时阻塞
+        let blocking_dependencies: Vec<String> = item
+            .depends_on
+            .iter()
+            .filter(|dep| {
+                runtime_status
+                    .get(*dep)
+                    .is_some_and(is_failure_like_status)
+            })
+            .cloned()
+            .collect();
+
+        if !blocking_dependencies.is_empty() {
+            let reason = format!("依赖项失败: {}", blocking_dependencies.join(", "));
+            item.status = NoteInitializationItemStatus::Blocked;
+            item.last_error = Some(reason.clone());
+            item.started_at = Some(chrono::Local::now().to_rfc3339());
+            item.completed_at = Some(chrono::Local::now().to_rfc3339());
+            item.last_model_id = Some(resolved_model_id.clone());
+            item = upsert_item(db, &item)?;
+            item_map.insert(step_key.clone(), item);
+            runtime_status.insert(step_key.clone(), NoteInitializationItemStatus::Blocked);
+
+            failed += 1;
+            let _ = app.emit(
+                event_name,
+                NoteInitializationEvent::StepFailed {
+                    step: step_key,
+                    step_index,
+                    step_name,
+                    error: reason,
+                },
+            );
+            continue;
+        }
+
+        let config = get_item_config(&item, definition);
+        let regenerate = config_regenerate(&config);
+
+        let latest_note = db
+            .get_note_by_id(&params.note_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "笔记不存在".to_string())?;
+        let output_present = detect_output_presence(&latest_note, &definition.item_key, db);
+
+        if output_present && !regenerate {
+            item.status = NoteInitializationItemStatus::Skipped;
+            item.output_present = true;
+            item.last_error = None;
+            item.started_at = Some(chrono::Local::now().to_rfc3339());
+            item.completed_at = Some(chrono::Local::now().to_rfc3339());
+            item.last_model_id = Some(resolved_model_id.clone());
+            item = upsert_item(db, &item)?;
+            item_map.insert(step_key.clone(), item);
+            runtime_status.insert(step_key.clone(), NoteInitializationItemStatus::Skipped);
+
+            skipped += 1;
+            let _ = app.emit(
+                event_name,
+                NoteInitializationEvent::StepSkipped {
+                    step: step_key,
+                    step_index,
+                    step_name,
+                    reason: "已有结果，已跳过".to_string(),
+                },
+            );
+            continue;
+        }
+
+        item.status = NoteInitializationItemStatus::Running;
+        item.started_at = Some(chrono::Local::now().to_rfc3339());
+        item.completed_at = None;
+        item.last_error = None;
+        item.last_model_id = Some(resolved_model_id.clone());
+        item = upsert_item(db, &item)?;
+        item_map.insert(step_key.clone(), item.clone());
+        runtime_status.insert(step_key.clone(), NoteInitializationItemStatus::Running);
+
+        let _ = app.emit(
             event_name,
-            &params,
-            &note,
-            step,
-            has_subtitle,
+            NoteInitializationEvent::StepProgress {
+                step: step_key.clone(),
+                message: format!("正在执行{}...", step_name),
+            },
+        );
+
+        let result = execute_item(
+            &app,
+            &mut context,
+            &config,
+            &definition.item_key,
             &abort_flag,
-            &mut chapter_data,
         )
         .await;
 
-        // 处理结果
-        match result {
-            StepResult::Completed => {
-                completed += 1;
-                // 更新数据库中的 init_status
-                let new_status = (step_index + 1) as i32;
-                let _ = db.update_note_init_status(&params.note_id, new_status);
+        let latest_note = db
+            .get_note_by_id(&params.note_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| "笔记不存在".to_string())?;
+        let latest_output_present = detect_output_presence(&latest_note, &definition.item_key, db);
 
+        match result {
+            ItemExecutionResult::Completed => {
+                item.status = NoteInitializationItemStatus::Completed;
+                item.output_present = latest_output_present;
+                item.last_error = None;
+                item.completed_at = Some(chrono::Local::now().to_rfc3339());
+                item.last_model_id = Some(resolved_model_id.clone());
+                item = upsert_item(db, &item)?;
+                item_map.insert(step_key.clone(), item);
+                runtime_status.insert(step_key.clone(), NoteInitializationItemStatus::Completed);
+
+                completed += 1;
                 let _ = app.emit(
                     event_name,
                     NoteInitializationEvent::StepCompleted {
-                        step,
+                        step: step_key,
                         step_index,
                         step_name,
                     },
                 );
             }
-            StepResult::Skipped(reason) => {
-                skipped += 1;
-                // 跳过也算完成该步骤，更新状态
-                let new_status = (step_index + 1) as i32;
-                let _ = db.update_note_init_status(&params.note_id, new_status);
+            ItemExecutionResult::Skipped(reason) => {
+                item.status = NoteInitializationItemStatus::Skipped;
+                item.output_present = latest_output_present;
+                item.last_error = None;
+                item.completed_at = Some(chrono::Local::now().to_rfc3339());
+                item.last_model_id = Some(resolved_model_id.clone());
+                item = upsert_item(db, &item)?;
+                item_map.insert(step_key.clone(), item);
+                runtime_status.insert(step_key.clone(), NoteInitializationItemStatus::Skipped);
 
+                skipped += 1;
                 let _ = app.emit(
                     event_name,
                     NoteInitializationEvent::StepSkipped {
-                        step,
+                        step: step_key,
                         step_index,
                         step_name,
                         reason,
                     },
                 );
             }
-            StepResult::Failed(error) => {
+            ItemExecutionResult::Failed(error) => {
+                item.status = NoteInitializationItemStatus::Failed;
+                item.output_present = latest_output_present;
+                item.last_error = Some(error.clone());
+                item.completed_at = Some(chrono::Local::now().to_rfc3339());
+                item.last_model_id = Some(resolved_model_id.clone());
+                item = upsert_item(db, &item)?;
+                item_map.insert(step_key.clone(), item);
+                runtime_status.insert(step_key.clone(), NoteInitializationItemStatus::Failed);
+
                 failed += 1;
-                // 失败时不更新 init_status，允许下次从此步骤重试
                 let _ = app.emit(
                     event_name,
                     NoteInitializationEvent::StepFailed {
-                        step,
+                        step: step_key,
                         step_index,
                         step_name,
                         error,
@@ -411,468 +806,331 @@ async fn run_initialization(
                 );
             }
         }
-
-        if step == InitializationStep::SubtitleGeneration {
-            if let Ok(Some(updated_note)) = db.get_note_by_id(&params.note_id) {
-                params.subtitle_path = updated_note.subtitle_path.clone();
-                has_subtitle = params.subtitle_path.is_some();
-            }
-        }
     }
 
-    // 发送完成事件
+    let final_run_status = if failed == 0 {
+        NoteInitializationRunStatus::Completed
+    } else if completed == 0 && skipped == 0 {
+        NoteInitializationRunStatus::Failed
+    } else {
+        NoteInitializationRunStatus::PartialFailed
+    };
+
+    db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
+        note_id: params.note_id.clone(),
+        status: final_run_status,
+        selected_items: expanded_selected.iter().cloned().collect(),
+        locked_items: auto_locked.iter().cloned().collect(),
+        model_override_id: model_override_id,
+        last_error: if failed > 0 {
+            Some(format!("初始化完成，失败项: {}", failed))
+        } else {
+            None
+        },
+        started_at: None,
+        completed_at: Some(chrono::Local::now().to_rfc3339()),
+    })
+    .map_err(|e| e.to_string())?;
+
     let _ = app.emit(
         event_name,
         NoteInitializationEvent::Completed {
             completed,
             skipped,
             failed,
-            total: 7,
+            total: execution_plan.len(),
         },
     );
 
     Ok(())
 }
 
-/// 执行单个步骤
-async fn execute_step(
+// ============================================================================
+// item 执行器
+// ============================================================================
+
+async fn execute_item(
     app: &AppHandle,
-    event_name: &str,
-    params: &InitializationParams,
-    note: &crate::db::Note,
-    step: InitializationStep,
-    has_subtitle: bool,
+    context: &mut ExecutionContext,
+    config: &Value,
+    item_key: &str,
     abort_flag: &Arc<AtomicBool>,
-    chapter_data: &mut Option<DetailedReadingData>,
-) -> StepResult {
-    match step {
-        InitializationStep::SubtitleGeneration => {
-            execute_subtitle_generation_step(app, event_name, params, note, abort_flag).await
-        }
-        InitializationStep::Questions => {
-            execute_questions_step(app, event_name, params, has_subtitle, abort_flag).await
-        }
-        InitializationStep::FullSummary => {
-            execute_full_summary_step(app, event_name, params, has_subtitle, abort_flag).await
-        }
-        InitializationStep::Chapters => {
-            execute_chapters_step(app, event_name, params, abort_flag, chapter_data).await
-        }
-        InitializationStep::SubtitleOptimization => {
-            execute_subtitle_optimization_step(
+) -> ItemExecutionResult {
+    if is_aborted(abort_flag) {
+        return ItemExecutionResult::Failed("已中止".to_string());
+    }
+
+    match item_key {
+        "subtitle_generation" => execute_subtitle_generation(app, context, abort_flag).await,
+        "suggested_questions" => execute_suggested_questions(context, abort_flag).await,
+        "full_summary" => {
+            execute_note_tab_generation(
                 app,
-                event_name,
-                params,
-                chapter_data,
-                abort_flag,
+                context,
+                config,
+                note_generation::TabType::FullSummary,
             )
             .await
         }
-        InitializationStep::Highlights => {
-            execute_highlights_step(app, event_name, params, note, has_subtitle, abort_flag).await
+        "detailed_reading" => {
+            execute_note_tab_generation(
+                app,
+                context,
+                config,
+                note_generation::TabType::DetailedReading,
+            )
+            .await
         }
-        InitializationStep::Flashcards => {
-            execute_flashcards_step(app, event_name, params, has_subtitle, abort_flag).await
+        "subtitle_optimization" => execute_subtitle_optimization(app, context).await,
+        "highlights" => execute_highlights(app, context, config).await,
+        "flashcards" => execute_flashcards(app, context).await,
+        "visual_summary" => execute_visual_summary(context, config).await,
+        "custom_summary" => {
+            execute_note_tab_generation(
+                app,
+                context,
+                config,
+                note_generation::TabType::CustomSummary,
+            )
+            .await
         }
+        "ai_note" => {
+            execute_note_tab_generation(app, context, config, note_generation::TabType::AiNote).await
+        }
+        "panoramic_blueprint" => execute_panoramic_blueprint(app, context, abort_flag).await,
+        _ => ItemExecutionResult::Failed(format!("未知初始化项目: {}", item_key)),
     }
 }
 
-// ============================================================================
-// 步骤实现
-// ============================================================================
-
-/// 步骤0: 字幕生成
-async fn execute_subtitle_generation_step(
+async fn execute_subtitle_generation(
     app: &AppHandle,
-    event_name: &str,
-    params: &InitializationParams,
-    note: &crate::db::Note,
+    context: &mut ExecutionContext,
     abort_flag: &Arc<AtomicBool>,
-) -> StepResult {
-    if params.subtitle_path.is_some() || note.subtitle_path.is_some() {
-        return StepResult::Skipped("已存在字幕".to_string());
-    }
-
-    let _ = app.emit(
-        event_name,
-        NoteInitializationEvent::StepProgress {
-            step: InitializationStep::SubtitleGeneration,
-            message: "正在生成字幕...".to_string(),
-        },
-    );
-
+) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
-        None => return StepResult::Failed("数据库未初始化".to_string()),
+        None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
     };
+
+    if let Some(subtitle_path) = resolve_subtitle_path(context, db) {
+        if !subtitle_path.trim().is_empty() {
+            return ItemExecutionResult::Skipped("已存在字幕".to_string());
+        }
+    }
 
     let subtitle_path = match bcut_asr::transcribe_video_to_srt(
         app,
-        &params.note_id,
-        &params.video_path,
+        &context.note_id,
+        &context.video_path,
         abort_flag,
     )
     .await
     {
         Ok(path) => path,
-        Err(e) => {
+        Err(err) => {
             if is_aborted(abort_flag) {
-                return StepResult::Failed("已中止".to_string());
+                return ItemExecutionResult::Failed("已中止".to_string());
             }
-            return StepResult::Failed(format!("自动转录失败: {}", e));
+            return ItemExecutionResult::Failed(format!("自动转录失败: {}", err));
         }
     };
 
-    if let Ok(Some(mut note)) = db.get_note_by_id(&params.note_id) {
-        note.subtitle_path = Some(subtitle_path);
-        if let Err(e) = db.update_note(&note) {
-            return StepResult::Failed(format!("更新字幕路径失败: {}", e));
+    match db.get_note_by_id(&context.note_id) {
+        Ok(Some(mut note)) => {
+            note.subtitle_path = Some(subtitle_path.clone());
+            if let Err(err) = db.update_note(&note) {
+                return ItemExecutionResult::Failed(format!("更新字幕路径失败: {}", err));
+            }
+            context.subtitle_path = Some(subtitle_path);
+            ItemExecutionResult::Completed
         }
+        Ok(None) => ItemExecutionResult::Failed("笔记不存在".to_string()),
+        Err(err) => ItemExecutionResult::Failed(format!("获取笔记失败: {}", err)),
     }
-
-    StepResult::Completed
 }
 
-/// 步骤1: 推荐问题生成
-async fn execute_questions_step(
-    app: &AppHandle,
-    event_name: &str,
-    params: &InitializationParams,
-    has_subtitle: bool,
+async fn execute_suggested_questions(
+    context: &mut ExecutionContext,
     abort_flag: &Arc<AtomicBool>,
-) -> StepResult {
-    if !has_subtitle {
-        return StepResult::Skipped("无字幕文件".to_string());
-    }
-
-    let _ = app.emit(
-        event_name,
-        NoteInitializationEvent::StepProgress {
-            step: InitializationStep::Questions,
-            message: "正在生成推荐问题...".to_string(),
-        },
-    );
-
+) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
-        None => return StepResult::Failed("数据库未初始化".to_string()),
+        None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
     };
 
-    // 获取笔记
-    let note = match db.get_note_by_id(&params.note_id) {
-        Ok(Some(n)) => n,
-        Ok(None) => return StepResult::Failed("笔记不存在".to_string()),
-        Err(e) => return StepResult::Failed(format!("获取笔记失败: {}", e)),
+    let subtitle_path = match resolve_subtitle_path(context, db) {
+        Some(path) if !path.trim().is_empty() => path,
+        _ => return ItemExecutionResult::Skipped("无字幕文件".to_string()),
     };
 
-    // 检查字幕和模型
-    let subtitle_path = match &note.subtitle_path {
-        Some(p) => p.clone(),
-        None => return StepResult::Skipped("无字幕文件".to_string()),
-    };
-
-    let model_id = match note.model_id {
-        Some(id) => id,
-        None => return StepResult::Failed("未配置AI模型".to_string()),
-    };
-
-    // 生成问题
-    match chat::generate_suggested_questions(db, &subtitle_path, &model_id, abort_flag).await {
+    match chat::generate_suggested_questions(db, &subtitle_path, &context.model_id, abort_flag).await {
         Ok(questions) => {
-            // 保存到数据库
-            if let Ok(questions_json) = serde_json::to_string(&questions) {
-                let _ = db.update_note_questions(&params.note_id, &questions_json);
+            match serde_json::to_string(&questions) {
+                Ok(questions_json) => {
+                    if let Err(err) = db.update_note_questions(&context.note_id, &questions_json) {
+                        ItemExecutionResult::Failed(format!("保存推荐问题失败: {}", err))
+                    } else {
+                        ItemExecutionResult::Completed
+                    }
+                }
+                Err(err) => ItemExecutionResult::Failed(format!("序列化推荐问题失败: {}", err)),
             }
-            StepResult::Completed
         }
-        Err(e) => {
-            // 使用默认问题
+        Err(err) => {
+            if is_aborted(abort_flag) {
+                return ItemExecutionResult::Failed("已中止".to_string());
+            }
+
+            // 与旧行为保持一致：失败时写入默认问题，按完成处理
             let default_questions = vec![
                 "这个视频的核心内容是什么?".to_string(),
                 "有哪些关键知识点?".to_string(),
                 "如何在实际项目中应用?".to_string(),
             ];
-            if let Ok(questions_json) = serde_json::to_string(&default_questions) {
-                let _ = db.update_note_questions(&params.note_id, &questions_json);
+            if let Ok(default_json) = serde_json::to_string(&default_questions) {
+                let _ = db.update_note_questions(&context.note_id, &default_json);
             }
-            tracing::warn!("[初始化] 问题生成失败，使用默认问题: {}", e);
-            StepResult::Completed // 使用默认问题也算完成
+            tracing::warn!("[初始化] 推荐问题生成失败，已写入默认问题: {}", err);
+            ItemExecutionResult::Completed
         }
     }
 }
 
-/// 步骤2: 全文总结
-async fn execute_full_summary_step(
+async fn execute_note_tab_generation(
     app: &AppHandle,
-    event_name: &str,
-    params: &InitializationParams,
-    has_subtitle: bool,
-    abort_flag: &Arc<AtomicBool>,
-) -> StepResult {
-    if !has_subtitle {
-        return StepResult::Skipped("无字幕文件".to_string());
-    }
-
-    let _ = app.emit(
-        event_name,
-        NoteInitializationEvent::StepProgress {
-            step: InitializationStep::FullSummary,
-            message: "正在生成全文总结...".to_string(),
-        },
-    );
-
+    context: &mut ExecutionContext,
+    config: &Value,
+    tab_type: note_generation::TabType,
+) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
-        None => return StepResult::Failed("数据库未初始化".to_string()),
+        None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
     };
 
-    // 使用 note_generation 模块生成全文总结
-    let generation_id = format!("init-summary-{}", uuid::Uuid::new_v4());
-
-    // 默认配置提示词（与前端弹框默认配置一致：中文、显示Emoji、不显示时间戳、5个要点、30字句子）
-    let default_prompt = r#"你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
-
-输出要求：
-1. 使用 Markdown 格式输出（不要使用代码块标记）
-2. 必须使用中文输出所有内容
-3. 使用自然连贯的段落式写作，禁止逐行罗列或一行一句的碎片化风格
-4. 严格按照以下格式输出：
-
-# 摘要
-用3-5句连贯的话概括视频的主题、核心论点和关键结论，每句话不超过30字，写成一个完整的自然段落。
-
-# 核心亮点
-提取最重要的5个知识点/亮点，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）
-
-## 🔥 亮点标题1
-用3-5句话展开描述：这个亮点讲了什么、为什么重要、有什么实际意义或启发。写成自然段落，不要逐条罗列。
-
-## 💡 亮点标题2
-用3-5句话展开描述：这个亮点讲了什么、为什么重要、有什么实际意义或启发。写成自然段落，不要逐条罗列。
-
-（继续提取5个亮点）
-
-# 关键术语
-- **术语1**：解释
-- **术语2**：解释
-
-视频字幕内容："#;
+    // 依赖字幕的项目在入口层再保险
+    if matches!(
+        tab_type,
+        note_generation::TabType::FullSummary
+            | note_generation::TabType::DetailedReading
+            | note_generation::TabType::CustomSummary
+            | note_generation::TabType::AiNote
+    ) {
+        if resolve_subtitle_path(context, db).is_none() {
+            return ItemExecutionResult::Skipped("无字幕文件".to_string());
+        }
+    }
 
     let request = note_generation::GenerateNoteRequest {
-        note_id: params.note_id.clone(),
-        model_id: params.model_id.clone(),
+        note_id: context.note_id.clone(),
+        model_id: context.model_id.clone(),
         options: note_generation::GenerationOptions {
             concurrent: true,
-            tabs_to_generate: vec![note_generation::TabType::FullSummary],
-            regenerate: true,
+            tabs_to_generate: vec![tab_type],
+            regenerate: config_regenerate(config),
             concurrent_limit: 1,
-            style: None,
-            custom_prompt: Some(default_prompt.to_string()),
-            screenshot_density: None,
+            style: config_string(config, "style"),
+            custom_prompt: config_string(config, "custom_prompt"),
+            screenshot_density: config_string(config, "screenshot_density"),
+            persist_model_id: context.persist_model_id,
         },
     };
 
-    match note_generation::generate_note(
-        app.clone(),
-        db,
-        generation_id.clone(),
-        request,
-    )
-    .await
-    {
-        Ok(_) => StepResult::Completed,
-        Err(e) => {
-            if is_aborted(abort_flag) {
-                StepResult::Failed("已中止".to_string())
-            } else {
-                StepResult::Failed(e)
-            }
-        }
+    let generation_id = format!("init-tab-{}", uuid::Uuid::new_v4());
+    match note_generation::generate_note(app.clone(), db, generation_id, request).await {
+        Ok(_) => ItemExecutionResult::Completed,
+        Err(err) => ItemExecutionResult::Failed(err),
     }
 }
 
-/// 步骤3: 章节生成
-async fn execute_chapters_step(
+async fn execute_subtitle_optimization(
     app: &AppHandle,
-    event_name: &str,
-    params: &InitializationParams,
-    abort_flag: &Arc<AtomicBool>,
-    chapter_data_out: &mut Option<DetailedReadingData>,
-) -> StepResult {
-    let subtitle_path = match &params.subtitle_path {
-        Some(p) => p.clone(),
-        None => return StepResult::Skipped("无字幕文件".to_string()),
-    };
-
-    let _ = app.emit(
-        event_name,
-        NoteInitializationEvent::StepProgress {
-            step: InitializationStep::Chapters,
-            message: "正在生成原文细读...".to_string(),
-        },
-    );
-
+    context: &mut ExecutionContext,
+) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
-        None => return StepResult::Failed("数据库未初始化".to_string()),
+        None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
     };
 
-    // 获取 AI 配置
-    let ai_config = match db.get_ai_config_by_id(&params.model_id) {
-        Ok(Some(config)) => config,
-        Ok(None) => return StepResult::Failed("AI模型未找到".to_string()),
-        Err(e) => return StepResult::Failed(format!("获取AI配置失败: {}", e)),
+    let subtitle_path = match resolve_subtitle_path(context, db) {
+        Some(path) if !path.trim().is_empty() => path,
+        _ => return ItemExecutionResult::Skipped("无字幕文件".to_string()),
     };
 
-    // 解析字幕
-    let subtitle_entries = match crate::subtitle::parse_subtitle_file(&subtitle_path) {
-        Ok(entries) => entries,
-        Err(e) => return StepResult::Failed(format!("解析字幕失败: {}", e)),
+    let note = match db.get_note_by_id(&context.note_id) {
+        Ok(Some(note)) => note,
+        Ok(None) => return ItemExecutionResult::Failed("笔记不存在".to_string()),
+        Err(err) => return ItemExecutionResult::Failed(format!("读取笔记失败: {}", err)),
     };
 
-    let generation_id = format!("init-chapters-{}", uuid::Uuid::new_v4());
-    let event_name_detailed = format!("chapter-generation-{}", generation_id);
-
-    // 注册中止标志
-    let abort_flag_detailed = crate::ai_pool::get_ai_pool_manager()
-        .register_abort_flag(generation_id.clone())
-        .await;
-
-    match crate::note_generation::generate_detailed_reading_chapters(
-        app,
-        &event_name_detailed,
-        &ai_config,
-        &subtitle_entries,
-        &params.video_path,
-        &params.note_id,
-        &abort_flag_detailed,
-    )
-    .await
-    {
-        Ok(data) => {
-            // 保存步骤输出，供后续步骤复用
-            *chapter_data_out = Some(data.clone());
-
-            // 保存数据到 detailed_reading 字段
-            if let Ok(json) = serde_json::to_string(&data) {
-                if let Ok(Some(mut note)) = db.get_note_by_id(&params.note_id) {
-                    note.detailed_reading = Some(json);
-                    let _ = db.update_note(&note);
-                }
-            }
-            // 清理中止标志
-            crate::ai_pool::get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
-            StepResult::Completed
-        }
-        Err(e) => {
-            crate::ai_pool::get_ai_pool_manager().cleanup_abort_flag(&generation_id).await;
-            if is_aborted(abort_flag) {
-                StepResult::Failed("已中止".to_string())
-            } else {
-                StepResult::Failed(e)
-            }
-        }
-    }
-}
-
-/// 步骤4: 字幕优化
-async fn execute_subtitle_optimization_step(
-    app: &AppHandle,
-    event_name: &str,
-    params: &InitializationParams,
-    _chapter_data: &Option<DetailedReadingData>,
-    abort_flag: &Arc<AtomicBool>,
-) -> StepResult {
-    let db = match DATABASE.get() {
-        Some(db) => db,
-        None => return StepResult::Failed("数据库未初始化".to_string()),
+    let detailed_reading_json = match &note.detailed_reading {
+        Some(value) if !value.trim().is_empty() => value,
+        _ => return ItemExecutionResult::Skipped("无章节数据".to_string()),
     };
 
-    // 从数据库读取 detailed_reading 并提取章节信息
-    let note = match db.get_note_by_id(&params.note_id) {
-        Ok(Some(n)) => n,
-        Ok(None) => return StepResult::Failed("笔记未找到".to_string()),
-        Err(e) => return StepResult::Failed(format!("读取笔记失败: {}", e)),
+    let detailed_reading = match serde_json::from_str::<DetailedReadingData>(detailed_reading_json) {
+        Ok(data) => data,
+        Err(_) => return ItemExecutionResult::Skipped("章节数据格式无效".to_string()),
     };
 
-    let chapters = match &note.detailed_reading {
-        Some(json_str) => {
-            match serde_json::from_str::<crate::chapter::DetailedReadingData>(json_str) {
-                Ok(data) => {
-                    // 转换为 Chapter 列表供字幕优化使用
-                    data.chapters.iter().map(|dc| crate::chapter::Chapter {
-                        id: dc.id.clone(),
-                        title: dc.title.clone(),
-                        start_time: dc.start_time,
-                        end_time: dc.end_time,
-                        content: String::new(), // 字幕优化不需要 content
-                        screenshot_path: dc.screenshot_path.clone(),
-                        level: None,
-                        parent_id: None,
-                    }).collect::<Vec<_>>()
-                }
-                Err(_) => return StepResult::Skipped("无章节数据".to_string()),
-            }
-        }
-        None => return StepResult::Skipped("无章节数据".to_string()),
-    };
+    let chapters: Vec<Chapter> = detailed_reading
+        .chapters
+        .iter()
+        .map(|dc| Chapter {
+            id: dc.id.clone(),
+            title: dc.title.clone(),
+            start_time: dc.start_time,
+            end_time: dc.end_time,
+            content: String::new(),
+            screenshot_path: dc.screenshot_path.clone(),
+            level: None,
+            parent_id: None,
+        })
+        .collect();
 
     if chapters.is_empty() {
-        return StepResult::Skipped("章节列表为空".to_string());
+        return ItemExecutionResult::Skipped("章节列表为空".to_string());
     }
 
-    // 需要字幕文件
-    let subtitle_path = match &params.subtitle_path {
-        Some(p) => p.clone(),
-        None => return StepResult::Skipped("无字幕文件".to_string()),
+    let ai_config = match db.get_ai_config_by_id(&context.model_id) {
+        Ok(Some(config)) => config,
+        Ok(None) => return ItemExecutionResult::Failed("AI配置不存在".to_string()),
+        Err(err) => return ItemExecutionResult::Failed(format!("获取AI配置失败: {}", err)),
     };
 
-    let _ = app.emit(
-        event_name,
-        NoteInitializationEvent::StepProgress {
-            step: InitializationStep::SubtitleOptimization,
-            message: "正在优化字幕...".to_string(),
-        },
-    );
-
-    // 获取 AI 配置
-    let config = match db.get_ai_config_by_id(&params.model_id) {
-        Ok(Some(c)) => c,
-        Ok(None) => return StepResult::Failed("AI配置不存在".to_string()),
-        Err(e) => return StepResult::Failed(format!("获取AI配置失败: {}", e)),
-    };
-
-    // 解析原始字幕文件（与前端按钮使用相同的逻辑）
     let subtitle_entries = match crate::subtitle::parse_subtitle_file(&subtitle_path) {
         Ok(entries) => entries,
-        Err(e) => return StepResult::Failed(format!("解析字幕失败: {}", e)),
+        Err(err) => return ItemExecutionResult::Failed(format!("解析字幕失败: {}", err)),
     };
 
     if subtitle_entries.is_empty() {
-        return StepResult::Skipped("字幕内容为空".to_string());
+        return ItemExecutionResult::Skipped("字幕内容为空".to_string());
     }
 
-    // 按章节时间范围过滤字幕，构建优化输入（与前端逻辑一致）
     let chapter_inputs: Vec<ChapterSubtitleInput> = chapters
         .iter()
-        .filter_map(|ch| {
-            // 过滤出当前章节时间范围内的字幕
+        .filter_map(|chapter| {
             let filtered: Vec<_> = subtitle_entries
                 .iter()
-                .filter(|sub| sub.start_time >= ch.start_time && sub.start_time < ch.end_time)
+                .filter(|sub| {
+                    sub.start_time >= chapter.start_time && sub.start_time < chapter.end_time
+                })
                 .collect();
 
             if filtered.is_empty() {
                 return None;
             }
 
-            // 检查是否有双语字幕
-            let has_bilingual = filtered.iter().any(|sub| sub.second_language_text.is_some());
+            let has_bilingual = filtered
+                .iter()
+                .any(|sub| sub.second_language_text.is_some());
 
             let subtitle_text = if has_bilingual {
-                // 双语字幕：合并两种语言
-                let primary_text: String = filtered.iter().map(|sub| sub.text.as_str()).collect::<Vec<_>>().join(" ");
-                let secondary_text: String = filtered
+                let primary_text = filtered
+                    .iter()
+                    .map(|sub| sub.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let secondary_text = filtered
                     .iter()
                     .filter_map(|sub| sub.second_language_text.as_ref())
                     .map(|s| s.as_str())
@@ -880,8 +1138,11 @@ async fn execute_subtitle_optimization_step(
                     .join(" ");
                 format!("{}\n\n{}", primary_text, secondary_text)
             } else {
-                // 单语字幕：直接拼接
-                filtered.iter().map(|sub| sub.text.as_str()).collect::<Vec<_>>().join(" ")
+                filtered
+                    .iter()
+                    .map(|sub| sub.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
             };
 
             if subtitle_text.trim().is_empty() {
@@ -889,7 +1150,7 @@ async fn execute_subtitle_optimization_step(
             }
 
             Some(ChapterSubtitleInput {
-                chapter_id: ch.id.clone(),
+                chapter_id: chapter.id.clone(),
                 subtitle_text,
                 has_bilingual,
             })
@@ -897,133 +1158,288 @@ async fn execute_subtitle_optimization_step(
         .collect();
 
     if chapter_inputs.is_empty() {
-        return StepResult::Skipped("没有需要优化的字幕内容".to_string());
+        return ItemExecutionResult::Skipped("没有需要优化的字幕内容".to_string());
     }
 
     let generation_id = format!("init-subtitle-opt-{}", uuid::Uuid::new_v4());
-
-    // 直接调用优化函数（同步等待完成）
     match crate::subtitle_optimizer::optimize_chapters_direct(
         app.clone(),
         generation_id,
-        params.note_id.clone(),
-        config,
+        context.note_id.clone(),
+        ai_config,
         chapter_inputs,
     )
     .await
     {
-        Ok(_) => {
-            StepResult::Completed
-        }
-        Err(e) => {
-            if is_aborted(abort_flag) {
-                StepResult::Failed("已中止".to_string())
-            } else {
-                StepResult::Failed(e)
-            }
-        }
+        Ok(_) => ItemExecutionResult::Completed,
+        Err(err) => ItemExecutionResult::Failed(err),
     }
 }
 
-/// 步骤5: 高光笔记
-async fn execute_highlights_step(
+async fn execute_highlights(
     app: &AppHandle,
-    event_name: &str,
-    params: &InitializationParams,
-    _note: &crate::db::Note,
-    has_subtitle: bool,
-    abort_flag: &Arc<AtomicBool>,
-) -> StepResult {
-    if !has_subtitle {
-        return StepResult::Skipped("无字幕文件".to_string());
-    }
-
-    let subtitle_path = match &params.subtitle_path {
-        Some(p) => p.clone(),
-        None => return StepResult::Skipped("无字幕文件".to_string()),
-    };
-
-    let _ = app.emit(
-        event_name,
-        NoteInitializationEvent::StepProgress {
-            step: InitializationStep::Highlights,
-            message: "正在生成高光笔记...".to_string(),
-        },
-    );
-
+    context: &mut ExecutionContext,
+    config: &Value,
+) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
-        None => return StepResult::Failed("数据库未初始化".to_string()),
+        None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
     };
 
-    let generation_id = format!("init-highlights-{}", uuid::Uuid::new_v4());
+    let subtitle_path = match resolve_subtitle_path(context, db) {
+        Some(path) if !path.trim().is_empty() => path,
+        _ => return ItemExecutionResult::Skipped("无字幕文件".to_string()),
+    };
 
-    // 从字幕文件获取视频时长（最后一条字幕的结束时间）
     let total_duration = crate::subtitle::parse_subtitle_file(&subtitle_path)
         .ok()
         .and_then(|entries| entries.last().map(|e| e.end_time))
         .unwrap_or(3600.0);
 
+    let highlight_type = config_string(config, "highlight_type").unwrap_or_else(|| "default".to_string());
+    let generation_id = format!("init-highlights-{}", uuid::Uuid::new_v4());
+
     match crate::highlight_generation::generate_highlights_direct(
         app.clone(),
         db,
         generation_id,
-        params.note_id.clone(),
-        params.model_id.clone(),
+        context.note_id.clone(),
+        context.model_id.clone(),
         subtitle_path,
-        "default".to_string(),
+        highlight_type,
         total_duration,
     )
     .await
     {
-        Ok(_) => StepResult::Completed,
-        Err(e) => {
-            if is_aborted(abort_flag) {
-                StepResult::Failed("已中止".to_string())
-            } else {
-                StepResult::Failed(e)
-            }
-        }
+        Ok(_) => ItemExecutionResult::Completed,
+        Err(err) => ItemExecutionResult::Failed(err),
     }
 }
 
-/// 步骤6: 闪记卡
-async fn execute_flashcards_step(
-    app: &AppHandle,
-    event_name: &str,
-    params: &InitializationParams,
-    has_subtitle: bool,
-    abort_flag: &Arc<AtomicBool>,
-) -> StepResult {
-    if !has_subtitle {
-        return StepResult::Skipped("无字幕文件".to_string());
+async fn execute_flashcards(app: &AppHandle, context: &mut ExecutionContext) -> ItemExecutionResult {
+    let db = match DATABASE.get() {
+        Some(db) => db,
+        None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
+    };
+
+    if resolve_subtitle_path(context, db).is_none() {
+        return ItemExecutionResult::Skipped("无字幕文件".to_string());
     }
 
-    let _ = app.emit(
-        event_name,
-        NoteInitializationEvent::StepProgress {
-            step: InitializationStep::Flashcards,
-            message: "正在生成闪记卡...".to_string(),
-        },
-    );
-
     let generation_id = format!("init-flashcards-{}", uuid::Uuid::new_v4());
-
     match crate::flashcard_generation::generate_flashcards_direct(
         app.clone(),
         generation_id,
-        params.note_id.clone(),
-        params.model_id.clone(),
+        context.note_id.clone(),
+        context.model_id.clone(),
     )
     .await
     {
-        Ok(_) => StepResult::Completed,
-        Err(e) => {
-            if is_aborted(abort_flag) {
-                StepResult::Failed("已中止".to_string())
-            } else {
-                StepResult::Failed(e)
+        Ok(_) => ItemExecutionResult::Completed,
+        Err(err) => ItemExecutionResult::Failed(err),
+    }
+}
+
+async fn execute_visual_summary(context: &ExecutionContext, config: &Value) -> ItemExecutionResult {
+    let db = match DATABASE.get() {
+        Some(db) => db,
+        None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
+    };
+
+    let mut note = match db.get_note_by_id(&context.note_id) {
+        Ok(Some(note)) => note,
+        Ok(None) => return ItemExecutionResult::Failed("笔记不存在".to_string()),
+        Err(err) => return ItemExecutionResult::Failed(format!("读取笔记失败: {}", err)),
+    };
+
+    if config_regenerate(config)
+        && note
+            .visual_summary
+            .as_ref()
+            .is_some_and(|value| !value.trim().is_empty())
+    {
+        note.visual_summary = None;
+        if let Err(err) = db.update_note(&note) {
+            return ItemExecutionResult::Failed(format!("重置视觉化总结失败: {}", err));
+        }
+    }
+
+    match crate::assemble_and_save_visual_summary(db, &mut note) {
+        Ok(true) => ItemExecutionResult::Completed,
+        Ok(false) => ItemExecutionResult::Skipped("缺少原文细读或可用章节内容".to_string()),
+        Err(err) => ItemExecutionResult::Failed(err),
+    }
+}
+
+async fn execute_panoramic_blueprint(
+    app: &AppHandle,
+    context: &mut ExecutionContext,
+    abort_flag: &Arc<AtomicBool>,
+) -> ItemExecutionResult {
+    let db = match DATABASE.get() {
+        Some(db) => db,
+        None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
+    };
+
+    if resolve_subtitle_path(context, db).is_none() {
+        return ItemExecutionResult::Skipped("无字幕文件".to_string());
+    }
+
+    match crate::blueprint_generation::generate_panoramic_blueprint_direct(
+        app.clone(),
+        context.note_id.clone(),
+        context.model_id.clone(),
+        abort_flag.clone(),
+    )
+    .await
+    {
+        Ok(_) => ItemExecutionResult::Completed,
+        Err(err) => ItemExecutionResult::Failed(err),
+    }
+}
+
+// ============================================================================
+// 工具函数
+// ============================================================================
+
+fn create_default_item(note_id: &str, definition: &InitializationItemDefinition) -> NoteInitializationItem {
+    NoteInitializationItem {
+        id: String::new(),
+        note_id: note_id.to_string(),
+        item_key: definition.item_key.clone(),
+        selected: false,
+        locked: false,
+        status: NoteInitializationItemStatus::Pending,
+        config_json: Some(definition.default_config.to_string()),
+        depends_on: definition.dependencies.clone(),
+        last_model_id: None,
+        last_error: None,
+        output_present: false,
+        started_at: None,
+        completed_at: None,
+        updated_at: String::new(),
+    }
+}
+
+fn upsert_item(db: &crate::db::Database, item: &NoteInitializationItem) -> Result<NoteInitializationItem, String> {
+    db.upsert_note_initialization_item(&UpsertNoteInitializationItemInput {
+        note_id: item.note_id.clone(),
+        item_key: item.item_key.clone(),
+        selected: item.selected,
+        locked: item.locked,
+        status: item.status.clone(),
+        config_json: item.config_json.clone(),
+        depends_on: item.depends_on.clone(),
+        last_model_id: item.last_model_id.clone(),
+        last_error: item.last_error.clone(),
+        output_present: item.output_present,
+        started_at: item.started_at.clone(),
+        completed_at: item.completed_at.clone(),
+    })
+    .map_err(|e| e.to_string())
+}
+
+fn get_item_config(item: &NoteInitializationItem, definition: &InitializationItemDefinition) -> Value {
+    item.config_json
+        .as_ref()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .unwrap_or_else(|| definition.default_config.clone())
+}
+
+fn config_regenerate(config: &Value) -> bool {
+    config
+        .get("regenerate")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn config_string(config: &Value, key: &str) -> Option<String> {
+    config
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
+fn resolve_subtitle_path(
+    context: &mut ExecutionContext,
+    db: &crate::db::Database,
+) -> Option<String> {
+    if let Some(path) = &context.subtitle_path {
+        if !path.trim().is_empty() {
+            return Some(path.clone());
+        }
+    }
+
+    if let Ok(Some(note)) = db.get_note_by_id(&context.note_id) {
+        if let Some(path) = note.subtitle_path {
+            if !path.trim().is_empty() {
+                context.subtitle_path = Some(path.clone());
+                return Some(path);
             }
         }
     }
+
+    None
+}
+
+fn expand_dependencies(
+    explicitly_selected: &HashSet<String>,
+    dependency_map: &HashMap<String, Vec<String>>,
+) -> HashSet<String> {
+    let mut expanded = explicitly_selected.clone();
+    let mut stack: Vec<String> = explicitly_selected.iter().cloned().collect();
+
+    while let Some(item_key) = stack.pop() {
+        if let Some(deps) = dependency_map.get(&item_key) {
+            for dep in deps {
+                if expanded.insert(dep.clone()) {
+                    stack.push(dep.clone());
+                }
+            }
+        }
+    }
+
+    expanded
+}
+
+fn is_failure_like_status(status: &NoteInitializationItemStatus) -> bool {
+    matches!(
+        status,
+        NoteInitializationItemStatus::Failed
+            | NoteInitializationItemStatus::Blocked
+            | NoteInitializationItemStatus::Canceled
+    )
+}
+
+fn mark_remaining_as_canceled(
+    db: &crate::db::Database,
+    execution_plan: &[InitializationItemDefinition],
+    from_index: usize,
+    item_map: &mut HashMap<String, NoteInitializationItem>,
+    runtime_status: &mut HashMap<String, NoteInitializationItemStatus>,
+    model_id: &str,
+) -> Result<(), String> {
+    for definition in execution_plan.iter().skip(from_index) {
+        if let Some(mut item) = item_map.get(&definition.item_key).cloned() {
+            if matches!(
+                item.status,
+                NoteInitializationItemStatus::Queued | NoteInitializationItemStatus::Running
+            ) {
+                item.status = NoteInitializationItemStatus::Canceled;
+                item.last_error = Some("用户取消".to_string());
+                if item.started_at.is_none() {
+                    item.started_at = Some(chrono::Local::now().to_rfc3339());
+                }
+                item.completed_at = Some(chrono::Local::now().to_rfc3339());
+                item.last_model_id = Some(model_id.to_string());
+                item = upsert_item(db, &item)?;
+                item_map.insert(definition.item_key.clone(), item);
+                runtime_status.insert(definition.item_key.clone(), NoteInitializationItemStatus::Canceled);
+            }
+        }
+    }
+
+    Ok(())
 }

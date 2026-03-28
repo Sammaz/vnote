@@ -1,5 +1,5 @@
 import {
-    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, MessageSquareText, Search, HardDrive, ImagePlus, X as XIcon, SlidersHorizontal, Focus, ScanText, RefreshCw
+    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, MessageSquareText, Search, HardDrive, ImagePlus, X as XIcon, SlidersHorizontal, Focus, ScanText, RefreshCw, ListChecks
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
@@ -7,6 +7,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "./context/AppContext";
 import { useSettings } from "./context/SettingsContext";
 import { DataManagementSection } from "./components/Settings/DataManagementSection";
+import { InitializationManagementSection } from "./components/Settings/InitializationManagementSection";
 import { message } from "./utils/message";
 import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptConfig } from "./types";
 
@@ -16,7 +17,7 @@ interface SettingsPageProps {
     onClose: () => void;
 }
 
-type SettingsTab = "general" | "model" | "prompt" | "data-management";
+type SettingsTab = "general" | "model" | "prompt" | "data-management" | "initialization-management";
 type EditingType = "ai" | "embedding" | "reranker" | null;
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
@@ -648,6 +649,18 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         <HardDrive size={16} />
                         数据管理
                     </button>
+                    <button
+                        onClick={() => setActiveTab("initialization-management")}
+                        className={[
+                            "w-full flex items-center gap-3 px-3 py-2.5 text-sm rounded-lg transition-all mt-1 cursor-pointer",
+                            activeTab === "initialization-management"
+                                ? "bg-blue-600 text-white shadow-sm"
+                                : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover",
+                        ].join(" ")}
+                    >
+                        <ListChecks size={16} />
+                        初始化管理
+                    </button>
                 </nav>
             </aside>
 
@@ -661,14 +674,18 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     ? <Bot size={20} />
                                     : activeTab === "prompt"
                                         ? <MessageSquareText size={20} />
-                                        : <HardDrive size={20} />}
+                                        : activeTab === "data-management"
+                                            ? <HardDrive size={20} />
+                                            : <ListChecks size={20} />}
                             {activeTab === "general"
                                 ? "常规设置"
                                 : activeTab === "model"
                                     ? "模型配置"
                                     : activeTab === "prompt"
                                         ? "提示词管理"
-                                        : "数据管理"}
+                                        : activeTab === "data-management"
+                                            ? "数据管理"
+                                            : "初始化管理"}
                         </h2>
                         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
                             {activeTab === "general"
@@ -677,7 +694,9 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     ? "配置对话模型、Embedding 和 Reranker"
                                     : activeTab === "prompt"
                                         ? "创建和管理自定义提示词模板"
-                                        : "统一查看空间占用、分类清理与异常扫描"}
+                                        : activeTab === "data-management"
+                                            ? "统一查看空间占用、分类清理与异常扫描"
+                                            : "手动规划初始化项目并按需执行"}
                         </p>
                     </div>
                     <button
@@ -1128,6 +1147,8 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                     )
                 ) : activeTab === "data-management" ? (
                     <DataManagementSection notes={notes} />
+                ) : activeTab === "initialization-management" ? (
+                    <InitializationManagementSection notes={notes} />
                 ) : editingType ? (
                     // Editor view
                     <>

@@ -266,7 +266,7 @@ pub fn knowledge_base_get_index_status() -> Result<Vec<KnowledgeIndexStatusRespo
             completed_at: status_info.and_then(|s| s.completed_at.clone()),
             error_message: status_info.and_then(|s| s.error_message.clone()),
             needs_reindex,
-            init_completed: note.init_status == 7 || note.model_id.is_none(),
+            init_completed: has_vs,
         });
     }
 

@@ -27,7 +27,6 @@ CREATE TABLE IF NOT EXISTS notes (
     video_path TEXT NOT NULL,
     subtitle_path TEXT,
     model_id TEXT,
-    init_status INTEGER NOT NULL DEFAULT 0,
     full_summary TEXT,
     detailed_reading TEXT,
     highlights TEXT,
@@ -45,6 +44,46 @@ CREATE TABLE IF NOT EXISTS notes (
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
+
+CREATE TABLE IF NOT EXISTS note_initialization_runs (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL CHECK(status IN ('idle', 'queued', 'running', 'completed', 'partial_failed', 'failed', 'canceled')),
+    selected_items_json TEXT NOT NULL DEFAULT '[]',
+    locked_items_json TEXT NOT NULL DEFAULT '[]',
+    model_override_id TEXT,
+    last_error TEXT,
+    started_at TEXT,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_initialization_runs_status ON note_initialization_runs(status);
+CREATE INDEX IF NOT EXISTS idx_note_initialization_runs_updated_at ON note_initialization_runs(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS note_initialization_items (
+    id TEXT PRIMARY KEY,
+    note_id TEXT NOT NULL,
+    item_key TEXT NOT NULL,
+    selected INTEGER NOT NULL DEFAULT 0,
+    locked INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'queued', 'running', 'completed', 'skipped', 'failed', 'blocked', 'canceled')),
+    config_json TEXT,
+    depends_on_json TEXT,
+    last_model_id TEXT,
+    last_error TEXT,
+    output_present INTEGER NOT NULL DEFAULT 0,
+    started_at TEXT,
+    completed_at TEXT,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE,
+    UNIQUE(note_id, item_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_note_initialization_items_note_id ON note_initialization_items(note_id);
+CREATE INDEX IF NOT EXISTS idx_note_initialization_items_status ON note_initialization_items(status);
+CREATE INDEX IF NOT EXISTS idx_note_initialization_items_note_status ON note_initialization_items(note_id, status);
 
 CREATE TABLE IF NOT EXISTS subtitle_chunks (
     id TEXT PRIMARY KEY,

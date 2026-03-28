@@ -1,16 +1,9 @@
 /**
- * 笔记初始化相关类型定义
+ * 笔记初始化相关类型定义（item 级）
  */
 
-/** 初始化步骤枚举 */
-export type InitializationStep =
-  | "subtitle_generation"
-  | "questions"
-  | "full_summary"
-  | "chapters"
-  | "subtitle_optimization"
-  | "highlights"
-  | "flashcards";
+/** 初始化项目键 */
+export type InitializationItemKey = string;
 
 /** 初始化事件类型 */
 export type NoteInitializationEvent =
@@ -22,31 +15,31 @@ export type NoteInitializationEvent =
     }
   | {
       type: "StepStarting";
-      step: InitializationStep;
+      step: InitializationItemKey;
       step_index: number;
       step_name: string;
     }
   | {
       type: "StepProgress";
-      step: InitializationStep;
+      step: InitializationItemKey;
       message: string;
     }
   | {
       type: "StepCompleted";
-      step: InitializationStep;
+      step: InitializationItemKey;
       step_index: number;
       step_name: string;
     }
   | {
       type: "StepSkipped";
-      step: InitializationStep;
+      step: InitializationItemKey;
       step_index: number;
       step_name: string;
       reason: string;
     }
   | {
       type: "StepFailed";
-      step: InitializationStep;
+      step: InitializationItemKey;
       step_index: number;
       step_name: string;
       error: string;
@@ -67,13 +60,13 @@ export type NoteInitializationEvent =
     };
 
 /** 步骤状态 */
-export type StepStatus = "pending" | "running" | "completed" | "skipped" | "failed";
+export type InitializationItemRuntimeStatus = "pending" | "running" | "completed" | "skipped" | "failed";
 
 /** 步骤信息 */
-export interface StepInfo {
-  step: InitializationStep;
+export interface InitializationItemRuntime {
+  step: InitializationItemKey;
   name: string;
-  status: StepStatus;
+  status: InitializationItemRuntimeStatus;
   message?: string;
   error?: string;
   reason?: string;
@@ -84,7 +77,7 @@ export interface InitializationState {
   isInitializing: boolean;
   initializationId: string | null;
   currentStepIndex: number;
-  steps: StepInfo[];
+  steps: InitializationItemRuntime[];
   completed: number;
   skipped: number;
   failed: number;
@@ -92,32 +85,17 @@ export interface InitializationState {
   error: string | null;
 }
 
-/** 步骤信息常量 */
-export const INITIALIZATION_STEPS: Array<{ step: InitializationStep; name: string }> = [
-  { step: "subtitle_generation", name: "字幕生成" },
-  { step: "questions", name: "推荐问题" },
-  { step: "full_summary", name: "全文总结" },
-  { step: "chapters", name: "章节生成" },
-  { step: "subtitle_optimization", name: "字幕优化" },
-  { step: "highlights", name: "高光笔记" },
-  { step: "flashcards", name: "闪记卡" },
-];
-
 /** 创建初始状态 */
 export function createInitialState(): InitializationState {
   return {
     isInitializing: false,
     initializationId: null,
     currentStepIndex: -1,
-    steps: INITIALIZATION_STEPS.map(({ step, name }) => ({
-      step,
-      name,
-      status: "pending" as StepStatus,
-    })),
+    steps: [],
     completed: 0,
     skipped: 0,
     failed: 0,
-    total: 7,
+    total: 0,
     error: null,
   };
 }

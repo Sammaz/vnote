@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
-import { useInitializationQueue } from "../../context/InitializationQueueContext";
+import { useInitializationRuntime } from "../../context/InitializationRuntimeContext";
 import { useCollections } from "../../context/CollectionsContext";
 import { CollectionSection } from "../Collection";
 import { CreateCollectionModal } from "../Collection/CreateCollectionModal";
@@ -128,7 +128,7 @@ interface NoteItemProps {
 // 笔记记录列表项 - 使用 memo 优化避免不必要的重渲染
 const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
   const { setSelectedNoteId, setCurrentView, selectedNoteId, deleteNote, setSelectedFolder, setSelectedCollection, collections, addNoteToCollection } = useApp();
-  const { removeNoteFromQueue } = useInitializationQueue();
+  const { removeNoteFromRuntime } = useInitializationRuntime();
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showCollectionSubmenu, setShowCollectionSubmenu] = useState(false);
@@ -173,8 +173,8 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
 
   const handleConfirmDelete = async () => {
     try {
-      // 先从初始化队列移除（包括中止正在运行的任务）
-      await removeNoteFromQueue(note.id);
+      // 先从初始化运行任务中移除（包括中止正在运行的任务）
+      await removeNoteFromRuntime(note.id);
       await deleteNote(note.id);
       handleCancelDelete();
     } catch (error) {

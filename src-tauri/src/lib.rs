@@ -24,7 +24,7 @@ pub mod storage_paths;
 
 use chat::ChatRequest;
 use data_management::{CleanupPreview, CleanupRequest, CleanupResult, DataManagementOverview, DataManagementScanResult};
-use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest};
+use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteInitializationDetail, NoteInitializationOverview, NoteInitializationRunStatus, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest, UpsertNoteInitializationItemInput, UpsertNoteInitializationRunInput};
 use regex::Regex;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
@@ -1193,6 +1193,7 @@ async fn generate_note_content(
         style: None,
         custom_prompt,
         screenshot_density: None,
+        persist_model_id: true,
     };
 
     let request = GenerateNoteRequest {
@@ -1253,6 +1254,7 @@ async fn generate_ai_note_content(
             style,
             custom_prompt,
             screenshot_density,
+            persist_model_id: true,
         },
     };
 
@@ -1846,20 +1848,81 @@ fn save_highlights_to_note_internal(note_id: &str, highlight_data: &highlight_ge
 
 // Note initialization commands (笔记初始化)
 #[tauri::command]
+fn get_initialization_registry() -> Vec<note_initialization::InitializationItemDefinition> {
+    note_initialization::get_initialization_registry()
+}
+
+#[tauri::command]
+fn get_initialization_overview() -> Result<Vec<NoteInitializationOverview>, String> {
+    let db = get_db();
+    let note_ids: Vec<String> = db
+        .get_all_notes()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(|note| note.id)
+        .collect();
+
+    for note_id in note_ids {
+        note_initialization::ensure_note_initialization_state(&note_id)?;
+    }
+
+    db.get_note_initialization_overview().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn get_note_initialization_plan(note_id: String) -> Result<NoteInitializationDetail, String> {
+    note_initialization::ensure_note_initialization_state(&note_id)?;
+    get_db().get_note_initialization_detail(&note_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn save_note_initialization_plan(
+    note_id: String,
+    selected_items: Vec<String>,
+    locked_items: Vec<String>,
+    model_override_id: Option<String>,
+    items: Vec<UpsertNoteInitializationItemInput>,
+) -> Result<NoteInitializationDetail, String> {
+    note_initialization::ensure_note_initialization_state(&note_id)?;
+    let db = get_db();
+    let normalized_items: Vec<UpsertNoteInitializationItemInput> = items
+        .into_iter()
+        .map(|mut item| {
+            item.note_id = note_id.clone();
+            item
+        })
+        .collect();
+
+    db.replace_note_initialization_items(&note_id, &normalized_items)
+        .map_err(|e| e.to_string())?;
+    db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
+        note_id: note_id.clone(),
+        status: NoteInitializationRunStatus::Idle,
+        selected_items,
+        locked_items,
+        model_override_id,
+        last_error: None,
+        started_at: None,
+        completed_at: None,
+    }).map_err(|e| e.to_string())?;
+
+    db.get_note_initialization_detail(&note_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn initialize_note_data(
     app: AppHandle,
     note_id: String,
     model_id: String,
     video_path: String,
     subtitle_path: Option<String>,
-    start_from_step: Option<usize>,
 ) -> Result<String, String> {
+    note_initialization::ensure_note_initialization_state(&note_id)?;
     let params = note_initialization::InitializationParams {
         note_id,
         model_id,
         video_path,
         subtitle_path,
-        start_from_step,
     };
     note_initialization::start_initialization(app, params).await
 }
@@ -1867,37 +1930,6 @@ async fn initialize_note_data(
 #[tauri::command]
 async fn abort_note_initialization(initialization_id: String) -> Result<(), String> {
     note_initialization::abort_initialization(&initialization_id).await
-}
-
-/// 获取未完成初始化的笔记列表（用于断点恢复）
-#[tauri::command]
-fn get_incomplete_initializations() -> Result<Vec<Note>, String> {
-    get_db().get_incomplete_notes().map_err(|e| e.to_string())
-}
-
-/// 恢复笔记初始化（从断点继续）
-#[tauri::command]
-async fn resume_note_initialization(
-    app: AppHandle,
-    note_id: String,
-) -> Result<String, String> {
-    let db = get_db();
-    let note = db
-        .get_note_by_id(&note_id)
-        .map_err(|e| e.to_string())?
-        .ok_or("笔记不存在")?;
-
-    let model_id = note.model_id.ok_or("笔记未配置AI模型")?;
-
-    let params = note_initialization::InitializationParams {
-        note_id,
-        model_id,
-        video_path: note.video_path,
-        subtitle_path: note.subtitle_path,
-        start_from_step: Some(note.init_status as usize),
-    };
-
-    note_initialization::start_initialization(app, params).await
 }
 
 // Collection commands (合集/资源库)
@@ -2204,10 +2236,12 @@ pub fn run() {
             blueprint_generation::generate_panoramic_blueprint,
             blueprint_generation::abort_blueprint_generation,
             // Note initialization commands
+            get_initialization_registry,
+            get_initialization_overview,
+            get_note_initialization_plan,
+            save_note_initialization_plan,
             initialize_note_data,
             abort_note_initialization,
-            get_incomplete_initializations,
-            resume_note_initialization,
             // Collection commands
             get_collections,
             get_collection,

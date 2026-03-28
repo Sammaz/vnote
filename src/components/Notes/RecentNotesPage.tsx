@@ -3,7 +3,7 @@ import { ArrowLeft, FileText } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
-import { useInitializationQueue } from "../../context/InitializationQueueContext";
+import { useInitializationRuntime } from "../../context/InitializationRuntimeContext";
 import { VirtualizedNoteGrid } from "./VirtualizedNoteGrid";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import type { Note } from "../../types";
@@ -11,7 +11,7 @@ import type { Note } from "../../types";
 export function RecentNotesPage() {
   const { notes, setSelectedNoteId, setCurrentView, deleteNote } = useApp();
   const { expandCollectionPathForNote } = useCollections();
-  const { removeNoteFromQueue } = useInitializationQueue();
+  const { removeNoteFromRuntime } = useInitializationRuntime();
   const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
   const [deleteTriggerRect, setDeleteTriggerRect] = useState<DOMRect | null>(null);
 
@@ -33,7 +33,7 @@ export function RecentNotesPage() {
     if (!noteToDelete) return;
 
     try {
-      await removeNoteFromQueue(noteToDelete.id);
+      await removeNoteFromRuntime(noteToDelete.id);
       await deleteNote(noteToDelete.id);
       handleCancelDelete();
     } catch (error) {

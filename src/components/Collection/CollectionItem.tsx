@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ChevronUp, ChevronDown, MoreHorizontal, Trash2, Edit3, Video, Library, ChevronRight, FolderPlus } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
-import { useInitializationQueue } from "../../context/InitializationQueueContext";
+import { useInitializationRuntime } from "../../context/InitializationRuntimeContext";
 import { CreateCollectionModal } from "./CreateCollectionModal";
 import { EditNoteModal } from "../Notes/EditNoteModal";
 import { ConfirmDialog } from "../common/ConfirmDialog";
@@ -126,7 +126,7 @@ function CollectionNoteItem({
     addNoteToCollection,
     removeNoteFromCollection,
   } = useApp();
-  const { removeNoteFromQueue } = useInitializationQueue();
+  const { removeNoteFromRuntime } = useInitializationRuntime();
 
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -196,8 +196,8 @@ function CollectionNoteItem({
 
   const handleDelete = async () => {
     try {
-      // 先从初始化队列移除（包括中止正在运行的任务）
-      await removeNoteFromQueue(item.note_id);
+      // 先从初始化运行任务中移除（包括中止正在运行的任务）
+      await removeNoteFromRuntime(item.note_id);
       await deleteNote(item.note_id);
     } catch (error) {
       console.error("Failed to delete note:", error);

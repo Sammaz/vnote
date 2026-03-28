@@ -67,6 +67,9 @@ pub struct GenerationOptions {
     /// AI 笔记截图密度（可选）
     #[serde(default)]
     pub screenshot_density: Option<String>,
+    /// 是否将本次生成模型写回 notes.model_id（默认 true）
+    #[serde(default = "default_persist_model_id")]
+    pub persist_model_id: bool,
 }
 
 fn default_concurrent_limit() -> usize {
@@ -75,6 +78,10 @@ fn default_concurrent_limit() -> usize {
     } else {
         3
     }
+}
+
+fn default_persist_model_id() -> bool {
+    true
 }
 
 /// 标签页类型
@@ -1659,6 +1666,7 @@ pub async fn generate_note(
                             request.options.style.as_deref(),
                             request.options.custom_prompt.as_deref(),
                             request.options.screenshot_density.as_deref(),
+                            request.options.persist_model_id,
                         )?;
                         let _ = app.emit(
                             &event_name,
@@ -1716,6 +1724,7 @@ pub async fn generate_note(
                         request.options.style.as_deref(),
                         request.options.custom_prompt.as_deref(),
                         request.options.screenshot_density.as_deref(),
+                        request.options.persist_model_id,
                     ) {
                         tracing::error!("[笔记生成] 更新数据库失败: {}", e);
                         failed_count += 1;
@@ -1768,6 +1777,7 @@ pub async fn generate_note(
                     request.options.style.as_deref(),
                     request.options.custom_prompt.as_deref(),
                     request.options.screenshot_density.as_deref(),
+                    request.options.persist_model_id,
                 )?;
 
                 let _ = app.emit(
@@ -1865,6 +1875,7 @@ pub async fn generate_note(
                             request.options.style.as_deref(),
                             request.options.custom_prompt.as_deref(),
                             request.options.screenshot_density.as_deref(),
+                            request.options.persist_model_id,
                         ) {
                             tracing::error!("[笔记生成] 更新数据库失败: {}", e);
                             failed_count += 1;
@@ -2059,6 +2070,7 @@ fn update_note_tab(
     style: Option<&str>,
     custom_prompt: Option<&str>,
     screenshot_density: Option<&str>,
+    persist_model_id: bool,
 ) -> Result<(), String> {
     let mut note = db
         .get_note_by_id(note_id)
@@ -2090,8 +2102,10 @@ fn update_note_tab(
         }
     }
 
-    // 同时更新 model_id，确保使用的模型被记录
-    note.model_id = Some(model_id.to_string());
+    // 默认情况下记录本次生成模型；初始化页临时覆盖模型时可关闭该行为
+    if persist_model_id {
+        note.model_id = Some(model_id.to_string());
+    }
 
     db.update_note(&note).map_err(|e| e.to_string())
 }

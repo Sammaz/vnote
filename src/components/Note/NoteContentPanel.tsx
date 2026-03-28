@@ -167,8 +167,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 原文细读相关状态
   const [detailedReadingData, setDetailedReadingData] = useState<DetailedReadingData | null>(null);
-  // 记录 detailedReadingData 所属的笔记 ID，防止笔记切换时的竞态条件
-  const detailedReadingDataNoteIdRef = useRef<string | null>(null);
 
   // 章节下拉框状态
   const [showChapterDropdown, setShowChapterDropdown] = useState(false);
@@ -208,7 +206,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [, setSubtitleOptimizationProgress] = useState<{ current: number; total: number } | null>(null);
   const [optimizedSubtitles, setOptimizedSubtitles] = useState<Map<string, string>>(new Map());
   // 标记优化字幕是否已从数据库加载完成（防止迁移保存时的竞态条件）
-  const [optimizedSubtitlesLoaded, setOptimizedSubtitlesLoaded] = useState(false);
+  const [, setOptimizedSubtitlesLoaded] = useState(false);
   const [optimizingChapterIds, setOptimizingChapterIds] = useState<Set<string>>(new Set());
   const [failedChapterIds, setFailedChapterIds] = useState<Set<string>>(new Set());
   const subtitleOptimizationIdRef = useRef<string | null>(null);
@@ -249,10 +247,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const parsed = parseDetailedReadingData(note.detailed_reading);
     if (parsed) {
       setDetailedReadingData(parsed);
-      detailedReadingDataNoteIdRef.current = note.id;
     } else {
       setDetailedReadingData(null);
-      detailedReadingDataNoteIdRef.current = null;
     }
   }, [note.id, note.detailed_reading]);
 
@@ -353,9 +349,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           if (data.succeeded === 0 && data.failed > 0) {
             message.error("所有章节字幕优化失败");
             setSubtitleOptimizationEnabled(false);
-          } else {
-            // 字幕优化成功，标记待保存视觉化总结
-            pendingVisualSummarySaveRef.current = true;
           }
           // 刷新笔记数据以确保视觉化总结能正确显示
           onGenerationComplete?.();
@@ -376,8 +369,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 切换笔记时从数据库加载 UI 状态和优化后的字幕，并恢复进行中的任务
   useEffect(() => {
     setOptimizedSubtitlesLoaded(false);
-    // 切换笔记时清除待保存标志，防止旧笔记的标志影响新笔记
-    pendingVisualSummarySaveRef.current = false;
     let stale = false;
     const loadSavedState = async () => {
       try {
@@ -495,8 +486,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const visualChapterDropdownRef = useRef<HTMLDivElement>(null);
   const visualManualScrollingRef = useRef(false);
   const visualManualScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // 标记"需要在状态更新后保存视觉化总结到数据库"
-  const pendingVisualSummarySaveRef = useRef<boolean>(false);
 
   // 从全局状态同步组件state
   const syncStateFromGlobal = useCallback(() => {
@@ -1191,69 +1180,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     };
   }, []);
 
-  // 组装视觉化总结 Markdown 并保存到数据库
-  const saveAssembledVisualMarkdown = useCallback(async () => {
-    const chapterDataForMarkdown = visualChaptersForMarkdown();
-    if (!chapterDataForMarkdown || chapterDataForMarkdown.chapters.length === 0) return;
-    if (detailedReadingDataNoteIdRef.current !== note.id) return;
-    const content = assembleChapterMarkdown({
-      chapters: chapterDataForMarkdown.chapters,
-      optimizedSubtitles,
-      originalSubtitles: subtitleEntries,
-      showTimestamp: true,
-    });
-    if (!content) return;
-    try {
-      await invoke("update_note_content", {
-        noteId: note.id,
-        tabType: "visual_summary",
-        content,
-      });
-    } catch (error) {
-      console.error("保存视觉化总结失败:", error);
-    }
-  }, [visualChaptersForMarkdown, note.id, optimizedSubtitles, subtitleEntries]);
-
-  // 当章节数据/optimizedSubtitles 更新后，如果有待保存标志，执行保存
-  useEffect(() => {
-    if (!pendingVisualSummarySaveRef.current) return;
-    pendingVisualSummarySaveRef.current = false;
-    saveAssembledVisualMarkdown().then(() => {
-      onGenerationComplete?.();
-    });
-  }, [detailedReadingData, optimizedSubtitles, saveAssembledVisualMarkdown, onGenerationComplete]);
-
-  // 迁移兼容：已有章节但从未保存过 visual_summary 的旧笔记，自动保存
-  // 必须等待 optimizedSubtitles 从数据库加载完成，否则会回退到原始字幕
-  // 注意：队列完成后 refreshNotes 会更新 note.detailed_reading（触发章节数据解析），
-  // 但 loadSavedState 只依赖 note.id 不会重新执行，导致 optimizedSubtitles 可能是空 Map。
-  // 因此这里需要重新从数据库加载优化字幕，确保用最新数据组装 markdown。
-  useEffect(() => {
-    if (!optimizedSubtitlesLoaded) return;
-    if (!(detailedReadingData && detailedReadingData.chapters.length > 0 && !note.visual_summary)) return;
-    let cancelled = false;
-    (async () => {
-      // 重新从数据库加载优化字幕，防止队列完成后 optimizedSubtitles 仍为空 Map
-      const savedSubtitles = await invoke<OptimizedSubtitle[]>(
-        "get_optimized_subtitles", { noteId: note.id }
-      );
-      if (cancelled) return;
-      if (savedSubtitles && savedSubtitles.length > 0) {
-        const freshMap = new Map<string, string>();
-        savedSubtitles.forEach(s => freshMap.set(s.chapter_id, s.optimized_text));
-        setOptimizedSubtitles(freshMap);
-        // 字幕状态更新后，由 pendingVisualSummarySaveRef 机制触发保存
-        pendingVisualSummarySaveRef.current = true;
-      } else {
-        // 没有优化字幕，直接用原始字幕组装保存
-        saveAssembledVisualMarkdown().then(() => {
-          onGenerationComplete?.();
-        });
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [note.id, detailedReadingData, note.visual_summary, optimizedSubtitlesLoaded, saveAssembledVisualMarkdown, onGenerationComplete]);
-
   // 视觉化总结复制
   const handleVisualCopy = async () => {
     const content = isVisualEditMode ? visualEditContent : getVisualSummaryDisplayMarkdown();
@@ -1391,8 +1317,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
               break;
             case "Completed":
               setAssistModeProgress({ current: markers.length, total: markers.length, message: "生成完成!" });
-              // 标记待保存视觉化总结
-              pendingVisualSummarySaveRef.current = true;
               // 刷新笔记数据
               onGenerationComplete?.();
               message.success("章节生成完成");
@@ -2066,8 +1990,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             newSet.delete(chapterId);
             return newSet;
           });
-          // 标记待保存视觉化总结
-          pendingVisualSummarySaveRef.current = true;
           message.success("字幕优化完成");
           unlisten();
           break;
@@ -2661,8 +2583,6 @@ Video subtitles content:`;
                       } catch (err) {
                         console.error("[NoteContentPanel] 清除截图缓存失败:", err);
                       }
-                      // 标记待保存视觉化总结
-                      pendingVisualSummarySaveRef.current = true;
                       // 重新生成章节（统一走详细阅读链路）
                       setChapterIsGenerating(true);
                       setChapterGenerating(note.id, true);

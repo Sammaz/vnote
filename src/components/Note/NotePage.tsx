@@ -7,7 +7,6 @@ import { VideoToolbar } from "./VideoToolbar";
 import { EditNoteModal } from "../Notes/EditNoteModal";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
-import { useInitializationQueue } from "../../context/InitializationQueueContext";
 
 // 拖拽分隔条组件
 interface ResizerProps {
@@ -57,9 +56,6 @@ export function NotePage() {
   const { notes, selectedNoteId, selectedCollectionId, setCurrentView, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, toggleSidebar, sidebar, setSelectedNoteId } = useApp();
   const { expandCollectionPath } = useCollections();
 
-  // 使用全局初始化队列 Context
-  const { currentTask, initState } = useInitializationQueue();
-
   // 找到当前选中的笔记
   const currentNote = notes.find((note) => note.id === selectedNoteId);
 
@@ -77,19 +73,6 @@ export function NotePage() {
       setCurrentModelId(currentNote.model_id);
     }
   }, [currentNote?.model_id]);
-
-  // 初始化完成后刷新笔记数据（监听当前笔记的初始化状态）
-  useEffect(() => {
-    // 当当前任务是当前笔记且初始化完成时刷新
-    if (
-      currentTask &&
-      currentTask.params.noteId === selectedNoteId &&
-      !initState.isInitializing &&
-      initState.completed > 0
-    ) {
-      refreshNotes();
-    }
-  }, [currentTask, selectedNoteId, initState.isInitializing, initState.completed, refreshNotes]);
 
   // 自动展开侧边栏
   useEffect(() => {
