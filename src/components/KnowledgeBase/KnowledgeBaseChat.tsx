@@ -771,6 +771,26 @@ export function KnowledgeBaseChat() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   }, []);
 
+  const handlePaste = useCallback((e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageFiles: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+    if (imageFiles.length === 0) return;
+    e.preventDefault();
+    const nextImages: UploadedImage[] = imageFiles.map((file) => ({
+      id: generateTempId(),
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
+    setUploadedImages((prev) => [...prev, ...nextImages]);
+  }, []);
+
   const handleRemoveImage = useCallback((imageId: string) => {
     setUploadedImages((prev) => {
       const matched = prev.find((item) => item.id === imageId);
@@ -802,12 +822,14 @@ export function KnowledgeBaseChat() {
 
     setComposerError(null);
 
-    const userImageUrls = usingOverride ? [] : uploadedImages.map((item) => item.previewUrl);
     let imagePayload: KnowledgeChatImageData[] | undefined;
+    const userImageUrls: string[] = [];
     if (!usingOverride && uploadedImages.length > 0) {
-      imagePayload = await Promise.all(
-        uploadedImages.map(async (item) => ({ data: await fileToBase64(item.file) }))
+      const encodedImages = await Promise.all(
+        uploadedImages.map(async (item) => await fileToBase64(item.file))
       );
+      imagePayload = encodedImages.map((data) => ({ data }));
+      userImageUrls.push(...encodedImages);
     }
 
     const tempUserId = generateTempId();
@@ -1465,6 +1487,7 @@ export function KnowledgeBaseChat() {
                   }
                 }}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 rows={4}
                 placeholder={mode === "agent" ? "输入复杂问题，Agent 会自动规划、多轮检索并给出结论..." : "输入问题，系统会检索知识库并回答..."}
                 className="w-full px-4 pt-4 pb-2 bg-transparent text-sm text-slate-800 dark:text-slate-200 placeholder:text-slate-400 resize-none focus:outline-none"
@@ -1839,22 +1862,20 @@ function MessageCard({
               {message.content}
             </div>
           ) : message.content ? (
-            message.status === "streaming" ? (
-              <div className="chat-streaming-content text-sm leading-7 whitespace-pre-wrap break-words">
-                {message.content}
-              </div>
-            ) : (
-              <MarkdownRenderer
-                content={message.content}
-                variant="chat"
-                className="text-sm leading-7"
-              />
-            )
-          ) : (
+            <MarkdownRenderer
+              content={message.content}
+              variant="chat"
+              className="text-sm leading-7"
+            />
+          ) : message.status === "streaming" ? (
             <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 py-1">
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.25s]" />
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.12s]" />
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" />
+            </div>
+          ) : (
+            <div className="text-sm leading-7 text-slate-400 dark:text-slate-500">
+              已中止
             </div>
           )}
         </div>

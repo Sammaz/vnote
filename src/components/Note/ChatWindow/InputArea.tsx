@@ -19,6 +19,7 @@ interface InputAreaProps {
   onFileSelect: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onRemoveImage: (imageId: string) => void;
   onAttachClick: () => void;
+  onPaste: (e: React.ClipboardEvent) => void;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   // 推荐问题相关
   questions: string[];
@@ -39,6 +40,7 @@ export function InputArea({
   onFileSelect,
   onRemoveImage,
   onAttachClick,
+  onPaste,
   fileInputRef,
   questions,
   questionButtonRef,
@@ -91,6 +93,7 @@ export function InputArea({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
+          onPaste={onPaste}
           placeholder="你的问题..."
           className="w-full px-4 py-3 bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border rounded-xl text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
           rows={2}

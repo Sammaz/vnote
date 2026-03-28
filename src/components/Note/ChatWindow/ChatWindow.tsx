@@ -215,6 +215,26 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
     }
   };
 
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageFiles: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        const file = item.getAsFile();
+        if (file) imageFiles.push(file);
+      }
+    }
+    if (imageFiles.length === 0) return;
+    e.preventDefault();
+    const newImages: UploadedImage[] = imageFiles.map((file) => ({
+      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      file,
+      previewUrl: URL.createObjectURL(file),
+    }));
+    setUploadedImages((prev) => [...prev, ...newImages]);
+  };
+
   const handleRemoveImage = (imageId: string) => {
     setUploadedImages((prev) => {
       const imageToRemove = prev.find((img) => img.id === imageId);
@@ -289,24 +309,27 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
     }
 
     const userContent = input.trim();
+
+    let imageDataArray: ImageData[] | undefined;
+    const userImageUrls: string[] = [];
+    if (uploadedImages.length > 0) {
+      const encodedImages = await Promise.all(
+        uploadedImages.map(async (img) => await fileToBase64(img.file))
+      );
+      imageDataArray = encodedImages.map((data) => ({ data }));
+      userImageUrls.push(...encodedImages);
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
       content: userContent,
       timestamp: new Date(),
+      imageUrls: userImageUrls.length > 0 ? userImageUrls : undefined,
     };
 
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
-
-    let imageDataArray: ImageData[] | undefined;
-    if (uploadedImages.length > 0) {
-      imageDataArray = await Promise.all(
-        uploadedImages.map(async (img) => ({
-          data: await fileToBase64(img.file),
-        }))
-      );
-    }
 
     uploadedImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     setUploadedImages([]);
@@ -497,6 +520,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
         onFileSelect={handleFileSelect}
         onRemoveImage={handleRemoveImage}
         onAttachClick={handleAttachClick}
+        onPaste={handlePaste}
         fileInputRef={fileInputRef}
         questions={questions}
         questionButtonRef={questionButtonRef}

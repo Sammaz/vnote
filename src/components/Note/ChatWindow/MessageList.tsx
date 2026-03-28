@@ -75,7 +75,21 @@ export function MessageList({
                 variant="chat"
               />
             ) : (
-              <span className="whitespace-pre-wrap">{message.content}</span>
+              <div className="whitespace-pre-wrap">
+                {message.imageUrls && message.imageUrls.length > 0 && (
+                  <div className="mb-3 flex flex-wrap gap-2">
+                    {message.imageUrls.map((url) => (
+                      <img
+                        key={url}
+                        src={url}
+                        alt="附件"
+                        className="w-20 h-20 object-cover rounded-xl border border-blue-400/30"
+                      />
+                    ))}
+                  </div>
+                )}
+                <span>{message.content}</span>
+              </div>
             )}
           </div>
         </div>

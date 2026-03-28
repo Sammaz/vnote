@@ -7,6 +7,7 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp: Date;
+  imageUrls?: string[];
 }
 
 export interface UploadedImage {

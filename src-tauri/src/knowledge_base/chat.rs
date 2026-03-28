@@ -141,9 +141,15 @@ pub async fn chat(
             } else {
                 None
             };
+            let existing_content = db
+                .get_knowledge_chat_message_by_id(&assistant_message_id)
+                .ok()
+                .flatten()
+                .map(|message| message.content)
+                .unwrap_or_default();
             let _ = db.update_knowledge_chat_message_content(
                 &assistant_message_id,
-                "",
+                &existing_content,
                 status,
                 error_message,
             );
@@ -426,6 +432,7 @@ async fn run_standard_chat(
         app.clone(),
         event_name,
         request_id,
+        &assistant_record.id,
         ai_config.clone(),
         history,
         images,
@@ -581,6 +588,7 @@ async fn run_agent_chat(
         app.clone(),
         event_name,
         request_id,
+        &assistant_record.id,
         ai_config.clone(),
         history,
         images,
@@ -772,6 +780,7 @@ async fn stream_response_and_collect(
     app: AppHandle,
     event_name: &str,
     request_id: &str,
+    assistant_message_id: &str,
     ai_config: AiConfig,
     messages: Vec<AiChatMessage>,
     images: Option<Vec<ImageData>>,
@@ -779,6 +788,7 @@ async fn stream_response_and_collect(
 ) -> Result<String, String> {
     let capture_event = format!("{}-capture", event_name);
     let forward_event = event_name.to_string();
+    let assistant_message_id = assistant_message_id.to_string();
     let full_content = Arc::new(std::sync::Mutex::new(String::new()));
     let full_content_clone = full_content.clone();
 
@@ -792,6 +802,14 @@ async fn stream_response_and_collect(
                         let delta = merge_stream_fragment(&mut full_content, &content);
                         if delta.is_empty() {
                             return;
+                        }
+                        if let Some(db) = DATABASE.get() {
+                            let _ = db.update_knowledge_chat_message_content(
+                                &assistant_message_id,
+                                &full_content,
+                                "streaming",
+                                None,
+                            );
                         }
                         let _ = app_for_listener.emit(
                             &forward_event,
@@ -1152,7 +1170,12 @@ async fn emit_aborted(
     db: &Database,
     assistant_message_id: &str,
 ) -> Result<(), String> {
-    db.update_knowledge_chat_message_content(assistant_message_id, "", "aborted", None)
+    let existing_content = db
+        .get_knowledge_chat_message_by_id(assistant_message_id)
+        .map_err(|e| e.to_string())?
+        .map(|message| message.content)
+        .unwrap_or_default();
+    db.update_knowledge_chat_message_content(assistant_message_id, &existing_content, "aborted", None)
         .map_err(|e| e.to_string())?;
     let _ = app.emit(event_name, KnowledgeChatEvent::Aborted);
     Ok(())
