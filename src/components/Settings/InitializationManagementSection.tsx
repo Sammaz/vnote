@@ -416,6 +416,7 @@ export function InitializationManagementSection({
 
   const noteFilterDropdownRef = useRef<HTMLDivElement | null>(null);
   const referenceModelDropdownRef = useRef<HTMLDivElement | null>(null);
+  const hasAutoJumpedToRunRef = useRef(false);
 
   const noteMap = useMemo(() => {
     return new Map(notes.map((note) => [note.id, note]));
@@ -444,6 +445,17 @@ export function InitializationManagementSection({
   useEffect(() => {
     setOpenDropdown(null);
   }, [activeStep]);
+
+  useEffect(() => {
+    if (hasAutoJumpedToRunRef.current) {
+      return;
+    }
+
+    if (currentTask?.status === "running" || initState.isInitializing) {
+      hasAutoJumpedToRunRef.current = true;
+      setActiveStep("run");
+    }
+  }, [currentTask?.status, initState.isInitializing]);
 
   const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
