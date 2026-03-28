@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme', 'dark');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('tray_enabled', 'false');
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('initialization_template_regenerate', 'false');
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('initialization_template_model_id', '');
 
 CREATE TABLE IF NOT EXISTS notes (
     id TEXT PRIMARY KEY,

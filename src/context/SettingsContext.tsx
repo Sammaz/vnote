@@ -38,6 +38,36 @@ export interface BackgroundSettings {
   attachment: "fixed" | "scroll";
 }
 
+export interface InitializationTemplateSettings {
+  selectedKeys: string[] | null;
+  regenerate: boolean;
+  modelId: string;
+  loaded: boolean;
+}
+
+const INITIALIZATION_TEMPLATE_SELECTED_KEYS_KEY = "initialization_template_selected_keys";
+const INITIALIZATION_TEMPLATE_REGENERATE_KEY = "initialization_template_regenerate";
+const INITIALIZATION_TEMPLATE_MODEL_ID_KEY = "initialization_template_model_id";
+
+const DEFAULT_INITIALIZATION_TEMPLATE_SETTINGS: InitializationTemplateSettings = {
+  selectedKeys: null,
+  regenerate: false,
+  modelId: "",
+  loaded: false,
+};
+
+function parseStringArraySetting(value: string | null): string[] | null {
+  if (value === null || value.trim() === "") return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is string => typeof item === "string");
+  } catch {
+    return [];
+  }
+}
+
 interface SettingsContextType {
   // AI 配置
   aiConfigs: AiConfig[];
@@ -66,6 +96,13 @@ interface SettingsContextType {
   setBackgroundImage: (path: string | null) => void;
   updateBackgroundSettings: (settings: Partial<BackgroundSettings>) => void;
   resetBackgroundSettings: () => void;
+
+  // 初始化模板
+  initializationTemplateSettings: InitializationTemplateSettings;
+  setInitializationTemplateSelectedKeys: (keys: string[]) => void;
+  setInitializationTemplateRegenerate: (regenerate: boolean) => void;
+  setInitializationTemplateModelId: (modelId: string) => void;
+  resetInitializationTemplateSettings: () => void;
 }
 
 const SettingsContext = createContext<SettingsContextType | null>(null);
@@ -86,6 +123,9 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
 
   const [backgroundImage, setBackgroundImageState] = useState<string | null>(null);
   const [backgroundSettings, setBackgroundSettingsState] = useState<BackgroundSettings>(DEFAULT_BACKGROUND_SETTINGS);
+  const [initializationTemplateSettings, setInitializationTemplateSettings] = useState<InitializationTemplateSettings>(
+    DEFAULT_INITIALIZATION_TEMPLATE_SETTINGS
+  );
 
   // 保存单个设置
   const saveSetting = useCallback(async (key: string, value: string) => {
@@ -261,6 +301,80 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     saveSetting("background_attachment", DEFAULT_BACKGROUND_SETTINGS.attachment);
   }, [saveSetting]);
 
+  const loadInitializationTemplateSettings = useCallback(async () => {
+    try {
+      const [selectedKeys, regenerate, modelId] = await Promise.all([
+        invoke<string | null>("get_setting", { key: INITIALIZATION_TEMPLATE_SELECTED_KEYS_KEY }),
+        invoke<string | null>("get_setting", { key: INITIALIZATION_TEMPLATE_REGENERATE_KEY }),
+        invoke<string | null>("get_setting", { key: INITIALIZATION_TEMPLATE_MODEL_ID_KEY }),
+      ]);
+
+      setInitializationTemplateSettings({
+        selectedKeys: parseStringArraySetting(selectedKeys),
+        regenerate: regenerate === "true",
+        modelId: modelId ?? "",
+        loaded: true,
+      });
+    } catch (error) {
+      console.error("Failed to load initialization template settings:", error);
+      setInitializationTemplateSettings({
+        ...DEFAULT_INITIALIZATION_TEMPLATE_SETTINGS,
+        loaded: true,
+      });
+    }
+  }, []);
+
+  const setInitializationTemplateSelectedKeys = useCallback((keys: string[]) => {
+    setInitializationTemplateSettings(prev => ({
+      ...prev,
+      selectedKeys: keys,
+      loaded: true,
+    }));
+    saveSetting(INITIALIZATION_TEMPLATE_SELECTED_KEYS_KEY, JSON.stringify(keys));
+  }, [saveSetting]);
+
+  const setInitializationTemplateRegenerate = useCallback((regenerate: boolean) => {
+    setInitializationTemplateSettings(prev => ({
+      ...prev,
+      regenerate,
+      loaded: true,
+    }));
+    saveSetting(INITIALIZATION_TEMPLATE_REGENERATE_KEY, regenerate.toString());
+  }, [saveSetting]);
+
+  const setInitializationTemplateModelId = useCallback((modelId: string) => {
+    setInitializationTemplateSettings(prev => ({
+      ...prev,
+      modelId,
+      loaded: true,
+    }));
+    saveSetting(INITIALIZATION_TEMPLATE_MODEL_ID_KEY, modelId);
+  }, [saveSetting]);
+
+  useEffect(() => {
+    if (!initializationTemplateSettings.loaded || aiConfigs.length === 0) return;
+    if (!initializationTemplateSettings.modelId) return;
+    if (aiConfigs.some((config) => config.id === initializationTemplateSettings.modelId)) return;
+
+    setInitializationTemplateSettings(prev => ({
+      ...prev,
+      modelId: "",
+    }));
+    saveSetting(INITIALIZATION_TEMPLATE_MODEL_ID_KEY, "");
+  }, [aiConfigs, initializationTemplateSettings.loaded, initializationTemplateSettings.modelId, saveSetting]);
+
+  const resetInitializationTemplateSettings = useCallback(() => {
+    setInitializationTemplateSettings({
+      selectedKeys: null,
+      regenerate: false,
+      modelId: "",
+      loaded: true,
+    });
+    saveSetting(INITIALIZATION_TEMPLATE_SELECTED_KEYS_KEY, "");
+    saveSetting(INITIALIZATION_TEMPLATE_REGENERATE_KEY, "false");
+    saveSetting(INITIALIZATION_TEMPLATE_MODEL_ID_KEY, "");
+  }, [saveSetting]);
+
   // 加载 AI 配置
   const refreshAiConfigs = useCallback(async () => {
     try {
@@ -298,6 +412,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     loadTotalWatchTime();
     loadBackgroundImage();
     loadBackgroundSettings();
+    loadInitializationTemplateSettings();
   }, []);
 
   const value = useMemo(() => ({
@@ -321,6 +436,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setBackgroundImage,
     updateBackgroundSettings,
     resetBackgroundSettings,
+    initializationTemplateSettings,
+    setInitializationTemplateSelectedKeys,
+    setInitializationTemplateRegenerate,
+    setInitializationTemplateModelId,
+    resetInitializationTemplateSettings,
   }), [
     aiConfigs,
     promptConfigs,
@@ -340,6 +460,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     setBackgroundImage,
     updateBackgroundSettings,
     resetBackgroundSettings,
+    initializationTemplateSettings,
+    setInitializationTemplateSelectedKeys,
+    setInitializationTemplateRegenerate,
+    setInitializationTemplateModelId,
+    resetInitializationTemplateSettings,
   ]);
 
   return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;

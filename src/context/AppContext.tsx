@@ -8,7 +8,11 @@
  */
 import { createContext, useContext, useMemo, useCallback, type ReactNode } from "react";
 import { SidebarProvider, useSidebar } from "./SidebarContext";
-import { SettingsProvider, useSettings } from "./SettingsContext";
+import {
+  SettingsProvider,
+  useSettings,
+  type InitializationTemplateSettings,
+} from "./SettingsContext";
 import { UploadProvider, useUpload } from "./UploadContext";
 import { CollectionsProvider, useCollections } from "./CollectionsContext";
 import { NotesProvider, useNotes } from "./NotesContext";
@@ -112,6 +116,13 @@ interface AppContextType {
   // 累计观看时长
   addWatchTime: (seconds: number) => void;
 
+  // 初始化模板
+  initializationTemplateSettings: InitializationTemplateSettings;
+  setInitializationTemplateSelectedKeys: (keys: string[]) => void;
+  setInitializationTemplateRegenerate: (regenerate: boolean) => void;
+  setInitializationTemplateModelId: (modelId: string) => void;
+  resetInitializationTemplateSettings: () => void;
+
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -171,6 +182,11 @@ function AppContextBridge({ children }: { children: ReactNode }) {
     setLayoutPanelWidth: settingsContext.setLayoutPanelWidth,
     setCaptionsEnabled: settingsContext.setCaptionsEnabled,
     addWatchTime: settingsContext.addWatchTime,
+    initializationTemplateSettings: settingsContext.initializationTemplateSettings,
+    setInitializationTemplateSelectedKeys: settingsContext.setInitializationTemplateSelectedKeys,
+    setInitializationTemplateRegenerate: settingsContext.setInitializationTemplateRegenerate,
+    setInitializationTemplateModelId: settingsContext.setInitializationTemplateModelId,
+    resetInitializationTemplateSettings: settingsContext.resetInitializationTemplateSettings,
 
     // 上传
     uploadedItems: uploadContext.uploadedItems,
