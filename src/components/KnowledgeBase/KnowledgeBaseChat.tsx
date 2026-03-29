@@ -1943,7 +1943,7 @@ function MessageCard({
                       key={url}
                       src={url}
                       alt="附件"
-                      className="w-20 h-20 object-cover rounded-xl border border-slate-300 dark:border-neutral-600"
+                      className="max-w-full w-auto h-auto max-h-64 object-contain rounded-xl border border-slate-300 dark:border-neutral-600"
                     />
                   ))}
                 </div>

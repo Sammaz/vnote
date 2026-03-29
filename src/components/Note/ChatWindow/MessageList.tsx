@@ -83,7 +83,7 @@ export function MessageList({
                         key={url}
                         src={url}
                         alt="附件"
-                        className="w-20 h-20 object-cover rounded-xl border border-blue-400/30"
+                        className="max-w-full w-auto h-auto max-h-64 object-contain rounded-xl border border-blue-400/30"
                       />
                     ))}
                   </div>
