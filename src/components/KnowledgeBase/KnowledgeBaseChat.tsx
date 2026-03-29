@@ -222,6 +222,7 @@ export function KnowledgeBaseChat() {
   const [messages, setMessages] = useState<UiMessage[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [requestId, setRequestId] = useState<string | null>(null);
   const [statusText, setStatusText] = useState<string | null>(null);
   const [statusQueries, setStatusQueries] = useState<string[]>([]);
@@ -320,6 +321,7 @@ export function KnowledgeBaseChat() {
     setMessages([]);
     setInspectorMessageId(null);
     pendingAbortRef.current = false;
+    setStopping(false);
     setStatusText(null);
     setStatusQueries([]);
     setRequestId(null);
@@ -555,6 +557,7 @@ export function KnowledgeBaseChat() {
           break;
         case "Completed":
           pendingAbortRef.current = false;
+          setStopping(false);
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
@@ -564,6 +567,7 @@ export function KnowledgeBaseChat() {
           break;
         case "Error":
           pendingAbortRef.current = false;
+          setStopping(false);
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
@@ -576,6 +580,7 @@ export function KnowledgeBaseChat() {
           break;
         case "Aborted":
           pendingAbortRef.current = false;
+          setStopping(false);
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
@@ -932,6 +937,7 @@ export function KnowledgeBaseChat() {
     uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     setUploadedImages([]);
     pendingAbortRef.current = false;
+    setStopping(false);
     setEditingMessageId(null);
     setEditingMessageValue("");
     setStreaming(true);
@@ -1001,8 +1007,9 @@ export function KnowledgeBaseChat() {
   ]);
 
   const handleAbort = useCallback(async () => {
-    if (!streaming) return;
+    if (!streaming || stopping) return;
     pendingAbortRef.current = true;
+    setStopping(true);
     setStatusText(null);
     setStatusQueries([]);
     setMessages((prev) => {
@@ -1024,7 +1031,7 @@ export function KnowledgeBaseChat() {
     } catch (error) {
       console.error("Failed to abort knowledge chat:", error);
     }
-  }, [requestId, streaming]);
+  }, [requestId, stopping, streaming]);
 
   const handleEditMessage = useCallback((message: UiMessage) => {
     uploadedImagesRef.current.forEach((image) => {
@@ -1690,7 +1697,7 @@ export function KnowledgeBaseChat() {
                   <span className="hidden md:inline text-[11px] text-slate-400 dark:text-slate-500">
                     Enter 发送 · Shift+Enter 换行
                   </span>
-                  {streaming ? (
+                  {streaming && !stopping ? (
                     <button
                       onClick={handleAbort}
                       className="w-10 h-10 rounded-xl bg-red-500 hover:bg-red-600 text-white flex items-center justify-center transition-colors cursor-pointer"
