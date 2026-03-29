@@ -38,6 +38,9 @@ function AppContent() {
   const { backgroundImage, backgroundSettings } = useSettings();
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [previousView, setPreviousView] = useState<NavigableViewType>(VIEW_TYPES.HOME);
+  const [shouldMountKnowledgeBase, setShouldMountKnowledgeBase] = useState(
+    currentView === VIEW_TYPES.KNOWLEDGE_BASE
+  );
 
   useEffect(() => {
     // Load saved theme and show window
@@ -137,6 +140,12 @@ function AppContent() {
   const handleThemeChange = useCallback((newTheme: "light" | "dark") => {
     applyTheme(newTheme);
   }, [applyTheme]);
+
+  useEffect(() => {
+    if (currentView === VIEW_TYPES.KNOWLEDGE_BASE) {
+      setShouldMountKnowledgeBase(true);
+    }
+  }, [currentView]);
 
   const isSettingsView = currentView === VIEW_TYPES.SETTINGS;
 
@@ -291,10 +300,12 @@ function AppContent() {
               <RecentNotesPage />
             </Suspense>
           )}
-          {!isSettingsView && currentView === VIEW_TYPES.KNOWLEDGE_BASE && (
-            <Suspense fallback={<PageLoadingFallback />}>
-              <KnowledgeBasePage />
-            </Suspense>
+          {shouldMountKnowledgeBase && (
+            <div className={cn("flex-1 flex overflow-hidden", currentView === VIEW_TYPES.KNOWLEDGE_BASE && !isSettingsView ? "" : "hidden")}>
+              <Suspense fallback={<PageLoadingFallback />}>
+                <KnowledgeBasePage />
+              </Suspense>
+            </div>
           )}
           {!isSettingsView && currentView === VIEW_TYPES.HOME && (
             <HomePage />

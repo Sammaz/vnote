@@ -70,9 +70,15 @@ export function KnowledgeBasePage() {
 
       {/* Content */}
       <div className="flex-1 overflow-hidden bg-white/16 dark:bg-black/8 backdrop-blur-[3px]">
-        {activeTab === "search" && <KnowledgeBaseSearch />}
-        {activeTab === "chat" && <KnowledgeBaseChat />}
-        {activeTab === "manage" && <KnowledgeBaseManage onStatsChange={loadStats} />}
+        <div className={cn("h-full", activeTab === "search" ? "block" : "hidden")}>
+          <KnowledgeBaseSearch />
+        </div>
+        <div className={cn("h-full", activeTab === "chat" ? "block" : "hidden")}>
+          <KnowledgeBaseChat />
+        </div>
+        <div className={cn("h-full", activeTab === "manage" ? "block" : "hidden")}>
+          <KnowledgeBaseManage onStatsChange={loadStats} />
+        </div>
       </div>
     </div>
   );
