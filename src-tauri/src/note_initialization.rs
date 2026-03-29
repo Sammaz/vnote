@@ -271,13 +271,7 @@ pub fn sync_note_initialization_outputs(note_id: &str) -> Result<Vec<NoteInitial
         next_items.push(UpsertNoteInitializationItemInput {
             note_id: note_id.to_string(),
             item_key: definition.item_key.clone(),
-            selected: existing.as_ref().map(|item| item.selected).unwrap_or(false),
-            locked: existing.as_ref().map(|item| item.locked).unwrap_or(false),
             status,
-            config_json: existing
-                .as_ref()
-                .and_then(|item| item.config_json.clone())
-                .or_else(|| Some(definition.default_config.to_string())),
             depends_on: existing
                 .as_ref()
                 .map(|item| item.depends_on.clone())
@@ -302,16 +296,6 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
         .ok_or_else(|| "笔记不存在".to_string())?;
 
     let items = sync_note_initialization_outputs(note_id)?;
-    let selected_items: Vec<String> = items
-        .iter()
-        .filter(|item| item.selected)
-        .map(|item| item.item_key.clone())
-        .collect();
-    let locked_items: Vec<String> = items
-        .iter()
-        .filter(|item| item.locked)
-        .map(|item| item.item_key.clone())
-        .collect();
 
     let running_count = items
         .iter()
@@ -341,6 +325,9 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
             )
         })
         .count();
+    let has_any_run = items.iter().any(|item| {
+        !matches!(item.status, NoteInitializationItemStatus::Pending)
+    });
 
     let status = if running_count > 0 {
         NoteInitializationRunStatus::Running
@@ -348,7 +335,7 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
         NoteInitializationRunStatus::Queued
     } else if failed_count > 0 {
         NoteInitializationRunStatus::PartialFailed
-    } else if !selected_items.is_empty() && pending_count == 0 {
+    } else if has_any_run && pending_count == 0 {
         NoteInitializationRunStatus::Completed
     } else {
         NoteInitializationRunStatus::Idle
@@ -357,8 +344,6 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
     db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
         note_id: note_id.to_string(),
         status,
-        selected_items,
-        locked_items,
         model_override_id: db
             .get_note_initialization_run(note_id)
             .ok()
@@ -482,30 +467,28 @@ async fn run_initialization(
         .map_err(|e| format!("获取 AI 配置失败: {}", e))?
         .ok_or_else(|| "AI 配置不存在".to_string())?;
 
-    let mut explicitly_selected: HashSet<String> = detail
-        .items
-        .iter()
-        .filter(|item| item.selected)
-        .map(|item| item.item_key.clone())
-        .collect();
-
-    if explicitly_selected.is_empty() {
-        if let Some(run) = &detail.run {
-            explicitly_selected = run
-                .selected_items
-                .iter()
-                .filter(|key| registry_map.contains_key(*key))
-                .cloned()
-                .collect();
+    let explicitly_selected: HashSet<String> = {
+        let raw = db
+            .get_setting("initialization_template_selected_keys")
+            .map_err(|e| format!("读取初始化配置失败: {}", e))?
+            .unwrap_or_default();
+        if raw.trim().is_empty() {
+            HashSet::new()
+        } else {
+            serde_json::from_str::<Vec<String>>(&raw)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|key| registry_map.contains_key(key.as_str()))
+                .collect()
         }
-    }
+    };
 
     let dependency_map: HashMap<String, Vec<String>> = registry
         .iter()
         .map(|d| (d.item_key.clone(), d.dependencies.clone()))
         .collect();
     let expanded_selected = expand_dependencies(&explicitly_selected, &dependency_map);
-    let auto_locked: HashSet<String> = expanded_selected
+    let _auto_locked: HashSet<String> = expanded_selected
         .difference(&explicitly_selected)
         .cloned()
         .collect();
@@ -554,12 +537,6 @@ async fn run_initialization(
             .cloned()
             .unwrap_or_else(|| create_default_item(&params.note_id, definition));
 
-        item.selected = expanded_selected.contains(&definition.item_key);
-        item.locked = auto_locked.contains(&definition.item_key);
-
-        if item.config_json.as_ref().is_none_or(|s| s.trim().is_empty()) {
-            item.config_json = Some(definition.default_config.to_string());
-        }
         if item.depends_on.is_empty() {
             item.depends_on = definition.dependencies.clone();
         }
@@ -570,7 +547,7 @@ async fn run_initialization(
             .ok_or_else(|| "笔记不存在".to_string())?;
         item.output_present = detect_output_presence(&latest_note, &definition.item_key, db);
 
-        if item.selected {
+        if expanded_selected.contains(&definition.item_key) {
             item.status = NoteInitializationItemStatus::Queued;
             item.last_error = None;
             item.started_at = None;
@@ -585,8 +562,6 @@ async fn run_initialization(
     db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
         note_id: params.note_id.clone(),
         status: NoteInitializationRunStatus::Running,
-        selected_items: expanded_selected.iter().cloned().collect(),
-        locked_items: auto_locked.iter().cloned().collect(),
         model_override_id: model_override_id.clone(),
         last_error: None,
         started_at: Some(chrono::Local::now().to_rfc3339()),
@@ -617,8 +592,6 @@ async fn run_initialization(
             db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
                 note_id: params.note_id.clone(),
                 status: NoteInitializationRunStatus::Canceled,
-                selected_items: expanded_selected.iter().cloned().collect(),
-                locked_items: auto_locked.iter().cloned().collect(),
                 model_override_id: model_override_id.clone(),
                 last_error: Some("用户取消初始化任务".to_string()),
                 started_at: None,
@@ -683,7 +656,7 @@ async fn run_initialization(
             continue;
         }
 
-        let config = get_item_config(&item, definition);
+        let config = get_item_config(definition);
         let regenerate = config_regenerate(&config);
 
         let latest_note = db
@@ -825,8 +798,6 @@ async fn run_initialization(
     db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
         note_id: params.note_id.clone(),
         status: final_run_status,
-        selected_items: expanded_selected.iter().cloned().collect(),
-        locked_items: auto_locked.iter().cloned().collect(),
         model_override_id: model_override_id,
         last_error: if failed > 0 {
             Some(format!("初始化完成，失败项: {}", failed))
@@ -1312,10 +1283,7 @@ fn create_default_item(note_id: &str, definition: &InitializationItemDefinition)
         id: String::new(),
         note_id: note_id.to_string(),
         item_key: definition.item_key.clone(),
-        selected: false,
-        locked: false,
         status: NoteInitializationItemStatus::Pending,
-        config_json: Some(definition.default_config.to_string()),
         depends_on: definition.dependencies.clone(),
         last_model_id: None,
         last_error: None,
@@ -1330,10 +1298,7 @@ fn upsert_item(db: &crate::db::Database, item: &NoteInitializationItem) -> Resul
     db.upsert_note_initialization_item(&UpsertNoteInitializationItemInput {
         note_id: item.note_id.clone(),
         item_key: item.item_key.clone(),
-        selected: item.selected,
-        locked: item.locked,
         status: item.status.clone(),
-        config_json: item.config_json.clone(),
         depends_on: item.depends_on.clone(),
         last_model_id: item.last_model_id.clone(),
         last_error: item.last_error.clone(),
@@ -1344,11 +1309,8 @@ fn upsert_item(db: &crate::db::Database, item: &NoteInitializationItem) -> Resul
     .map_err(|e| e.to_string())
 }
 
-fn get_item_config(item: &NoteInitializationItem, definition: &InitializationItemDefinition) -> Value {
-    item.config_json
-        .as_ref()
-        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
-        .unwrap_or_else(|| definition.default_config.clone())
+fn get_item_config(definition: &InitializationItemDefinition) -> Value {
+    definition.default_config.clone()
 }
 
 fn config_regenerate(config: &Value) -> bool {

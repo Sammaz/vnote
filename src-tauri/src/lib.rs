@@ -24,7 +24,7 @@ pub mod storage_paths;
 
 use chat::ChatRequest;
 use data_management::{CleanupPreview, CleanupRequest, CleanupResult, DataManagementOverview, DataManagementScanResult};
-use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteInitializationDetail, NoteInitializationOverview, NoteInitializationRunStatus, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest, UpsertNoteInitializationItemInput, UpsertNoteInitializationRunInput};
+use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteInitializationDetail, NoteInitializationOverview, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest};
 use regex::Regex;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
@@ -1874,40 +1874,6 @@ fn get_note_initialization_plan(note_id: String) -> Result<NoteInitializationDet
 }
 
 #[tauri::command]
-fn save_note_initialization_plan(
-    note_id: String,
-    selected_items: Vec<String>,
-    locked_items: Vec<String>,
-    model_override_id: Option<String>,
-    items: Vec<UpsertNoteInitializationItemInput>,
-) -> Result<NoteInitializationDetail, String> {
-    note_initialization::ensure_note_initialization_state(&note_id)?;
-    let db = get_db();
-    let normalized_items: Vec<UpsertNoteInitializationItemInput> = items
-        .into_iter()
-        .map(|mut item| {
-            item.note_id = note_id.clone();
-            item
-        })
-        .collect();
-
-    db.replace_note_initialization_items(&note_id, &normalized_items)
-        .map_err(|e| e.to_string())?;
-    db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
-        note_id: note_id.clone(),
-        status: NoteInitializationRunStatus::Idle,
-        selected_items,
-        locked_items,
-        model_override_id,
-        last_error: None,
-        started_at: None,
-        completed_at: None,
-    }).map_err(|e| e.to_string())?;
-
-    db.get_note_initialization_detail(&note_id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
 async fn initialize_note_data(
     app: AppHandle,
     note_id: String,
@@ -2237,7 +2203,6 @@ pub fn run() {
             get_initialization_registry,
             get_initialization_overview,
             get_note_initialization_plan,
-            save_note_initialization_plan,
             initialize_note_data,
             abort_note_initialization,
             // Collection commands

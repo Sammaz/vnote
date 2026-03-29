@@ -147,8 +147,6 @@ pub struct NoteInitializationRun {
     pub id: String,
     pub note_id: String,
     pub status: NoteInitializationRunStatus,
-    pub selected_items: Vec<String>,
-    pub locked_items: Vec<String>,
     pub model_override_id: Option<String>,
     pub last_error: Option<String>,
     pub started_at: Option<String>,
@@ -161,10 +159,7 @@ pub struct NoteInitializationItem {
     pub id: String,
     pub note_id: String,
     pub item_key: String,
-    pub selected: bool,
-    pub locked: bool,
     pub status: NoteInitializationItemStatus,
-    pub config_json: Option<String>,
     pub depends_on: Vec<String>,
     pub last_model_id: Option<String>,
     pub last_error: Option<String>,
@@ -199,8 +194,6 @@ pub struct NoteInitializationOverview {
 pub struct UpsertNoteInitializationRunInput {
     pub note_id: String,
     pub status: NoteInitializationRunStatus,
-    pub selected_items: Vec<String>,
-    pub locked_items: Vec<String>,
     pub model_override_id: Option<String>,
     pub last_error: Option<String>,
     pub started_at: Option<String>,
@@ -211,10 +204,7 @@ pub struct UpsertNoteInitializationRunInput {
 pub struct UpsertNoteInitializationItemInput {
     pub note_id: String,
     pub item_key: String,
-    pub selected: bool,
-    pub locked: bool,
     pub status: NoteInitializationItemStatus,
-    pub config_json: Option<String>,
     pub depends_on: Vec<String>,
     pub last_model_id: Option<String>,
     pub last_error: Option<String>,
@@ -763,45 +753,38 @@ impl Database {
 
     fn row_to_note_initialization_run(row: &rusqlite::Row<'_>) -> SqliteResult<NoteInitializationRun> {
         let status: String = row.get(2)?;
-        let selected_items_json: String = row.get(3)?;
-        let locked_items_json: String = row.get(4)?;
 
         Ok(NoteInitializationRun {
             id: row.get(0)?,
             note_id: row.get(1)?,
             status: NoteInitializationRunStatus::from_str(&status),
-            selected_items: Self::parse_string_list_json(&selected_items_json),
-            locked_items: Self::parse_string_list_json(&locked_items_json),
-            model_override_id: row.get(5)?,
-            last_error: row.get(6)?,
-            started_at: row.get(7)?,
-            completed_at: row.get(8)?,
-            updated_at: row.get(9)?,
+            model_override_id: row.get(3)?,
+            last_error: row.get(4)?,
+            started_at: row.get(5)?,
+            completed_at: row.get(6)?,
+            updated_at: row.get(7)?,
         })
     }
 
     fn row_to_note_initialization_item(row: &rusqlite::Row<'_>) -> SqliteResult<NoteInitializationItem> {
-        let status: String = row.get(5)?;
-        let depends_on_json: Option<String> = row.get(7)?;
+        let status: String = row.get(3)?;
+        let depends_on_json: Option<String> = row.get(4)?;
 
         Ok(NoteInitializationItem {
             id: row.get(0)?,
             note_id: row.get(1)?,
             item_key: row.get(2)?,
-            selected: row.get::<_, i64>(3)? != 0,
-            locked: row.get::<_, i64>(4)? != 0,
             status: NoteInitializationItemStatus::from_str(&status),
-            config_json: row.get(6)?,
             depends_on: depends_on_json
                 .as_deref()
                 .map(Self::parse_string_list_json)
                 .unwrap_or_default(),
-            last_model_id: row.get(8)?,
-            last_error: row.get(9)?,
-            output_present: row.get::<_, i64>(10)? != 0,
-            started_at: row.get(11)?,
-            completed_at: row.get(12)?,
-            updated_at: row.get(13)?,
+            last_model_id: row.get(5)?,
+            last_error: row.get(6)?,
+            output_present: row.get::<_, i64>(7)? != 0,
+            started_at: row.get(8)?,
+            completed_at: row.get(9)?,
+            updated_at: row.get(10)?,
         })
     }
 
@@ -922,7 +905,7 @@ impl Database {
     pub fn get_note_initialization_run(&self, note_id: &str) -> SqliteResult<Option<NoteInitializationRun>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, note_id, status, selected_items_json, locked_items_json, model_override_id,
+            "SELECT id, note_id, status, model_override_id,
                     last_error, started_at, completed_at, updated_at
              FROM note_initialization_runs WHERE note_id = ?1"
         )?;
@@ -932,8 +915,6 @@ impl Database {
 
     pub fn upsert_note_initialization_run(&self, input: &UpsertNoteInitializationRunInput) -> SqliteResult<NoteInitializationRun> {
         let conn = self.connection();
-        let selected_items_json = Self::to_string_list_json(&input.selected_items)?;
-        let locked_items_json = Self::to_string_list_json(&input.locked_items)?;
         let run_id = self
             .get_note_initialization_run(&input.note_id)?
             .map(|run| run.id)
@@ -941,13 +922,11 @@ impl Database {
 
         conn.execute(
             "INSERT INTO note_initialization_runs (
-                id, note_id, status, selected_items_json, locked_items_json, model_override_id,
+                id, note_id, status, model_override_id,
                 last_error, started_at, completed_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now', 'localtime'))
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now', 'localtime'))
             ON CONFLICT(note_id) DO UPDATE SET
                 status = excluded.status,
-                selected_items_json = excluded.selected_items_json,
-                locked_items_json = excluded.locked_items_json,
                 model_override_id = excluded.model_override_id,
                 last_error = excluded.last_error,
                 started_at = excluded.started_at,
@@ -957,8 +936,6 @@ impl Database {
                 &run_id,
                 &input.note_id,
                 input.status.as_str(),
-                &selected_items_json,
-                &locked_items_json,
                 &input.model_override_id,
                 &input.last_error,
                 &input.started_at,
@@ -973,7 +950,7 @@ impl Database {
     pub fn get_note_initialization_items(&self, note_id: &str) -> SqliteResult<Vec<NoteInitializationItem>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, note_id, item_key, selected, locked, status, config_json, depends_on_json,
+            "SELECT id, note_id, item_key, status, depends_on_json,
                     last_model_id, last_error, output_present, started_at, completed_at, updated_at
              FROM note_initialization_items
              WHERE note_id = ?1
@@ -995,14 +972,11 @@ impl Database {
 
         conn.execute(
             "INSERT INTO note_initialization_items (
-                id, note_id, item_key, selected, locked, status, config_json, depends_on_json,
+                id, note_id, item_key, status, depends_on_json,
                 last_model_id, last_error, output_present, started_at, completed_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, datetime('now', 'localtime'))
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now', 'localtime'))
             ON CONFLICT(note_id, item_key) DO UPDATE SET
-                selected = excluded.selected,
-                locked = excluded.locked,
                 status = excluded.status,
-                config_json = excluded.config_json,
                 depends_on_json = excluded.depends_on_json,
                 last_model_id = excluded.last_model_id,
                 last_error = excluded.last_error,
@@ -1014,10 +988,7 @@ impl Database {
                 &item_id,
                 &input.note_id,
                 &input.item_key,
-                if input.selected { 1 } else { 0 },
-                if input.locked { 1 } else { 0 },
                 input.status.as_str(),
-                &input.config_json,
                 &depends_on_json,
                 &input.last_model_id,
                 &input.last_error,
@@ -1028,7 +999,7 @@ impl Database {
         )?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, note_id, item_key, selected, locked, status, config_json, depends_on_json,
+            "SELECT id, note_id, item_key, status, depends_on_json,
                     last_model_id, last_error, output_present, started_at, completed_at, updated_at
              FROM note_initialization_items
              WHERE note_id = ?1 AND item_key = ?2"
@@ -1054,17 +1025,14 @@ impl Database {
             let depends_on_json = Self::to_string_list_json(&item.depends_on)?;
             tx.execute(
                 "INSERT INTO note_initialization_items (
-                    id, note_id, item_key, selected, locked, status, config_json, depends_on_json,
+                    id, note_id, item_key, status, depends_on_json,
                     last_model_id, last_error, output_present, started_at, completed_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, datetime('now', 'localtime'))",
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now', 'localtime'))",
                 rusqlite::params![
                     snowflake::generate_id_string(),
                     &item.note_id,
                     &item.item_key,
-                    if item.selected { 1 } else { 0 },
-                    if item.locked { 1 } else { 0 },
                     item.status.as_str(),
-                    &item.config_json,
                     &depends_on_json,
                     &item.last_model_id,
                     &item.last_error,
@@ -1094,7 +1062,7 @@ impl Database {
                 n.title,
                 n.subtitle_path,
                 COALESCE(r.status, 'idle') AS run_status,
-                COALESCE(SUM(CASE WHEN i.selected = 1 THEN 1 ELSE 0 END), 0) AS selected_count,
+                0 AS selected_count,
                 COALESCE(SUM(CASE WHEN i.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_count,
                 COALESCE(SUM(CASE WHEN i.status = 'skipped' THEN 1 ELSE 0 END), 0) AS skipped_count,
                 COALESCE(SUM(CASE WHEN i.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,

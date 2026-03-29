@@ -96,8 +96,6 @@ interface NoteInitializationDetail {
     id: string;
     note_id: string;
     status: RunStatus;
-    selected_items: string[];
-    locked_items: string[];
     model_override_id: string | null;
     last_error: string | null;
     started_at: string | null;
@@ -107,20 +105,6 @@ interface NoteInitializationDetail {
   items: NoteInitializationItem[];
 }
 
-interface UpsertNoteInitializationItemInput {
-  note_id: string;
-  item_key: string;
-  selected: boolean;
-  locked: boolean;
-  status: ItemStatus;
-  config_json: string | null;
-  depends_on: string[];
-  last_model_id: string | null;
-  last_error: string | null;
-  output_present: boolean;
-  started_at: string | null;
-  completed_at: string | null;
-}
 
 const runStatusLabelMap: Record<RunStatus, string> = {
   idle: "待处理",
@@ -797,7 +781,7 @@ interface InitializationManagementSectionProps {
 export function InitializationManagementSection({
   notes,
 }: InitializationManagementSectionProps) {
-  const { aiConfigs, defaultAiConfigId, promptConfigs } = useApp();
+  const { aiConfigs, defaultAiConfigId, promptConfigs, initializationTemplateSettings, setInitializationTemplateSelectedKeys } = useApp();
   const {
     runtimeQueue,
     currentTask,
@@ -916,10 +900,7 @@ export function InitializationManagementSection({
       id: "",
       note_id: "",
       item_key: definition.item_key,
-      selected: false,
-      locked: false,
       status: "pending" as ItemStatus,
-      config_json: JSON.stringify(definition.default_config ?? {}),
       depends_on: definition.dependencies,
       last_model_id: null,
       last_error: null,
@@ -938,39 +919,32 @@ export function InitializationManagementSection({
       return registry.map((definition) => {
         const existing = prevMap.get(definition.item_key);
         if (existing) {
-          return {
-            ...existing,
-            depends_on: definition.dependencies,
-            config_json:
-              existing.config_json ?? JSON.stringify(definition.default_config ?? {}),
-          };
+          return { ...existing, depends_on: definition.dependencies };
         }
-
-        return {
-          id: "",
-          note_id: "",
-          item_key: definition.item_key,
-          selected: false,
-          locked: false,
-          status: "pending" as ItemStatus,
-          config_json: JSON.stringify(definition.default_config ?? {}),
-          depends_on: definition.dependencies,
-          last_model_id: null,
-          last_error: null,
-          output_present: false,
-          started_at: null,
-          completed_at: null,
-          updated_at: "",
-        };
+        return normalizedItems.find((i) => i.item_key === definition.item_key)!;
       });
     });
 
     setEditingExplicitKeys((prev) => {
       const validKeys = new Set(registry.map((item) => item.item_key));
-      const next = new Set(Array.from(prev).filter((key) => validKeys.has(key)));
-      return next;
+      // 首次加载时从全局设置恢复
+      if (prev.size === 0 && initializationTemplateSettings.loaded && initializationTemplateSettings.selectedKeys) {
+        return new Set(initializationTemplateSettings.selectedKeys.filter((k) => validKeys.has(k)));
+      }
+      return new Set(Array.from(prev).filter((key) => validKeys.has(key)));
     });
-  }, [registry]);
+  }, [registry, initializationTemplateSettings.loaded, initializationTemplateSettings.selectedKeys]);
+
+  // 当已选项目变化时，自动持久化到全局设置
+  const isFirstRenderRef = useRef(true);
+  useEffect(() => {
+    if (!initializationTemplateSettings.loaded) return;
+    if (isFirstRenderRef.current) {
+      isFirstRenderRef.current = false;
+      return;
+    }
+    setInitializationTemplateSelectedKeys(Array.from(editingExplicitKeys));
+  }, [editingExplicitKeys, initializationTemplateSettings.loaded, setInitializationTemplateSelectedKeys]);
 
   useEffect(() => {
     setEditingModelOverrideId((prev) => {
@@ -1241,96 +1215,6 @@ export function InitializationManagementSection({
       )
     );
   }, []);
-
-  const buildItemsForTarget = useCallback(
-    (
-      noteId: string,
-      detail: NoteInitializationDetail
-    ): UpsertNoteInitializationItemInput[] => {
-      const detailMap = new Map(detail.items.map((item) => [item.item_key, item]));
-      const sourceMap = new Map(editingItems.map((item) => [item.item_key, item]));
-
-      return registry.map((definition) => {
-        const base = detailMap.get(definition.item_key);
-        const source = sourceMap.get(definition.item_key);
-
-        return {
-          note_id: noteId,
-          item_key: definition.item_key,
-          selected: source?.selected ?? false,
-          locked: source?.locked ?? false,
-          status: base?.status ?? "pending",
-          config_json:
-            source?.config_json ??
-            base?.config_json ??
-            JSON.stringify(definition.default_config ?? {}),
-          depends_on: definition.dependencies,
-          last_model_id: base?.last_model_id ?? null,
-          last_error: base?.last_error ?? null,
-          output_present: base?.output_present ?? false,
-          started_at: base?.started_at ?? null,
-          completed_at: base?.completed_at ?? null,
-        };
-      });
-    },
-    [editingItems, registry]
-  );
-
-  const syncSelectedNotes = useCallback(async () => {
-    if (selectedNoteIds.length === 0) {
-      message.warning("请先在步骤 1 选择至少一条笔记");
-      return false;
-    }
-
-    if (registry.length === 0) {
-      message.warning("初始化项目尚未加载完成");
-      return false;
-    }
-
-    if (selectedItemsForSync.length === 0) {
-      message.warning("请至少选择一个初始化项目");
-      return false;
-    }
-
-    setActionLoading("sync");
-    try {
-      const uniqueNoteIds = Array.from(new Set(selectedNoteIds));
-
-      for (const noteId of uniqueNoteIds) {
-        const detail = await invoke<NoteInitializationDetail>(
-          "get_note_initialization_plan",
-          { noteId }
-        );
-        const items = buildItemsForTarget(noteId, detail);
-
-        await invoke<NoteInitializationDetail>("save_note_initialization_plan", {
-          noteId,
-          selectedItems: selectedItemsForSync,
-          lockedItems: lockedItemsForSync,
-          modelOverrideId: detail.run?.model_override_id ?? null,
-          items,
-        });
-      }
-
-      message.success(`已同步到 ${uniqueNoteIds.length} 条笔记`);
-      await loadOverview();
-      return true;
-    } catch (error) {
-      console.error("Failed to sync initialization plan:", error);
-      message.error(`同步初始化配置失败：${String(error)}`);
-      return false;
-    } finally {
-      setActionLoading(null);
-    }
-  }, [
-    buildItemsForTarget,
-    loadOverview,
-    lockedItemsForSync,
-    registry.length,
-    selectedItemsForSync,
-    selectedNoteIds,
-  ]);
-
   const executeSelectedNotes = useCallback(async () => {
     if (selectedNoteIds.length === 0) {
       message.warning("请先选择至少一条笔记");
@@ -1344,14 +1228,10 @@ export function InitializationManagementSection({
       let skippedNoModel = 0;
 
       for (const noteId of uniqueNoteIds) {
-        const detail = await invoke<NoteInitializationDetail>(
-          "get_note_initialization_plan",
-          { noteId }
-        );
         const note = noteMap.get(noteId);
         if (!note) continue;
 
-        const modelId = resolveModelId(noteId, detail.run?.model_override_id ?? editingModelOverrideId);
+        const modelId = resolveModelId(noteId, editingModelOverrideId);
         if (!modelId) {
           skippedNoModel += 1;
           continue;
@@ -1399,47 +1279,12 @@ export function InitializationManagementSection({
         return { task: null as InitializationTaskParams | null, missingModel: false };
       }
 
-      const normalized = normalizeSelection(retryKeys, registry);
-      if (normalized.selected.size === 0) {
-        message.warning("请至少选择一个初始化项目");
-        return { task: null as InitializationTaskParams | null, missingModel: false };
-      }
-
-      const detailMap = new Map(detail.items.map((item) => [item.item_key, item]));
-      const items: UpsertNoteInitializationItemInput[] = registry.map((definition) => {
-        const base = detailMap.get(definition.item_key);
-        return {
-          note_id: noteId,
-          item_key: definition.item_key,
-          selected: normalized.selected.has(definition.item_key),
-          locked: normalized.locked.has(definition.item_key),
-          status: base?.status ?? "pending",
-          config_json:
-            base?.config_json ?? JSON.stringify(definition.default_config ?? {}),
-          depends_on: definition.dependencies,
-          last_model_id: base?.last_model_id ?? null,
-          last_error: base?.last_error ?? null,
-          output_present: base?.output_present ?? false,
-          started_at: base?.started_at ?? null,
-          completed_at: base?.completed_at ?? null,
-        };
-      });
-
-      const modelOverrideForRun = detail.run?.model_override_id ?? null;
-
-      await invoke<NoteInitializationDetail>("save_note_initialization_plan", {
-        noteId,
-        selectedItems: Array.from(normalized.selected),
-        lockedItems: Array.from(normalized.locked),
-        modelOverrideId: modelOverrideForRun,
-        items,
-      });
-
       const note = noteMap.get(noteId);
       if (!note) {
         return { task: null as InitializationTaskParams | null, missingModel: false };
       }
 
+      const modelOverrideForRun = detail.run?.model_override_id ?? null;
       const modelId = resolveModelId(noteId, modelOverrideForRun);
       if (!modelId) {
         return { task: null as InitializationTaskParams | null, missingModel: true };
@@ -1456,7 +1301,7 @@ export function InitializationManagementSection({
         missingModel: false,
       };
     },
-    [noteMap, registry, resolveModelId]
+    [noteMap, resolveModelId]
   );
 
   const handleRetryFailed = useCallback(async () => {
@@ -1690,7 +1535,7 @@ export function InitializationManagementSection({
                 </div>
 
                 <HelperBlock>
-                  已勾选的笔记会在步骤 2 接收统一的初始化项目配置，并在步骤 3 统一加入执行队列。
+                  已勾选的笔记将在步骤 3 统一加入执行队列，执行时使用步骤 2 的全局配置。
                 </HelperBlock>
 
                 <div className="max-h-[620px] overflow-y-auto pr-1 space-y-2.5">
@@ -1824,11 +1669,11 @@ export function InitializationManagementSection({
                     <div className={sectionEyebrowClass}>Step 2</div>
                     <div className={sectionTitleClass}>第 2 步：选择初始化项目</div>
                     <div className={sectionDescriptionClass}>
-                      这里的初始化项目是固定的。调整后可一键同步到步骤 1 中已选的目标笔记。
+                      这里的初始化项目是全局配置，调整后将自动保存并在执行时生效。
                     </div>
                   </div>
                   <HelperBlock className="xl:max-w-sm py-2">
-                    当前将同步到 <span className="font-medium text-slate-700 dark:text-slate-200">{selectedNoteIds.length}</span> 条已选笔记。
+                    配置自动保存，执行时将应用到所有选中笔记。
                   </HelperBlock>
                 </div>
 
@@ -1859,18 +1704,6 @@ export function InitializationManagementSection({
                     className={`${tertiaryButtonClass} py-1.5`}
                   >
                     清空项目
-                  </button>
-                  <button
-                    onClick={syncSelectedNotes}
-                    disabled={actionLoading !== null || selectedNoteIds.length === 0}
-                    className={`${tertiaryIconButtonClass} py-1.5`}
-                  >
-                    {actionLoading === "sync" ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : (
-                      <RefreshCw size={14} />
-                    )}
-                    同步到已选笔记
                   </button>
                 </div>
 
@@ -1991,7 +1824,7 @@ export function InitializationManagementSection({
                               </button>
                             )}
                             <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                              {item.selected ? "将同步到目标笔记" : "当前不参与同步"}
+                              {item.selected ? "已选，将在执行时生效" : "未选，不参与执行"}
                             </span>
                           </div>
                         </div>
@@ -2033,7 +1866,7 @@ export function InitializationManagementSection({
                       <div className={sectionEyebrowClass}>Step 3</div>
                       <div className={sectionTitleClass}>第 3 步：开始执行</div>
                       <div className={sectionDescriptionClass}>
-                        这里仅负责执行。请选择模型后，将已同步的笔记统一加入运行队列。
+                        这里仅负责执行。请选择模型后，将已选笔记统一加入运行队列。
                       </div>
                     </div>
                     <HelperBlock className="xl:max-w-sm py-2">

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS app_settings (
 
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('theme', 'dark');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('tray_enabled', 'false');
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('initialization_template_selected_keys', '');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('initialization_template_regenerate', 'false');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('initialization_template_model_id', '');
 
@@ -50,8 +51,6 @@ CREATE TABLE IF NOT EXISTS note_initialization_runs (
     id TEXT PRIMARY KEY,
     note_id TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL CHECK(status IN ('idle', 'queued', 'running', 'completed', 'partial_failed', 'failed', 'canceled')),
-    selected_items_json TEXT NOT NULL DEFAULT '[]',
-    locked_items_json TEXT NOT NULL DEFAULT '[]',
     model_override_id TEXT,
     last_error TEXT,
     started_at TEXT,
@@ -67,10 +66,7 @@ CREATE TABLE IF NOT EXISTS note_initialization_items (
     id TEXT PRIMARY KEY,
     note_id TEXT NOT NULL,
     item_key TEXT NOT NULL,
-    selected INTEGER NOT NULL DEFAULT 0,
-    locked INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL CHECK(status IN ('pending', 'queued', 'running', 'completed', 'skipped', 'failed', 'blocked', 'canceled')),
-    config_json TEXT,
     depends_on_json TEXT,
     last_model_id TEXT,
     last_error TEXT,
