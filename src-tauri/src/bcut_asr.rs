@@ -10,9 +10,11 @@ use crate::storage_paths;
 use tokio::process::Command as TokioCommand;
 
 const API_REQ_UPLOAD: &str = "https://member.bilibili.com/x/bcut/rubick-interface/resource/create";
-const API_COMMIT_UPLOAD: &str = "https://member.bilibili.com/x/bcut/rubick-interface/resource/create/complete";
+const API_COMMIT_UPLOAD: &str =
+    "https://member.bilibili.com/x/bcut/rubick-interface/resource/create/complete";
 const API_CREATE_TASK: &str = "https://member.bilibili.com/x/bcut/rubick-interface/task";
 const API_QUERY_RESULT: &str = "https://member.bilibili.com/x/bcut/rubick-interface/task/result";
+const MAX_SEGMENT_DURATION_MS: i64 = 60 * 60 * 1000;
 
 const USER_AGENT: &str = "Bilibili/1.0.0 (https://www.bilibili.com)";
 
@@ -61,6 +63,21 @@ fn async_ffmpeg_command() -> TokioCommand {
     TokioCommand::new("ffmpeg")
 }
 
+#[cfg(windows)]
+fn async_ffprobe_command() -> TokioCommand {
+    #[allow(unused_imports)]
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let mut cmd = TokioCommand::new("ffprobe");
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    cmd
+}
+
+#[cfg(not(windows))]
+fn async_ffprobe_command() -> TokioCommand {
+    TokioCommand::new("ffprobe")
+}
+
 fn is_aborted(abort_flag: &Arc<AtomicBool>) -> bool {
     abort_flag.load(Ordering::Relaxed)
 }
@@ -76,6 +93,10 @@ fn ms_to_srt_time(ms: i64) -> String {
         "{:02}:{:02}:{:02},{:03}",
         hours, minutes, seconds, milliseconds
     )
+}
+
+fn ms_to_ffmpeg_time(ms: i64) -> String {
+    format!("{:.3}", ms as f64 / 1000.0)
 }
 
 fn base_name_from_path(path: &str) -> String {
@@ -111,7 +132,100 @@ async fn extract_audio_to_mp3(video_path: &str, audio_path: &Path) -> Result<(),
     Ok(())
 }
 
-async fn upload_audio(client: &Client, audio_bytes: &[u8]) -> Result<(UploadData, Vec<String>), String> {
+async fn probe_audio_duration_ms(audio_path: &Path) -> Result<i64, String> {
+    let output = async_ffprobe_command()
+        .arg("-v")
+        .arg("error")
+        .arg("-show_entries")
+        .arg("format=duration")
+        .arg("-of")
+        .arg("default=noprint_wrappers=1:nokey=1")
+        .arg(audio_path)
+        .output()
+        .await
+        .map_err(|e| format!("ffprobe执行失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("读取音频时长失败: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let duration_secs = stdout
+        .trim()
+        .parse::<f64>()
+        .map_err(|e| format!("解析音频时长失败: {}", e))?;
+    let duration_ms = (duration_secs * 1000.0).round() as i64;
+
+    if duration_ms <= 0 {
+        return Err("音频时长无效".to_string());
+    }
+
+    Ok(duration_ms)
+}
+
+fn build_segment_plan(total_duration_ms: i64) -> Vec<(i64, i64)> {
+    if total_duration_ms <= 0 {
+        return Vec::new();
+    }
+
+    if total_duration_ms <= MAX_SEGMENT_DURATION_MS {
+        return vec![(0, total_duration_ms)];
+    }
+
+    let segment_count = (total_duration_ms + MAX_SEGMENT_DURATION_MS - 1) / MAX_SEGMENT_DURATION_MS;
+    let mut segments = Vec::with_capacity(segment_count as usize);
+
+    for index in 0..segment_count {
+        let start_ms = index * total_duration_ms / segment_count;
+        let end_ms = (index + 1) * total_duration_ms / segment_count;
+        segments.push((start_ms, end_ms));
+    }
+
+    segments
+}
+
+async fn extract_audio_segment_to_mp3(
+    source_audio_path: &Path,
+    segment_audio_path: &Path,
+    start_ms: i64,
+    duration_ms: i64,
+) -> Result<(), String> {
+    if duration_ms <= 0 {
+        return Err("音频分段时长无效".to_string());
+    }
+
+    let output = async_ffmpeg_command()
+        .arg("-y")
+        .arg("-ss")
+        .arg(ms_to_ffmpeg_time(start_ms))
+        .arg("-t")
+        .arg(ms_to_ffmpeg_time(duration_ms))
+        .arg("-i")
+        .arg(source_audio_path)
+        .arg("-ac")
+        .arg("1")
+        .arg("-ar")
+        .arg("16000")
+        .arg("-f")
+        .arg("mp3")
+        .arg(segment_audio_path)
+        .output()
+        .await
+        .map_err(|e| format!("ffmpeg执行失败: {}", e))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("音频切分失败: {}", stderr));
+    }
+
+    Ok(())
+}
+
+async fn upload_audio(
+    client: &Client,
+    audio_bytes: &[u8],
+) -> Result<(UploadData, Vec<String>), String> {
     let payload = json!({
         "type": 2,
         "name": "audio.mp3",
@@ -293,6 +407,133 @@ fn build_srt_from_result(result_json: &serde_json::Value) -> Result<String, Stri
     Ok(lines.join("\n"))
 }
 
+fn parse_srt_timestamp_to_ms(value: &str) -> Result<i64, String> {
+    let parts: Vec<&str> = value.trim().split(':').collect();
+    if parts.len() != 3 {
+        return Err(format!("无效的 SRT 时间戳: {}", value));
+    }
+
+    let second_parts: Vec<&str> = parts[2].split(',').collect();
+    if second_parts.len() != 2 {
+        return Err(format!("无效的 SRT 时间戳: {}", value));
+    }
+
+    let hours = parts[0]
+        .parse::<i64>()
+        .map_err(|e| format!("解析小时失败: {}", e))?;
+    let minutes = parts[1]
+        .parse::<i64>()
+        .map_err(|e| format!("解析分钟失败: {}", e))?;
+    let seconds = second_parts[0]
+        .parse::<i64>()
+        .map_err(|e| format!("解析秒失败: {}", e))?;
+    let milliseconds = second_parts[1]
+        .parse::<i64>()
+        .map_err(|e| format!("解析毫秒失败: {}", e))?;
+
+    Ok((((hours * 60) + minutes) * 60 + seconds) * 1000 + milliseconds)
+}
+
+fn offset_srt_content(
+    srt_content: &str,
+    offset_ms: i64,
+    start_index: usize,
+) -> Result<(String, usize), String> {
+    let normalized = srt_content.replace("\r\n", "\n");
+    let mut blocks = Vec::new();
+    let mut current_index = start_index;
+
+    for block in normalized.split("\n\n") {
+        let trimmed = block.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut lines = trimmed.lines();
+        lines
+            .next()
+            .ok_or_else(|| "SRT 字幕块缺少序号".to_string())?;
+        let time_line = lines
+            .next()
+            .ok_or_else(|| "SRT 字幕块缺少时间轴".to_string())?;
+        let (start_text, end_text) = time_line
+            .split_once(" --> ")
+            .ok_or_else(|| format!("无效的 SRT 时间轴: {}", time_line))?;
+
+        let start_ms = parse_srt_timestamp_to_ms(start_text)? + offset_ms;
+        let end_ms = parse_srt_timestamp_to_ms(end_text)? + offset_ms;
+        let text = lines.collect::<Vec<_>>().join("\n");
+
+        blocks.push(format!(
+            "{}\n{} --> {}\n{}\n",
+            current_index,
+            ms_to_srt_time(start_ms),
+            ms_to_srt_time(end_ms),
+            text
+        ));
+        current_index += 1;
+    }
+
+    if blocks.is_empty() {
+        return Err("SRT 内容为空".to_string());
+    }
+
+    Ok((blocks.join("\n"), current_index))
+}
+
+fn merge_srt_segments(segments: &[String]) -> Result<String, String> {
+    let merged = segments
+        .iter()
+        .map(|segment| segment.trim())
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    if merged.is_empty() {
+        return Err("没有可合并的字幕分段".to_string());
+    }
+
+    Ok(format!("{}\n", merged))
+}
+
+async fn transcribe_audio_file_to_srt_content(
+    client: &Client,
+    audio_path: &Path,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    if is_aborted(abort_flag) {
+        return Err("已中止".to_string());
+    }
+
+    let audio_bytes = tokio::fs::read(audio_path)
+        .await
+        .map_err(|e| format!("读取音频失败: {}", e))?;
+
+    let (upload_data, etags) = upload_audio(client, &audio_bytes).await?;
+    let download_url = commit_upload(client, &upload_data, &etags).await?;
+    let task_id = create_task(client, &download_url).await?;
+
+    for _ in 0..500 {
+        if is_aborted(abort_flag) {
+            return Err("已中止".to_string());
+        }
+
+        let result = query_result(client, &task_id).await?;
+        if result.state == 4 {
+            let result_str = result
+                .result
+                .ok_or_else(|| "转录结果缺少 result".to_string())?;
+            let result_json: serde_json::Value = serde_json::from_str(&result_str)
+                .map_err(|e| format!("解析转录结果失败: {}", e))?;
+            return build_srt_from_result(&result_json);
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    }
+
+    Err("转录超时".to_string())
+}
+
 fn build_subtitle_dir(app: &AppHandle, note_id: &str) -> Result<PathBuf, String> {
     storage_paths::subtitle_dir(app, note_id)
 }
@@ -323,40 +564,137 @@ pub async fn transcribe_video_to_srt(
         return Err("已中止".to_string());
     }
 
-    let audio_bytes = tokio::fs::read(&audio_path)
-        .await
-        .map_err(|e| format!("读取音频失败: {}", e))?;
+    let total_duration_ms = probe_audio_duration_ms(&audio_path).await?;
+    let segment_plan = build_segment_plan(total_duration_ms);
+    if segment_plan.is_empty() {
+        return Err("音频分段计划为空".to_string());
+    }
 
     let client = Client::builder()
         .user_agent(USER_AGENT)
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-    let (upload_data, etags) = upload_audio(&client, &audio_bytes).await?;
-    let download_url = commit_upload(&client, &upload_data, &etags).await?;
-    let task_id = create_task(&client, &download_url).await?;
+    let srt_content = if segment_plan.len() == 1 {
+        transcribe_audio_file_to_srt_content(&client, &audio_path, abort_flag).await?
+    } else {
+        let mut merged_segments = Vec::with_capacity(segment_plan.len());
+        let mut next_index = 1;
 
-    for _ in 0..500 {
-        if is_aborted(abort_flag) {
-            return Err("已中止".to_string());
+        for (segment_index, (start_ms, end_ms)) in segment_plan.iter().copied().enumerate() {
+            if is_aborted(abort_flag) {
+                return Err("已中止".to_string());
+            }
+
+            let duration_ms = end_ms - start_ms;
+            let segment_audio_path =
+                subtitle_dir.join(format!("{}.part{}.mp3", base_name, segment_index + 1));
+
+            if !segment_audio_path.exists() {
+                extract_audio_segment_to_mp3(
+                    &audio_path,
+                    &segment_audio_path,
+                    start_ms,
+                    duration_ms,
+                )
+                .await?;
+            }
+
+            let segment_srt =
+                transcribe_audio_file_to_srt_content(&client, &segment_audio_path, abort_flag)
+                    .await?;
+            let (offset_segment_srt, updated_index) =
+                offset_srt_content(&segment_srt, start_ms, next_index)?;
+            merged_segments.push(offset_segment_srt);
+            next_index = updated_index;
         }
 
-        let result = query_result(&client, &task_id).await?;
-        if result.state == 4 {
-            let result_str = result
-                .result
-                .ok_or_else(|| "转录结果缺少 result".to_string())?;
-            let result_json: serde_json::Value = serde_json::from_str(&result_str)
-                .map_err(|e| format!("解析转录结果失败: {}", e))?;
-            let srt_content = build_srt_from_result(&result_json)?;
-            tokio::fs::write(&srt_path, srt_content)
-                .await
-                .map_err(|e| format!("保存字幕失败: {}", e))?;
-            return Ok(srt_path.to_string_lossy().to_string());
-        }
+        merge_srt_segments(&merged_segments)?
+    };
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    if is_aborted(abort_flag) {
+        return Err("已中止".to_string());
     }
 
-    Err("转录超时".to_string())
+    tokio::fs::write(&srt_path, srt_content)
+        .await
+        .map_err(|e| format!("保存字幕失败: {}", e))?;
+    Ok(srt_path.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        build_segment_plan, merge_srt_segments, offset_srt_content, parse_srt_timestamp_to_ms,
+        MAX_SEGMENT_DURATION_MS,
+    };
+
+    #[test]
+    fn build_segment_plan_keeps_short_audio_as_single_segment() {
+        let segments = build_segment_plan(59 * 60 * 1000);
+        assert_eq!(segments, vec![(0, 59 * 60 * 1000)]);
+    }
+
+    #[test]
+    fn build_segment_plan_keeps_exactly_one_hour_as_single_segment() {
+        let segments = build_segment_plan(MAX_SEGMENT_DURATION_MS);
+        assert_eq!(segments, vec![(0, MAX_SEGMENT_DURATION_MS)]);
+    }
+
+    #[test]
+    fn build_segment_plan_splits_audio_slightly_over_one_hour() {
+        let total_duration_ms = MAX_SEGMENT_DURATION_MS + 1000;
+        let segments = build_segment_plan(total_duration_ms);
+        assert_eq!(segments.len(), 2);
+        assert_eq!(segments[0], (0, 1_800_500));
+        assert_eq!(segments[1], (1_800_500, total_duration_ms));
+    }
+
+    #[test]
+    fn build_segment_plan_splits_seventy_minutes_into_two_equal_parts() {
+        let total_duration_ms = 70 * 60 * 1000;
+        let segments = build_segment_plan(total_duration_ms);
+        assert_eq!(
+            segments,
+            vec![(0, 35 * 60 * 1000), (35 * 60 * 1000, total_duration_ms)]
+        );
+    }
+
+    #[test]
+    fn build_segment_plan_splits_one_hundred_twenty_five_minutes_into_three_parts() {
+        let total_duration_ms = 125 * 60 * 1000;
+        let segments = build_segment_plan(total_duration_ms);
+        assert_eq!(segments.len(), 3);
+        assert_eq!(segments[0], (0, 2_500_000));
+        assert_eq!(segments[1], (2_500_000, 5_000_000));
+        assert_eq!(segments[2], (5_000_000, total_duration_ms));
+    }
+
+    #[test]
+    fn parse_srt_timestamp_to_ms_parses_valid_timestamp() {
+        let value = parse_srt_timestamp_to_ms("01:02:03,456").unwrap();
+        assert_eq!(value, 3_723_456);
+    }
+
+    #[test]
+    fn offset_srt_content_shifts_timestamps_and_renumbers_indices() {
+        let srt = "1\n00:00:01,000 --> 00:00:03,000\n第一行\n\n2\n00:00:05,500 --> 00:00:06,250\n第二行\n";
+        let (shifted, next_index) = offset_srt_content(srt, 35 * 60 * 1000, 7).unwrap();
+
+        assert_eq!(next_index, 9);
+        assert!(shifted.contains("7\n00:35:01,000 --> 00:35:03,000\n第一行"));
+        assert!(shifted.contains("8\n00:35:05,500 --> 00:35:06,250\n第二行"));
+    }
+
+    #[test]
+    fn merge_srt_segments_combines_non_empty_segments() {
+        let merged = merge_srt_segments(&[
+            "1\n00:00:00,000 --> 00:00:01,000\nA\n".to_string(),
+            "2\n00:10:00,000 --> 00:10:01,000\nB\n".to_string(),
+        ])
+        .unwrap();
+
+        assert!(merged.contains("1\n00:00:00,000 --> 00:00:01,000\nA"));
+        assert!(merged.contains("2\n00:10:00,000 --> 00:10:01,000\nB"));
+    }
 }

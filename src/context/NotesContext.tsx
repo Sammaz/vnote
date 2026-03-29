@@ -2,7 +2,7 @@
  * NotesContext - 笔记数据管理
  * 从 AppContext 拆分，减少不必要的重渲染
  */
-import { createContext, useContext, useState, useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Note, CreateNoteRequest, UpdateNoteMetadataRequest, ViewType, AppStats } from "../types";
 import { getNoteGenerationState, getActiveGenerationIds, clearNoteGenerationState } from "../utils/noteGenerationState";
@@ -48,6 +48,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
   const [searchQuery, setSearchQuery] = useState("");
   const [currentView, setCurrentView] = useState<ViewType>("home");
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const latestRefreshRequestIdRef = useRef(0);
 
   // 更新统计
   const updateStats = useCallback((notesList: Note[]) => {
@@ -80,11 +81,19 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
 
   // 加载笔记列表
   const refreshNotes = useCallback(async () => {
+    const requestId = ++latestRefreshRequestIdRef.current;
+
     try {
       const notesList = await invoke<Note[]>("get_notes");
+      if (requestId !== latestRefreshRequestIdRef.current) {
+        return;
+      }
       setNotes(notesList);
       updateStats(notesList);
     } catch (error) {
+      if (requestId !== latestRefreshRequestIdRef.current) {
+        return;
+      }
       console.error("Failed to load notes:", error);
     }
   }, [updateStats]);

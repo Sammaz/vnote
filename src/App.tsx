@@ -320,7 +320,8 @@ function AppContent() {
 function InitializationRuntimeWrapper({ children }: { children: React.ReactNode }) {
   const { refreshNotes } = useApp();
 
-  const handleTaskCompleted = useCallback(async () => {
+  const handleTaskCompleted = useCallback(async (noteId: string) => {
+    if (!noteId) return;
     await refreshNotes();
   }, [refreshNotes]);
 
