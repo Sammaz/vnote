@@ -297,6 +297,9 @@ fn prepare_chat(
 
     maybe_auto_rename_session(db, &session, &user_message)?;
 
+    let user_images_json = request.images.as_ref()
+        .and_then(|images| serde_json::to_string(images).ok());
+
     let user_record = db
         .create_knowledge_chat_message(
             &session.id,
@@ -308,6 +311,7 @@ fn prepare_chat(
             Some(&ai_config.id),
             prompt_id.as_deref(),
             None,
+            user_images_json.as_deref(),
         )
         .map_err(|e| e.to_string())?;
 
@@ -321,6 +325,7 @@ fn prepare_chat(
             Some(&user_record.id),
             Some(&ai_config.id),
             prompt_id.as_deref(),
+            None,
             None,
         )
         .map_err(|e| e.to_string())?;

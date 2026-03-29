@@ -289,6 +289,7 @@ pub struct KnowledgeChatMessage {
     pub model_id: Option<String>,
     pub prompt_id: Option<String>,
     pub error_message: Option<String>,
+    pub images_json: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -484,12 +485,24 @@ impl Database {
             pool,
         };
         db.init_tables()?;
+        db.ensure_knowledge_chat_message_images_column()?;
         Ok(db)
     }
 
     fn init_tables(&self) -> SqliteResult<()> {
         let conn = self.connection();
         conn.execute_batch(INIT_SQL)?;
+        Ok(())
+    }
+
+    fn ensure_knowledge_chat_message_images_column(&self) -> SqliteResult<()> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare("PRAGMA table_info(knowledge_chat_messages)")?;
+        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?
+            .collect::<SqliteResult<Vec<_>>>()?;
+        if !columns.iter().any(|column| column == "images_json") {
+            conn.execute("ALTER TABLE knowledge_chat_messages ADD COLUMN images_json TEXT", [])?;
+        }
         Ok(())
     }
 
@@ -2649,7 +2662,7 @@ impl Database {
     pub fn get_knowledge_chat_messages(&self, session_id: &str) -> SqliteResult<Vec<KnowledgeChatMessage>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message, created_at, updated_at
+            "SELECT id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message, images_json, created_at, updated_at
              FROM knowledge_chat_messages WHERE session_id = ?1 ORDER BY created_at ASC, rowid ASC"
         )?;
         let messages = stmt.query_map([session_id], |row| {
@@ -2664,8 +2677,9 @@ impl Database {
                 model_id: row.get(7)?,
                 prompt_id: row.get(8)?,
                 error_message: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
+                images_json: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?;
         messages.collect()
@@ -2674,7 +2688,7 @@ impl Database {
     pub fn get_knowledge_chat_message_by_id(&self, message_id: &str) -> SqliteResult<Option<KnowledgeChatMessage>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message, created_at, updated_at
+            "SELECT id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message, images_json, created_at, updated_at
              FROM knowledge_chat_messages WHERE id = ?1"
         )?;
         let result = stmt.query_row([message_id], |row| {
@@ -2689,8 +2703,9 @@ impl Database {
                 model_id: row.get(7)?,
                 prompt_id: row.get(8)?,
                 error_message: row.get(9)?,
-                created_at: row.get(10)?,
-                updated_at: row.get(11)?,
+                images_json: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         }).optional()?;
         Ok(result)
@@ -2707,13 +2722,14 @@ impl Database {
         model_id: Option<&str>,
         prompt_id: Option<&str>,
         error_message: Option<&str>,
+        images_json: Option<&str>,
     ) -> SqliteResult<KnowledgeChatMessage> {
         let conn = self.connection();
         let new_id = snowflake::generate_id_string();
         conn.execute(
             "INSERT INTO knowledge_chat_messages (
-                id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                id, session_id, role, content, status, request_id, parent_message_id, model_id, prompt_id, error_message, images_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             rusqlite::params![
                 &new_id,
                 session_id,
@@ -2725,6 +2741,7 @@ impl Database {
                 model_id,
                 prompt_id,
                 error_message,
+                images_json,
             ],
         )?;
         self.touch_knowledge_chat_session(session_id)?;

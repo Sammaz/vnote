@@ -119,6 +119,7 @@ export interface KnowledgeChatMessageRecord {
     model_id: string | null;
     prompt_id: string | null;
     error_message: string | null;
+    images_json: string | null;
     created_at: string;
     updated_at: string;
   };

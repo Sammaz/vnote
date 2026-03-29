@@ -254,6 +254,7 @@ CREATE TABLE IF NOT EXISTS knowledge_chat_messages (
     model_id TEXT,
     prompt_id TEXT,
     error_message TEXT,
+    images_json TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (session_id) REFERENCES knowledge_chat_sessions(id) ON DELETE CASCADE,

@@ -85,6 +85,16 @@ function generateTempId() {
 }
 
 function mapRecordToUiMessage(record: KnowledgeChatMessageRecord): UiMessage {
+  let imageUrls: string[] | undefined;
+  if (record.message.images_json) {
+    try {
+      const parsed = JSON.parse(record.message.images_json) as Array<{ data?: string }>;
+      imageUrls = parsed.map((item) => item.data).filter((item): item is string => Boolean(item));
+    } catch {
+      imageUrls = undefined;
+    }
+  }
+
   return {
     id: record.message.id,
     role: record.message.role,
@@ -97,6 +107,7 @@ function mapRecordToUiMessage(record: KnowledgeChatMessageRecord): UiMessage {
     parentMessageId: record.message.parent_message_id,
     errorMessage: record.message.error_message,
     createdAt: record.message.created_at,
+    imageUrls,
   };
 }
 
@@ -252,6 +263,7 @@ export function KnowledgeBaseChat() {
   const promptDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadedImagesRef = useRef<UploadedImage[]>([]);
+  const pendingAbortRef = useRef(false);
 
   const availablePromptConfigs = useMemo(() => promptConfigs, [promptConfigs]);
   const activeModel = useMemo(
@@ -307,6 +319,7 @@ export function KnowledgeBaseChat() {
     setSelectedSessionId(null);
     setMessages([]);
     setInspectorMessageId(null);
+    pendingAbortRef.current = false;
     setStatusText(null);
     setStatusQueries([]);
     setRequestId(null);
@@ -436,6 +449,10 @@ export function KnowledgeBaseChat() {
         const targetIndex = next.length - 1 - assistantIndex;
         const current = next[targetIndex];
 
+        if (pendingAbortRef.current && !["Aborted", "Completed", "Error"].includes(data.status)) {
+          return prev;
+        }
+
         switch (data.status) {
           case "ContextFound":
             next[targetIndex] = {
@@ -513,22 +530,31 @@ export function KnowledgeBaseChat() {
       switch (data.status) {
         case "Searching":
         case "Planning":
-          setStatusText(data.message);
-          setStatusQueries([]);
+          if (!pendingAbortRef.current) {
+            setStatusText(data.message);
+            setStatusQueries([]);
+          }
           break;
         case "Retrieving":
-          setStatusText(data.message);
-          setStatusQueries(data.queries);
+          if (!pendingAbortRef.current) {
+            setStatusText(data.message);
+            setStatusQueries(data.queries);
+          }
           break;
         case "ContextFound":
-          setStatusText(mode === "agent" ? "正在整理证据与组织回答..." : "正在整理证据并生成回答...");
-          setStatusQueries([]);
+          if (!pendingAbortRef.current) {
+            setStatusText(mode === "agent" ? "正在整理证据与组织回答..." : "正在整理证据并生成回答...");
+            setStatusQueries([]);
+          }
           break;
         case "Streaming":
-          setStatusText(null);
-          setStatusQueries([]);
+          if (!pendingAbortRef.current) {
+            setStatusText(null);
+            setStatusQueries([]);
+          }
           break;
         case "Completed":
+          pendingAbortRef.current = false;
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
@@ -537,6 +563,7 @@ export function KnowledgeBaseChat() {
           void loadSessionDetail(data.session_id);
           break;
         case "Error":
+          pendingAbortRef.current = false;
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
@@ -548,6 +575,7 @@ export function KnowledgeBaseChat() {
           }
           break;
         case "Aborted":
+          pendingAbortRef.current = false;
           setStreaming(false);
           setRequestId(null);
           setStatusText(null);
@@ -567,6 +595,12 @@ export function KnowledgeBaseChat() {
         return;
       }
       unlisten = fn;
+      if (pendingAbortRef.current) {
+        pendingAbortRef.current = false;
+        void invoke("knowledge_base_abort_chat", { requestId }).catch((error) => {
+          console.error("Failed to abort knowledge chat:", error);
+        });
+      }
     });
 
     return () => {
@@ -808,12 +842,29 @@ export function KnowledgeBaseChat() {
     });
   }, []);
 
-  const handleSend = useCallback(async (overrideText?: string, overrideEditMessageId?: string | null) => {
+  const dataUrlToFile = useCallback((dataUrl: string, filename: string) => {
+    const [header, base64] = dataUrl.split(",");
+    const mime = header.match(/data:(.*?);base64/)?.[1] ?? "image/png";
+    const binary = atob(base64 ?? "");
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new File([bytes], filename, { type: mime });
+  }, []);
+
+  const handleSend = useCallback(async (
+    overrideText?: string,
+    overrideEditMessageId?: string | null,
+    overrideImageUrls?: string[]
+  ) => {
     const normalizedOverride = typeof overrideText === "string" ? overrideText : undefined;
     const text = (normalizedOverride ?? input).trim();
     const effectiveEditMessageId = overrideEditMessageId ?? editingMessageId;
     const usingOverride = typeof normalizedOverride === "string";
-    if ((!text && uploadedImages.length === 0) || streaming) return;
+    const effectiveImageUrls = overrideImageUrls ?? null;
+    const imageCount = effectiveImageUrls ? effectiveImageUrls.length : uploadedImages.length;
+    if ((!text && imageCount === 0) || streaming) return;
 
     if (!localModelId && aiConfigs.length === 0) {
       setComposerError("当前没有可用模型，请先到设置页配置 AI 模型。");
@@ -824,7 +875,10 @@ export function KnowledgeBaseChat() {
 
     let imagePayload: KnowledgeChatImageData[] | undefined;
     const userImageUrls: string[] = [];
-    if (!usingOverride && uploadedImages.length > 0) {
+    if (effectiveImageUrls) {
+      imagePayload = effectiveImageUrls.map((data) => ({ data }));
+      userImageUrls.push(...effectiveImageUrls);
+    } else if (uploadedImages.length > 0) {
       const encodedImages = await Promise.all(
         uploadedImages.map(async (item) => await fileToBase64(item.file))
       );
@@ -877,6 +931,7 @@ export function KnowledgeBaseChat() {
     setInput("");
     uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     setUploadedImages([]);
+    pendingAbortRef.current = false;
     setEditingMessageId(null);
     setEditingMessageValue("");
     setStreaming(true);
@@ -946,28 +1001,62 @@ export function KnowledgeBaseChat() {
   ]);
 
   const handleAbort = useCallback(async () => {
-    if (!requestId) return;
+    if (!streaming) return;
+    pendingAbortRef.current = true;
+    setStatusText(null);
+    setStatusQueries([]);
+    setMessages((prev) => {
+      const next = [...prev];
+      const assistantIndex = [...next].reverse().findIndex((message) => message.role === "assistant");
+      if (assistantIndex === -1) return prev;
+      const targetIndex = next.length - 1 - assistantIndex;
+      next[targetIndex] = {
+        ...next[targetIndex],
+        status: "aborted",
+      };
+      return next;
+    });
+    if (!requestId) {
+      return;
+    }
     try {
       await invoke("knowledge_base_abort_chat", { requestId });
     } catch (error) {
       console.error("Failed to abort knowledge chat:", error);
     }
-  }, [requestId]);
+  }, [requestId, streaming]);
 
   const handleEditMessage = useCallback((message: UiMessage) => {
+    uploadedImagesRef.current.forEach((image) => {
+      if (image.previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(image.previewUrl);
+      }
+    });
+    const restoredImages = (message.imageUrls ?? []).map((url, index) => ({
+      id: generateTempId(),
+      file: dataUrlToFile(url, `knowledge-chat-image-${index + 1}.png`),
+      previewUrl: url,
+    }));
+    setUploadedImages(restoredImages);
     setEditingMessageId(message.id);
     setEditingMessageValue(message.content);
     setInput(message.content);
     setComposerError(null);
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, []);
+  }, [dataUrlToFile]);
 
   const handleRetryMessage = useCallback((message: UiMessage) => {
     setComposerError(null);
-    void handleSend(message.content, message.id);
+    void handleSend(message.content, message.id, message.imageUrls);
   }, [handleSend]);
 
   const handleCancelEdit = useCallback(() => {
+    uploadedImagesRef.current.forEach((image) => {
+      if (image.previewUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(image.previewUrl);
+      }
+    });
+    setUploadedImages([]);
     setEditingMessageId(null);
     setEditingMessageValue("");
     setInput("");
