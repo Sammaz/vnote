@@ -181,7 +181,10 @@ pub fn get_initialization_registry() -> Vec<InitializationItemDefinition> {
             description: "按自定义提示词生成总结。".to_string(),
             dependencies: vec!["subtitle_generation".to_string()],
             output_target: "notes.custom_summary".to_string(),
-            default_config: serde_json::json!({ "regenerate": false, "custom_prompt": null }),
+            default_config: serde_json::json!({
+                "regenerate": false,
+                "custom_prompt": "你是一位高效的学习笔记整理专家。请基于以下视频字幕，生成一份面向实际应用的精炼总结。\n\n输出要求：\n1. 使用 Markdown 格式，结构紧凑，适合快速回顾\n2. 使用中文输出，专有名词保留英文\n3. 严格按照以下格式：\n\n## 一句话概括\n用一句话（30字以内）说清这个视频讲了什么。\n\n## 核心要点\n用编号列表提炼 3-5 个最重要的观点或结论，每条 1-2 句话，前面加合适的 emoji。\n\n## 行动清单\n提炼出可以直接落地执行的建议或步骤，以任务清单（- [ ]）格式输出。\n\n## 值得深挖\n列出视频中提到但未展开、值得进一步学习的概念或资源（1-3 条）。"
+            }),
         },
         InitializationItemDefinition {
             item_key: "ai_note".to_string(),
@@ -189,7 +192,7 @@ pub fn get_initialization_registry() -> Vec<InitializationItemDefinition> {
             description: "生成大纲式 AI 笔记。".to_string(),
             dependencies: vec!["subtitle_generation".to_string()],
             output_target: "notes.ai_note_markdown".to_string(),
-            default_config: serde_json::json!({ "regenerate": false, "style": null, "custom_prompt": null, "screenshot_density": null }),
+            default_config: serde_json::json!({ "regenerate": false, "style": "detailed", "custom_prompt": null, "screenshot_density": "moderate" }),
         },
         InitializationItemDefinition {
             item_key: "panoramic_blueprint".to_string(),

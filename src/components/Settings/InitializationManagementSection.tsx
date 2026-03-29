@@ -5,10 +5,12 @@ import {
   AlertCircle,
   Check,
   ChevronDown,
+  ChevronUp,
   Clock,
   Loader2,
   Play,
   RefreshCw,
+  SlidersHorizontal,
   Square,
 } from "lucide-react";
 
@@ -18,7 +20,7 @@ import {
   type InitializationTaskParams,
 } from "../../context/InitializationRuntimeContext";
 import { message } from "../../utils/message";
-import type { Note } from "../../types";
+import type { Note, PromptConfig } from "../../types";
 
 type RunStatus =
   | "idle"
@@ -329,6 +331,119 @@ const sectionDescriptionClass =
   "mt-1 text-xs leading-5 text-slate-500 dark:text-slate-400";
 const dashboardToggleButtonClass =
   "w-full px-4 md:px-5 py-4 flex items-center justify-between gap-3 hover:bg-slate-50/90 dark:hover:bg-vnote-hover cursor-pointer transition-colors";
+const configPanelClass =
+  "rounded-xl border border-slate-200/60 dark:border-slate-700/60 bg-slate-50/60 dark:bg-slate-900/30 p-3 space-y-3";
+const configLabelClass =
+  "text-xs font-medium text-slate-600 dark:text-slate-300";
+const configToggleBtnClass =
+  "relative w-11 h-6 rounded-full transition-all duration-200 ease-in-out cursor-pointer";
+const configToggleKnobClass =
+  "absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all duration-200 ease-in-out";
+
+const CONFIGURABLE_ITEM_KEYS = new Set(["full_summary", "custom_summary", "ai_note"]);
+
+const DEFAULT_CUSTOM_SUMMARY_PROMPT = `你是一位高效的学习笔记整理专家。请基于以下视频字幕，生成一份面向实际应用的精炼总结。
+
+输出要求：
+1. 使用 Markdown 格式，结构紧凑，适合快速回顾
+2. 使用中文输出，专有名词保留英文
+3. 严格按照以下格式：
+
+## 一句话概括
+用一句话（30字以内）说清这个视频讲了什么。
+
+## 核心要点
+用编号列表提炼 3-5 个最重要的观点或结论，每条 1-2 句话，前面加合适的 emoji。
+
+## 行动清单
+提炼出可以直接落地执行的建议或步骤，以任务清单（- [ ]）格式输出。
+
+## 值得深挖
+列出视频中提到但未展开、值得进一步学习的概念或资源（1-3 条）。`;
+
+const AI_NOTE_STYLE_OPTIONS: Array<{ value: string; label: string; description: string }> = [
+  { value: "concise", label: "简洁", description: "更聚焦核心结论与重点，适合快速复习。" },
+  { value: "detailed", label: "详细", description: "兼顾概念、步骤与细节，适合系统学习。" },
+  { value: "outline", label: "大纲", description: "更强调标题层级与结构，便于转换脑图。" },
+];
+
+const AI_NOTE_SCREENSHOT_OPTIONS: Array<{ value: string; label: string; description: string }> = [
+  { value: "off", label: "关闭", description: "仅生成文字笔记，不插入关键帧截图。" },
+  { value: "few", label: "少量", description: "仅在最关键章节插入少量截图，适合快速回看。" },
+  { value: "moderate", label: "适中", description: "每个主要章节配一张截图，兼顾结构与可回看性。" },
+  { value: "dense", label: "密集", description: "尽可能保留更多视觉节点，适合演示型视频。" },
+];
+
+function generateFullSummaryPrompt(options: {
+  language: "zh" | "en";
+  showEmoji: boolean;
+  showTimestamp: boolean;
+  highlightCount: number;
+  sentenceLength: number;
+}): string {
+  const { language, showEmoji, showTimestamp, highlightCount, sentenceLength } = options;
+  const emojiEx = showEmoji ? "🔥 " : "";
+  const emojiEx2 = showEmoji ? "💡 " : "";
+  const tsEx = showTimestamp ? " [00:01:23]" : "";
+
+  if (language === "en") {
+    return `You are a professional video content analyst. Analyze the following video subtitles and generate a structured summary.
+
+Output Requirements:
+1. Use Markdown format (do not use code block markers)
+2. Must output ALL content in English
+3. Use natural, coherent paragraph-style writing. Do NOT use line-by-line listing or fragmented one-sentence-per-line style.
+4. Follow this exact format:
+
+# Summary
+Summarize the video's topic, core arguments, and key conclusions in 3-5 coherent sentences (each sentence no more than ${sentenceLength} words). Write as a complete natural paragraph.
+
+# Key Highlights
+Extract the most important ${highlightCount} key points/highlights${showTimestamp ? ", and add the video timestamp (format: [00:01:23]) after each highlight title" : ""}${showEmoji ? ", and add an appropriate emoji symbol before each highlight title" : ""}
+
+## ${emojiEx}Highlight Title 1${tsEx}
+Describe in 3-5 sentences: what this highlight covers, why it matters, and what practical significance or insight it offers. Write as a natural paragraph, not a bullet list.
+
+## ${emojiEx2}Highlight Title 2
+Describe in 3-5 sentences: what this highlight covers, why it matters, and what practical significance or insight it offers. Write as a natural paragraph, not a bullet list.
+
+(Continue with ${highlightCount} highlights)
+
+# Key Terms
+- **Term 1**: Explanation
+- **Term 2**: Explanation
+
+Video subtitles content:`;
+  }
+
+  return `你是一个专业的视频内容分析师。请分析以下视频字幕，生成一份结构化的全文总结。
+
+输出要求：
+1. 使用 Markdown 格式输出（不要使用代码块标记）
+2. 必须使用中文输出所有内容
+3. 使用自然连贯的段落式写作，禁止逐行罗列或一行一句的碎片化风格
+4. 严格按照以下格式输出：
+
+# 摘要
+用3-5句连贯的话概括视频的主题、核心论点和关键结论，每句话不超过${sentenceLength}字，写成一个完整的自然段落。
+
+# 核心亮点
+提取最重要的${highlightCount}个知识点/亮点${showEmoji ? "，每个亮点标题前必须添加一个合适的 emoji 表情符号（如 🔥 💡 📊 🎯 ⚡）" : ""}${showTimestamp ? "，并在每个亮点标题后标注该亮点对应的视频时间戳（格式如 [00:01:23]）" : ""}
+
+## ${emojiEx}亮点标题1${tsEx}
+用3-5句话展开描述：这个亮点讲了什么、为什么重要、有什么实际意义或启发。写成自然段落，不要逐条罗列。
+
+## ${emojiEx2}亮点标题2
+用3-5句话展开描述：这个亮点讲了什么、为什么重要、有什么实际意义或启发。写成自然段落，不要逐条罗列。
+
+（继续提取${highlightCount}个亮点）
+
+# 关键术语
+- **术语1**：解释
+- **术语2**：解释
+
+视频字幕内容：`;
+}
 
 function MiniBadge({
   children,
@@ -380,6 +495,301 @@ function HelperBlock({
   );
 }
 
+/* ---------- Item Config Panel ---------- */
+
+interface ItemConfigPanelProps {
+  itemKey: string;
+  config: Record<string, unknown>;
+  onConfigChange: (updater: (c: Record<string, unknown>) => Record<string, unknown>) => void;
+  promptConfigs: PromptConfig[];
+}
+
+function ItemConfigPanel({ itemKey, config, onConfigChange, promptConfigs }: ItemConfigPanelProps) {
+  const [showPromptDropdown, setShowPromptDropdown] = useState(false);
+  const promptDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (promptDropdownRef.current && !promptDropdownRef.current.contains(e.target as Node)) {
+        setShowPromptDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  if (itemKey === "full_summary") {
+    const ui = (config._ui as Record<string, unknown>) ?? {};
+    const language = (ui.language as "zh" | "en") ?? "zh";
+    const showEmoji = ui.showEmoji !== undefined ? Boolean(ui.showEmoji) : true;
+    const showTimestamp = Boolean(ui.showTimestamp ?? false);
+    const highlightCount = Number(ui.highlightCount ?? 5);
+    const sentenceLength = Number(ui.sentenceLength ?? 30);
+
+    const updateUi = (patch: Record<string, unknown>) => {
+      const newUi = { language, showEmoji, showTimestamp, highlightCount, sentenceLength, ...patch };
+      const prompt = generateFullSummaryPrompt({
+        language: newUi.language as "zh" | "en",
+        showEmoji: Boolean(newUi.showEmoji),
+        showTimestamp: Boolean(newUi.showTimestamp),
+        highlightCount: Number(newUi.highlightCount),
+        sentenceLength: Number(newUi.sentenceLength),
+      });
+      onConfigChange((c) => ({ ...c, _ui: newUi, custom_prompt: prompt }));
+    };
+
+    return (
+      <div className={configPanelClass}>
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          {/* 输出语言 */}
+          <div className="flex items-center justify-between">
+            <span className={configLabelClass}>输出语言</span>
+            <button
+              onClick={() => updateUi({ language: language === "zh" ? "en" : "zh" })}
+              className="px-2.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/60 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer min-w-[56px] text-center"
+            >
+              {language === "zh" ? "中文" : "EN"}
+            </button>
+          </div>
+
+          {/* 是否显示 Emoji */}
+          <div className="flex items-center justify-between">
+            <span className={configLabelClass}>显示 Emoji</span>
+            <button
+              onClick={() => updateUi({ showEmoji: !showEmoji })}
+              className={`${configToggleBtnClass} ${showEmoji ? "bg-blue-500" : "bg-slate-200 dark:bg-slate-600"}`}
+            >
+              <span className={`${configToggleKnobClass} ${showEmoji ? "left-[22px]" : "left-0.5"}`} />
+            </button>
+          </div>
+
+          {/* 是否显示时间戳 */}
+          <div className="flex items-center justify-between">
+            <span className={configLabelClass}>显示时间戳</span>
+            <button
+              onClick={() => updateUi({ showTimestamp: !showTimestamp })}
+              className={`${configToggleBtnClass} ${showTimestamp ? "bg-blue-500" : "bg-slate-200 dark:bg-slate-600"}`}
+            >
+              <span className={`${configToggleKnobClass} ${showTimestamp ? "left-[22px]" : "left-0.5"}`} />
+            </button>
+          </div>
+
+          {/* 要点个数 */}
+          <div className="flex items-center justify-between gap-2">
+            <span className={configLabelClass}>要点个数</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min="1"
+                max="15"
+                value={highlightCount}
+                onChange={(e) => updateUi({ highlightCount: Number(e.target.value) })}
+                className="w-16 h-1.5 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-blue-500"
+              />
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 w-5 text-center">{highlightCount}</span>
+            </div>
+          </div>
+
+          {/* 句子长短 */}
+          <div className="col-span-2 flex items-center justify-between gap-2">
+            <span className={configLabelClass}>句子长短</span>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min="10"
+                max="40"
+                step="5"
+                value={sentenceLength}
+                onChange={(e) => updateUi({ sentenceLength: Number(e.target.value) })}
+                className="w-24 h-1.5 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-blue-500"
+              />
+              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 w-5 text-center">{sentenceLength}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (itemKey === "custom_summary") {
+    const customPrompt = (config.custom_prompt as string) ?? DEFAULT_CUSTOM_SUMMARY_PROMPT;
+
+    return (
+      <div className={configPanelClass}>
+        {/* 预配置提示词 */}
+        <div className="flex items-center justify-between">
+          <span className={configLabelClass}>提示词内容</span>
+          <div className="flex items-center gap-1.5">
+            {customPrompt !== DEFAULT_CUSTOM_SUMMARY_PROMPT && (
+              <button
+                type="button"
+                onClick={() => onConfigChange((c) => ({ ...c, custom_prompt: DEFAULT_CUSTOM_SUMMARY_PROMPT }))}
+                className="px-2 py-0.5 rounded-lg text-[10px] text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-all cursor-pointer"
+              >
+                恢复默认
+              </button>
+            )}
+            {promptConfigs.length > 0 && (
+              <div className="relative" ref={promptDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowPromptDropdown(!showPromptDropdown)}
+                  className="px-2.5 py-1 pr-7 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/60 text-xs text-slate-600 dark:text-slate-300 text-left cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
+                >
+                  选择提示词
+                </button>
+                <ChevronDown className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none transition-transform ${showPromptDropdown ? "rotate-180" : ""}`} />
+                {showPromptDropdown && (
+                  <div className={`${premiumDropdownMenuClass} w-56`}>
+                    {promptConfigs.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          onConfigChange((c) => ({ ...c, custom_prompt: p.content }));
+                          setShowPromptDropdown(false);
+                        }}
+                        className="w-full px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300 cursor-pointer"
+                      >
+                        <div className="font-medium truncate">{p.title}</div>
+                        {p.description && (
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">{p.description}</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 提示词内容 */}
+        <div>
+          <textarea
+            value={customPrompt}
+            onChange={(e) => onConfigChange((c) => ({ ...c, custom_prompt: e.target.value }))}
+            placeholder="输入自定义提示词，AI 将按照此提示词生成总结..."
+            rows={6}
+            className={`${premiumInputClass} resize-none text-xs !py-2`}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (itemKey === "ai_note") {
+    const style = (config.style as string) || "detailed";
+    const screenshotDensity = (config.screenshot_density as string) || "moderate";
+    const customPrompt = (config.custom_prompt as string) ?? "";
+
+    return (
+      <div className={configPanelClass}>
+        {/* 笔记风格 */}
+        <div>
+          <span className={`${configLabelClass} block mb-2`}>笔记风格</span>
+          <div className="grid grid-cols-3 gap-1.5">
+            {AI_NOTE_STYLE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => onConfigChange((c) => ({ ...c, style: opt.value }))}
+                className={`rounded-lg border px-2 py-2 text-left transition-colors cursor-pointer ${
+                  style === opt.value
+                    ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
+                    : "border-slate-200/80 bg-white/80 text-slate-700 hover:border-slate-300 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-slate-500"
+                }`}
+              >
+                <div className="text-xs font-medium">{opt.label}</div>
+                <div className="mt-0.5 text-[10px] leading-4 text-slate-500 dark:text-slate-400">{opt.description}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 关键帧截图 */}
+        <div>
+          <span className={`${configLabelClass} block mb-2`}>关键帧截图</span>
+          <div className="grid grid-cols-4 gap-1.5">
+            {AI_NOTE_SCREENSHOT_OPTIONS.map((opt) => (
+              <div key={opt.value} className="relative group">
+                <button
+                  type="button"
+                  onClick={() => onConfigChange((c) => ({ ...c, screenshot_density: opt.value }))}
+                  className={`w-full rounded-lg border px-1.5 py-1.5 text-center transition-colors cursor-pointer ${
+                    screenshotDensity === opt.value
+                      ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
+                      : "border-slate-200/80 bg-white/80 text-slate-700 hover:border-slate-300 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-slate-500"
+                  }`}
+                >
+                  <span className="text-xs font-medium">{opt.label}</span>
+                </button>
+                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-1.5 px-2.5 py-1 text-[10px] rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 bg-slate-800 text-slate-100 dark:bg-slate-200 dark:text-slate-800 shadow-lg">
+                  {opt.description}
+                  <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-800 dark:border-t-slate-200" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* 补充提示词 */}
+        <div>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className={configLabelClass}>补充提示词（可选）</span>
+            {promptConfigs.length > 0 && (
+              <div className="relative" ref={promptDropdownRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowPromptDropdown(!showPromptDropdown)}
+                  className="px-2 py-0.5 pr-6 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/60 text-[10px] text-slate-500 dark:text-slate-400 cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
+                >
+                  选择提示词
+                </button>
+                <ChevronDown className={`absolute right-1 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400 pointer-events-none transition-transform ${showPromptDropdown ? "rotate-180" : ""}`} />
+                {showPromptDropdown && (
+                  <div className={`${premiumDropdownMenuClass} w-56`}>
+                    {promptConfigs.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => {
+                          onConfigChange((c) => ({ ...c, custom_prompt: p.content }));
+                          setShowPromptDropdown(false);
+                        }}
+                        className="w-full px-3 py-2 text-left text-xs hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300 cursor-pointer"
+                      >
+                        <div className="font-medium truncate">{p.title}</div>
+                        {p.description && (
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400 truncate mt-0.5">{p.description}</div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <textarea
+            value={customPrompt}
+            onChange={(e) => onConfigChange((c) => ({ ...c, custom_prompt: e.target.value }))}
+            placeholder={`可选：补充你希望 AI 额外关注的重点，比如：
+- 更关注案例拆解
+- 在关键小节保留时间戳`}
+            rows={3}
+            className={`${premiumInputClass} resize-none text-xs !py-2`}
+          />
+          <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+            不填写时将使用当前风格的默认提示词。
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 interface InitializationManagementSectionProps {
   notes: Note[];
 }
@@ -387,7 +797,7 @@ interface InitializationManagementSectionProps {
 export function InitializationManagementSection({
   notes,
 }: InitializationManagementSectionProps) {
-  const { aiConfigs, defaultAiConfigId } = useApp();
+  const { aiConfigs, defaultAiConfigId, promptConfigs } = useApp();
   const {
     runtimeQueue,
     currentTask,
@@ -417,6 +827,22 @@ export function InitializationManagementSection({
   const noteFilterDropdownRef = useRef<HTMLDivElement | null>(null);
   const referenceModelDropdownRef = useRef<HTMLDivElement | null>(null);
   const hasAutoJumpedToRunRef = useRef(false);
+
+  const [expandedConfigKey, setExpandedConfigKey] = useState<string | null>(null);
+
+  const updateEditingItemConfig = useCallback(
+    (itemKey: string, updater: (config: Record<string, unknown>) => Record<string, unknown>) => {
+      setEditingItems((prev) =>
+        prev.map((item) => {
+          if (item.item_key !== itemKey) return item;
+          const config = safeJsonParse(item.config_json);
+          const updated = updater(config);
+          return { ...item, config_json: JSON.stringify(updated) };
+        })
+      );
+    },
+    []
+  );
 
   const noteMap = useMemo(() => {
     return new Map(notes.map((note) => [note.id, note]));
@@ -1512,6 +1938,24 @@ export function InitializationManagementSection({
                           </div>
                         </div>
 
+                        {/* 展开式配置面板 */}
+                        {CONFIGURABLE_ITEM_KEYS.has(definition.item_key) && (
+                          <div
+                            className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                              expandedConfigKey === definition.item_key
+                                ? "max-h-[600px] opacity-100 mt-3"
+                                : "max-h-0 opacity-0"
+                            }`}
+                          >
+                            <ItemConfigPanel
+                              itemKey={definition.item_key}
+                              config={safeJsonParse(item.config_json)}
+                              onConfigChange={(updater) => updateEditingItemConfig(definition.item_key, updater)}
+                              promptConfigs={promptConfigs}
+                            />
+                          </div>
+                        )}
+
                         <div className="mt-3 pt-3.5 border-t border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-2.5">
                           <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
                             <input
@@ -1522,9 +1966,34 @@ export function InitializationManagementSection({
                             />
                             覆盖已有结果
                           </label>
-                          <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                            {item.selected ? "将同步到目标笔记" : "当前不参与同步"}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            {CONFIGURABLE_ITEM_KEYS.has(definition.item_key) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setExpandedConfigKey((prev) =>
+                                    prev === definition.item_key ? null : definition.item_key
+                                  )
+                                }
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer ${
+                                  expandedConfigKey === definition.item_key
+                                    ? "bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400"
+                                    : "text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:text-slate-300 dark:hover:bg-slate-700/50"
+                                }`}
+                                title="自定义配置"
+                              >
+                                <SlidersHorizontal className="w-3.5 h-3.5" />
+                                {expandedConfigKey === definition.item_key ? (
+                                  <ChevronUp className="w-3 h-3" />
+                                ) : (
+                                  <ChevronDown className="w-3 h-3" />
+                                )}
+                              </button>
+                            )}
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                              {item.selected ? "将同步到目标笔记" : "当前不参与同步"}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     );
