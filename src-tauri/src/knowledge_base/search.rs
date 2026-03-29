@@ -3,9 +3,86 @@ use std::collections::HashMap;
 use crate::db::KnowledgeChunk;
 use crate::rag::{bytes_to_embedding, cosine_similarity, generate_embedding};
 use crate::settings::{defaults, keys, SettingsManager};
-use crate::DATABASE;
+use crate::{get_embedding_cache, DATABASE};
+use crate::retry::with_retry;
 
 use super::types::KnowledgeSearchResult;
+
+/// Generate embedding with LRU cache and retry
+async fn cached_embedding(config: &crate::db::EmbeddingConfig, text: &str) -> Result<Vec<f32>, String> {
+    let cache_key = format!("{}::{}", config.model, text);
+    {
+        let mut cache = get_embedding_cache().lock().await;
+        if let Some(v) = cache.get(&cache_key) {
+            return Ok(v);
+        }
+    }
+    let config = config.clone();
+    let text = text.to_string();
+    let embedding = with_retry(3, 500, || {
+        let config = config.clone();
+        let text = text.clone();
+        async move { generate_embedding(&config, &text).await }
+    })
+    .await?;
+    {
+        let mut cache = get_embedding_cache().lock().await;
+        cache.insert(cache_key, embedding.clone());
+    }
+    Ok(embedding)
+}
+
+/// MMR (Maximal Marginal Relevance) selection
+/// lambda: relevance vs diversity balance (higher = more relevance)
+fn mmr_select(candidates: &[KnowledgeSearchResult], top_k: usize, lambda: f32, embeddings: &HashMap<String, Vec<f32>>) -> Vec<KnowledgeSearchResult> {
+    if candidates.is_empty() {
+        return vec![];
+    }
+    let mut selected: Vec<usize> = Vec::new();
+    let mut remaining: Vec<usize> = (0..candidates.len()).collect();
+
+    while selected.len() < top_k && !remaining.is_empty() {
+        let best = remaining.iter().copied().max_by(|&a, &b| {
+            let rel_a = candidates[a].score;
+            let rel_b = candidates[b].score;
+
+            let div_a = if selected.is_empty() {
+                0.0_f32
+            } else {
+                selected.iter().map(|&s| {
+                    match (embeddings.get(&candidates[a].chunk_id), embeddings.get(&candidates[s].chunk_id)) {
+                        (Some(ea), Some(es)) => cosine_similarity(ea, es),
+                        _ => 0.0,
+                    }
+                }).fold(f32::NEG_INFINITY, f32::max)
+            };
+
+            let div_b = if selected.is_empty() {
+                0.0_f32
+            } else {
+                selected.iter().map(|&s| {
+                    match (embeddings.get(&candidates[b].chunk_id), embeddings.get(&candidates[s].chunk_id)) {
+                        (Some(eb), Some(es)) => cosine_similarity(eb, es),
+                        _ => 0.0,
+                    }
+                }).fold(f32::NEG_INFINITY, f32::max)
+            };
+
+            let score_a = lambda * rel_a - (1.0 - lambda) * div_a;
+            let score_b = lambda * rel_b - (1.0 - lambda) * div_b;
+            score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        if let Some(best_idx) = best {
+            selected.push(best_idx);
+            remaining.retain(|&x| x != best_idx);
+        } else {
+            break;
+        }
+    }
+
+    selected.into_iter().map(|i| candidates[i].clone()).collect()
+}
 
 /// Tokenize text for BM25: CJK single chars + lowercase English words
 fn tokenize(text: &str) -> Vec<String> {
@@ -137,7 +214,7 @@ pub async fn search(
         .map_err(|e| e.to_string())?
         .ok_or("Embedding 模型未配置，请在设置中配置 Embedding 模型并设为默认")?;
 
-    let query_embedding = generate_embedding(&embedding_config, query).await?;
+    let query_embedding = cached_embedding(&embedding_config, query).await?;
 
     let chunks = db
         .get_all_knowledge_chunks_with_embeddings()
@@ -150,6 +227,9 @@ pub async fn search(
     let top_k = top_k.unwrap_or_else(|| {
         SettingsManager::get_int(keys::RAG_TOP_K, defaults::RAG_TOP_K) as i32
     }) as usize;
+
+    // Use a larger candidate pool to allow MMR selection and low-confidence expansion
+    let candidate_top_k = top_k * 4;
 
     let threshold =
         SettingsManager::get_float(keys::RAG_SIMILARITY_THRESHOLD, defaults::RAG_SIMILARITY_THRESHOLD);
@@ -171,28 +251,55 @@ pub async fn search(
         .collect();
 
     vec_scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    vec_scored.truncate(top_k);
+
+    // Low-confidence expansion: if top score is weak, double the candidate pool
+    let effective_candidate_k = if vec_scored.first().map(|(s, _)| *s).unwrap_or(0.0) < 0.22 {
+        candidate_top_k * 2
+    } else {
+        candidate_top_k
+    };
+
+    vec_scored.truncate(effective_candidate_k);
 
     // BM25 search
-    let bm25_scored = bm25_search(query, &chunks, top_k);
+    let bm25_scored = bm25_search(query, &chunks, effective_candidate_k);
 
     // RRF merge
-    let merged_indices = rrf_merge(&vec_scored, &bm25_scored, top_k);
+    let merged_indices = rrf_merge(&vec_scored, &bm25_scored, effective_candidate_k);
 
-    // Build results
+    // Build results with chunk-length scoring
     let mut results = Vec::new();
-    // Create a score lookup from vector search for display
     let vec_score_map: HashMap<usize, f32> = vec_scored.into_iter().map(|(s, i)| (i, s)).collect();
+
+    // Build chunk_id -> embedding map for MMR
+    let mut chunk_embeddings: HashMap<String, Vec<f32>> = HashMap::new();
 
     for idx in merged_indices {
         let chunk = &chunks[idx];
-        let score = vec_score_map.get(&idx).copied().unwrap_or(0.0);
+        let base_score = vec_score_map.get(&idx).copied().unwrap_or(0.0);
+
+        // Chunk length scoring
+        let char_count = chunk.content.chars().count();
+        let length_bonus: f32 = if char_count >= 80 && char_count <= 220 {
+            0.05
+        } else if char_count < 30 {
+            -0.15
+        } else {
+            0.0
+        };
+        let score = (base_score + length_bonus).clamp(0.0, 1.0);
+
         let note_title = db
             .get_note_by_id(&chunk.note_id)
             .ok()
             .flatten()
             .map(|n| n.title)
             .unwrap_or_else(|| "未知笔记".to_string());
+
+        // Collect embedding for MMR
+        if let Some(emb_bytes) = &chunk.embedding {
+            chunk_embeddings.insert(chunk.id.clone(), bytes_to_embedding(emb_bytes));
+        }
 
         results.push(KnowledgeSearchResult {
             chunk_id: chunk.id.clone(),
@@ -209,6 +316,9 @@ pub async fn search(
         let rerank_k = SettingsManager::get_int(keys::RAG_RERANK_K, defaults::RAG_RERANK_K);
         results = rerank_knowledge_results(&config, query, results, rerank_k).await?;
     }
+
+    // MMR selection for diversity (lambda=0.75: 75% relevance, 25% diversity)
+    results = mmr_select(&results, top_k, 0.75, &chunk_embeddings);
 
     // Deduplicate: max 3 chunks per note
     results = deduplicate_results(results, 3);

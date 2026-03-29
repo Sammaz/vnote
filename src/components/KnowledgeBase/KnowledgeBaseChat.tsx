@@ -565,6 +565,9 @@ export function KnowledgeBaseChat() {
           void refreshSessions();
           void loadSessionDetail(data.session_id);
           break;
+        case "Degraded":
+          setComposerError(data.message);
+          break;
         case "Error":
           pendingAbortRef.current = false;
           setStopping(false);

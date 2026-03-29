@@ -11,6 +11,7 @@ import {
   Database,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
+import { message } from "../../utils/message";
 import type { KnowledgeIndexStatus, KnowledgeIndexEvent } from "./types";
 
 interface Props {
@@ -99,7 +100,7 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
       setIndexingTaskId(taskId);
       setIndexProgress({ completed: 0, failed: 0, total: 0 });
     } catch (e) {
-      console.error("Failed to start indexing:", e);
+      message.error(String(e));
     }
   }, []);
 
@@ -109,7 +110,7 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
       setIndexingTaskId(taskId);
       setIndexProgress({ completed: 0, failed: 0, total: 0 });
     } catch (e) {
-      console.error("Failed to start outdated indexing:", e);
+      message.error(String(e));
     }
   }, []);
 
@@ -132,7 +133,7 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
         loadStatuses();
         onStatsChange();
       } catch (e) {
-        console.error("Failed to index note:", e);
+        message.error(String(e));
         loadStatuses();
       } finally {
         setIndexingNoteIds((prev) => {

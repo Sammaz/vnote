@@ -2,8 +2,9 @@ use crate::rag::{
     embedding_to_bytes,
     generate_embedding,
 };
+use crate::retry::with_retry;
 use crate::settings::{defaults, keys, SettingsManager};
-use crate::DATABASE;
+use crate::{get_embedding_cache, DATABASE};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -217,7 +218,30 @@ pub async fn index_note(
             }
         }
 
-        match generate_embedding(&embedding_config, chunk_text).await {
+        match {
+            let cache_key = format!("{}::{}", embedding_config.model, chunk_text);
+            let cached = {
+                let mut cache = get_embedding_cache().lock().await;
+                cache.get(&cache_key)
+            };
+            if let Some(v) = cached {
+                Ok(v)
+            } else {
+                let config = embedding_config.clone();
+                let text = chunk_text.to_string();
+                let result = with_retry(3, 500, || {
+                    let config = config.clone();
+                    let text = text.clone();
+                    async move { generate_embedding(&config, &text).await }
+                })
+                .await;
+                if let Ok(ref v) = result {
+                    let mut cache = get_embedding_cache().lock().await;
+                    cache.insert(cache_key, v.clone());
+                }
+                result
+            }
+        } {
             Ok(embedding) => all_embeddings.push(embedding),
             Err(e) => {
                 let err_msg = format!("分块 {}/{} 嵌入失败: {}", i + 1, chunks.len(), e);

@@ -184,5 +184,8 @@ pub enum KnowledgeChatEvent {
     Error {
         error: String,
     },
+    Degraded {
+        message: String,
+    },
     Aborted,
 }

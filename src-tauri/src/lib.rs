@@ -1,6 +1,7 @@
 mod ai_pool;
 mod bcut_asr;
 mod chat;
+pub mod retry;
 mod chapter;
 mod data_management;
 mod db;
@@ -27,7 +28,7 @@ use data_management::{CleanupPreview, CleanupRequest, CleanupResult, DataManagem
 use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteInitializationDetail, NoteInitializationOverview, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest};
 use regex::Regex;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use tokio::process::Command as TokioCommand;
@@ -43,6 +44,48 @@ const TRAY_ICON: &[u8] = include_bytes!("../icons/icon.png");
 static TRAY_ENABLED: AtomicBool = AtomicBool::new(false);
 const TRAY_ID: &str = "vnote-tray";
 pub static DATABASE: OnceLock<Database> = OnceLock::new();
+
+/// Global LRU cache for embeddings: (model_id + text) -> embedding vector
+/// Capacity: 512 entries. Avoids redundant Embedding API calls for repeated queries.
+pub static EMBEDDING_CACHE: OnceLock<tokio::sync::Mutex<EmbeddingLruCache>> = OnceLock::new();
+
+pub struct EmbeddingLruCache {
+    map: HashMap<String, Vec<f32>>,
+    order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl EmbeddingLruCache {
+    pub fn new(capacity: usize) -> Self {
+        Self { map: HashMap::new(), order: VecDeque::new(), capacity }
+    }
+
+    pub fn get(&mut self, key: &str) -> Option<Vec<f32>> {
+        if self.map.contains_key(key) {
+            self.order.retain(|k| k != key);
+            self.order.push_back(key.to_string());
+            self.map.get(key).cloned()
+        } else {
+            None
+        }
+    }
+
+    pub fn insert(&mut self, key: String, value: Vec<f32>) {
+        if self.map.contains_key(&key) {
+            self.order.retain(|k| k != &key);
+        } else if self.map.len() >= self.capacity {
+            if let Some(oldest) = self.order.pop_front() {
+                self.map.remove(&oldest);
+            }
+        }
+        self.order.push_back(key.clone());
+        self.map.insert(key, value);
+    }
+}
+
+pub fn get_embedding_cache() -> &'static tokio::sync::Mutex<EmbeddingLruCache> {
+    EMBEDDING_CACHE.get_or_init(|| tokio::sync::Mutex::new(EmbeddingLruCache::new(512)))
+}
 
 // 高光生成防重复：跟踪正在生成高光的 note_id
 static HIGHLIGHT_GENERATING_NOTES: OnceLock<tokio::sync::Mutex<HashSet<String>>> = OnceLock::new();

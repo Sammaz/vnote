@@ -28,11 +28,19 @@ fn get_db() -> &'static crate::db::Database {
 
 #[tauri::command]
 pub async fn knowledge_base_index_note(note_id: String) -> Result<(), String> {
+    let db = crate::get_db();
+    if db.get_default_embedding_config().map_err(|e| e.to_string())?.is_none() {
+        return Err("Embedding 模型未配置，请在设置中配置 Embedding 模型并设为默认".to_string());
+    }
     indexing::index_note(&note_id, None).await
 }
 
 #[tauri::command]
 pub async fn knowledge_base_index_all_notes(app: AppHandle) -> Result<String, String> {
+    let db = crate::get_db();
+    if db.get_default_embedding_config().map_err(|e| e.to_string())?.is_none() {
+        return Err("Embedding 模型未配置，请在设置中配置 Embedding 模型并设为默认".to_string());
+    }
     let task_id = uuid::Uuid::new_v4().to_string();
     let abort_flag = Arc::new(AtomicBool::new(false));
 
@@ -118,6 +126,10 @@ pub async fn knowledge_base_index_all_notes(app: AppHandle) -> Result<String, St
 
 #[tauri::command]
 pub async fn knowledge_base_index_outdated_notes(app: AppHandle) -> Result<String, String> {
+    let db = crate::get_db();
+    if db.get_default_embedding_config().map_err(|e| e.to_string())?.is_none() {
+        return Err("Embedding 模型未配置，请在设置中配置 Embedding 模型并设为默认".to_string());
+    }
     let task_id = uuid::Uuid::new_v4().to_string();
     let abort_flag = Arc::new(AtomicBool::new(false));
 

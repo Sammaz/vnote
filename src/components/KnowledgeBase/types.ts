@@ -171,6 +171,7 @@ export type KnowledgeChatEvent =
       run_id: string | null;
     }
   | { status: "Error"; error: string }
+  | { status: "Degraded"; message: string }
   | { status: "Aborted" };
 
 // 索引进度事件
