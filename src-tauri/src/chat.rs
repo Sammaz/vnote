@@ -1,4 +1,4 @@
-use crate::ai_pool::{execute_non_streaming_with_abort, execute_streaming_chat, get_ai_pool_manager, NonStreamingRequest, StreamingChatRequest, StreamEvent};
+use crate::ai_pool::{execute_non_streaming_with_abort, execute_streaming_chat, get_ai_pool_manager, ChatSystemPromptKind, NonStreamingRequest, StreamingChatRequest, StreamEvent};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use crate::db::{Database};
@@ -88,6 +88,7 @@ pub async fn chat_stream(
         config: ai_config,
         messages: pool_messages,
         images: pool_images,
+        system_prompt_kind: ChatSystemPromptKind::Default,
     };
 
     // Spawn async task for streaming (RAG will be done inside the task)

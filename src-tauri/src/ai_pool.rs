@@ -521,6 +521,12 @@ impl AiPoolManager {
 // 流式聊天实现
 // ============================================================================
 
+#[derive(Debug, Clone, Copy)]
+pub enum ChatSystemPromptKind {
+    Default,
+    KnowledgeBaseQuickChat,
+}
+
 /// 流式聊天请求参数
 pub struct StreamingChatRequest {
     pub app: AppHandle,
@@ -529,6 +535,7 @@ pub struct StreamingChatRequest {
     pub config: AiConfig,
     pub messages: Vec<ChatMessage>,
     pub images: Option<Vec<ImageData>>,
+    pub system_prompt_kind: ChatSystemPromptKind,
 }
 
 /// 执行流式聊天请求
@@ -733,8 +740,15 @@ async fn execute_streaming_chat_single_attempt(
     // 构建消息数组
     let mut api_messages: Vec<Value> = Vec::new();
 
-    // 添加系统提示词（根据RAG上下文是否可用）
-    if let Some(system_prompt) = prompts::build_chat_system_prompt(rag_context.clone()) {
+    // 添加系统提示词（根据场景选择提示词构建路径）
+    let system_prompt = match req.system_prompt_kind {
+        ChatSystemPromptKind::Default => prompts::build_chat_system_prompt(rag_context.clone()),
+        ChatSystemPromptKind::KnowledgeBaseQuickChat => {
+            prompts::build_knowledge_base_chat_system_prompt(rag_context.clone())
+        }
+    };
+
+    if let Some(system_prompt) = system_prompt {
         api_messages.push(json!({
             "role": "system",
             "content": system_prompt

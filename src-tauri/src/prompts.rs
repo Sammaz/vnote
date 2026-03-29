@@ -48,6 +48,27 @@ pub const fn general_system_prompt() -> &'static str {
 - 适当引导用户深入思考"#
 }
 
+/// Knowledge base quick chat system prompt - when AI answers with KB evidence context
+pub fn knowledge_base_chat_system_prompt(context: String) -> String {
+    format!(
+        r#"你是一个本地知识库问答助手，正在帮助用户基于知识库检索结果回答问题。
+
+【参考材料】
+以下是本次检索到的知识库证据与回答约束：
+
+{}
+
+【回答要求】
+1. 只能基于参考材料回答，缺少依据时必须直接说明
+2. 优先先给出结论，再补充必要的结构化要点
+3. 使用自然、完整、可直接渲染的标准 Markdown
+4. 优先普通段落与简单列表，非必要不要使用强调语法
+5. 不要输出孤立、残缺或未闭合的 Markdown 标记
+6. 不要编造知识库中不存在的事实"#,
+        context
+    )
+}
+
 /// Build the appropriate system prompt based on whether RAG context is available
 pub fn build_chat_system_prompt(rag_context: Option<String>) -> Option<String> {
     match rag_context {
@@ -56,5 +77,14 @@ pub fn build_chat_system_prompt(rag_context: Option<String>) -> Option<String> {
         }
         None => Some(general_system_prompt().to_string()),
         _ => None, // Empty context, don't add system message
+    }
+}
+
+/// Build the knowledge base quick chat system prompt
+pub fn build_knowledge_base_chat_system_prompt(rag_context: Option<String>) -> Option<String> {
+    match rag_context {
+        Some(context) if !context.is_empty() => Some(knowledge_base_chat_system_prompt(context)),
+        None => Some(general_system_prompt().to_string()),
+        _ => None,
     }
 }

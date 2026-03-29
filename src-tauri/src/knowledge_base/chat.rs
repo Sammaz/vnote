@@ -1,6 +1,6 @@
 use crate::ai_pool::{
     execute_non_streaming_with_abort, execute_streaming_chat, get_ai_pool_manager, ChatMessage as AiChatMessage,
-    ImageData, NonStreamingRequest, StreamingChatRequest,
+    ChatSystemPromptKind, ImageData, NonStreamingRequest, StreamingChatRequest,
 };
 use crate::db::{AiConfig, Database, KnowledgeAgentTraceStep, KnowledgeChatMessage, KnowledgeChatSession};
 use crate::DATABASE;
@@ -442,6 +442,7 @@ async fn run_standard_chat(
         history,
         images,
         rag_context,
+        ChatSystemPromptKind::KnowledgeBaseQuickChat,
     )
     .await?;
 
@@ -598,6 +599,7 @@ async fn run_agent_chat(
         history,
         images,
         rag_context,
+        ChatSystemPromptKind::Default,
     )
     .await?;
 
@@ -790,6 +792,7 @@ async fn stream_response_and_collect(
     messages: Vec<AiChatMessage>,
     images: Option<Vec<ImageData>>,
     rag_context: Option<String>,
+    system_prompt_kind: ChatSystemPromptKind,
 ) -> Result<String, String> {
     let capture_event = format!("{}-capture", event_name);
     let forward_event = event_name.to_string();
@@ -844,6 +847,7 @@ async fn stream_response_and_collect(
         config: ai_config,
         messages,
         images,
+        system_prompt_kind,
     };
 
     let result = execute_streaming_chat(stream_req, rag_context).await;
@@ -1023,7 +1027,7 @@ fn build_standard_context(results: &[KnowledgeSearchResult], custom_prompt: Opti
         .unwrap_or_default();
 
     format!(
-        "你是本地知识库问答助手，只能基于 visual_summary 检索结果回答。\n\n【知识库证据】\n{}\n\n【回答要求】\n1. 先直接回答问题\n2. 再给出结构化要点\n3. 明确标注证据不足的部分\n4. 不要编造知识库中不存在的信息{}",
+        "你是本地知识库问答助手，只能基于 visual_summary 检索结果回答。\n\n【知识库证据】\n{}\n\n【回答要求】\n1. 先直接回答问题\n2. 再给出结构化要点\n3. 明确标注证据不足的部分\n4. 不要编造知识库中不存在的信息\n\n【Markdown 输出要求】\n1. 仅在有助于阅读时使用 Markdown，优先使用普通段落和简单列表\n2. 所有 Markdown 标记必须完整闭合，例如 `**加粗**`、`*斜体*`、代码块围栏\n3. 不要输出孤立或未闭合的 `*`、`**`、`_`、`#`、`>`、`-` 等格式符号\n4. 列表项必须包含完整文本，不能只输出符号或残缺内容\n5. 如果不确定 Markdown 格式是否正确，改用纯文本表达\n6. 输出前自行检查，确保内容可以被标准 Markdown 正常渲染{}",
         references, custom
     )
 }
