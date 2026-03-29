@@ -688,7 +688,7 @@ export function KnowledgeBaseChat() {
     sessionTitle: string,
     triggerRect?: DOMRect | null,
   ) => {
-    if (streaming) return;
+    if (streaming && !stopping) return;
 
     if (triggerRect && deleteConfirmAnchorRef.current) {
       const anchorRect = deleteConfirmAnchorRef.current.getBoundingClientRect();
@@ -735,7 +735,7 @@ export function KnowledgeBaseChat() {
     setPendingDeleteSessionId(sessionId);
     setPendingDeleteSessionTitle(sessionTitle);
     setDeleteConfirmOpen(true);
-  }, [streaming]);
+  }, [stopping, streaming]);
 
   const handleCancelDeleteSession = useCallback(() => {
     setDeleteConfirmOpen(false);
@@ -869,7 +869,7 @@ export function KnowledgeBaseChat() {
     const usingOverride = typeof normalizedOverride === "string";
     const effectiveImageUrls = overrideImageUrls ?? null;
     const imageCount = effectiveImageUrls ? effectiveImageUrls.length : uploadedImages.length;
-    if ((!text && imageCount === 0) || streaming) return;
+    if ((!text && imageCount === 0) || (streaming && !stopping)) return;
 
     if (!localModelId && aiConfigs.length === 0) {
       setComposerError("当前没有可用模型，请先到设置页配置 AI 模型。");
@@ -1002,6 +1002,7 @@ export function KnowledgeBaseChat() {
     refreshSessions,
     selectedPromptId,
     selectedSessionId,
+    stopping,
     streaming,
     uploadedImages,
   ]);
@@ -1490,8 +1491,8 @@ export function KnowledgeBaseChat() {
                       onCopy={handleCopyMessage}
                       onEdit={handleEditMessage}
                       onRetry={handleRetryMessage}
-                      canEdit={!streaming && message.role === "user"}
-                      canRetry={!streaming && message.role === "user"}
+                      canEdit={(!streaming || stopping) && message.role === "user"}
+                      canRetry={(!streaming || stopping) && message.role === "user"}
                     />
                   </Fragment>
                 ))}
@@ -1708,7 +1709,7 @@ export function KnowledgeBaseChat() {
                   ) : (
                     <button
                       onClick={() => void handleSend(editingMessageId ? editingMessageValue : undefined, editingMessageId)}
-                      disabled={!(editingMessageId ? editingMessageValue.trim() : input.trim()) && uploadedImages.length === 0}
+                      disabled={((streaming && !stopping) || (!(editingMessageId ? editingMessageValue.trim() : input.trim()) && uploadedImages.length === 0))}
                       className={cn(
                         "w-10 h-10 rounded-xl flex items-center justify-center transition-colors cursor-pointer",
                         (editingMessageId ? editingMessageValue.trim() : input.trim()) || uploadedImages.length > 0
