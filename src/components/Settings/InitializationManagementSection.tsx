@@ -285,8 +285,6 @@ const tertiaryButtonClass =
   "px-3 py-2 text-sm rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/80 dark:bg-slate-800/55 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 disabled:opacity-50 transition-all cursor-pointer";
 const wideTertiaryButtonClass =
   `${tertiaryButtonClass} min-w-[132px] inline-flex items-center justify-center`;
-const tertiaryIconButtonClass =
-  `${tertiaryButtonClass} flex items-center gap-2`;
 const chipButtonClass =
   "px-2.5 py-1.5 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-slate-800/44 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 transition-all cursor-pointer";
 const subtleDangerButtonClass =
@@ -900,7 +898,10 @@ export function InitializationManagementSection({
       id: "",
       note_id: "",
       item_key: definition.item_key,
+      selected: false,
+      locked: false,
       status: "pending" as ItemStatus,
+      config_json: null,
       depends_on: definition.dependencies,
       last_model_id: null,
       last_error: null,
@@ -1052,16 +1053,6 @@ export function InitializationManagementSection({
 
     return { total, selected, completed, running, failed, locked };
   }, [editingItems]);
-
-  const selectedItemsForSync = useMemo(
-    () => editingItems.filter((item) => item.selected).map((item) => item.item_key),
-    [editingItems]
-  );
-
-  const lockedItemsForSync = useMemo(
-    () => editingItems.filter((item) => item.locked).map((item) => item.item_key),
-    [editingItems]
-  );
 
   const currentExecutionModel = aiConfigs.find((config) => config.id === editingModelOverrideId);
   const executionModelTitle = currentExecutionModel?.title || "选择模型";
