@@ -5,7 +5,6 @@ import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import SettingsPage from "./SettingsPage";
 import { AppProvider, useApp } from "./context/AppContext";
 import { useSettings } from "./context/SettingsContext";
-import { InitializationRuntimeProvider } from "./context/InitializationRuntimeContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
@@ -316,29 +315,11 @@ function AppContent() {
   );
 }
 
-// 包装组件：连接初始化运行时 Provider 和 AppContext
-function InitializationRuntimeWrapper({ children }: { children: React.ReactNode }) {
-  const { refreshNotes } = useApp();
-
-  const handleTaskCompleted = useCallback(async (noteId: string) => {
-    if (!noteId) return;
-    await refreshNotes();
-  }, [refreshNotes]);
-
-  return (
-    <InitializationRuntimeProvider onTaskCompleted={handleTaskCompleted}>
-      {children}
-    </InitializationRuntimeProvider>
-  );
-}
-
 function App() {
   return (
     <ErrorBoundary>
       <AppProvider>
-        <InitializationRuntimeWrapper>
-          <AppContent />
-        </InitializationRuntimeWrapper>
+        <AppContent />
       </AppProvider>
     </ErrorBoundary>
   );

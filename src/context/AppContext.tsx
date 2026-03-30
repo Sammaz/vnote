@@ -8,7 +8,7 @@
  */
 import { createContext, useContext, useMemo, useCallback, type ReactNode } from "react";
 import { SidebarProvider, useSidebar } from "./SidebarContext";
-import { useInitializationRuntime } from "./InitializationRuntimeContext";
+import { InitializationRuntimeProvider, useInitializationRuntime } from "./InitializationRuntimeContext";
 import {
   SettingsProvider,
   useSettings,
@@ -262,6 +262,21 @@ function NotesProviderWithStats({ children }: { children: ReactNode }) {
   );
 }
 
+function InitializationRuntimeProviderWithNotes({ children }: { children: ReactNode }) {
+  const { refreshNotes } = useNotes();
+
+  const handleTaskCompleted = useCallback(async (noteId: string) => {
+    if (!noteId) return;
+    await refreshNotes();
+  }, [refreshNotes]);
+
+  return (
+    <InitializationRuntimeProvider onTaskCompleted={handleTaskCompleted}>
+      {children}
+    </InitializationRuntimeProvider>
+  );
+}
+
 /**
  * AppProvider - 嵌套所有拆分的 Provider
  * 顺序很重要：外层 Provider 可以被内层访问
@@ -272,11 +287,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       <SettingsProvider>
         <UploadProvider>
           <NotesProviderWithStats>
-            <CollectionsProvider>
-              <AppContextBridge>
-                {children}
-              </AppContextBridge>
-            </CollectionsProvider>
+            <InitializationRuntimeProviderWithNotes>
+              <CollectionsProvider>
+                <AppContextBridge>
+                  {children}
+                </AppContextBridge>
+              </CollectionsProvider>
+            </InitializationRuntimeProviderWithNotes>
           </NotesProviderWithStats>
         </UploadProvider>
       </SettingsProvider>
