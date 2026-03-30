@@ -1008,6 +1008,7 @@ async fn execute_note_tab_generation(
             style: config_string(config, "style"),
             custom_prompt: config_string(config, "custom_prompt"),
             screenshot_density: config_string(config, "screenshot_density"),
+            fail_on_any_tab_error: true,
         },
     };
 

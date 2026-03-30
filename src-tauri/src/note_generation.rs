@@ -67,6 +67,9 @@ pub struct GenerationOptions {
     /// AI 笔记截图密度（可选）
     #[serde(default)]
     pub screenshot_density: Option<String>,
+    /// 严格失败模式：任一标签页失败时整体返回错误
+    #[serde(default)]
+    pub fail_on_any_tab_error: bool,
 }
 
 fn default_concurrent_limit() -> usize {
@@ -771,6 +774,7 @@ async fn generate_full_summary_layered(
     event_name: &str,
     app: &AppHandle,
     custom_prompt: Option<&str>,
+    concurrent_limit: usize,
 ) -> Result<String, String> {
     // 将 event_name 转换为 String 以便在异步任务中使用
     let event_name = event_name.to_string();
@@ -791,7 +795,10 @@ async fn generate_full_summary_layered(
     }
     tracing::info!("[笔记生成] ========================================");
 
-    // 并发生成各段摘要（并发控制由 AI 线程池统一管理）
+    // 受控并发生成各段摘要，首个失败后尽快停止后续子任务
+    let task_concurrency = concurrent_limit.max(1).min(total_chunks.max(1));
+    let semaphore = Arc::new(Semaphore::new(task_concurrency));
+    let child_abort_flag = Arc::new(AtomicBool::new(false));
     let mut tasks = Vec::new();
 
     for (i, chunk) in chunks.iter().enumerate() {
@@ -800,19 +807,24 @@ async fn generate_full_summary_layered(
         let ai_config = ai_config.clone();
         let chunk = chunk.clone();
         let abort_flag = abort_flag.clone();
+        let child_abort_flag = child_abort_flag.clone();
+        let semaphore = semaphore.clone();
         let chunk_index = i;
         let custom_prompt_for_task = custom_prompt.map(|p| p.to_string());
 
         let task = tokio::spawn(async move {
+            let _permit = semaphore
+                .acquire_owned()
+                .await
+                .map_err(|e| format!("获取分段并发许可失败: {}", e))?;
+
             tracing::info!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
 
-            // 检查中止
-            if abort_flag.load(Ordering::Relaxed) {
+            if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
                 tracing::info!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
                 return Err::<(String, usize), String>("已中止".to_string());
             }
 
-            // 发送进度事件
             let _ = app.emit(
                 &event_name_for_task,
                 GenerationEvent::TabProgress {
@@ -823,10 +835,7 @@ async fn generate_full_summary_layered(
                 },
             );
 
-            // 使用自定义提示词或默认提示词生成分段摘要
-            // 并发控制由 call_ai_api 内部的 AI 线程池管理
             let prompt = if let Some(custom) = &custom_prompt_for_task {
-                // 自定义提示词：为每段字幕生成摘要
                 format!("{}\n\n视频字幕片段：\n{}", custom, chunk)
             } else {
                 PromptTemplates::chunk_summary(&chunk)
@@ -834,10 +843,14 @@ async fn generate_full_summary_layered(
 
             match call_ai_api(&ai_config, &prompt, &abort_flag).await {
                 Ok(summary) => {
+                    if child_abort_flag.load(Ordering::Relaxed) {
+                        return Err("已中止".to_string());
+                    }
                     tracing::info!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
                     Ok((summary, chunk_index))
                 }
                 Err(e) => {
+                    child_abort_flag.store(true, Ordering::Relaxed);
                     tracing::warn!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
                     Err(e)
                 }
@@ -847,23 +860,35 @@ async fn generate_full_summary_layered(
         tasks.push(task);
     }
 
-    // 等待所有任务完成
     let mut results = Vec::new();
     let mut success_count = 0;
+    let mut first_error: Option<String> = None;
 
     for task in tasks {
         match task.await {
             Ok(Ok((summary, index))) => {
-                results.push((index, summary));
-                success_count += 1;
+                if first_error.is_none() {
+                    results.push((index, summary));
+                    success_count += 1;
+                }
             }
             Ok(Err(e)) => {
-                return Err(format!("分段生成失败: {}", e));
+                if e != "已中止" && first_error.is_none() {
+                    child_abort_flag.store(true, Ordering::Relaxed);
+                    first_error = Some(format!("分段生成失败: {}", e));
+                }
             }
             Err(e) => {
-                return Err(format!("任务执行出错: {}", e));
+                if first_error.is_none() {
+                    child_abort_flag.store(true, Ordering::Relaxed);
+                    first_error = Some(format!("任务执行出错: {}", e));
+                }
             }
         }
+    }
+
+    if let Some(error) = first_error {
+        return Err(error);
     }
 
     let failed_count = total_chunks - success_count;
@@ -1183,6 +1208,7 @@ pub async fn generate_detailed_reading_chapters(
     video_path: &str,
     note_id: &str,
     abort_flag: &Arc<AtomicBool>,
+    concurrent_limit: usize,
 ) -> Result<DetailedReadingData, String> {
     tracing::info!("[原文细读] ========================================");
     tracing::info!("[原文细读] 开始生成章节数据");
@@ -1266,19 +1292,29 @@ pub async fn generate_detailed_reading_chapters(
 
     tracing::info!("[原文细读] 分段数: {}", planned_segments.len());
 
-    // 第二步：为分段生成章节内容
+    // 第二步：为分段生成章节内容，受控并发执行，首个失败后停止后续子任务
     let total_chunks = planned_segments.len();
+    let task_concurrency = concurrent_limit.max(1).min(total_chunks.max(1));
+    let semaphore = Arc::new(Semaphore::new(task_concurrency));
+    let child_abort_flag = Arc::new(AtomicBool::new(false));
     let mut tasks = Vec::new();
 
     for (chunk_idx, (start_index, end_index)) in planned_segments.iter().copied().enumerate() {
         let ai_config = ai_config.clone();
         let abort_flag = abort_flag.clone();
+        let child_abort_flag = child_abort_flag.clone();
+        let semaphore = semaphore.clone();
         let app = app.clone();
         let event_name = event_name.to_string();
         let subtitle_entries = subtitle_entries.to_vec();
 
         let task = tokio::spawn(async move {
-            if abort_flag.load(Ordering::Relaxed) {
+            let _permit = semaphore
+                .acquire_owned()
+                .await
+                .map_err(|e| format!("获取章节并发许可失败: {}", e))?;
+
+            if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
                 return Err::<(usize, String, String, f64, f64), String>("已中止".to_string());
             }
 
@@ -1286,6 +1322,7 @@ pub async fn generate_detailed_reading_chapters(
             let safe_end = end_index.min(subtitle_entries.len());
 
             if safe_end <= safe_start {
+                child_abort_flag.store(true, Ordering::Relaxed);
                 return Err::<(usize, String, String, f64, f64), String>("无效章节边界".to_string());
             }
 
@@ -1331,49 +1368,53 @@ pub async fn generate_detailed_reading_chapters(
                 prompt,
             };
 
-            let (title, content) = match execute_non_streaming_with_abort(req, &abort_flag).await {
+            match execute_non_streaming_with_abort(req, &abort_flag).await {
                 Ok(response) => match parse_detailed_reading_chapter_response(&response.content) {
-                    Ok((t, c)) => (t, c),
+                    Ok((title, content)) => Ok((chunk_idx, title, content, start_time, end_time)),
                     Err(e) => {
+                        child_abort_flag.store(true, Ordering::Relaxed);
                         tracing::error!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
-                        (
-                            format!("章节 {}", chunk_idx + 1),
-                            subtitle_text.chars().take(200).collect(),
-                        )
+                        Err(format!("第 {} 段解析失败: {}", chunk_idx + 1, e))
                     }
                 },
                 Err(e) => {
+                    child_abort_flag.store(true, Ordering::Relaxed);
                     tracing::error!("[原文细读] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
-                    (
-                        format!("章节 {}", chunk_idx + 1),
-                        subtitle_text.chars().take(200).collect(),
-                    )
+                    Err(format!("第 {} 段 AI 调用失败: {}", chunk_idx + 1, e))
                 }
-            };
-
-            Ok((chunk_idx, title, content, start_time, end_time))
+            }
         });
 
         tasks.push(task);
     }
 
     let mut results: Vec<(usize, String, String, f64, f64)> = Vec::new();
+    let mut first_error: Option<String> = None;
 
     for task in tasks {
         match task.await {
             Ok(Ok(result)) => {
-                results.push(result);
+                if first_error.is_none() {
+                    results.push(result);
+                }
             }
             Ok(Err(e)) => {
-                if e == "已中止" {
-                    return Err(e);
+                if e != "已中止" && first_error.is_none() {
+                    child_abort_flag.store(true, Ordering::Relaxed);
+                    first_error = Some(e);
                 }
-                tracing::warn!("[原文细读] 分段任务失败，跳过: {}", e);
             }
             Err(e) => {
-                tracing::error!("[原文细读] 任务执行出错: {}", e);
+                if first_error.is_none() {
+                    child_abort_flag.store(true, Ordering::Relaxed);
+                    first_error = Some(format!("任务执行出错: {}", e));
+                }
             }
         }
+    }
+
+    if let Some(error) = first_error {
+        return Err(error);
     }
 
     results.sort_by_key(|(idx, _, _, _, _)| *idx);
@@ -1596,6 +1637,7 @@ pub async fn generate_note(
 
     let mut generated_count = 0;
     let mut failed_count = 0;
+    let mut first_error: Option<String> = None;
 
     // 按顺序串行生成所有标签页（当 concurrent_limit = 1 时）
     if request.options.concurrent_limit == 1 {
@@ -1645,6 +1687,7 @@ pub async fn generate_note(
                     &note.video_path,
                     &request.note_id,
                     &abort_flag,
+                    request.options.concurrent_limit,
                 ).await {
                     Ok(chapter_data) => {
                         tracing::info!("[笔记生成] {:?} 生成完成", tab_type);
@@ -1671,6 +1714,9 @@ pub async fn generate_note(
                     }
                     Err(e) => {
                         tracing::warn!("[笔记生成] {:?} 生成失败: {}", tab_type, e);
+                        if first_error.is_none() {
+                            first_error = Some(e.clone());
+                        }
                         let _ = app.emit(
                             &event_name,
                             GenerationEvent::TabError {
@@ -1697,6 +1743,7 @@ pub async fn generate_note(
                     current_subtitle_text,
                     &abort_flag,
                     model_context_size,
+                    request.options.concurrent_limit,
                     tab_name,
                     request.options.style.as_deref(),
                     request.options.custom_prompt.as_deref(),
@@ -1718,9 +1765,15 @@ pub async fn generate_note(
                         request.options.screenshot_density.as_deref(),
                     ) {
                         tracing::error!("[笔记生成] 更新数据库失败: {}", e);
+                        if first_error.is_none() {
+                            first_error = Some(format!("更新数据库失败: {}", e));
+                        }
                         failed_count += 1;
                     }
                 } else {
+                    if first_error.is_none() {
+                        first_error = result.error.clone();
+                    }
                     failed_count += 1;
                 }
             }
@@ -1753,6 +1806,7 @@ pub async fn generate_note(
             &note.video_path,
             &request.note_id,
             &abort_flag,
+            request.options.concurrent_limit,
         ).await {
             Ok(chapter_data) => {
                 // 序列化为 JSON 存储
@@ -1780,6 +1834,9 @@ pub async fn generate_note(
                 generated_count += 1;
             }
             Err(e) => {
+                if first_error.is_none() {
+                    first_error = Some(e.clone());
+                }
                 let _ = app.emit(
                     &event_name,
                     GenerationEvent::TabError {
@@ -1839,6 +1896,7 @@ pub async fn generate_note(
                     &subtitle_text,
                     &abort_flag,
                     model_context_size,
+                    request.options.concurrent_limit,
                     tab_name,
                     style.as_deref(),
                     custom_prompt.as_deref(),
@@ -1867,15 +1925,24 @@ pub async fn generate_note(
                             request.options.screenshot_density.as_deref(),
                         ) {
                             tracing::error!("[笔记生成] 更新数据库失败: {}", e);
+                            if first_error.is_none() {
+                                first_error = Some(format!("更新数据库失败: {}", e));
+                            }
                             failed_count += 1;
                         }
                     } else {
+                        if first_error.is_none() {
+                            first_error = result.error.clone();
+                        }
                         failed_count += 1;
                     }
                 }
                 Err(e) => {
                     // 任务 panic 或被取消，记录错误但继续处理其他任务
                     tracing::error!("[笔记生成] 任务执行异常: {}", e);
+                    if first_error.is_none() {
+                        first_error = Some(format!("任务执行异常: {}", e));
+                    }
                     failed_count += 1;
                 }
             }
@@ -1895,6 +1962,10 @@ pub async fn generate_note(
         },
     );
 
+    if request.options.fail_on_any_tab_error && failed_count > 0 {
+        return Err(first_error.unwrap_or_else(|| "存在标签页生成失败".to_string()));
+    }
+
     Ok(())
 }
 
@@ -1908,6 +1979,7 @@ async fn generate_single_tab(
     subtitle_text: &str,
     abort_flag: &Arc<AtomicBool>,
     model_context_size: usize,
+    concurrent_limit: usize,
     tab_name: String,
     style: Option<&str>,
     custom_prompt: Option<&str>,
@@ -1943,7 +2015,15 @@ async fn generate_single_tab(
     // 执行生成
     let content_result = match strategy {
         GenerationStrategy::Layered if matches!(tab_type, TabType::FullSummary | TabType::CustomSummary) => {
-            generate_full_summary_layered(ai_config, subtitle_text, abort_flag, event_name, app, custom_prompt).await
+            generate_full_summary_layered(
+                ai_config,
+                subtitle_text,
+                abort_flag,
+                event_name,
+                app,
+                custom_prompt,
+                concurrent_limit,
+            ).await
         }
         _ => {
             // 使用自定义提示词或默认提示词

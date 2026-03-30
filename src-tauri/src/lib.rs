@@ -1236,6 +1236,7 @@ async fn generate_note_content(
         style: None,
         custom_prompt,
         screenshot_density: None,
+        fail_on_any_tab_error: false,
     };
 
     let request = GenerateNoteRequest {
@@ -1296,6 +1297,7 @@ async fn generate_ai_note_content(
             style,
             custom_prompt,
             screenshot_density,
+            fail_on_any_tab_error: false,
         },
     };
 
