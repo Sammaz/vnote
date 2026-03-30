@@ -295,6 +295,9 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
         .map_err(|e| e.to_string())?
         .ok_or_else(|| "笔记不存在".to_string())?;
 
+    let existing_run = db
+        .get_note_initialization_run(note_id)
+        .map_err(|e| e.to_string())?;
     let items = sync_note_initialization_outputs(note_id)?;
 
     let running_count = items
@@ -329,9 +332,9 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
             )
         })
         .count();
-    let has_any_run = items.iter().any(|item| {
-        !matches!(item.status, NoteInitializationItemStatus::Pending)
-    });
+    let has_any_run = items
+        .iter()
+        .any(|item| !matches!(item.status, NoteInitializationItemStatus::Pending));
 
     let status = if running_count > 0 {
         NoteInitializationRunStatus::Running
@@ -347,17 +350,28 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
         NoteInitializationRunStatus::Idle
     };
 
+    let preserved_last_error = existing_run.as_ref().and_then(|run| match status {
+        NoteInitializationRunStatus::Failed
+        | NoteInitializationRunStatus::PartialFailed
+        | NoteInitializationRunStatus::Canceled => run.last_error.clone(),
+        _ => None,
+    });
+    let preserved_started_at = existing_run.as_ref().and_then(|run| run.started_at.clone());
+    let preserved_completed_at = existing_run.as_ref().and_then(|run| match status {
+        NoteInitializationRunStatus::Completed
+        | NoteInitializationRunStatus::Failed
+        | NoteInitializationRunStatus::PartialFailed
+        | NoteInitializationRunStatus::Canceled => run.completed_at.clone(),
+        _ => None,
+    });
+
     db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
         note_id: note_id.to_string(),
         status,
-        model_override_id: db
-            .get_note_initialization_run(note_id)
-            .ok()
-            .flatten()
-            .and_then(|run| run.model_override_id),
-        last_error: None,
-        started_at: None,
-        completed_at: None,
+        model_override_id: existing_run.and_then(|run| run.model_override_id),
+        last_error: preserved_last_error,
+        started_at: preserved_started_at,
+        completed_at: preserved_completed_at,
     })
     .map_err(|e| e.to_string())?;
 

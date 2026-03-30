@@ -8,6 +8,7 @@
  */
 import { createContext, useContext, useMemo, useCallback, type ReactNode } from "react";
 import { SidebarProvider, useSidebar } from "./SidebarContext";
+import { useInitializationRuntime } from "./InitializationRuntimeContext";
 import {
   SettingsProvider,
   useSettings,
@@ -140,6 +141,7 @@ function AppContextBridge({ children }: { children: ReactNode }) {
   const uploadContext = useUpload();
   const collectionsContext = useCollections();
   const notesContext = useNotes();
+  const { removeNoteFromRuntime } = useInitializationRuntime();
 
   // 组合所有值 - 使用 useMemo 优化
   // 注意：依赖项使用整个 context 对象是合理的，因为：
@@ -225,6 +227,9 @@ function AppContextBridge({ children }: { children: ReactNode }) {
     batchRemoveFromCollection: collectionsContext.batchRemoveFromCollection,
     batchMoveToCollection: collectionsContext.batchMoveToCollection,
     batchDeleteNotes: async (noteIds: string[]) => {
+      for (const noteId of noteIds) {
+        await removeNoteFromRuntime(noteId);
+      }
       await collectionsContext.batchDeleteNotes(noteIds, notesContext.refreshNotes);
     },
   }), [
@@ -233,6 +238,7 @@ function AppContextBridge({ children }: { children: ReactNode }) {
     uploadContext,
     collectionsContext,
     notesContext,
+    removeNoteFromRuntime,
   ]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

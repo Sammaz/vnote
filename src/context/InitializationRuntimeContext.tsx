@@ -100,6 +100,11 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
   const [runtimeSummary, setRuntimeSummary] = useState<RuntimeSummary>(createEmptyRuntimeSummary());
   const unlistenRef = useRef<UnlistenFn | null>(null);
   const isProcessingRef = useRef(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingAbortRef = useRef(false);
+  const currentTaskRef = useRef<RuntimeTask | null>(null);
+  const runtimeQueueRef = useRef<RuntimeTask[]>([]);
+  const initIdRef = useRef<string | null>(null);
 
   const initProgress =
     initState.total > 0
@@ -108,6 +113,18 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
 
   const hasActiveTasks = currentTask !== null || runtimeQueue.length > 0;
 
+  useEffect(() => {
+    currentTaskRef.current = currentTask;
+  }, [currentTask]);
+
+  useEffect(() => {
+    runtimeQueueRef.current = runtimeQueue;
+  }, [runtimeQueue]);
+
+  useEffect(() => {
+    initIdRef.current = initState.initializationId;
+  }, [initState.initializationId]);
+
   const cleanup = useCallback(() => {
     if (unlistenRef.current) {
       unlistenRef.current();
@@ -115,8 +132,51 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
     }
   }, []);
 
+  const clearResetTimer = useCallback(() => {
+    if (resetTimerRef.current) {
+      clearTimeout(resetTimerRef.current);
+      resetTimerRef.current = null;
+    }
+  }, []);
+
+  const waitForTaskExit = useCallback(async (noteId: string) => {
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const task = currentTaskRef.current;
+      if (!task || task.params.noteId !== noteId || task.status !== "running") {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }, []);
+
+  const scheduleTerminalReset = useCallback((taskId: string) => {
+    clearResetTimer();
+    resetTimerRef.current = setTimeout(() => {
+      const shouldResetState = currentTaskRef.current?.id === taskId;
+      setCurrentTask((prevTask) => {
+        if (!prevTask || prevTask.id !== taskId) {
+          return prevTask;
+        }
+        currentTaskRef.current = null;
+        return null;
+      });
+      setInitState((prevState) => {
+        if (shouldResetState) {
+          initIdRef.current = null;
+          return createInitialState();
+        }
+        return prevState;
+      });
+      resetTimerRef.current = null;
+    }, 1500);
+  }, [clearResetTimer]);
+
   const executeTask = useCallback(
     async (task: RuntimeTask) => {
+      pendingAbortRef.current = false;
+      initIdRef.current = null;
+      currentTaskRef.current = { ...task, status: "running" };
+      clearResetTimer();
       setCurrentTask({ ...task, status: "running" });
       setInitState({
         ...createInitialState(),
@@ -135,6 +195,16 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
           ...prev,
           initializationId,
         }));
+
+        if (pendingAbortRef.current) {
+          try {
+            await invoke("abort_note_initialization", {
+              initializationId,
+            });
+          } catch (error) {
+            console.error("Failed to abort pending initialization:", error);
+          }
+        }
 
         const eventName = `note-initialization-${initializationId}`;
         unlistenRef.current = await listen<NoteInitializationEvent>(eventName, (event) => {
@@ -193,6 +263,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
 
               case "StepCompleted": {
                 ensureStepIndex(payload.step_index, payload.step_name, payload.step);
+                const previousStatus = newState.steps[payload.step_index]?.status;
                 newState.steps[payload.step_index] = {
                   ...newState.steps[payload.step_index],
                   step: payload.step,
@@ -202,12 +273,15 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                   error: undefined,
                   reason: undefined,
                 };
-                newState.completed = prev.completed + 1;
+                if (previousStatus !== "completed") {
+                  newState.completed = prev.completed + 1;
+                }
                 break;
               }
 
               case "StepSkipped": {
                 ensureStepIndex(payload.step_index, payload.step_name, payload.step);
+                const previousStatus = newState.steps[payload.step_index]?.status;
                 newState.steps[payload.step_index] = {
                   ...newState.steps[payload.step_index],
                   step: payload.step,
@@ -217,12 +291,15 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                   message: undefined,
                   error: undefined,
                 };
-                newState.skipped = prev.skipped + 1;
+                if (previousStatus !== "skipped") {
+                  newState.skipped = prev.skipped + 1;
+                }
                 break;
               }
 
               case "StepFailed": {
                 ensureStepIndex(payload.step_index, payload.step_name, payload.step);
+                const previousStatus = newState.steps[payload.step_index]?.status;
                 newState.steps[payload.step_index] = {
                   ...newState.steps[payload.step_index],
                   step: payload.step,
@@ -231,7 +308,9 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                   error: payload.error,
                   message: undefined,
                 };
-                newState.failed = prev.failed + 1;
+                if (previousStatus !== "failed") {
+                  newState.failed = prev.failed + 1;
+                }
                 break;
               }
 
@@ -241,25 +320,34 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                 newState.skipped = payload.skipped;
                 newState.failed = payload.failed;
                 newState.total = payload.total;
-                setRuntimeSummary((prevSummary) => {
-                  const next = {
-                    ...prevSummary,
-                    running: 0,
-                  };
-                  if (payload.failed > 0) {
-                    next.failed += 1;
-                  } else if (payload.completed > 0) {
-                    next.success += 1;
-                  } else {
-                    next.skipped += 1;
-                  }
-                  return next;
-                });
+                pendingAbortRef.current = false;
                 setCurrentTask((t) => {
-                  if (t && onTaskCompleted) {
+                  if (!t || ["completed", "failed", "aborted"].includes(t.status)) {
+                    return t;
+                  }
+
+                  setRuntimeSummary((prevSummary) => {
+                    const next = {
+                      ...prevSummary,
+                      running: 0,
+                    };
+                    if (payload.failed > 0) {
+                      next.failed += 1;
+                    } else if (payload.completed > 0) {
+                      next.success += 1;
+                    } else {
+                      next.skipped += 1;
+                    }
+                    return next;
+                  });
+
+                  if (onTaskCompleted) {
                     onTaskCompleted(t.params.noteId);
                   }
-                  return t ? { ...t, status: payload.failed > 0 ? "failed" : "completed" } : null;
+
+                  const nextStatus = payload.failed > 0 ? "failed" : "completed";
+                  scheduleTerminalReset(t.id);
+                  return { ...t, status: nextStatus };
                 });
                 cleanup();
                 break;
@@ -268,16 +356,24 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
               case "Error": {
                 newState.isInitializing = false;
                 newState.error = payload.error;
-                setRuntimeSummary((prevSummary) => ({
-                  ...prevSummary,
-                  running: 0,
-                  failed: prevSummary.failed + 1,
-                }));
+                pendingAbortRef.current = false;
                 setCurrentTask((t) => {
-                  if (t && onTaskCompleted) {
+                  if (!t || ["completed", "failed", "aborted"].includes(t.status)) {
+                    return t;
+                  }
+
+                  setRuntimeSummary((prevSummary) => ({
+                    ...prevSummary,
+                    running: 0,
+                    failed: prevSummary.failed + 1,
+                  }));
+
+                  if (onTaskCompleted) {
                     onTaskCompleted(t.params.noteId);
                   }
-                  return t ? { ...t, status: "failed" } : null;
+
+                  scheduleTerminalReset(t.id);
+                  return { ...t, status: "failed" };
                 });
                 cleanup();
                 break;
@@ -285,16 +381,24 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
 
               case "Aborted": {
                 newState.isInitializing = false;
-                setRuntimeSummary((prevSummary) => ({
-                  ...prevSummary,
-                  running: 0,
-                  failed: prevSummary.failed + 1,
-                }));
+                pendingAbortRef.current = false;
                 setCurrentTask((t) => {
-                  if (t && onTaskCompleted) {
+                  if (!t || ["completed", "failed", "aborted"].includes(t.status)) {
+                    return t;
+                  }
+
+                  setRuntimeSummary((prevSummary) => ({
+                    ...prevSummary,
+                    running: 0,
+                    failed: prevSummary.failed + 1,
+                  }));
+
+                  if (onTaskCompleted) {
                     onTaskCompleted(t.params.noteId);
                   }
-                  return t ? { ...t, status: "aborted" } : null;
+
+                  scheduleTerminalReset(t.id);
+                  return { ...t, status: "aborted" };
                 });
                 cleanup();
                 break;
@@ -305,25 +409,33 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
           });
         });
       } catch (error) {
+        pendingAbortRef.current = false;
         setInitState((prev) => ({
           ...prev,
           isInitializing: false,
           error: error instanceof Error ? error.message : String(error),
         }));
-        setRuntimeSummary((prevSummary) => ({
-          ...prevSummary,
-          running: 0,
-          failed: prevSummary.failed + 1,
-        }));
         setCurrentTask((t) => {
-          if (t && onTaskCompleted) {
+          if (!t || ["completed", "failed", "aborted"].includes(t.status)) {
+            return t;
+          }
+
+          setRuntimeSummary((prevSummary) => ({
+            ...prevSummary,
+            running: 0,
+            failed: prevSummary.failed + 1,
+          }));
+
+          if (onTaskCompleted) {
             onTaskCompleted(t.params.noteId);
           }
-          return t ? { ...t, status: "failed" } : null;
+
+          scheduleTerminalReset(t.id);
+          return { ...t, status: "failed" };
         });
       }
     },
-    [cleanup, onTaskCompleted]
+    [cleanup, onTaskCompleted, scheduleTerminalReset]
   );
 
   useEffect(() => {
@@ -331,10 +443,9 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       if (isProcessingRef.current) return;
 
       if (currentTask && ["completed", "failed", "aborted"].includes(currentTask.status)) {
-        setTimeout(() => {
-          setCurrentTask(null);
-          setInitState(createInitialState());
-        }, 1500);
+        if (!resetTimerRef.current) {
+          scheduleTerminalReset(currentTask.id);
+        }
         return;
       }
 
@@ -353,7 +464,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
     };
 
     processNext();
-  }, [currentTask, runtimeQueue, initState.isInitializing, executeTask]);
+  }, [currentTask, runtimeQueue, initState.isInitializing, executeTask, scheduleTerminalReset]);
 
   const addBatchToRuntime = useCallback((paramsList: InitializationTaskParams[]) => {
     if (paramsList.length === 0) return 0;
@@ -365,12 +476,13 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       return true;
     });
 
-    const existingNoteIds = new Set(runtimeQueue.map((task) => task.params.noteId));
-    if (currentTask?.status === "running") {
-      existingNoteIds.add(currentTask.params.noteId);
+    const queuedNoteIds = new Set(runtimeQueueRef.current.map((task) => task.params.noteId));
+    const runningTask = currentTaskRef.current;
+    if (runningTask?.status === "running") {
+      queuedNoteIds.add(runningTask.params.noteId);
     }
 
-    const accepted = uniqueParams.filter((params) => !existingNoteIds.has(params.noteId));
+    const accepted = uniqueParams.filter((params) => !queuedNoteIds.has(params.noteId));
     if (accepted.length === 0) return 0;
 
     const now = Date.now();
@@ -383,7 +495,8 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
 
     setQueue((prev) => [...prev, ...tasks]);
     setRuntimeSummary((prevSummary) => {
-      const isNewBatch = currentTask === null && runtimeQueue.length === 0 && prevSummary.running === 0;
+      const isNewBatch =
+        currentTaskRef.current === null && runtimeQueueRef.current.length === 0 && prevSummary.running === 0;
       const baseSummary = isNewBatch ? createEmptyRuntimeSummary() : prevSummary;
       return {
         ...baseSummary,
@@ -392,98 +505,78 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       };
     });
     return accepted.length;
-  }, [runtimeQueue, currentTask]);
+  }, []);
 
   const removeFromRuntime = useCallback((taskId: string) => {
-    let removed = 0;
-    setQueue((prev) => {
-      const next = prev.filter((t) => {
-        const shouldKeep = t.id !== taskId;
-        if (!shouldKeep) {
-          removed += 1;
-        }
-        return shouldKeep;
-      });
-      return next;
-    });
-    if (removed > 0) {
-      setRuntimeSummary((prevSummary) => ({
-        ...prevSummary,
-        total: Math.max(prevSummary.total - removed, 0),
-        queued: Math.max(prevSummary.queued - removed, 0),
-      }));
+    const removed = runtimeQueueRef.current.some((task) => task.id === taskId) ? 1 : 0;
+    if (removed === 0) {
+      return;
     }
+
+    setQueue((prev) => prev.filter((task) => task.id !== taskId));
+    setRuntimeSummary((prevSummary) => ({
+      ...prevSummary,
+      total: Math.max(prevSummary.total - removed, 0),
+      queued: Math.max(prevSummary.queued - removed, 0),
+    }));
   }, []);
 
   const abortCurrent = useCallback(async () => {
-    if (initState.initializationId) {
-      try {
-        await invoke("abort_note_initialization", {
-          initializationId: initState.initializationId,
-        });
-      } catch (error) {
-        console.error("Failed to abort initialization:", error);
-      }
+    const runningTask = currentTaskRef.current;
+    if (!runningTask || runningTask.status !== "running") {
+      return;
     }
-    cleanup();
-    setInitState((prev) => ({
-      ...prev,
-      isInitializing: false,
-    }));
-    setRuntimeSummary((prevSummary) => ({
-      ...prevSummary,
-      running: 0,
-      failed: currentTask?.status === "running" ? prevSummary.failed + 1 : prevSummary.failed,
-    }));
-    setCurrentTask((t) => {
-      if (t && onTaskCompleted) {
-        onTaskCompleted(t.params.noteId);
-      }
-      return t ? { ...t, status: "aborted" } : null;
-    });
-  }, [currentTask?.status, initState.initializationId, cleanup, onTaskCompleted]);
 
-  const clearRuntime = useCallback(() => {
-    let removed = 0;
-    setQueue((prev) => {
-      removed = prev.length;
-      return [];
-    });
-    if (removed > 0) {
-      setRuntimeSummary((prevSummary) => ({
-        ...prevSummary,
-        total: Math.max(prevSummary.total - removed, 0),
-        queued: Math.max(prevSummary.queued - removed, 0),
-      }));
+    pendingAbortRef.current = true;
+    const initializationId = initIdRef.current;
+    if (!initializationId) {
+      return;
+    }
+
+    try {
+      await invoke("abort_note_initialization", {
+        initializationId,
+      });
+    } catch (error) {
+      pendingAbortRef.current = false;
+      console.error("Failed to abort initialization:", error);
+      throw error;
     }
   }, []);
 
-  const stopAllTasks = useCallback(async () => {
-    const queuedCount = runtimeQueue.length;
-    await abortCurrent();
+  const clearRuntime = useCallback(() => {
+    const removed = runtimeQueueRef.current.length;
+    if (removed === 0) {
+      return;
+    }
+
     setQueue([]);
     setRuntimeSummary((prevSummary) => ({
       ...prevSummary,
-      queued: 0,
-      skipped: prevSummary.skipped + queuedCount,
+      total: Math.max(prevSummary.total - removed, 0),
+      queued: Math.max(prevSummary.queued - removed, 0),
     }));
-  }, [abortCurrent, runtimeQueue.length]);
+  }, []);
+
+  const stopAllTasks = useCallback(async () => {
+    const queuedCount = runtimeQueueRef.current.length;
+    if (queuedCount > 0) {
+      setQueue([]);
+      setRuntimeSummary((prevSummary) => ({
+        ...prevSummary,
+        queued: 0,
+        skipped: prevSummary.skipped + queuedCount,
+      }));
+    }
+
+    await abortCurrent();
+  }, [abortCurrent]);
 
   const removeNoteFromRuntime = useCallback(
     async (noteId: string) => {
-      let removedQueued = 0;
-      setQueue((prev) => {
-        const next = prev.filter((t) => {
-          const shouldKeep = t.params.noteId !== noteId;
-          if (!shouldKeep) {
-            removedQueued += 1;
-          }
-          return shouldKeep;
-        });
-        return next;
-      });
-
+      const removedQueued = runtimeQueueRef.current.filter((task) => task.params.noteId === noteId).length;
       if (removedQueued > 0) {
+        setQueue((prev) => prev.filter((task) => task.params.noteId !== noteId));
         setRuntimeSummary((prevSummary) => ({
           ...prevSummary,
           total: Math.max(prevSummary.total - removedQueued, 0),
@@ -491,32 +584,20 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
         }));
       }
 
-      if (currentTask && currentTask.params.noteId === noteId && currentTask.status === "running") {
-        if (initState.initializationId) {
-          try {
-            await invoke("abort_note_initialization", {
-              initializationId: initState.initializationId,
-            });
-            console.log(`[InitializationRuntime] 已中止笔记 ${noteId} 的初始化任务`);
-          } catch (error) {
-            console.error(`[InitializationRuntime] 中止笔记 ${noteId} 的初始化任务失败:`, error);
-          }
-        }
-
-        cleanup();
-        setInitState((prev) => ({
-          ...prev,
-          isInitializing: false,
-        }));
-        setCurrentTask((t) => (t ? { ...t, status: "aborted" } : null));
+      if (currentTaskRef.current?.params.noteId === noteId && currentTaskRef.current.status === "running") {
+        await abortCurrent();
+        await waitForTaskExit(noteId);
       }
     },
-    [currentTask, initState.initializationId, cleanup]
+    [abortCurrent, waitForTaskExit]
   );
 
   useEffect(() => {
-    return cleanup;
-  }, [cleanup]);
+    return () => {
+      clearResetTimer();
+      cleanup();
+    };
+  }, [cleanup, clearResetTimer]);
 
   const value = useMemo(
     () => ({
