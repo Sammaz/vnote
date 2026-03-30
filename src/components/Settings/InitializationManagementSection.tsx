@@ -228,6 +228,7 @@ function getRunStatusBadgeTone(
       return "success";
     case "failed":
     case "partial_failed":
+    case "canceled":
       return "danger";
     default:
       return "neutral";
@@ -785,9 +786,11 @@ export function InitializationManagementSection({
     currentTask,
     initState,
     initProgress,
+    runtimeSummary,
     addBatchToRuntime,
     removeFromRuntime,
     abortCurrent,
+    stopAllTasks,
     clearRuntime,
     hasActiveTasks,
   } = useInitializationRuntime();
@@ -887,6 +890,25 @@ export function InitializationManagementSection({
     loadOverview();
   }, [loadOverview]);
 
+  const lastOverviewRefreshTaskRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentTask) {
+      return;
+    }
+
+    if (!["completed", "failed", "aborted"].includes(currentTask.status)) {
+      return;
+    }
+
+    const refreshKey = `${currentTask.id}:${currentTask.status}`;
+    if (lastOverviewRefreshTaskRef.current === refreshKey) {
+      return;
+    }
+
+    lastOverviewRefreshTaskRef.current = refreshKey;
+    void loadOverview();
+  }, [currentTask, loadOverview]);
+
   useEffect(() => {
     if (registry.length === 0) {
       setEditingItems([]);
@@ -970,7 +992,9 @@ export function InitializationManagementSection({
           return item.run_status === "running" || item.run_status === "queued";
         case "failed":
           return (
-            item.run_status === "failed" || item.run_status === "partial_failed"
+            item.run_status === "failed" ||
+            item.run_status === "partial_failed" ||
+            item.run_status === "canceled"
           );
         case "completed":
           return item.run_status === "completed";
@@ -991,6 +1015,7 @@ export function InitializationManagementSection({
       (item) =>
         item.run_status === "failed" ||
         item.run_status === "partial_failed" ||
+        item.run_status === "canceled" ||
         item.failed_count > 0
     );
   }, [overview]);
@@ -1006,23 +1031,7 @@ export function InitializationManagementSection({
       ? initState.steps[initState.currentStepIndex].message
       : undefined;
 
-  const runSummary = useMemo(() => {
-    const queuedCount = runtimeQueue.length;
-    const runningCount = currentTask && currentTask.status === "running" ? 1 : 0;
-    const successCount =
-      currentTask && currentTask.status === "completed" ? 1 : 0;
-    const failedCount = currentTask && currentTask.status === "failed" ? 1 : 0;
-    const skippedCount = initState.skipped;
-
-    return {
-      total: queuedCount + (currentTask ? 1 : 0),
-      queued: queuedCount,
-      running: runningCount,
-      success: successCount,
-      failed: failedCount,
-      skipped: skippedCount,
-    };
-  }, [currentTask, initState.skipped, runtimeQueue.length]);
+  const runSummary = runtimeSummary;
 
   const overviewStats = useMemo(() => {
     const total = overview.length;
@@ -1030,7 +1039,10 @@ export function InitializationManagementSection({
       (item) => item.run_status === "running" || item.run_status === "queued"
     ).length;
     const failed = overview.filter(
-      (item) => item.run_status === "failed" || item.run_status === "partial_failed"
+      (item) =>
+        item.run_status === "failed" ||
+        item.run_status === "partial_failed" ||
+        item.run_status === "canceled"
     ).length;
     const completed = overview.filter(
       (item) => item.run_status === "completed"
@@ -1363,6 +1375,24 @@ export function InitializationManagementSection({
     prepareRetryTask,
     selectedNoteIds,
   ]);
+
+  const handleStopAllTasks = useCallback(async () => {
+    if (!hasActiveTasks) {
+      return;
+    }
+
+    setActionLoading("stop-all");
+    try {
+      await stopAllTasks();
+      await loadOverview();
+      message.success("已停止全部任务");
+    } catch (error) {
+      console.error("Failed to stop all initialization tasks:", error);
+      message.error(`停止全部任务失败：${String(error)}`);
+    } finally {
+      setActionLoading(null);
+    }
+  }, [hasActiveTasks, loadOverview, stopAllTasks]);
 
   return (
     <div className="space-y-5">
@@ -1957,11 +1987,19 @@ export function InitializationManagementSection({
                       </MiniBadge>
                       <button
                         onClick={abortCurrent}
-                        disabled={!hasActiveTasks || actionLoading !== null}
+                        disabled={!currentTask || currentTask.status !== "running" || actionLoading !== null}
                         className={dangerButtonClass}
                       >
                         <Square size={14} />
                         取消当前运行
+                      </button>
+                      <button
+                        onClick={handleStopAllTasks}
+                        disabled={!hasActiveTasks || actionLoading !== null}
+                        className={dangerButtonClass}
+                      >
+                        <Square size={14} />
+                        停止全部任务
                       </button>
                     </div>
                   </div>
@@ -2030,6 +2068,15 @@ export function InitializationManagementSection({
                               className={chipButtonClass}
                             >
                               清空等待队列
+                            </button>
+                          )}
+                          {hasActiveTasks && (
+                            <button
+                              onClick={handleStopAllTasks}
+                              disabled={actionLoading !== null}
+                              className={chipButtonClass}
+                            >
+                              停止全部任务
                             </button>
                           )}
                         </div>

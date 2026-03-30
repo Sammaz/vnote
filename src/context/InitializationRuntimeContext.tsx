@@ -40,16 +40,27 @@ export interface RuntimeTask {
   addedAt: Date;
 }
 
+export interface RuntimeSummary {
+  total: number;
+  queued: number;
+  running: number;
+  success: number;
+  failed: number;
+  skipped: number;
+}
+
 /** Context 类型 */
 interface InitializationRuntimeContextType {
   runtimeQueue: RuntimeTask[];
   currentTask: RuntimeTask | null;
   initState: InitializationState;
   initProgress: number;
+  runtimeSummary: RuntimeSummary;
   addBatchToRuntime: (paramsList: InitializationTaskParams[]) => number;
   removeFromRuntime: (taskId: string) => void;
   removeNoteFromRuntime: (noteId: string) => Promise<void>;
   abortCurrent: () => Promise<void>;
+  stopAllTasks: () => Promise<void>;
   clearRuntime: () => void;
   hasActiveTasks: boolean;
 }
@@ -71,10 +82,22 @@ function createRuntimeItemsFromStartingPayload(
   }));
 }
 
+function createEmptyRuntimeSummary(): RuntimeSummary {
+  return {
+    total: 0,
+    queued: 0,
+    running: 0,
+    success: 0,
+    failed: 0,
+    skipped: 0,
+  };
+}
+
 export function InitializationRuntimeProvider({ children, onTaskCompleted }: InitializationRuntimeProviderProps) {
   const [runtimeQueue, setQueue] = useState<RuntimeTask[]>([]);
   const [currentTask, setCurrentTask] = useState<RuntimeTask | null>(null);
   const [initState, setInitState] = useState<InitializationState>(createInitialState());
+  const [runtimeSummary, setRuntimeSummary] = useState<RuntimeSummary>(createEmptyRuntimeSummary());
   const unlistenRef = useRef<UnlistenFn | null>(null);
   const isProcessingRef = useRef(false);
 
@@ -218,11 +241,25 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                 newState.skipped = payload.skipped;
                 newState.failed = payload.failed;
                 newState.total = payload.total;
+                setRuntimeSummary((prevSummary) => {
+                  const next = {
+                    ...prevSummary,
+                    running: 0,
+                  };
+                  if (payload.failed > 0) {
+                    next.failed += 1;
+                  } else if (payload.completed > 0) {
+                    next.success += 1;
+                  } else {
+                    next.skipped += 1;
+                  }
+                  return next;
+                });
                 setCurrentTask((t) => {
                   if (t && onTaskCompleted) {
                     onTaskCompleted(t.params.noteId);
                   }
-                  return t ? { ...t, status: "completed" } : null;
+                  return t ? { ...t, status: payload.failed > 0 ? "failed" : "completed" } : null;
                 });
                 cleanup();
                 break;
@@ -231,14 +268,34 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
               case "Error": {
                 newState.isInitializing = false;
                 newState.error = payload.error;
-                setCurrentTask((t) => (t ? { ...t, status: "failed" } : null));
+                setRuntimeSummary((prevSummary) => ({
+                  ...prevSummary,
+                  running: 0,
+                  failed: prevSummary.failed + 1,
+                }));
+                setCurrentTask((t) => {
+                  if (t && onTaskCompleted) {
+                    onTaskCompleted(t.params.noteId);
+                  }
+                  return t ? { ...t, status: "failed" } : null;
+                });
                 cleanup();
                 break;
               }
 
               case "Aborted": {
                 newState.isInitializing = false;
-                setCurrentTask((t) => (t ? { ...t, status: "aborted" } : null));
+                setRuntimeSummary((prevSummary) => ({
+                  ...prevSummary,
+                  running: 0,
+                  failed: prevSummary.failed + 1,
+                }));
+                setCurrentTask((t) => {
+                  if (t && onTaskCompleted) {
+                    onTaskCompleted(t.params.noteId);
+                  }
+                  return t ? { ...t, status: "aborted" } : null;
+                });
                 cleanup();
                 break;
               }
@@ -253,7 +310,17 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
           isInitializing: false,
           error: error instanceof Error ? error.message : String(error),
         }));
-        setCurrentTask((t) => (t ? { ...t, status: "failed" } : null));
+        setRuntimeSummary((prevSummary) => ({
+          ...prevSummary,
+          running: 0,
+          failed: prevSummary.failed + 1,
+        }));
+        setCurrentTask((t) => {
+          if (t && onTaskCompleted) {
+            onTaskCompleted(t.params.noteId);
+          }
+          return t ? { ...t, status: "failed" } : null;
+        });
       }
     },
     [cleanup, onTaskCompleted]
@@ -275,6 +342,11 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
         isProcessingRef.current = true;
         const nextTask = runtimeQueue[0];
         setQueue((prev) => prev.slice(1));
+        setRuntimeSummary((prevSummary) => ({
+          ...prevSummary,
+          queued: Math.max(prevSummary.queued - 1, 0),
+          running: 1,
+        }));
         await executeTask(nextTask);
         isProcessingRef.current = false;
       }
@@ -310,11 +382,37 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
     }));
 
     setQueue((prev) => [...prev, ...tasks]);
+    setRuntimeSummary((prevSummary) => {
+      const isNewBatch = currentTask === null && runtimeQueue.length === 0 && prevSummary.running === 0;
+      const baseSummary = isNewBatch ? createEmptyRuntimeSummary() : prevSummary;
+      return {
+        ...baseSummary,
+        total: baseSummary.total + accepted.length,
+        queued: baseSummary.queued + accepted.length,
+      };
+    });
     return accepted.length;
   }, [runtimeQueue, currentTask]);
 
   const removeFromRuntime = useCallback((taskId: string) => {
-    setQueue((prev) => prev.filter((t) => t.id !== taskId));
+    let removed = 0;
+    setQueue((prev) => {
+      const next = prev.filter((t) => {
+        const shouldKeep = t.id !== taskId;
+        if (!shouldKeep) {
+          removed += 1;
+        }
+        return shouldKeep;
+      });
+      return next;
+    });
+    if (removed > 0) {
+      setRuntimeSummary((prevSummary) => ({
+        ...prevSummary,
+        total: Math.max(prevSummary.total - removed, 0),
+        queued: Math.max(prevSummary.queued - removed, 0),
+      }));
+    }
   }, []);
 
   const abortCurrent = useCallback(async () => {
@@ -332,16 +430,66 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       ...prev,
       isInitializing: false,
     }));
-    setCurrentTask((t) => (t ? { ...t, status: "aborted" } : null));
-  }, [initState.initializationId, cleanup]);
+    setRuntimeSummary((prevSummary) => ({
+      ...prevSummary,
+      running: 0,
+      failed: currentTask?.status === "running" ? prevSummary.failed + 1 : prevSummary.failed,
+    }));
+    setCurrentTask((t) => {
+      if (t && onTaskCompleted) {
+        onTaskCompleted(t.params.noteId);
+      }
+      return t ? { ...t, status: "aborted" } : null;
+    });
+  }, [currentTask?.status, initState.initializationId, cleanup, onTaskCompleted]);
 
   const clearRuntime = useCallback(() => {
-    setQueue([]);
+    let removed = 0;
+    setQueue((prev) => {
+      removed = prev.length;
+      return [];
+    });
+    if (removed > 0) {
+      setRuntimeSummary((prevSummary) => ({
+        ...prevSummary,
+        total: Math.max(prevSummary.total - removed, 0),
+        queued: Math.max(prevSummary.queued - removed, 0),
+      }));
+    }
   }, []);
+
+  const stopAllTasks = useCallback(async () => {
+    const queuedCount = runtimeQueue.length;
+    await abortCurrent();
+    setQueue([]);
+    setRuntimeSummary((prevSummary) => ({
+      ...prevSummary,
+      queued: 0,
+      skipped: prevSummary.skipped + queuedCount,
+    }));
+  }, [abortCurrent, runtimeQueue.length]);
 
   const removeNoteFromRuntime = useCallback(
     async (noteId: string) => {
-      setQueue((prev) => prev.filter((t) => t.params.noteId !== noteId));
+      let removedQueued = 0;
+      setQueue((prev) => {
+        const next = prev.filter((t) => {
+          const shouldKeep = t.params.noteId !== noteId;
+          if (!shouldKeep) {
+            removedQueued += 1;
+          }
+          return shouldKeep;
+        });
+        return next;
+      });
+
+      if (removedQueued > 0) {
+        setRuntimeSummary((prevSummary) => ({
+          ...prevSummary,
+          total: Math.max(prevSummary.total - removedQueued, 0),
+          queued: Math.max(prevSummary.queued - removedQueued, 0),
+        }));
+      }
 
       if (currentTask && currentTask.params.noteId === noteId && currentTask.status === "running") {
         if (initState.initializationId) {
@@ -376,10 +524,12 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       currentTask,
       initState,
       initProgress,
+      runtimeSummary,
       addBatchToRuntime,
       removeFromRuntime,
       removeNoteFromRuntime,
       abortCurrent,
+      stopAllTasks,
       clearRuntime,
       hasActiveTasks,
     }),
@@ -388,10 +538,12 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       currentTask,
       initState,
       initProgress,
+      runtimeSummary,
       addBatchToRuntime,
       removeFromRuntime,
       removeNoteFromRuntime,
       abortCurrent,
+      stopAllTasks,
       clearRuntime,
       hasActiveTasks,
     ]

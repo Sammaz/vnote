@@ -3,6 +3,7 @@ use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{Connection, Result as SqliteResult};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use crate::snowflake;
@@ -1056,13 +1057,43 @@ impl Database {
 
     pub fn get_note_initialization_overview(&self) -> SqliteResult<Vec<NoteInitializationOverview>> {
         let conn = self.connection();
+        let selected_count = self
+            .get_setting("initialization_template_selected_keys")?
+            .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+            .map(|keys| {
+                let registry = crate::note_initialization::get_initialization_registry();
+                let registry_set: HashSet<String> =
+                    registry.iter().map(|item| item.item_key.clone()).collect();
+                let dependency_map: HashMap<String, Vec<String>> = registry
+                    .iter()
+                    .map(|item| (item.item_key.clone(), item.dependencies.clone()))
+                    .collect();
+                let mut expanded: HashSet<String> = keys
+                    .into_iter()
+                    .filter(|key| registry_set.contains(key))
+                    .collect();
+                let mut stack: Vec<String> = expanded.iter().cloned().collect();
+
+                while let Some(item_key) = stack.pop() {
+                    if let Some(dependencies) = dependency_map.get(&item_key) {
+                        for dependency in dependencies {
+                            if expanded.insert(dependency.clone()) {
+                                stack.push(dependency.clone());
+                            }
+                        }
+                    }
+                }
+
+                expanded.len() as i32
+            })
+            .unwrap_or(0);
+
         let mut stmt = conn.prepare(
             "SELECT
                 n.id,
                 n.title,
                 n.subtitle_path,
                 COALESCE(r.status, 'idle') AS run_status,
-                0 AS selected_count,
                 COALESCE(SUM(CASE WHEN i.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_count,
                 COALESCE(SUM(CASE WHEN i.status = 'skipped' THEN 1 ELSE 0 END), 0) AS skipped_count,
                 COALESCE(SUM(CASE WHEN i.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,
@@ -1083,13 +1114,13 @@ impl Database {
                 note_title: row.get(1)?,
                 subtitle_path: row.get(2)?,
                 run_status: NoteInitializationRunStatus::from_str(&run_status),
-                selected_count: row.get(4)?,
-                completed_count: row.get(5)?,
-                skipped_count: row.get(6)?,
-                failed_count: row.get(7)?,
-                running_count: row.get(8)?,
-                output_count: row.get(9)?,
-                updated_at: row.get(10)?,
+                selected_count,
+                completed_count: row.get(4)?,
+                skipped_count: row.get(5)?,
+                failed_count: row.get(6)?,
+                running_count: row.get(7)?,
+                output_count: row.get(8)?,
+                updated_at: row.get(9)?,
             })
         })?;
 

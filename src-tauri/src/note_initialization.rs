@@ -314,6 +314,10 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
             )
         })
         .count();
+    let canceled_count = items
+        .iter()
+        .filter(|item| matches!(item.status, NoteInitializationItemStatus::Canceled))
+        .count();
     let pending_count = items
         .iter()
         .filter(|item| {
@@ -333,6 +337,8 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
         NoteInitializationRunStatus::Running
     } else if queued_count > 0 {
         NoteInitializationRunStatus::Queued
+    } else if canceled_count > 0 {
+        NoteInitializationRunStatus::Canceled
     } else if failed_count > 0 {
         NoteInitializationRunStatus::PartialFailed
     } else if has_any_run && pending_count == 0 {
