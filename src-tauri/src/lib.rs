@@ -1919,7 +1919,7 @@ fn get_note_initialization_plan(note_id: String) -> Result<NoteInitializationDet
 }
 
 #[tauri::command]
-async fn initialize_note_data(
+async fn prepare_note_initialization(
     app: AppHandle,
     note_id: String,
     model_id: String,
@@ -1933,7 +1933,12 @@ async fn initialize_note_data(
         video_path,
         subtitle_path,
     };
-    note_initialization::start_initialization(app, params).await
+    note_initialization::prepare_initialization(app, params).await
+}
+
+#[tauri::command]
+async fn start_note_initialization(initialization_id: String) -> Result<(), String> {
+    note_initialization::start_initialization(&initialization_id).await
 }
 
 #[tauri::command]
@@ -2248,7 +2253,8 @@ pub fn run() {
             get_initialization_registry,
             get_initialization_overview,
             get_note_initialization_plan,
-            initialize_note_data,
+            prepare_note_initialization,
+            start_note_initialization,
             abort_note_initialization,
             // Collection commands
             get_collections,

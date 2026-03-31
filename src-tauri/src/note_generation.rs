@@ -797,91 +797,91 @@ async fn generate_full_summary_layered(
 
     // 受控并发生成各段摘要，首个失败后尽快停止后续子任务
     let task_concurrency = concurrent_limit.max(1).min(total_chunks.max(1));
-    let semaphore = Arc::new(Semaphore::new(task_concurrency));
     let child_abort_flag = Arc::new(AtomicBool::new(false));
-    let mut tasks = Vec::new();
-
-    for (i, chunk) in chunks.iter().enumerate() {
-        let app = app.clone();
-        let event_name_for_task = event_name.clone();
-        let ai_config = ai_config.clone();
-        let chunk = chunk.clone();
-        let abort_flag = abort_flag.clone();
-        let child_abort_flag = child_abort_flag.clone();
-        let semaphore = semaphore.clone();
-        let chunk_index = i;
-        let custom_prompt_for_task = custom_prompt.map(|p| p.to_string());
-
-        let task = tokio::spawn(async move {
-            let _permit = semaphore
-                .acquire_owned()
-                .await
-                .map_err(|e| format!("获取分段并发许可失败: {}", e))?;
-
-            tracing::info!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
-
-            if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
-                tracing::info!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
-                return Err::<(String, usize), String>("已中止".to_string());
-            }
-
-            let _ = app.emit(
-                &event_name_for_task,
-                GenerationEvent::TabProgress {
-                    tab_type: "full_summary".to_string(),
-                    current: chunk_index + 1,
-                    total: total_chunks + 2,
-                    message: format!("生成第 {}/{} 段摘要...", chunk_index + 1, total_chunks),
-                },
-            );
-
-            let prompt = if let Some(custom) = &custom_prompt_for_task {
-                format!("{}\n\n视频字幕片段：\n{}", custom, chunk)
-            } else {
-                PromptTemplates::chunk_summary(&chunk)
-            };
-
-            match call_ai_api(&ai_config, &prompt, &abort_flag).await {
-                Ok(summary) => {
-                    if child_abort_flag.load(Ordering::Relaxed) {
-                        return Err("已中止".to_string());
-                    }
-                    tracing::info!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
-                    Ok((summary, chunk_index))
-                }
-                Err(e) => {
-                    child_abort_flag.store(true, Ordering::Relaxed);
-                    tracing::warn!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
-                    Err(e)
-                }
-            }
-        });
-
-        tasks.push(task);
-    }
-
     let mut results = Vec::new();
     let mut success_count = 0;
     let mut first_error: Option<String> = None;
 
-    for task in tasks {
-        match task.await {
-            Ok(Ok((summary, index))) => {
-                if first_error.is_none() {
-                    results.push((index, summary));
-                    success_count += 1;
+    for (batch_index, chunk_batch) in chunks.chunks(task_concurrency).enumerate() {
+        if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let batch_start = batch_index * task_concurrency;
+        let mut tasks = Vec::with_capacity(chunk_batch.len());
+
+        for (offset, chunk) in chunk_batch.iter().enumerate() {
+            let app = app.clone();
+            let event_name_for_task = event_name.clone();
+            let ai_config = ai_config.clone();
+            let chunk = chunk.clone();
+            let abort_flag = abort_flag.clone();
+            let child_abort_flag = child_abort_flag.clone();
+            let chunk_index = batch_start + offset;
+            let custom_prompt_for_task = custom_prompt.map(|p| p.to_string());
+
+            let task = tokio::spawn(async move {
+                tracing::info!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
+
+                if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
+                    tracing::info!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
+                    return Err::<(String, usize), String>("已中止".to_string());
                 }
-            }
-            Ok(Err(e)) => {
-                if e != "已中止" && first_error.is_none() {
-                    child_abort_flag.store(true, Ordering::Relaxed);
-                    first_error = Some(format!("分段生成失败: {}", e));
+
+                let _ = app.emit(
+                    &event_name_for_task,
+                    GenerationEvent::TabProgress {
+                        tab_type: "full_summary".to_string(),
+                        current: chunk_index + 1,
+                        total: total_chunks + 2,
+                        message: format!("生成第 {}/{} 段摘要...", chunk_index + 1, total_chunks),
+                    },
+                );
+
+                let prompt = if let Some(custom) = &custom_prompt_for_task {
+                    format!("{}\n\n视频字幕片段：\n{}", custom, chunk)
+                } else {
+                    PromptTemplates::chunk_summary(&chunk)
+                };
+
+                match call_ai_api(&ai_config, &prompt, &abort_flag).await {
+                    Ok(summary) => {
+                        if child_abort_flag.load(Ordering::Relaxed) {
+                            return Err("已中止".to_string());
+                        }
+                        tracing::info!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
+                        Ok((summary, chunk_index))
+                    }
+                    Err(e) => {
+                        child_abort_flag.store(true, Ordering::Relaxed);
+                        tracing::warn!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
+                        Err(e)
+                    }
                 }
-            }
-            Err(e) => {
-                if first_error.is_none() {
-                    child_abort_flag.store(true, Ordering::Relaxed);
-                    first_error = Some(format!("任务执行出错: {}", e));
+            });
+
+            tasks.push(task);
+        }
+
+        for task in tasks {
+            match task.await {
+                Ok(Ok((summary, index))) => {
+                    if first_error.is_none() {
+                        results.push((index, summary));
+                        success_count += 1;
+                    }
+                }
+                Ok(Err(e)) => {
+                    if e != "已中止" && first_error.is_none() {
+                        child_abort_flag.store(true, Ordering::Relaxed);
+                        first_error = Some(format!("分段生成失败: {}", e));
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        child_abort_flag.store(true, Ordering::Relaxed);
+                        first_error = Some(format!("任务执行出错: {}", e));
+                    }
                 }
             }
         }
@@ -1295,119 +1295,120 @@ pub async fn generate_detailed_reading_chapters(
     // 第二步：为分段生成章节内容，受控并发执行，首个失败后停止后续子任务
     let total_chunks = planned_segments.len();
     let task_concurrency = concurrent_limit.max(1).min(total_chunks.max(1));
-    let semaphore = Arc::new(Semaphore::new(task_concurrency));
     let child_abort_flag = Arc::new(AtomicBool::new(false));
-    let mut tasks = Vec::new();
-
-    for (chunk_idx, (start_index, end_index)) in planned_segments.iter().copied().enumerate() {
-        let ai_config = ai_config.clone();
-        let abort_flag = abort_flag.clone();
-        let child_abort_flag = child_abort_flag.clone();
-        let semaphore = semaphore.clone();
-        let app = app.clone();
-        let event_name = event_name.to_string();
-        let subtitle_entries = subtitle_entries.to_vec();
-
-        let task = tokio::spawn(async move {
-            let _permit = semaphore
-                .acquire_owned()
-                .await
-                .map_err(|e| format!("获取章节并发许可失败: {}", e))?;
-
-            if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
-                return Err::<(usize, String, String, f64, f64), String>("已中止".to_string());
-            }
-
-            let safe_start = start_index.min(subtitle_entries.len().saturating_sub(1));
-            let safe_end = end_index.min(subtitle_entries.len());
-
-            if safe_end <= safe_start {
-                child_abort_flag.store(true, Ordering::Relaxed);
-                return Err::<(usize, String, String, f64, f64), String>("无效章节边界".to_string());
-            }
-
-            tracing::info!(
-                "[原文细读] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
-                chunk_idx + 1,
-                total_chunks,
-                safe_start,
-                safe_end
-            );
-
-            let _ = app.emit(&event_name, GenerationEvent::TabProgress {
-                tab_type: "DetailedReading".to_string(),
-                current: chunk_idx + 1,
-                total: total_chunks + 1,
-                message: format!("AI正在生成第 {}/{} 章节内容...", chunk_idx + 1, total_chunks),
-            });
-
-            let segment_subtitles: Vec<&SubtitleEntry> = subtitle_entries
-                .iter()
-                .skip(safe_start)
-                .take(safe_end - safe_start)
-                .collect();
-
-            let subtitle_text: String = segment_subtitles
-                .iter()
-                .map(|e| e.text.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-
-            let start_time = subtitle_entries
-                .get(safe_start)
-                .map(|e| e.start_time)
-                .unwrap_or(0.0);
-            let end_time = subtitle_entries
-                .get(safe_end.saturating_sub(1))
-                .map(|e| e.end_time)
-                .unwrap_or(total_duration);
-
-            let prompt = build_detailed_reading_chapter_prompt(&subtitle_text);
-            let req = NonStreamingRequest {
-                config: ai_config,
-                prompt,
-            };
-
-            match execute_non_streaming_with_abort(req, &abort_flag).await {
-                Ok(response) => match parse_detailed_reading_chapter_response(&response.content) {
-                    Ok((title, content)) => Ok((chunk_idx, title, content, start_time, end_time)),
-                    Err(e) => {
-                        child_abort_flag.store(true, Ordering::Relaxed);
-                        tracing::error!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
-                        Err(format!("第 {} 段解析失败: {}", chunk_idx + 1, e))
-                    }
-                },
-                Err(e) => {
-                    child_abort_flag.store(true, Ordering::Relaxed);
-                    tracing::error!("[原文细读] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
-                    Err(format!("第 {} 段 AI 调用失败: {}", chunk_idx + 1, e))
-                }
-            }
-        });
-
-        tasks.push(task);
-    }
-
     let mut results: Vec<(usize, String, String, f64, f64)> = Vec::new();
     let mut first_error: Option<String> = None;
 
-    for task in tasks {
-        match task.await {
-            Ok(Ok(result)) => {
-                if first_error.is_none() {
-                    results.push(result);
+    for (batch_index, segment_batch) in planned_segments.chunks(task_concurrency).enumerate() {
+        if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let batch_start = batch_index * task_concurrency;
+        let mut tasks = Vec::with_capacity(segment_batch.len());
+
+        for (offset, (start_index, end_index)) in segment_batch.iter().copied().enumerate() {
+            let ai_config = ai_config.clone();
+            let abort_flag = abort_flag.clone();
+            let child_abort_flag = child_abort_flag.clone();
+            let app = app.clone();
+            let event_name = event_name.to_string();
+            let subtitle_entries = subtitle_entries.to_vec();
+            let chunk_idx = batch_start + offset;
+
+            let task = tokio::spawn(async move {
+                if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
+                    return Err::<(usize, String, String, f64, f64), String>("已中止".to_string());
                 }
-            }
-            Ok(Err(e)) => {
-                if e != "已中止" && first_error.is_none() {
+
+                let safe_start = start_index.min(subtitle_entries.len().saturating_sub(1));
+                let safe_end = end_index.min(subtitle_entries.len());
+
+                if safe_end <= safe_start {
                     child_abort_flag.store(true, Ordering::Relaxed);
-                    first_error = Some(e);
+                    return Err::<(usize, String, String, f64, f64), String>("无效章节边界".to_string());
                 }
-            }
-            Err(e) => {
-                if first_error.is_none() {
-                    child_abort_flag.store(true, Ordering::Relaxed);
-                    first_error = Some(format!("任务执行出错: {}", e));
+
+                tracing::info!(
+                    "[原文细读] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+                    chunk_idx + 1,
+                    total_chunks,
+                    safe_start,
+                    safe_end
+                );
+
+                let _ = app.emit(&event_name, GenerationEvent::TabProgress {
+                    tab_type: "DetailedReading".to_string(),
+                    current: chunk_idx + 1,
+                    total: total_chunks + 1,
+                    message: format!("AI正在生成第 {}/{} 章节内容...", chunk_idx + 1, total_chunks),
+                });
+
+                let segment_subtitles: Vec<&SubtitleEntry> = subtitle_entries
+                    .iter()
+                    .skip(safe_start)
+                    .take(safe_end - safe_start)
+                    .collect();
+
+                let subtitle_text: String = segment_subtitles
+                    .iter()
+                    .map(|e| e.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                let start_time = subtitle_entries
+                    .get(safe_start)
+                    .map(|e| e.start_time)
+                    .unwrap_or(0.0);
+                let end_time = subtitle_entries
+                    .get(safe_end.saturating_sub(1))
+                    .map(|e| e.end_time)
+                    .unwrap_or(total_duration);
+
+                let prompt = build_detailed_reading_chapter_prompt(&subtitle_text);
+                let req = NonStreamingRequest {
+                    config: ai_config,
+                    prompt,
+                };
+
+                match execute_non_streaming_with_abort(req, &abort_flag).await {
+                    Ok(response) => match parse_detailed_reading_chapter_response(&response.content) {
+                        Ok((title, content)) => Ok((chunk_idx, title, content, start_time, end_time)),
+                        Err(e) => {
+                            child_abort_flag.store(true, Ordering::Relaxed);
+                            tracing::error!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
+                            Err(format!("第 {} 段解析失败: {}", chunk_idx + 1, e))
+                        }
+                    },
+                    Err(e) => {
+                        child_abort_flag.store(true, Ordering::Relaxed);
+                        tracing::error!("[原文细读] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
+                        Err(format!("第 {} 段 AI 调用失败: {}", chunk_idx + 1, e))
+                    }
+                }
+            });
+
+            tasks.push(task);
+        }
+
+        for task in tasks {
+            match task.await {
+                Ok(Ok(result)) => {
+                    if first_error.is_none() {
+                        results.push(result);
+                    }
+                }
+                Ok(Err(e)) => {
+                    if e != "已中止" && first_error.is_none() {
+                        child_abort_flag.store(true, Ordering::Relaxed);
+                        first_error = Some(e);
+                    }
+                }
+                Err(e) => {
+                    if first_error.is_none() {
+                        child_abort_flag.store(true, Ordering::Relaxed);
+                        first_error = Some(format!("任务执行出错: {}", e));
+                    }
                 }
             }
         }

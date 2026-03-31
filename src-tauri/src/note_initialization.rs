@@ -383,9 +383,27 @@ pub fn ensure_note_initialization_state(note_id: &str) -> Result<(), String> {
 // ============================================================================
 
 static INITIALIZATION_ABORT_FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+static ACTIVE_INITIALIZATION_NOTES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+static PENDING_INITIALIZATIONS: OnceLock<Mutex<HashMap<String, PendingInitialization>>> = OnceLock::new();
+
+#[derive(Clone)]
+struct PendingInitialization {
+    app: AppHandle,
+    params: InitializationParams,
+    event_name: String,
+    abort_flag: Arc<AtomicBool>,
+}
 
 fn get_abort_flags() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
     INITIALIZATION_ABORT_FLAGS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn get_active_initialization_notes() -> &'static Mutex<HashMap<String, String>> {
+    ACTIVE_INITIALIZATION_NOTES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn get_pending_initializations() -> &'static Mutex<HashMap<String, PendingInitialization>> {
+    PENDING_INITIALIZATIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 async fn register_abort_flag(initialization_id: &str) -> Arc<AtomicBool> {
@@ -400,11 +418,27 @@ async fn cleanup_abort_flag(initialization_id: &str) {
     flags.remove(initialization_id);
 }
 
+async fn release_note_guard(initialization_id: &str) {
+    let mut active = get_active_initialization_notes().lock().await;
+    active.retain(|_, current_init_id| current_init_id != initialization_id);
+}
+
 fn is_aborted(abort_flag: &Arc<AtomicBool>) -> bool {
     abort_flag.load(Ordering::Relaxed)
 }
 
 pub async fn abort_initialization(initialization_id: &str) -> Result<(), String> {
+    let removed_pending = {
+        let mut pending_map = get_pending_initializations().lock().await;
+        pending_map.remove(initialization_id).is_some()
+    };
+
+    if removed_pending {
+        cleanup_abort_flag(initialization_id).await;
+        release_note_guard(initialization_id).await;
+        return Ok(());
+    }
+
     let flags = get_abort_flags().lock().await;
     if let Some(flag) = flags.get(initialization_id) {
         flag.store(true, Ordering::Relaxed);
@@ -418,29 +452,66 @@ pub async fn abort_initialization(initialization_id: &str) -> Result<(), String>
 // 主流程
 // ============================================================================
 
-pub async fn start_initialization(app: AppHandle, params: InitializationParams) -> Result<String, String> {
+pub async fn prepare_initialization(app: AppHandle, params: InitializationParams) -> Result<String, String> {
+    ensure_note_initialization_state(&params.note_id)?;
+
     let initialization_id = format!("init-{}-{}", params.note_id, uuid::Uuid::new_v4());
     let event_name = format!("note-initialization-{}", initialization_id);
 
-    ensure_note_initialization_state(&params.note_id)?;
+    {
+        let mut active = get_active_initialization_notes().lock().await;
+        if active.contains_key(&params.note_id) {
+            return Err("该笔记已有初始化任务正在运行".to_string());
+        }
+        active.insert(params.note_id.clone(), initialization_id.clone());
+    }
 
     let abort_flag = register_abort_flag(&initialization_id).await;
-    let init_id = initialization_id.clone();
-    let event_name_clone = event_name.clone();
+
+    let pending = PendingInitialization {
+        app,
+        params,
+        event_name,
+        abort_flag,
+    };
+
+    let mut pending_map = get_pending_initializations().lock().await;
+    pending_map.insert(initialization_id.clone(), pending);
+    drop(pending_map);
+
+    Ok(initialization_id)
+}
+
+pub async fn start_initialization(initialization_id: &str) -> Result<(), String> {
+    let pending = {
+        let mut pending_map = get_pending_initializations().lock().await;
+        pending_map.remove(initialization_id)
+    }
+    .ok_or_else(|| "初始化任务不存在或已启动".to_string())?;
+
+    let init_id = initialization_id.to_string();
+    let event_name_clone = pending.event_name.clone();
+    let app = pending.app.clone();
 
     tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-
-        let result = run_initialization(app.clone(), &event_name_clone, &init_id, params, abort_flag).await;
+        let result = run_initialization(
+            pending.app.clone(),
+            &pending.event_name,
+            &init_id,
+            pending.params,
+            pending.abort_flag,
+        )
+        .await;
 
         cleanup_abort_flag(&init_id).await;
+        release_note_guard(&init_id).await;
 
         if let Err(error) = result {
             let _ = app.emit(&event_name_clone, NoteInitializationEvent::Error { error });
         }
     });
 
-    Ok(initialization_id)
+    Ok(())
 }
 
 async fn run_initialization(

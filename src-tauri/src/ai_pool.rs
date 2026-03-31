@@ -132,9 +132,30 @@ impl TokenBucket {
     }
 }
 
+struct ActiveSemaphorePermit {
+    _permit: OwnedSemaphorePermit,
+    active_count: Arc<AtomicUsize>,
+}
+
+impl ActiveSemaphorePermit {
+    fn new(permit: OwnedSemaphorePermit, active_count: Arc<AtomicUsize>) -> Self {
+        active_count.fetch_add(1, Ordering::Relaxed);
+        Self {
+            _permit: permit,
+            active_count,
+        }
+    }
+}
+
+impl Drop for ActiveSemaphorePermit {
+    fn drop(&mut self) {
+        self.active_count.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 /// 单个AiConfig的并发控制器
 struct ConfigConcurrencyController {
-    /// 信号量：控制并发数（使用 Arc<Mutex<>> 支持动态替换）
+    /// 信号量：控制并发数
     semaphore: Arc<Mutex<Arc<Semaphore>>>,
     /// 当前并发限制（用于读取配置）
     concurrent_limit: Arc<Mutex<usize>>,
@@ -163,13 +184,18 @@ impl ConfigConcurrencyController {
     pub async fn update_concurrent_limit(&self, new_limit: i32) {
         let limit = new_limit.max(1).min(10) as usize;
 
-        // 更新存储的并发限制
-        *self.concurrent_limit.lock().await = limit;
+        let mut limit_guard = self.concurrent_limit.lock().await;
+        let previous_limit = *limit_guard;
+        *limit_guard = limit;
+        drop(limit_guard);
 
-        // 创建新的信号量并替换旧的
-        let new_semaphore = Arc::new(Semaphore::new(limit));
-        let mut semaphore_guard = self.semaphore.lock().await;
-        *semaphore_guard = new_semaphore;
+        if limit > previous_limit {
+            let semaphore = {
+                let guard = self.semaphore.lock().await;
+                guard.clone()
+            };
+            semaphore.add_permits(limit - previous_limit);
+        }
     }
 
     /// 动态更新速率限制
@@ -232,12 +258,10 @@ impl ConfigConcurrencyController {
     }
 
     /// 获取槽位（异步等待，带超时保护）
-    /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
+    /// 返回 ActiveSemaphorePermit，持有这个 permit 会保持信号量被占用
     /// 超时时间：5分钟，防止任务永久卡住
-    async fn acquire(&self) -> OwnedSemaphorePermit {
-        // 先检查速率限制
+    async fn acquire(&self) -> Result<ActiveSemaphorePermit, String> {
         self.check_rate_limit().await;
-
         self.waiting_count.fetch_add(1, Ordering::Relaxed);
 
         let start_time = std::time::Instant::now();
@@ -245,42 +269,33 @@ impl ConfigConcurrencyController {
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
 
         loop {
-            // 检查是否超时
             if start_time.elapsed() > timeout_duration {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
-                tracing::warn!("[AI线程池] 警告：获取信号量超时（{}秒），强制创建新的许可", timeout_secs);
-                // 超时后直接创建一个新的信号量并获取许可，确保任务能继续
-                let emergency_semaphore = Arc::new(Semaphore::new(1));
-                let permit = emergency_semaphore.try_acquire_owned().unwrap();
-                self.active_count.fetch_add(1, Ordering::Relaxed);
-                return permit;
+                tracing::warn!("[AI线程池] 获取信号量超时（{}秒）", timeout_secs);
+                return Err(format!("获取并发许可超时（{}秒）", timeout_secs));
             }
 
-            // 获取当前信号量的克隆
             let semaphore = {
                 let guard = self.semaphore.lock().await;
                 guard.clone()
             };
 
-            // 尝试获取 OwnedSemaphorePermit
             if let Ok(permit) = semaphore.clone().try_acquire_owned() {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
-                self.active_count.fetch_add(1, Ordering::Relaxed);
-                return permit;
+                return Ok(ActiveSemaphorePermit::new(permit, self.active_count.clone()));
             }
 
-            // 等待一小段时间再重试
             tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
         }
     }
 
     /// 获取槽位（支持中止检查，带超时保护）
-    /// 返回 OwnedSemaphorePermit，持有这个 permit 会保持信号量被占用
+    /// 返回 ActiveSemaphorePermit，持有这个 permit 会保持信号量被占用
     /// 超时时间：5分钟，防止任务永久卡住
-    async fn acquire_with_abort(&self, abort_flag: &Arc<AtomicBool>) -> Result<OwnedSemaphorePermit, &'static str> {
-        // 先检查速率限制
-        self.check_rate_limit_with_abort(abort_flag).await?;
-
+    async fn acquire_with_abort(&self, abort_flag: &Arc<AtomicBool>) -> Result<ActiveSemaphorePermit, String> {
+        self.check_rate_limit_with_abort(abort_flag)
+            .await
+            .map_err(|e| e.to_string())?;
         self.waiting_count.fetch_add(1, Ordering::Relaxed);
 
         let start_time = std::time::Instant::now();
@@ -288,35 +303,27 @@ impl ConfigConcurrencyController {
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
 
         loop {
-            // 检查是否被中止
             if abort_flag.load(Ordering::Relaxed) {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
-                return Err("请求已取消");
+                return Err("请求已取消".to_string());
             }
 
-            // 检查是否超时
             if start_time.elapsed() > timeout_duration {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
-                tracing::warn!("[AI线程池] 警告：acquire_with_abort 获取信号量超时（{}秒），强制创建新的许可", timeout_secs);
-                // 超时后直接创建一个新的信号量并获取许可，确保任务能继续
-                let emergency_semaphore = Arc::new(Semaphore::new(1));
-                let permit = emergency_semaphore.try_acquire_owned().unwrap();
-                self.active_count.fetch_add(1, Ordering::Relaxed);
-                return Ok(permit);
+                tracing::warn!("[AI线程池] acquire_with_abort 获取信号量超时（{}秒）", timeout_secs);
+                return Err(format!("获取并发许可超时（{}秒）", timeout_secs));
             }
 
-            // 获取当前信号量的克隆（每次循环都重新获取，以支持动态更新）
-            let semaphore = self.semaphore.lock().await.clone();
+            let semaphore = {
+                let guard = self.semaphore.lock().await;
+                guard.clone()
+            };
 
-            // 尝试非阻塞获取许可
             if let Ok(permit) = semaphore.try_acquire_owned() {
                 self.waiting_count.fetch_sub(1, Ordering::Relaxed);
-                self.active_count.fetch_add(1, Ordering::Relaxed);
-                // 返回 OwnedSemaphorePermit，调用者需要持有它直到请求完成
-                return Ok(permit);
+                return Ok(ActiveSemaphorePermit::new(permit, self.active_count.clone()));
             }
 
-            // 等待一小段时间再重试（定期检查 abort_flag 和信号量更新）
             tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
         }
     }
@@ -560,13 +567,13 @@ pub async fn execute_streaming_chat(
     // permit 会被持有直到函数结束，确保信号量在整个请求期间被占用
     let _permit = match controller.acquire_with_abort(&abort_flag).await {
         Ok(p) => p,
-        Err(_) => {
+        Err(error) => {
             pool.cleanup_abort_flag(&request_id).await;
             let _ = app.emit(&event_name, StreamEvent::Done {
                 success: false,
-                error: Some("请求已取消".to_string()),
+                error: Some(error.clone()),
             });
-            return Err("请求已取消".to_string());
+            return Err(error);
         }
     };
 
@@ -977,7 +984,7 @@ pub async fn execute_non_streaming_with_abort(
 
     // 获取许可
     // permit 会在 Drop 时自动释放
-    let permit = controller.acquire().await;
+    let permit = controller.acquire_with_abort(abort_flag).await?;
 
     // 检查中止
     if abort_flag.load(Ordering::Relaxed) {
@@ -1030,6 +1037,10 @@ async fn execute_non_streaming_impl_with_abort(
 
                 // 如果还有重试机会，等待后重试
                 if attempt < max_retries {
+                    if abort_flag.load(Ordering::Relaxed) {
+                        return Err("请求已取消".to_string());
+                    }
+
                     let delay = calculate_retry_delay(attempt);
                     tracing::warn!(
                         "非流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
@@ -1137,6 +1148,20 @@ mod tests {
     }
 
     #[test]
+    fn test_active_semaphore_permit_decrements_on_drop() {
+        let semaphore = Arc::new(Semaphore::new(1));
+        let permit = semaphore.clone().try_acquire_owned().expect("permit");
+        let active_count = Arc::new(AtomicUsize::new(0));
+
+        {
+            let _tracked = ActiveSemaphorePermit::new(permit, active_count.clone());
+            assert_eq!(active_count.load(Ordering::Relaxed), 1);
+        }
+
+        assert_eq!(active_count.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
     fn test_config_concurrency_controller_creation() {
         let controller = ConfigConcurrencyController::new(5, 60);
         assert_eq!(controller.active_count.load(Ordering::Relaxed), 0);
@@ -1151,6 +1176,33 @@ mod tests {
 
         let _controller_max = ConfigConcurrencyController::new(100, 60);
         // 100 应该被限制为 10
+    }
+
+    #[tokio::test]
+    async fn test_update_concurrent_limit_increase_adds_permits() {
+        let controller = ConfigConcurrencyController::new(1, 60);
+        let semaphore = {
+            let guard = controller.semaphore.lock().await;
+            guard.clone()
+        };
+
+        let permit = semaphore.clone().try_acquire_owned().expect("first permit");
+        assert!(semaphore.clone().try_acquire_owned().is_err());
+
+        controller.update_concurrent_limit(2).await;
+        assert!(semaphore.clone().try_acquire_owned().is_ok());
+
+        drop(permit);
+    }
+
+    #[tokio::test]
+    async fn test_acquire_with_abort_returns_canceled_error() {
+        let controller = ConfigConcurrencyController::new(1, 60);
+        let abort_flag = Arc::new(AtomicBool::new(true));
+
+        let result = controller.acquire_with_abort(&abort_flag).await;
+
+        assert!(matches!(result, Err(ref error) if error == "请求已取消"));
     }
 
     #[test]

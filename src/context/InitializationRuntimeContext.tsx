@@ -125,10 +125,11 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
     initIdRef.current = initState.initializationId;
   }, [initState.initializationId]);
 
-  const cleanup = useCallback(() => {
-    if (unlistenRef.current) {
-      unlistenRef.current();
-      unlistenRef.current = null;
+  const cleanup = useCallback(async () => {
+    const unlisten = unlistenRef.current;
+    unlistenRef.current = null;
+    if (unlisten) {
+      await unlisten();
     }
   }, []);
 
@@ -184,7 +185,9 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       });
 
       try {
-        const initializationId = await invoke<string>("initialize_note_data", {
+        await cleanup();
+
+        const initializationId = await invoke<string>("prepare_note_initialization", {
           noteId: task.params.noteId,
           modelId: task.params.modelId,
           videoPath: task.params.videoPath,
@@ -196,21 +199,15 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
           initializationId,
         }));
 
-        if (pendingAbortRef.current) {
-          try {
-            await invoke("abort_note_initialization", {
-              initializationId,
-            });
-          } catch (error) {
-            console.error("Failed to abort pending initialization:", error);
-          }
-        }
-
         const eventName = `note-initialization-${initializationId}`;
         unlistenRef.current = await listen<NoteInitializationEvent>(eventName, (event) => {
           const payload = event.payload;
 
           setInitState((prev) => {
+            if (prev.initializationId && prev.initializationId !== initializationId) {
+              return prev;
+            }
+
             const newState: InitializationState = {
               ...prev,
               steps: [...prev.steps],
@@ -252,7 +249,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
 
               case "StepProgress": {
                 const progressIdx = newState.steps.findIndex((s) => s.step === payload.step);
-                if (progressIdx >= 0) {
+                if (progressIdx >= 0 && newState.steps[progressIdx]?.message !== payload.message) {
                   newState.steps[progressIdx] = {
                     ...newState.steps[progressIdx],
                     message: payload.message,
@@ -349,7 +346,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                   scheduleTerminalReset(t.id);
                   return { ...t, status: nextStatus };
                 });
-                cleanup();
+                void cleanup();
                 break;
               }
 
@@ -375,7 +372,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                   scheduleTerminalReset(t.id);
                   return { ...t, status: "failed" };
                 });
-                cleanup();
+                void cleanup();
                 break;
               }
 
@@ -400,7 +397,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                   scheduleTerminalReset(t.id);
                   return { ...t, status: "aborted" };
                 });
-                cleanup();
+                void cleanup();
                 break;
               }
             }
@@ -408,8 +405,23 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
             return newState;
           });
         });
+
+        if (pendingAbortRef.current) {
+          try {
+            await invoke("abort_note_initialization", {
+              initializationId,
+            });
+          } catch (error) {
+            console.error("Failed to abort pending initialization:", error);
+          }
+        } else {
+          await invoke("start_note_initialization", {
+            initializationId,
+          });
+        }
       } catch (error) {
         pendingAbortRef.current = false;
+        void cleanup();
         setInitState((prev) => ({
           ...prev,
           isInitializing: false,
@@ -595,7 +607,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
   useEffect(() => {
     return () => {
       clearResetTimer();
-      cleanup();
+      void cleanup();
     };
   }, [cleanup, clearResetTimer]);
 
