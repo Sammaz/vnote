@@ -197,16 +197,16 @@ async fn optimize_single_chapter(
     Ok(response.content)
 }
 
-/// 批量优化章节字幕
-pub async fn optimize_chapters(
+async fn optimize_chapters_internal(
     app: AppHandle,
     generation_id: String,
     note_id: String,
     config: AiConfig,
     chapters: Vec<ChapterSubtitleInput>,
+    abort_flag: Arc<AtomicBool>,
+    cleanup_owned_abort_flag: bool,
 ) -> Result<(), String> {
     let pool = get_ai_pool_manager();
-    let abort_flag = pool.register_abort_flag(generation_id.clone()).await;
     let event_name = format!("subtitle-optimization-{}", generation_id);
     let task_manager = get_task_state_manager();
 
@@ -313,7 +313,9 @@ pub async fn optimize_chapters(
     // 检查是否被中止
     if abort_flag.load(std::sync::atomic::Ordering::Relaxed) {
         let _ = app.emit(&event_name, SubtitleOptimizationEvent::Aborted);
-        pool.cleanup_abort_flag(&generation_id).await;
+        if cleanup_owned_abort_flag {
+            pool.cleanup_abort_flag(&generation_id).await;
+        }
         task_manager.remove_task(&note_id).await;
         return Err("请求已取消".to_string());
     }
@@ -324,10 +326,24 @@ pub async fn optimize_chapters(
         SubtitleOptimizationEvent::AllCompleted { succeeded, failed },
     );
 
-    // 清理
-    pool.cleanup_abort_flag(&generation_id).await;
+    if cleanup_owned_abort_flag {
+        pool.cleanup_abort_flag(&generation_id).await;
+    }
 
     Ok(())
+}
+
+/// 批量优化章节字幕
+pub async fn optimize_chapters(
+    app: AppHandle,
+    generation_id: String,
+    note_id: String,
+    config: AiConfig,
+    chapters: Vec<ChapterSubtitleInput>,
+) -> Result<(), String> {
+    let pool = get_ai_pool_manager();
+    let abort_flag = pool.register_abort_flag(generation_id.clone()).await;
+    optimize_chapters_internal(app, generation_id, note_id, config, chapters, abort_flag, true).await
 }
 
 /// 直接调用的优化函数（同步等待完成，供 note_initialization 使用）
@@ -337,8 +353,9 @@ pub async fn optimize_chapters_direct(
     note_id: String,
     config: AiConfig,
     chapters: Vec<ChapterSubtitleInput>,
+    abort_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
-    optimize_chapters(app, generation_id, note_id, config, chapters).await
+    optimize_chapters_internal(app, generation_id, note_id, config, chapters, abort_flag, false).await
 }
 
 // ============================================================================

@@ -1534,15 +1534,15 @@ pub async fn generate_detailed_reading_chapters(
 // 主生成函数
 // ============================================================================
 
-/// 开始生成笔记内容
-pub async fn generate_note(
+async fn generate_note_internal(
     app: AppHandle,
     db: &Database,
     generation_id: String,
     request: GenerateNoteRequest,
+    abort_flag: Arc<AtomicBool>,
+    cleanup_owned_abort_flag: bool,
 ) -> Result<(), String> {
     let event_name = format!("note-generation-{}", generation_id);
-    let abort_flag = get_abort_flag(&generation_id).await;
 
     // 获取AI配置
     let ai_config = db
@@ -1620,7 +1620,9 @@ pub async fn generate_note(
                 total: 0,
             },
         );
-        cleanup_abort_flag(&generation_id).await;
+        if cleanup_owned_abort_flag {
+            cleanup_abort_flag(&generation_id).await;
+        }
         return Ok(());
     }
 
@@ -1661,7 +1663,9 @@ pub async fn generate_note(
                 let _ = app.emit(&event_name, GenerationEvent::Aborted {
                     reason: "用户中止".to_string(),
                 });
-                cleanup_abort_flag(&generation_id).await;
+                if cleanup_owned_abort_flag {
+                    cleanup_abort_flag(&generation_id).await;
+                }
                 return Err("生成已中止".to_string());
             }
 
@@ -1951,7 +1955,9 @@ pub async fn generate_note(
     }
     } // 结束 else 分支（并发生成）
 
-    cleanup_abort_flag(&generation_id).await;
+    if cleanup_owned_abort_flag {
+        cleanup_abort_flag(&generation_id).await;
+    }
 
     // 发送完成事件
     let _ = app.emit(
@@ -1968,6 +1974,28 @@ pub async fn generate_note(
     }
 
     Ok(())
+}
+
+/// 开始生成笔记内容
+pub async fn generate_note(
+    app: AppHandle,
+    db: &Database,
+    generation_id: String,
+    request: GenerateNoteRequest,
+) -> Result<(), String> {
+    let abort_flag = get_abort_flag(&generation_id).await;
+    generate_note_internal(app, db, generation_id, request, abort_flag, true).await
+}
+
+/// 直接复用外部 abort_flag 的笔记生成入口（供初始化流程使用）
+pub async fn generate_note_with_abort(
+    app: AppHandle,
+    db: &Database,
+    generation_id: String,
+    request: GenerateNoteRequest,
+    abort_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    generate_note_internal(app, db, generation_id, request, abort_flag, false).await
 }
 
 /// 生成单个标签页内容

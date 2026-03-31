@@ -234,56 +234,19 @@ pub async fn generate_flashcards(
     note_id: String,
     model_id: String,
 ) -> Result<(), String> {
-    let event_name = format!("flashcard-generation-{}", generation_id);
-
-    // 创建中止标志
     let abort_flag = create_abort_flag(&generation_id).await;
 
-    // 发送开始事件
-    let _ = app.emit(&event_name, FlashcardGenerationEvent::Starting);
-
-    // 在后台执行生成
     let app_clone = app.clone();
-    let event_name_clone = event_name.clone();
-    let generation_id_clone = generation_id.clone();
-
     tokio::spawn(async move {
-        let result = generate_flashcards_internal(
-            &app_clone,
-            &event_name_clone,
-            &note_id,
-            &model_id,
-            &abort_flag,
-        ).await;
-
-        // 清理中止标志
-        remove_abort_flag(&generation_id_clone).await;
-
-        match result {
-            Ok(flashcard_data) => {
-                // 保存到数据库
-                if let Some(db) = DATABASE.get() {
-                    if let Ok(Some(mut note)) = db.get_note_by_id(&note_id) {
-                        note.flashcards = Some(serde_json::to_string(&flashcard_data).unwrap_or_default());
-                        let _ = db.update_note(&note);
-                    }
-                }
-
-                let _ = app_clone.emit(
-                    &event_name_clone,
-                    FlashcardGenerationEvent::Completed { flashcard_data },
-                );
-            }
-            Err(e) => {
-                if e == "已中止" {
-                    let _ = app_clone.emit(&event_name_clone, FlashcardGenerationEvent::Aborted);
-                } else {
-                    let _ = app_clone.emit(
-                        &event_name_clone,
-                        FlashcardGenerationEvent::Error { error: e },
-                    );
-                }
-            }
+        if let Err(e) = generate_flashcards_direct_internal(
+            app_clone,
+            generation_id,
+            note_id,
+            model_id,
+            abort_flag,
+            true,
+        ).await {
+            tracing::error!("[generate_flashcards] 生成失败: {}", e);
         }
     });
 
@@ -468,17 +431,15 @@ async fn generate_flashcards_internal(
     Ok(flashcard_data)
 }
 
-/// 直接调用的闪记卡生成函数（同步等待完成，供 note_initialization 使用）
-pub async fn generate_flashcards_direct(
+async fn generate_flashcards_direct_internal(
     app: AppHandle,
     generation_id: String,
     note_id: String,
     model_id: String,
+    abort_flag: Arc<AtomicBool>,
+    cleanup_owned_abort_flag: bool,
 ) -> Result<(), String> {
     let event_name = format!("flashcard-generation-{}", generation_id);
-
-    // 创建中止标志
-    let abort_flag = create_abort_flag(&generation_id).await;
 
     // 发送开始事件
     let _ = app.emit(&event_name, FlashcardGenerationEvent::Starting);
@@ -491,8 +452,9 @@ pub async fn generate_flashcards_direct(
         &abort_flag,
     ).await;
 
-    // 清理中止标志
-    remove_abort_flag(&generation_id).await;
+    if cleanup_owned_abort_flag {
+        remove_abort_flag(&generation_id).await;
+    }
 
     match result {
         Ok(flashcard_data) => {
@@ -522,6 +484,17 @@ pub async fn generate_flashcards_direct(
             Err(e)
         }
     }
+}
+
+/// 直接调用的闪记卡生成函数（同步等待完成，供 note_initialization 使用）
+pub async fn generate_flashcards_direct(
+    app: AppHandle,
+    generation_id: String,
+    note_id: String,
+    model_id: String,
+    abort_flag: Arc<AtomicBool>,
+) -> Result<(), String> {
+    generate_flashcards_direct_internal(app, generation_id, note_id, model_id, abort_flag, false).await
 }
 
 #[tauri::command]

@@ -999,6 +999,7 @@ async fn execute_item(
                 context,
                 config,
                 note_generation::TabType::FullSummary,
+                abort_flag,
             )
             .await
         }
@@ -1008,12 +1009,13 @@ async fn execute_item(
                 context,
                 config,
                 note_generation::TabType::DetailedReading,
+                abort_flag,
             )
             .await
         }
-        "subtitle_optimization" => execute_subtitle_optimization(app, context).await,
-        "highlights" => execute_highlights(app, context, config).await,
-        "flashcards" => execute_flashcards(app, context).await,
+        "subtitle_optimization" => execute_subtitle_optimization(app, context, abort_flag).await,
+        "highlights" => execute_highlights(app, context, config, abort_flag).await,
+        "flashcards" => execute_flashcards(app, context, abort_flag).await,
         "visual_summary" => execute_visual_summary(context, config).await,
         "custom_summary" => {
             execute_note_tab_generation(
@@ -1021,11 +1023,12 @@ async fn execute_item(
                 context,
                 config,
                 note_generation::TabType::CustomSummary,
+                abort_flag,
             )
             .await
         }
         "ai_note" => {
-            execute_note_tab_generation(app, context, config, note_generation::TabType::AiNote).await
+            execute_note_tab_generation(app, context, config, note_generation::TabType::AiNote, abort_flag).await
         }
         "panoramic_blueprint" => execute_panoramic_blueprint(app, context, abort_flag).await,
         _ => ItemExecutionResult::Failed(format!("未知初始化项目: {}", item_key)),
@@ -1131,6 +1134,7 @@ async fn execute_note_tab_generation(
     context: &mut ExecutionContext,
     config: &Value,
     tab_type: note_generation::TabType,
+    abort_flag: &Arc<AtomicBool>,
 ) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
@@ -1166,7 +1170,7 @@ async fn execute_note_tab_generation(
     };
 
     let generation_id = format!("init-tab-{}", uuid::Uuid::new_v4());
-    match note_generation::generate_note(app.clone(), db, generation_id, request).await {
+    match note_generation::generate_note_with_abort(app.clone(), db, generation_id, request, abort_flag.clone()).await {
         Ok(_) => ItemExecutionResult::Completed,
         Err(err) => ItemExecutionResult::Failed(err),
     }
@@ -1175,6 +1179,7 @@ async fn execute_note_tab_generation(
 async fn execute_subtitle_optimization(
     app: &AppHandle,
     context: &mut ExecutionContext,
+    abort_flag: &Arc<AtomicBool>,
 ) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
@@ -1298,6 +1303,7 @@ async fn execute_subtitle_optimization(
         context.note_id.clone(),
         ai_config,
         chapter_inputs,
+        abort_flag.clone(),
     )
     .await
     {
@@ -1310,6 +1316,7 @@ async fn execute_highlights(
     app: &AppHandle,
     context: &mut ExecutionContext,
     config: &Value,
+    abort_flag: &Arc<AtomicBool>,
 ) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
@@ -1338,6 +1345,7 @@ async fn execute_highlights(
         subtitle_path,
         highlight_type,
         total_duration,
+        abort_flag.clone(),
     )
     .await
     {
@@ -1346,7 +1354,7 @@ async fn execute_highlights(
     }
 }
 
-async fn execute_flashcards(app: &AppHandle, context: &mut ExecutionContext) -> ItemExecutionResult {
+async fn execute_flashcards(app: &AppHandle, context: &mut ExecutionContext, abort_flag: &Arc<AtomicBool>) -> ItemExecutionResult {
     let db = match DATABASE.get() {
         Some(db) => db,
         None => return ItemExecutionResult::Failed("数据库未初始化".to_string()),
@@ -1362,6 +1370,7 @@ async fn execute_flashcards(app: &AppHandle, context: &mut ExecutionContext) -> 
         generation_id,
         context.note_id.clone(),
         context.model_id.clone(),
+        abort_flag.clone(),
     )
     .await
     {

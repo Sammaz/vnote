@@ -422,14 +422,15 @@ fn extract_json_array(text: &str) -> Result<String, String> {
 // 主生成函数
 // ============================================================================
 
-pub async fn generate_highlights(
+async fn generate_highlights_internal(
     app: AppHandle,
     db: &Database,
     generation_id: String,
     request: GenerateHighlightsRequest,
+    abort_flag: Arc<AtomicBool>,
+    cleanup_owned_abort_flag: bool,
 ) -> Result<HighlightData, String> {
     let event_name = format!("highlight-generation-{}", generation_id);
-    let abort_flag = get_abort_flag(&generation_id).await;
 
     // 获取 AI 配置
     let ai_config = db
@@ -440,7 +441,9 @@ pub async fn generate_highlights(
     // 解析字幕
     let entries = parse_subtitle_file(&request.subtitle_path)?;
     if entries.is_empty() {
-        cleanup_abort_flag(&generation_id).await;
+        if cleanup_owned_abort_flag {
+            cleanup_abort_flag(&generation_id).await;
+        }
         return Err("字幕内容为空".to_string());
     }
 
@@ -468,7 +471,9 @@ pub async fn generate_highlights(
         // 检查中止
         if abort_flag.load(Ordering::Relaxed) {
             let _ = app.emit(&event_name, HighlightGenerationEvent::Aborted);
-            cleanup_abort_flag(&generation_id).await;
+            if cleanup_owned_abort_flag {
+                cleanup_abort_flag(&generation_id).await;
+            }
             return Err("已中止".to_string());
         }
 
@@ -517,7 +522,9 @@ pub async fn generate_highlights(
 
                 if e.contains("已中止") {
                     let _ = app.emit(&event_name, HighlightGenerationEvent::Aborted);
-                    cleanup_abort_flag(&generation_id).await;
+                    if cleanup_owned_abort_flag {
+                        cleanup_abort_flag(&generation_id).await;
+                    }
                     return Err(e);
                 }
             }
@@ -541,11 +548,33 @@ pub async fn generate_highlights(
         topic_tags: all_topic_tags,
     });
 
-    cleanup_abort_flag(&generation_id).await;
+    if cleanup_owned_abort_flag {
+        cleanup_abort_flag(&generation_id).await;
+    }
 
     tracing::info!("[高光生成] 完成，共生成 {} 个高光片段", all_highlights.len());
 
     Ok(highlight_data)
+}
+
+pub async fn generate_highlights(
+    app: AppHandle,
+    db: &Database,
+    generation_id: String,
+    request: GenerateHighlightsRequest,
+) -> Result<HighlightData, String> {
+    let abort_flag = get_abort_flag(&generation_id).await;
+    generate_highlights_internal(app, db, generation_id, request, abort_flag, true).await
+}
+
+pub async fn generate_highlights_with_abort(
+    app: AppHandle,
+    db: &Database,
+    generation_id: String,
+    request: GenerateHighlightsRequest,
+    abort_flag: Arc<AtomicBool>,
+) -> Result<HighlightData, String> {
+    generate_highlights_internal(app, db, generation_id, request, abort_flag, false).await
 }
 
 /// 直接调用的高光生成函数（同步等待完成，供 note_initialization 使用）
@@ -558,6 +587,7 @@ pub async fn generate_highlights_direct(
     subtitle_path: String,
     highlight_type: String,
     total_duration: f64,
+    abort_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let hl_type = match highlight_type.as_str() {
         "emotional" => HighlightType::Emotional,
@@ -574,7 +604,7 @@ pub async fn generate_highlights_direct(
         total_duration,
     };
 
-    match generate_highlights(app, db, generation_id, request).await {
+    match generate_highlights_with_abort(app, db, generation_id, request, abort_flag).await {
         Ok(highlight_data) => {
             // 保存到数据库
             if let Ok(json) = serde_json::to_string(&highlight_data) {
