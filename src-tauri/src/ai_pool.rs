@@ -207,6 +207,7 @@ impl ConfigConcurrencyController {
     }
 
     /// 检查速率限制（异步等待直到有令牌可用）
+    #[allow(dead_code)]
     async fn check_rate_limit(&self) {
         loop {
             let result = {
@@ -260,6 +261,7 @@ impl ConfigConcurrencyController {
     /// 获取槽位（异步等待，带超时保护）
     /// 返回 ActiveSemaphorePermit，持有这个 permit 会保持信号量被占用
     /// 超时时间：5分钟，防止任务永久卡住
+    #[allow(dead_code)]
     async fn acquire(&self) -> Result<ActiveSemaphorePermit, String> {
         self.check_rate_limit().await;
         self.waiting_count.fetch_add(1, Ordering::Relaxed);
