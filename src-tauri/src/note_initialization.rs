@@ -660,6 +660,13 @@ async fn run_initialization(
     })
     .map_err(|e| e.to_string())?;
 
+    tracing::info!(
+        note_id = %params.note_id,
+        model_id = %resolved_model_id,
+        selected_steps = ?execution_plan.iter().map(|item| item.item_key.clone()).collect::<Vec<_>>(),
+        "[初始化] 启动初始化运行"
+    );
+
     let mut completed = 0usize;
     let mut skipped = 0usize;
     let mut failed = 0usize;
@@ -697,6 +704,16 @@ async fn run_initialization(
         let step_key = definition.item_key.clone();
         let step_name = definition.display_name.clone();
 
+        tracing::info!(
+            note_id = %params.note_id,
+            model_id = %resolved_model_id,
+            step_index,
+            step_key = %step_key,
+            step_name = %step_name,
+            depends_on = ?definition.dependencies,
+            "[初始化] 开始执行步骤"
+        );
+
         let _ = app.emit(
             event_name,
             NoteInitializationEvent::StepStarting {
@@ -725,6 +742,15 @@ async fn run_initialization(
 
         if !blocking_dependencies.is_empty() {
             let reason = format!("依赖项失败: {}", blocking_dependencies.join(", "));
+            tracing::warn!(
+                note_id = %params.note_id,
+                model_id = %resolved_model_id,
+                step_index,
+                step_key = %step_key,
+                step_name = %step_name,
+                blocked_by = ?blocking_dependencies,
+                "[初始化] 步骤因依赖失败被阻塞"
+            );
             item.status = NoteInitializationItemStatus::Blocked;
             item.last_error = Some(reason.clone());
             item.started_at = Some(chrono::Local::now().to_rfc3339());
@@ -814,6 +840,14 @@ async fn run_initialization(
 
         match result {
             ItemExecutionResult::Completed => {
+                tracing::info!(
+                    note_id = %params.note_id,
+                    model_id = %resolved_model_id,
+                    step_index,
+                    step_key = %step_key,
+                    step_name = %step_name,
+                    "[初始化] 步骤执行成功"
+                );
                 item.status = NoteInitializationItemStatus::Completed;
                 item.output_present = latest_output_present;
                 item.last_error = None;
@@ -834,6 +868,15 @@ async fn run_initialization(
                 );
             }
             ItemExecutionResult::Skipped(reason) => {
+                tracing::info!(
+                    note_id = %params.note_id,
+                    model_id = %resolved_model_id,
+                    step_index,
+                    step_key = %step_key,
+                    step_name = %step_name,
+                    reason = %reason,
+                    "[初始化] 步骤被跳过"
+                );
                 item.status = NoteInitializationItemStatus::Skipped;
                 item.output_present = latest_output_present;
                 item.last_error = None;
@@ -855,6 +898,15 @@ async fn run_initialization(
                 );
             }
             ItemExecutionResult::Failed(error) => {
+                tracing::error!(
+                    note_id = %params.note_id,
+                    model_id = %resolved_model_id,
+                    step_index,
+                    step_key = %step_key,
+                    step_name = %step_name,
+                    error = %error,
+                    "[初始化] 步骤执行失败"
+                );
                 item.status = NoteInitializationItemStatus::Failed;
                 item.output_present = latest_output_present;
                 item.last_error = Some(error.clone());
@@ -885,6 +937,16 @@ async fn run_initialization(
     } else {
         NoteInitializationRunStatus::PartialFailed
     };
+
+    tracing::info!(
+        note_id = %params.note_id,
+        model_id = %resolved_model_id,
+        completed,
+        skipped,
+        failed,
+        final_run_status = ?final_run_status,
+        "[初始化] 初始化运行结束"
+    );
 
     db.upsert_note_initialization_run(&UpsertNoteInitializationRunInput {
         note_id: params.note_id.clone(),

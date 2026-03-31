@@ -9,6 +9,7 @@ use crate::db::AiConfig;
 use crate::prompts;
 use futures::StreamExt;
 use reqwest::Client;
+use std::cmp;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -632,6 +633,11 @@ fn calculate_retry_delay(attempt: u32) -> std::time::Duration {
     std::time::Duration::from_millis(delay_ms)
 }
 
+fn effective_max_attempts() -> u32 {
+    let configured = SettingsManager::get_int(keys::AI_RETRY_MAX_COUNT, defaults::AI_RETRY_MAX_COUNT);
+    cmp::min(cmp::max(configured, 1), 3)
+}
+
 #[derive(Debug, Clone)]
 struct StreamingAttemptError {
     message: String,
@@ -687,9 +693,18 @@ async fn execute_streaming_chat_impl(
     abort_flag: Arc<AtomicBool>,
 ) -> Result<(), String> {
     let mut last_error = String::new();
-    let max_retries = SettingsManager::get_int(keys::AI_RETRY_MAX_COUNT, defaults::AI_RETRY_MAX_COUNT);
+    let max_attempts = effective_max_attempts();
+    let model_id = req.config.model.clone();
+    let config_id = req.config.id.clone();
 
-    for attempt in 1..=max_retries {
+    for attempt in 1..=max_attempts {
+        tracing::info!(
+            config_id = %config_id,
+            model_id = %model_id,
+            attempt,
+            max_attempts,
+            "[AI池] 开始流式请求尝试"
+        );
         // 检查中止
         if abort_flag.load(Ordering::Relaxed) {
             return Err("请求已取消".to_string());
@@ -710,20 +725,33 @@ async fn execute_streaming_chat_impl(
                     return Err(error.message);
                 }
 
+                let retryable = is_retryable_error(&error.message);
+                tracing::warn!(
+                    config_id = %config_id,
+                    model_id = %model_id,
+                    attempt,
+                    max_attempts,
+                    retryable,
+                    error = %error.message,
+                    emitted_content = error.emitted_content,
+                    "[AI池] 流式请求尝试失败"
+                );
+
                 // 如果错误不可重试，直接返回
-                if !is_retryable_error(&error.message) {
+                if !retryable {
                     return Err(error.message);
                 }
 
                 // 如果还有重试机会，等待后重试
-                if attempt < max_retries {
+                if attempt < max_attempts {
                     let delay = calculate_retry_delay(attempt);
                     tracing::warn!(
-                        "流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
+                        config_id = %config_id,
+                        model_id = %model_id,
                         attempt,
-                        max_retries,
-                        error.message,
-                        delay.as_millis()
+                        max_attempts,
+                        delay_ms = delay.as_millis(),
+                        "[AI池] 准备重试流式请求"
                     );
                     tokio::time::sleep(delay).await;
                 }
@@ -731,9 +759,17 @@ async fn execute_streaming_chat_impl(
         }
     }
 
+    tracing::error!(
+        config_id = %config_id,
+        model_id = %model_id,
+        max_attempts,
+        error = %last_error,
+        "[AI池] 流式请求已耗尽重试次数"
+    );
+
     Err(format!(
         "请求失败，已重试 {} 次: {}",
-        max_retries, last_error
+        max_attempts, last_error
     ))
 }
 
@@ -1014,9 +1050,19 @@ async fn execute_non_streaming_impl_with_abort(
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<NonStreamingResponse, String> {
     let mut last_error = String::new();
-    let max_retries = SettingsManager::get_int(keys::AI_RETRY_MAX_COUNT, defaults::AI_RETRY_MAX_COUNT);
+    let max_attempts = effective_max_attempts();
+    let model_id = req.config.model.clone();
+    let config_id = req.config.id.clone();
 
-    for attempt in 1..=max_retries {
+    for attempt in 1..=max_attempts {
+        tracing::info!(
+            config_id = %config_id,
+            model_id = %model_id,
+            attempt,
+            max_attempts,
+            "[AI池] 开始非流式请求尝试"
+        );
+
         // 检查中止
         if abort_flag.load(Ordering::Relaxed) {
             return Err("请求已取消".to_string());
@@ -1032,24 +1078,36 @@ async fn execute_non_streaming_impl_with_abort(
                     return Err(e);
                 }
 
+                let retryable = is_retryable_error(&e);
+                tracing::warn!(
+                    config_id = %config_id,
+                    model_id = %model_id,
+                    attempt,
+                    max_attempts,
+                    retryable,
+                    error = %e,
+                    "[AI池] 非流式请求尝试失败"
+                );
+
                 // 如果错误不可重试，直接返回
-                if !is_retryable_error(&e) {
+                if !retryable {
                     return Err(e);
                 }
 
                 // 如果还有重试机会，等待后重试
-                if attempt < max_retries {
+                if attempt < max_attempts {
                     if abort_flag.load(Ordering::Relaxed) {
                         return Err("请求已取消".to_string());
                     }
 
                     let delay = calculate_retry_delay(attempt);
                     tracing::warn!(
-                        "非流式请求失败 (尝试 {}/{}): {}，{}ms 后重试",
+                        config_id = %config_id,
+                        model_id = %model_id,
                         attempt,
-                        max_retries,
-                        e,
-                        delay.as_millis()
+                        max_attempts,
+                        delay_ms = delay.as_millis(),
+                        "[AI池] 准备重试非流式请求"
                     );
                     tokio::time::sleep(delay).await;
                 }
@@ -1057,9 +1115,17 @@ async fn execute_non_streaming_impl_with_abort(
         }
     }
 
+    tracing::error!(
+        config_id = %config_id,
+        model_id = %model_id,
+        max_attempts,
+        error = %last_error,
+        "[AI池] 非流式请求已耗尽重试次数"
+    );
+
     Err(format!(
         "请求失败，已重试 {} 次: {}",
-        max_retries, last_error
+        max_attempts, last_error
     ))
 }
 

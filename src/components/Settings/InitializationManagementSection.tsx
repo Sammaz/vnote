@@ -117,12 +117,13 @@ const runStatusLabelMap: Record<RunStatus, string> = {
 };
 
 const runtimeTaskStatusLabelMap: Record<
-  "waiting" | "running" | "completed" | "failed" | "aborted",
+  "waiting" | "running" | "completed" | "partial_failed" | "failed" | "aborted",
   string
 > = {
   waiting: "等待中",
   running: "运行中",
   completed: "已完成",
+  partial_failed: "部分失败",
   failed: "失败",
   aborted: "已取消",
 };
@@ -236,7 +237,7 @@ function getRunStatusBadgeTone(
 }
 
 function getRuntimeTaskStatusBadgeTone(
-  status: "waiting" | "running" | "completed" | "failed" | "aborted"
+  status: "waiting" | "running" | "completed" | "partial_failed" | "failed" | "aborted"
 ): "neutral" | "info" | "success" | "warning" | "danger" {
   switch (status) {
     case "waiting":
@@ -245,6 +246,8 @@ function getRuntimeTaskStatusBadgeTone(
       return "info";
     case "completed":
       return "success";
+    case "partial_failed":
+      return "warning";
     case "failed":
       return "danger";
     default:
@@ -896,7 +899,7 @@ export function InitializationManagementSection({
       return;
     }
 
-    if (!["completed", "failed", "aborted"].includes(currentTask.status)) {
+    if (!["completed", "partial_failed", "failed", "aborted"].includes(currentTask.status)) {
       return;
     }
 
@@ -2031,7 +2034,7 @@ export function InitializationManagementSection({
                   {dashboardExpanded && (
                     <div className="px-4 md:px-5 pb-5 space-y-3.5 border-t border-slate-200 dark:border-vnote-border">
                       <div className="pt-4 flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2 flex-1">
+                        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-7 gap-2 flex-1">
                           <MetricCard label="总任务" value={String(runSummary.total)} compact />
                           <MetricCard
                             label="排队中"
@@ -2049,6 +2052,12 @@ export function InitializationManagementSection({
                             label="成功"
                             value={String(runSummary.success)}
                             accent="text-emerald-600 dark:text-emerald-400"
+                            compact
+                          />
+                          <MetricCard
+                            label="部分失败"
+                            value={String(runSummary.partial)}
+                            accent="text-amber-600 dark:text-amber-400"
                             compact
                           />
                           <MetricCard

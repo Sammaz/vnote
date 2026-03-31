@@ -36,7 +36,7 @@ export interface InitializationTaskParams {
 export interface RuntimeTask {
   id: string;
   params: InitializationTaskParams;
-  status: "waiting" | "running" | "completed" | "failed" | "aborted";
+  status: "waiting" | "running" | "completed" | "partial_failed" | "failed" | "aborted";
   addedAt: Date;
 }
 
@@ -45,6 +45,7 @@ export interface RuntimeSummary {
   queued: number;
   running: number;
   success: number;
+  partial: number;
   failed: number;
   skipped: number;
 }
@@ -88,6 +89,7 @@ function createEmptyRuntimeSummary(): RuntimeSummary {
     queued: 0,
     running: 0,
     success: 0,
+    partial: 0,
     failed: 0,
     skipped: 0,
   };
@@ -319,7 +321,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                 newState.total = payload.total;
                 pendingAbortRef.current = false;
                 setCurrentTask((t) => {
-                  if (!t || ["completed", "failed", "aborted"].includes(t.status)) {
+                  if (!t || ["completed", "partial_failed", "failed", "aborted"].includes(t.status)) {
                     return t;
                   }
 
@@ -328,9 +330,15 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                       ...prevSummary,
                       running: 0,
                     };
-                    if (payload.failed > 0) {
+                    const hasFailure = payload.failed > 0;
+                    const hasCompletion = payload.completed > 0;
+                    const hasSkipped = payload.skipped > 0;
+
+                    if (hasFailure && (hasCompletion || hasSkipped)) {
+                      next.partial += 1;
+                    } else if (hasFailure) {
                       next.failed += 1;
-                    } else if (payload.completed > 0) {
+                    } else if (hasCompletion) {
                       next.success += 1;
                     } else {
                       next.skipped += 1;
@@ -342,7 +350,14 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                     onTaskCompleted(t.params.noteId);
                   }
 
-                  const nextStatus = payload.failed > 0 ? "failed" : "completed";
+                  const hasFailure = payload.failed > 0;
+                  const hasCompletion = payload.completed > 0;
+                  const hasSkipped = payload.skipped > 0;
+                  const nextStatus = hasFailure
+                    ? hasCompletion || hasSkipped
+                      ? "partial_failed"
+                      : "failed"
+                    : "completed";
                   scheduleTerminalReset(t.id);
                   return { ...t, status: nextStatus };
                 });
@@ -355,7 +370,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                 newState.error = payload.error;
                 pendingAbortRef.current = false;
                 setCurrentTask((t) => {
-                  if (!t || ["completed", "failed", "aborted"].includes(t.status)) {
+                  if (!t || ["completed", "partial_failed", "failed", "aborted"].includes(t.status)) {
                     return t;
                   }
 
@@ -380,7 +395,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                 newState.isInitializing = false;
                 pendingAbortRef.current = false;
                 setCurrentTask((t) => {
-                  if (!t || ["completed", "failed", "aborted"].includes(t.status)) {
+                  if (!t || ["completed", "partial_failed", "failed", "aborted"].includes(t.status)) {
                     return t;
                   }
 
@@ -454,7 +469,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
     const processNext = async () => {
       if (isProcessingRef.current) return;
 
-      if (currentTask && ["completed", "failed", "aborted"].includes(currentTask.status)) {
+      if (currentTask && ["completed", "partial_failed", "failed", "aborted"].includes(currentTask.status)) {
         if (!resetTimerRef.current) {
           scheduleTerminalReset(currentTask.id);
         }
