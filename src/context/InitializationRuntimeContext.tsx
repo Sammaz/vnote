@@ -30,6 +30,7 @@ export interface InitializationTaskParams {
   modelId: string;
   videoPath: string;
   subtitlePath: string | null;
+  selectedKeys: string[];
 }
 
 /** 初始化运行任务 */
@@ -194,6 +195,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
           modelId: task.params.modelId,
           videoPath: task.params.videoPath,
           subtitlePath: task.params.subtitlePath,
+          selectedKeys: task.params.selectedKeys,
         });
 
         setInitState((prev) => ({

@@ -42,6 +42,7 @@ pub struct InitializationParams {
     pub model_id: String,
     pub video_path: String,
     pub subtitle_path: Option<String>,
+    pub selected_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -558,21 +559,12 @@ async fn run_initialization(
         .map_err(|e| format!("获取 AI 配置失败: {}", e))?
         .ok_or_else(|| "AI 配置不存在".to_string())?;
 
-    let explicitly_selected: HashSet<String> = {
-        let raw = db
-            .get_setting("initialization_template_selected_keys")
-            .map_err(|e| format!("读取初始化配置失败: {}", e))?
-            .unwrap_or_default();
-        if raw.trim().is_empty() {
-            HashSet::new()
-        } else {
-            serde_json::from_str::<Vec<String>>(&raw)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|key| registry_map.contains_key(key.as_str()))
-                .collect()
-        }
-    };
+    let explicitly_selected: HashSet<String> = params
+        .selected_keys
+        .iter()
+        .filter(|key| registry_map.contains_key(key.as_str()))
+        .cloned()
+        .collect();
 
     let dependency_map: HashMap<String, Vec<String>> = registry
         .iter()

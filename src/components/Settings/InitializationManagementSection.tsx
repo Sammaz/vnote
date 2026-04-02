@@ -1231,6 +1231,7 @@ export function InitializationManagementSection({
     try {
       const uniqueNoteIds = Array.from(new Set(selectedNoteIds));
       const tasks: InitializationTaskParams[] = [];
+      const selectedKeys = Array.from(editingExplicitKeys);
       let skippedNoModel = 0;
 
       for (const noteId of uniqueNoteIds) {
@@ -1249,6 +1250,7 @@ export function InitializationManagementSection({
           modelId,
           videoPath: note.video_path,
           subtitlePath: note.subtitle_path,
+          selectedKeys,
         });
       }
 
@@ -1272,6 +1274,7 @@ export function InitializationManagementSection({
     }
   }, [
     addBatchToRuntime,
+    editingExplicitKeys,
     editingModelOverrideId,
     loadOverview,
     noteMap,
@@ -1303,6 +1306,7 @@ export function InitializationManagementSection({
           modelId,
           videoPath: note.video_path,
           subtitlePath: note.subtitle_path,
+          selectedKeys: Array.from(retryKeys),
         } satisfies InitializationTaskParams,
         missingModel: false,
       };
