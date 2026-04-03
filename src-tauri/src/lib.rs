@@ -1032,30 +1032,28 @@ async fn generate_questions_for_note(note_id: String) -> Result<Vec<String>, Str
     let subtitle_path = match &note.subtitle_path {
         Some(p) => p.clone(),
         None => {
-            // No subtitle, save and return default
-            let questions_json = serde_json::to_string(&default_questions).map_err(|e| e.to_string())?;
-            db.update_note_questions(&note_id, &questions_json).map_err(|e| e.to_string())?;
+            // No subtitle, return default without saving to database
             return Ok(default_questions);
         }
     };
     let model_id = match db.get_default_ai_config().map_err(|e| e.to_string())? {
         Some(config) => config.id,
         None => {
-            // No model, save and return default
-            let questions_json = serde_json::to_string(&default_questions).map_err(|e| e.to_string())?;
-            db.update_note_questions(&note_id, &questions_json).map_err(|e| e.to_string())?;
+            // No model, return default without saving to database
             return Ok(default_questions);
         }
     };
 
-    // Generate questions (use default on failure)
+    // Generate questions
     let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let questions = chat::generate_suggested_questions(db, &subtitle_path, &model_id, &abort_flag)
-        .await
-        .unwrap_or_else(|e| {
+    let questions = match chat::generate_suggested_questions(db, &subtitle_path, &model_id, &abort_flag).await {
+        Ok(q) => q,
+        Err(e) => {
+            // 生成失败不保存数据库，直接返回默认问题
             tracing::error!("Failed to generate questions: {}", e);
-            default_questions.clone()
-        });
+            return Ok(default_questions);
+        }
+    };
 
     // Save to database
     let questions_json = serde_json::to_string(&questions).map_err(|e| e.to_string())?;
