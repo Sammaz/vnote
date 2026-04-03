@@ -274,11 +274,11 @@ function getItemStatusBadgeClass(status: ItemStatus) {
 }
 
 const glassPanelClass =
-  "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/90 dark:bg-vnote-card/85 shadow-[0_10px_30px_rgba(15,23,42,0.06)] dark:shadow-[0_16px_40px_rgba(2,6,23,0.32)] backdrop-blur-xl";
+  "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/85 shadow-[0_10px_30px_rgba(15,23,42,0.06)] dark:shadow-[0_16px_40px_rgba(2,6,23,0.32)] backdrop-blur-xl";
 const softSurfaceClass =
-  "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.92),rgba(248,250,252,0.88))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.58),rgba(15,23,42,0.7))] shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
+  "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(248,250,252,0.58))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.58),rgba(15,23,42,0.7))] shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 const secondaryButtonClass =
-  "px-3 py-2 text-sm rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/80 dark:bg-slate-800/55 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 disabled:opacity-50 transition-all cursor-pointer shadow-sm";
+  "px-3 py-2 text-sm rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/55 dark:bg-slate-800/55 text-slate-700 dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 disabled:opacity-50 transition-all cursor-pointer shadow-sm";
 const primaryButtonClass =
   "px-3.5 py-2 text-sm rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 cursor-pointer shadow-[0_8px_20px_rgba(37,99,235,0.25)] hover:shadow-[0_10px_24px_rgba(37,99,235,0.3)] transition-all";
 const dangerButtonClass =
@@ -286,27 +286,27 @@ const dangerButtonClass =
 const warningButtonClass =
   "px-3 py-2 text-sm rounded-xl border border-amber-200/90 text-amber-700 hover:bg-amber-50 dark:border-amber-900/40 dark:text-amber-300 dark:hover:bg-amber-900/20 disabled:opacity-50 flex items-center gap-2 cursor-pointer transition-all";
 const tertiaryButtonClass =
-  "px-3 py-2 text-sm rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/80 dark:bg-slate-800/55 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 disabled:opacity-50 transition-all cursor-pointer";
+  "px-3 py-2 text-sm rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/55 dark:bg-slate-800/55 text-slate-700 dark:text-slate-200 hover:bg-slate-100/70 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 disabled:opacity-50 transition-all cursor-pointer";
 const wideTertiaryButtonClass =
   `${tertiaryButtonClass} min-w-[132px] inline-flex items-center justify-center`;
 const chipButtonClass =
-  "px-2.5 py-1.5 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-slate-800/44 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 transition-all cursor-pointer";
+  "px-2.5 py-1.5 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/50 dark:bg-slate-800/44 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100/65 dark:hover:bg-vnote-hover hover:border-slate-300 dark:hover:border-slate-600 transition-all cursor-pointer";
 const subtleDangerButtonClass =
   "text-[11px] font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors cursor-pointer";
 const premiumInputClass =
-  "w-full px-3 py-2.5 rounded-xl border border-slate-200/80 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/80 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-all";
+  "w-full px-3 py-2.5 rounded-xl border border-slate-200/80 dark:border-slate-600/80 bg-white/68 dark:bg-slate-800/80 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-all";
 const premiumDropdownButtonClass =
-  "w-full px-3 py-2.5 pr-10 rounded-xl border border-slate-200/80 dark:border-slate-600/80 bg-white/90 dark:bg-slate-800/80 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";
+  "w-full px-3 py-2.5 pr-10 rounded-xl border border-slate-200/80 dark:border-slate-600/80 bg-white/68 dark:bg-slate-800/80 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";
 const premiumDropdownMenuClass =
-  "absolute z-50 mt-2 w-full right-0 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 bg-white/95 dark:bg-slate-800/95 shadow-[0_18px_40px_rgba(15,23,42,0.12)] dark:shadow-[0_20px_44px_rgba(2,6,23,0.5)] backdrop-blur-xl py-1.5 max-h-72 overflow-auto";
+  "absolute z-50 mt-2 w-full right-0 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 bg-white/78 dark:bg-slate-800/95 shadow-[0_18px_40px_rgba(15,23,42,0.12)] dark:shadow-[0_20px_44px_rgba(2,6,23,0.5)] backdrop-blur-xl py-1.5 max-h-72 overflow-auto";
 const summaryStripClass =
-  "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.88),rgba(248,250,252,0.78))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.42),rgba(15,23,42,0.72))] px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.76)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
+  "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(248,250,252,0.52))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.42),rgba(15,23,42,0.72))] px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.76)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 const infoSurfaceClass =
-  "rounded-2xl border border-blue-200/75 dark:border-blue-900/40 bg-[linear-gradient(180deg,rgba(239,246,255,0.78),rgba(219,234,254,0.42))] dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.16),rgba(15,23,42,0.82))] p-3.5 space-y-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]";
+  "rounded-2xl border border-blue-200/75 dark:border-blue-900/40 bg-[linear-gradient(180deg,rgba(239,246,255,0.58),rgba(219,234,254,0.32))] dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.16),rgba(15,23,42,0.82))] p-3.5 space-y-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]";
 const warningSurfaceClass =
-  "rounded-2xl border border-amber-200/75 dark:border-amber-900/40 bg-[linear-gradient(180deg,rgba(255,251,235,0.82),rgba(254,243,199,0.35))] dark:bg-[linear-gradient(180deg,rgba(120,53,15,0.14),rgba(15,23,42,0.82))] p-3.5 space-y-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]";
+  "rounded-2xl border border-amber-200/75 dark:border-amber-900/40 bg-[linear-gradient(180deg,rgba(255,251,235,0.62),rgba(254,243,199,0.28))] dark:bg-[linear-gradient(180deg,rgba(120,53,15,0.14),rgba(15,23,42,0.82))] p-3.5 space-y-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]";
 const dangerSurfaceClass =
-  "rounded-2xl border border-red-200/75 dark:border-red-900/40 bg-[linear-gradient(180deg,rgba(254,242,242,0.82),rgba(254,226,226,0.34))] dark:bg-[linear-gradient(180deg,rgba(127,29,29,0.14),rgba(15,23,42,0.82))] p-3.5 space-y-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]";
+  "rounded-2xl border border-red-200/75 dark:border-red-900/40 bg-[linear-gradient(180deg,rgba(254,242,242,0.62),rgba(254,226,226,0.26))] dark:bg-[linear-gradient(180deg,rgba(127,29,29,0.14),rgba(15,23,42,0.82))] p-3.5 space-y-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.45)]";
 const inlineDangerActionClass =
   "text-xs font-medium text-red-500 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300 transition-colors cursor-pointer";
 const sectionEyebrowClass =
@@ -440,16 +440,16 @@ function MiniBadge({
 }) {
   const toneClass =
     tone === "info"
-      ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300"
+      ? "border-blue-200 bg-blue-100/50 text-blue-700 dark:border-blue-900/40 dark:bg-blue-900/20 dark:text-blue-300"
       : tone === "success"
-        ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-300"
+        ? "border-emerald-200 bg-emerald-100/50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-900/20 dark:text-emerald-300"
         : tone === "warning"
-          ? "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300"
+          ? "border-amber-200 bg-amber-100/50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300"
           : tone === "danger"
-            ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300"
+            ? "border-red-200 bg-red-100/50 text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-300"
             : tone === "strong-info"
               ? "border-blue-600 bg-blue-600 text-white dark:border-blue-500 dark:bg-blue-500 dark:text-white"
-              : "border-slate-200 bg-slate-100 text-slate-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300";
+              : "border-slate-200 bg-slate-100/50 text-slate-600 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-300";
 
   return (
     <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-medium leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.55)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${toneClass}`}>
@@ -469,8 +469,8 @@ function HelperBlock({
 }) {
   const toneClass =
     tone === "muted"
-      ? "border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-800/50"
-      : "border-slate-200 bg-white/80 dark:border-slate-700 dark:bg-slate-800/45";
+      ? "border-slate-200 bg-slate-50/55 dark:border-slate-700 dark:bg-slate-800/50"
+      : "border-slate-200 bg-white/50 dark:border-slate-700 dark:bg-slate-800/45";
 
   return (
     <div
@@ -532,7 +532,7 @@ function ItemConfigPanel({ itemKey, config, onConfigChange, promptConfigs }: Ite
             <span className={configLabelClass}>输出语言</span>
             <button
               onClick={() => updateUi({ language: language === "zh" ? "en" : "zh" })}
-              className="px-2.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/60 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer min-w-[56px] text-center"
+              className="px-2.5 py-1 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/52 dark:bg-slate-800/60 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100/70 dark:hover:bg-slate-700 transition-colors cursor-pointer min-w-[56px] text-center"
             >
               {language === "zh" ? "中文" : "EN"}
             </button>
@@ -620,7 +620,7 @@ function ItemConfigPanel({ itemKey, config, onConfigChange, promptConfigs }: Ite
                 <button
                   type="button"
                   onClick={() => setShowPromptDropdown(!showPromptDropdown)}
-                  className="px-2.5 py-1 pr-7 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/60 text-xs text-slate-600 dark:text-slate-300 text-left cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
+                  className="px-2.5 py-1 pr-7 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/52 dark:bg-slate-800/60 text-xs text-slate-600 dark:text-slate-300 text-left cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
                 >
                   选择提示词
                 </button>
@@ -683,7 +683,7 @@ function ItemConfigPanel({ itemKey, config, onConfigChange, promptConfigs }: Ite
                 className={`rounded-lg border px-2 py-2 text-left transition-colors cursor-pointer ${
                   style === opt.value
                     ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
-                    : "border-slate-200/80 bg-white/80 text-slate-700 hover:border-slate-300 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-slate-500"
+                    : "border-slate-200/80 bg-white/52 text-slate-700 hover:border-slate-300 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-slate-500"
                 }`}
               >
                 <div className="text-xs font-medium">{opt.label}</div>
@@ -705,7 +705,7 @@ function ItemConfigPanel({ itemKey, config, onConfigChange, promptConfigs }: Ite
                   className={`w-full rounded-lg border px-1.5 py-1.5 text-center transition-colors cursor-pointer ${
                     screenshotDensity === opt.value
                       ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
-                      : "border-slate-200/80 bg-white/80 text-slate-700 hover:border-slate-300 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-slate-500"
+                      : "border-slate-200/80 bg-white/52 text-slate-700 hover:border-slate-300 dark:border-slate-600/80 dark:bg-slate-800/60 dark:text-slate-300 dark:hover:border-slate-500"
                   }`}
                 >
                   <span className="text-xs font-medium">{opt.label}</span>
@@ -728,7 +728,7 @@ function ItemConfigPanel({ itemKey, config, onConfigChange, promptConfigs }: Ite
                 <button
                   type="button"
                   onClick={() => setShowPromptDropdown(!showPromptDropdown)}
-                  className="px-2 py-0.5 pr-6 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/80 dark:bg-slate-800/60 text-[10px] text-slate-500 dark:text-slate-400 cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
+                  className="px-2 py-0.5 pr-6 rounded-lg border border-slate-200/80 dark:border-slate-600/80 bg-white/52 dark:bg-slate-800/60 text-[10px] text-slate-500 dark:text-slate-400 cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
                 >
                   选择提示词
                 </button>
@@ -1580,8 +1580,8 @@ export function InitializationManagementSection({
                         key={item.note_id}
                         className={`rounded-[24px] border p-4 transition-all duration-200 shadow-[0_10px_24px_rgba(15,23,42,0.04)] ${
                           isSelected
-                            ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.72),rgba(219,234,254,0.38))] shadow-[0_12px_24px_rgba(59,130,246,0.05)] dark:border-blue-900/50 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.12),rgba(15,23,42,0.72))]"
-                            : "border-slate-200/80 dark:border-slate-700/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,250,252,0.82))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.5),rgba(15,23,42,0.74))]"
+                            ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.52),rgba(219,234,254,0.32))] shadow-[0_12px_24px_rgba(59,130,246,0.05)] dark:border-blue-900/50 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.12),rgba(15,23,42,0.72))]"
+                            : "border-slate-200/80 dark:border-slate-700/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.58),rgba(248,250,252,0.52))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.5),rgba(15,23,42,0.74))]"
                         }`}
                       >
                         <div className="flex items-start justify-between gap-3">
@@ -1747,12 +1747,12 @@ export function InitializationManagementSection({
                       )
                       .join(" / ");
                     const cardTone = item.selected
-                      ? "border-blue-300/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.96),rgba(219,234,254,0.72))] shadow-[0_16px_30px_rgba(59,130,246,0.10)] ring-1 ring-blue-100/80 dark:border-blue-800/60 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.22),rgba(15,23,42,0.78))] dark:ring-blue-900/35"
+                      ? "border-blue-300/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.72),rgba(219,234,254,0.52))] shadow-[0_16px_30px_rgba(59,130,246,0.10)] ring-1 ring-blue-100/80 dark:border-blue-800/60 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.22),rgba(15,23,42,0.78))] dark:ring-blue-900/35"
                       : item.status === "failed" || item.status === "blocked"
-                        ? "border-red-200/90 bg-[linear-gradient(180deg,rgba(254,242,242,0.92),rgba(254,226,226,0.6))] dark:border-red-900/40 dark:bg-[linear-gradient(180deg,rgba(127,29,29,0.18),rgba(15,23,42,0.78))]"
+                        ? "border-red-200/90 bg-[linear-gradient(180deg,rgba(254,242,242,0.62),rgba(254,226,226,0.42))] dark:border-red-900/40 dark:bg-[linear-gradient(180deg,rgba(127,29,29,0.18),rgba(15,23,42,0.78))]"
                         : item.status === "running" || item.status === "queued"
-                          ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.86),rgba(219,234,254,0.5))] dark:border-blue-900/40 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.14),rgba(15,23,42,0.76))]"
-                          : "border-slate-200/80 dark:border-slate-700/80 bg-white/85 dark:bg-slate-800/48 hover:border-slate-300/90 dark:hover:border-slate-600/80";
+                          ? "border-blue-200/90 bg-[linear-gradient(180deg,rgba(239,246,255,0.62),rgba(219,234,254,0.38))] dark:border-blue-900/40 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.14),rgba(15,23,42,0.76))]"
+                          : "border-slate-200/80 dark:border-slate-700/80 bg-white/52 dark:bg-slate-800/48 hover:border-slate-300/90 dark:hover:border-slate-600/80";
 
                     return (
                       <div
@@ -2127,7 +2127,7 @@ export function InitializationManagementSection({
                               >
                                 {currentTask.params.noteTitle}
                               </div>
-                              <div className="rounded-lg border border-blue-200/70 dark:border-blue-900/40 bg-white/70 dark:bg-slate-900/20 px-3 py-2 space-y-1.5">
+                              <div className="rounded-lg border border-blue-200/70 dark:border-blue-900/40 bg-white/46 dark:bg-slate-900/20 px-3 py-2 space-y-1.5">
                                 <div className="text-[11px] text-slate-500 dark:text-slate-400">
                                   当前步骤
                                 </div>
@@ -2189,7 +2189,7 @@ export function InitializationManagementSection({
                               runtimeQueue.map((task, index) => (
                                 <div
                                   key={task.id}
-                                  className="flex items-center justify-between gap-2 rounded-lg border border-amber-200/70 dark:border-amber-900/30 bg-white/75 dark:bg-slate-900/20 px-3 py-2"
+                                  className="flex items-center justify-between gap-2 rounded-lg border border-amber-200/70 dark:border-amber-900/30 bg-white/50 dark:bg-slate-900/20 px-3 py-2"
                                 >
                                   <div className="min-w-0 flex items-center gap-2">
                                     <span className="text-[11px] text-amber-700 dark:text-amber-300 shrink-0">
@@ -2245,7 +2245,7 @@ export function InitializationManagementSection({
                               failedOverview.map((item) => (
                                 <div
                                   key={item.note_id}
-                                  className="rounded-lg border border-red-200/70 dark:border-red-900/40 bg-white/75 dark:bg-slate-900/20 px-3 py-2"
+                                  className="rounded-lg border border-red-200/70 dark:border-red-900/40 bg-white/50 dark:bg-slate-900/20 px-3 py-2"
                                 >
                                   <div className="flex items-center justify-between gap-2">
                                     <span
@@ -2306,8 +2306,8 @@ function StepCard({
       onClick={onClick}
       className={`group relative w-full overflow-hidden rounded-[24px] border p-4 text-left transition-all duration-200 cursor-pointer ${
         active
-          ? "border-blue-400/80 bg-[linear-gradient(180deg,rgba(239,246,255,0.98),rgba(219,234,254,0.8))] shadow-[0_18px_36px_rgba(59,130,246,0.12)] dark:border-blue-500/70 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.28),rgba(15,23,42,0.84))]"
-          : "border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.88),rgba(248,250,252,0.8))] hover:bg-slate-50/95 hover:border-slate-300/90 dark:border-slate-700/80 dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.48),rgba(15,23,42,0.76))] dark:hover:bg-slate-800/74"
+          ? "border-blue-400/80 bg-[linear-gradient(180deg,rgba(239,246,255,0.72),rgba(219,234,254,0.54))] shadow-[0_18px_36px_rgba(59,130,246,0.12)] dark:border-blue-500/70 dark:bg-[linear-gradient(180deg,rgba(30,64,175,0.28),rgba(15,23,42,0.84))]"
+          : "border-slate-200/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.58),rgba(248,250,252,0.52))] hover:bg-slate-50/70 hover:border-slate-300/90 dark:border-slate-700/80 dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.48),rgba(15,23,42,0.76))] dark:hover:bg-slate-800/74"
       }`}
     >
       <div className={`absolute inset-x-0 top-0 h-px ${active ? "bg-gradient-to-r from-transparent via-blue-400/80 to-transparent" : "bg-transparent"}`} />
@@ -2379,7 +2379,7 @@ function MetricCard({
 }) {
   return (
     <div
-      className={`rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.9),rgba(248,250,252,0.82))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.5),rgba(15,23,42,0.72))] shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${
+      className={`rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(248,250,252,0.54))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.5),rgba(15,23,42,0.72))] shadow-[inset_0_1px_0_rgba(255,255,255,0.82)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] ${
         compact ? "px-3 py-2.5" : "px-4 py-3"
       }`}
     >
