@@ -180,7 +180,7 @@ function AppContent() {
       backdropFilter: `blur(${backgroundSettings.blur}px)`,
       backgroundColor: theme === "dark"
         ? `rgb(10 10 10 / ${backgroundSettings.overlayOpacity}%)`
-        : `rgb(248 250 252 / ${backgroundSettings.overlayOpacity}%)`,
+        : `rgb(248 250 252 / ${Math.max(28, Math.round(backgroundSettings.overlayOpacity * 0.6))}%)`,
     } as React.CSSProperties;
   }, [backgroundImage, backgroundSettings, theme]);
 
@@ -190,7 +190,7 @@ function AppContent() {
       backdropFilter: `blur(${Math.max(0, backgroundSettings.blur - 2)}px)`,
       backgroundColor: theme === "dark"
         ? `rgb(10 10 10 / ${backgroundSettings.contentOpacity}%)`
-        : `rgb(248 250 252 / ${backgroundSettings.contentOpacity}%)`,
+        : `rgb(248 250 252 / ${Math.max(22, Math.round(backgroundSettings.contentOpacity * 0.72))}%)`,
     } as React.CSSProperties;
   }, [backgroundImage, backgroundSettings, theme]);
 
