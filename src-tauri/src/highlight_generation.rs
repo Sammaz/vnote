@@ -466,6 +466,8 @@ async fn generate_highlights_internal(
 
     let mut all_highlights: Vec<HighlightSegment> = Vec::new();
     let mut all_topic_tags: Vec<String> = Vec::new();
+    let mut success_count = 0usize;
+    let mut failure_count = 0usize;
 
     for (i, chunk) in chunks.iter().enumerate() {
         // 检查中止
@@ -488,6 +490,7 @@ async fn generate_highlights_internal(
             Ok(response) => {
                 match parse_highlights_response(&response, request.highlight_type) {
                     Ok(highlights) => {
+                        success_count += 1;
                         // 收集主题标签
                         for h in &highlights {
                             for tag in &h.topic_tags {
@@ -505,6 +508,7 @@ async fn generate_highlights_internal(
                         all_highlights.extend(highlights);
                     }
                     Err(e) => {
+                        failure_count += 1;
                         tracing::error!("[高光生成] 段 {} 解析失败: {}", i, e);
                         let _ = app.emit(&event_name, HighlightGenerationEvent::SegmentFailed {
                             segment_index: i,
@@ -514,6 +518,7 @@ async fn generate_highlights_internal(
                 }
             }
             Err(e) => {
+                failure_count += 1;
                 tracing::error!("[高光生成] 段 {} 生成失败: {}", i, e);
                 let _ = app.emit(&event_name, HighlightGenerationEvent::SegmentFailed {
                     segment_index: i,
@@ -529,6 +534,15 @@ async fn generate_highlights_internal(
                 }
             }
         }
+    }
+
+    // 检查是否所有段落都生成失败
+    if success_count == 0 && failure_count > 0 {
+        let _ = app.emit(&event_name, HighlightGenerationEvent::Aborted);
+        if cleanup_owned_abort_flag {
+            cleanup_abort_flag(&generation_id).await;
+        }
+        return Err("所有段落均生成失败，无法保存高光数据".to_string());
     }
 
     // 按开始时间排序
@@ -552,7 +566,7 @@ async fn generate_highlights_internal(
         cleanup_abort_flag(&generation_id).await;
     }
 
-    tracing::info!("[高光生成] 完成，共生成 {} 个高光片段", all_highlights.len());
+    tracing::info!("[高光生成] 完成，共生成 {} 个高光片段，成功 {} 段，失败 {} 段", all_highlights.len(), success_count, failure_count);
 
     Ok(highlight_data)
 }
