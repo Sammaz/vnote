@@ -1106,17 +1106,9 @@ async fn execute_suggested_questions(
                 return ItemExecutionResult::Failed("已中止".to_string());
             }
 
-            // 与旧行为保持一致：失败时写入默认问题，按完成处理
-            let default_questions = vec![
-                "这个视频的核心内容是什么?".to_string(),
-                "有哪些关键知识点?".to_string(),
-                "如何在实际项目中应用?".to_string(),
-            ];
-            if let Ok(default_json) = serde_json::to_string(&default_questions) {
-                let _ = db.update_note_questions(&context.note_id, &default_json);
-            }
-            tracing::warn!("[初始化] 推荐问题生成失败，已写入默认问题: {}", err);
-            ItemExecutionResult::Completed
+            // 生成失败时不保存数据库，返回失败状态
+            tracing::warn!("[初始化] 推荐问题生成失败: {}", err);
+            ItemExecutionResult::Failed(format!("推荐问题生成失败: {}", err))
         }
     }
 }

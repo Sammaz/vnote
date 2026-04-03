@@ -149,10 +149,21 @@ export function NotePage() {
     );
   }
 
-  // 解析建议问题
-  const suggestedQuestions: string[] = currentNote.suggested_questions
-    ? JSON.parse(currentNote.suggested_questions)
-    : [];
+  // 解析建议问题，若没有或解析失败则显示默认问题
+  const defaultSuggestedQuestions = [
+    "这个视频的核心内容是什么?",
+    "有哪些关键知识点?",
+    "如何在实际项目中应用?",
+  ];
+  const suggestedQuestions: string[] = (() => {
+    if (!currentNote.suggested_questions) return defaultSuggestedQuestions;
+    try {
+      const parsed = JSON.parse(currentNote.suggested_questions);
+      return Array.isArray(parsed) && parsed.length > 0 ? parsed : defaultSuggestedQuestions;
+    } catch {
+      return defaultSuggestedQuestions;
+    }
+  })();
 
   // 视频+聊天面板
   const videoPanel = (
