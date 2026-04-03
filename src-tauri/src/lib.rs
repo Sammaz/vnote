@@ -1926,6 +1926,7 @@ async fn prepare_note_initialization(
     video_path: String,
     subtitle_path: Option<String>,
     selected_keys: Vec<String>,
+    item_configs: std::collections::HashMap<String, String>,
 ) -> Result<String, String> {
     note_initialization::ensure_note_initialization_state(&note_id)?;
     let params = note_initialization::InitializationParams {
@@ -1934,6 +1935,7 @@ async fn prepare_note_initialization(
         video_path,
         subtitle_path,
         selected_keys,
+        item_configs,
     };
     note_initialization::prepare_initialization(app, params).await
 }

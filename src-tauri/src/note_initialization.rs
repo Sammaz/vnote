@@ -43,6 +43,8 @@ pub struct InitializationParams {
     pub video_path: String,
     pub subtitle_path: Option<String>,
     pub selected_keys: Vec<String>,
+    /// 项目配置：item_key -> config_json
+    pub item_configs: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -280,6 +282,7 @@ pub fn sync_note_initialization_outputs(note_id: &str) -> Result<Vec<NoteInitial
             last_model_id: existing.as_ref().and_then(|item| item.last_model_id.clone()),
             last_error: existing.as_ref().and_then(|item| item.last_error.clone()),
             output_present,
+            config_json: existing.as_ref().and_then(|item| item.config_json.clone()),
             started_at: existing.as_ref().and_then(|item| item.started_at.clone()),
             completed_at: existing.as_ref().and_then(|item| item.completed_at.clone()),
         });
@@ -613,7 +616,7 @@ async fn run_initialization(
         .map(|item| (item.item_key.clone(), item))
         .collect();
 
-    // 新一轮运行前，将参与运行的 item 置为 queued
+    // 新一轮运行前，将参与运行的 item 置为 queued，并保存用户配置
     for definition in &registry {
         let mut item = item_map
             .get(&definition.item_key)
@@ -636,6 +639,13 @@ async fn run_initialization(
             item.started_at = None;
             item.completed_at = None;
             item.last_model_id = Some(resolved_model_id.clone());
+
+            // 保存用户传入的配置（如果有的话）
+            if let Some(config_json) = params.item_configs.get(&definition.item_key) {
+                if !config_json.trim().is_empty() {
+                    item.config_json = Some(config_json.clone());
+                }
+            }
         }
 
         item = upsert_item(db, &item)?;
@@ -765,7 +775,7 @@ async fn run_initialization(
             continue;
         }
 
-        let config = get_item_config(definition);
+        let config = get_item_config(definition, &item);
         let regenerate = config_regenerate(&config);
 
         let latest_note = db
@@ -1435,6 +1445,7 @@ fn create_default_item(note_id: &str, definition: &InitializationItemDefinition)
         last_model_id: None,
         last_error: None,
         output_present: false,
+        config_json: None,
         started_at: None,
         completed_at: None,
         updated_at: String::new(),
@@ -1450,13 +1461,31 @@ fn upsert_item(db: &crate::db::Database, item: &NoteInitializationItem) -> Resul
         last_model_id: item.last_model_id.clone(),
         last_error: item.last_error.clone(),
         output_present: item.output_present,
+        config_json: item.config_json.clone(),
         started_at: item.started_at.clone(),
         completed_at: item.completed_at.clone(),
     })
     .map_err(|e| e.to_string())
 }
 
-fn get_item_config(definition: &InitializationItemDefinition) -> Value {
+fn get_item_config(definition: &InitializationItemDefinition, item: &NoteInitializationItem) -> Value {
+    // 优先使用用户保存的配置，否则使用默认配置
+    if let Some(ref config_json) = item.config_json {
+        if !config_json.trim().is_empty() {
+            if let Ok(user_config) = serde_json::from_str::<Value>(config_json) {
+                // 合并用户配置和默认配置（用户配置覆盖默认值）
+                let mut merged = definition.default_config.clone();
+                if let Value::Object(ref mut merged_map) = merged {
+                    if let Value::Object(user_map) = user_config {
+                        for (key, value) in user_map {
+                            merged_map.insert(key, value);
+                        }
+                    }
+                }
+                return merged;
+            }
+        }
+    }
     definition.default_config.clone()
 }
 

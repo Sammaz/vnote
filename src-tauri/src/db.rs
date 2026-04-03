@@ -165,6 +165,7 @@ pub struct NoteInitializationItem {
     pub last_model_id: Option<String>,
     pub last_error: Option<String>,
     pub output_present: bool,
+    pub config_json: Option<String>,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
     pub updated_at: String,
@@ -210,6 +211,7 @@ pub struct UpsertNoteInitializationItemInput {
     pub last_model_id: Option<String>,
     pub last_error: Option<String>,
     pub output_present: bool,
+    pub config_json: Option<String>,
     pub started_at: Option<String>,
     pub completed_at: Option<String>,
 }
@@ -476,24 +478,12 @@ impl Database {
             pool,
         };
         db.init_tables()?;
-        db.ensure_knowledge_chat_message_images_column()?;
         Ok(db)
     }
 
     fn init_tables(&self) -> SqliteResult<()> {
         let conn = self.connection();
         conn.execute_batch(INIT_SQL)?;
-        Ok(())
-    }
-
-    fn ensure_knowledge_chat_message_images_column(&self) -> SqliteResult<()> {
-        let conn = self.connection();
-        let mut stmt = conn.prepare("PRAGMA table_info(knowledge_chat_messages)")?;
-        let columns = stmt.query_map([], |row| row.get::<_, String>(1))?
-            .collect::<SqliteResult<Vec<_>>>()?;
-        if !columns.iter().any(|column| column == "images_json") {
-            conn.execute("ALTER TABLE knowledge_chat_messages ADD COLUMN images_json TEXT", [])?;
-        }
         Ok(())
     }
 
@@ -783,9 +773,10 @@ impl Database {
             last_model_id: row.get(5)?,
             last_error: row.get(6)?,
             output_present: row.get::<_, i64>(7)? != 0,
-            started_at: row.get(8)?,
-            completed_at: row.get(9)?,
-            updated_at: row.get(10)?,
+            config_json: row.get(8)?,
+            started_at: row.get(9)?,
+            completed_at: row.get(10)?,
+            updated_at: row.get(11)?,
         })
     }
 
@@ -952,7 +943,7 @@ impl Database {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT id, note_id, item_key, status, depends_on_json,
-                    last_model_id, last_error, output_present, started_at, completed_at, updated_at
+                    last_model_id, last_error, output_present, config_json, started_at, completed_at, updated_at
              FROM note_initialization_items
              WHERE note_id = ?1
              ORDER BY item_key ASC"
@@ -974,14 +965,15 @@ impl Database {
         conn.execute(
             "INSERT INTO note_initialization_items (
                 id, note_id, item_key, status, depends_on_json,
-                last_model_id, last_error, output_present, started_at, completed_at, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now', 'localtime'))
+                last_model_id, last_error, output_present, config_json, started_at, completed_at, updated_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now', 'localtime'))
             ON CONFLICT(note_id, item_key) DO UPDATE SET
                 status = excluded.status,
                 depends_on_json = excluded.depends_on_json,
                 last_model_id = excluded.last_model_id,
                 last_error = excluded.last_error,
                 output_present = excluded.output_present,
+                config_json = excluded.config_json,
                 started_at = excluded.started_at,
                 completed_at = excluded.completed_at,
                 updated_at = datetime('now', 'localtime')",
@@ -994,6 +986,7 @@ impl Database {
                 &input.last_model_id,
                 &input.last_error,
                 if input.output_present { 1 } else { 0 },
+                &input.config_json,
                 &input.started_at,
                 &input.completed_at,
             ],
@@ -1001,7 +994,7 @@ impl Database {
 
         let mut stmt = conn.prepare(
             "SELECT id, note_id, item_key, status, depends_on_json,
-                    last_model_id, last_error, output_present, started_at, completed_at, updated_at
+                    last_model_id, last_error, output_present, config_json, started_at, completed_at, updated_at
              FROM note_initialization_items
              WHERE note_id = ?1 AND item_key = ?2"
         )?;
@@ -1027,8 +1020,8 @@ impl Database {
             tx.execute(
                 "INSERT INTO note_initialization_items (
                     id, note_id, item_key, status, depends_on_json,
-                    last_model_id, last_error, output_present, started_at, completed_at, updated_at
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now', 'localtime'))",
+                    last_model_id, last_error, output_present, config_json, started_at, completed_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now', 'localtime'))",
                 rusqlite::params![
                     snowflake::generate_id_string(),
                     &item.note_id,
@@ -1038,6 +1031,7 @@ impl Database {
                     &item.last_model_id,
                     &item.last_error,
                     if item.output_present { 1 } else { 0 },
+                    &item.config_json,
                     &item.started_at,
                     &item.completed_at,
                 ],

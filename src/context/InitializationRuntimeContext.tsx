@@ -31,6 +31,8 @@ export interface InitializationTaskParams {
   videoPath: string;
   subtitlePath: string | null;
   selectedKeys: string[];
+  /** 项目配置：item_key -> config_json */
+  itemConfigs: Record<string, string>;
 }
 
 /** 初始化运行任务 */
@@ -196,6 +198,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
           videoPath: task.params.videoPath,
           subtitlePath: task.params.subtitlePath,
           selectedKeys: task.params.selectedKeys,
+          itemConfigs: task.params.itemConfigs,
         });
 
         setInitState((prev) => ({

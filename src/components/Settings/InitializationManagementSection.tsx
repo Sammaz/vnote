@@ -1234,6 +1234,14 @@ export function InitializationManagementSection({
       const selectedKeys = Array.from(editingExplicitKeys);
       let skippedNoModel = 0;
 
+      // 收集所有已选项目的配置
+      const itemConfigs: Record<string, string> = {};
+      for (const item of editingItems) {
+        if (item.selected && item.config_json) {
+          itemConfigs[item.item_key] = item.config_json;
+        }
+      }
+
       for (const noteId of uniqueNoteIds) {
         const note = noteMap.get(noteId);
         if (!note) continue;
@@ -1251,6 +1259,7 @@ export function InitializationManagementSection({
           videoPath: note.video_path,
           subtitlePath: note.subtitle_path,
           selectedKeys,
+          itemConfigs,
         });
       }
 
@@ -1275,6 +1284,7 @@ export function InitializationManagementSection({
   }, [
     addBatchToRuntime,
     editingExplicitKeys,
+    editingItems,
     editingModelOverrideId,
     loadOverview,
     noteMap,
@@ -1299,6 +1309,14 @@ export function InitializationManagementSection({
         return { task: null as InitializationTaskParams | null, missingModel: true };
       }
 
+      // 收集重试项目的配置（使用数据库中已保存的配置）
+      const itemConfigs: Record<string, string> = {};
+      for (const item of detail.items) {
+        if (retryKeys.has(item.item_key) && item.config_json) {
+          itemConfigs[item.item_key] = item.config_json;
+        }
+      }
+
       return {
         task: {
           noteId,
@@ -1307,6 +1325,7 @@ export function InitializationManagementSection({
           videoPath: note.video_path,
           subtitlePath: note.subtitle_path,
           selectedKeys: Array.from(retryKeys),
+          itemConfigs,
         } satisfies InitializationTaskParams,
         missingModel: false,
       };
@@ -1818,15 +1837,20 @@ export function InitializationManagementSection({
                         )}
 
                         <div className="mt-3 pt-3.5 border-t border-slate-200/80 dark:border-slate-700/80 flex items-center justify-between gap-2.5">
-                          <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={regenerate}
-                              onChange={(e) => updateEditingItemRegenerate(item.item_key, e.target.checked)}
-                              className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/70"
-                            />
-                            覆盖已有结果
-                          </label>
+                          {/* 字幕生成不允许覆盖已有结果 */}
+                          {definition.item_key !== "subtitle_generation" ? (
+                            <label className="inline-flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={regenerate}
+                                onChange={(e) => updateEditingItemRegenerate(item.item_key, e.target.checked)}
+                                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500/70"
+                              />
+                              覆盖已有结果
+                            </label>
+                          ) : (
+                            <div />
+                          )}
                           <div className="flex items-center gap-2">
                             {CONFIGURABLE_ITEM_KEYS.has(definition.item_key) && (
                               <button

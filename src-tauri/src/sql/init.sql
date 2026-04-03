@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS note_initialization_items (
     last_model_id TEXT,
     last_error TEXT,
     output_present INTEGER NOT NULL DEFAULT 0,
+    config_json TEXT,
     started_at TEXT,
     completed_at TEXT,
     updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
