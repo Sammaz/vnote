@@ -1103,8 +1103,8 @@ impl Database {
              FROM notes n
              LEFT JOIN note_initialization_runs r ON r.note_id = n.id
              LEFT JOIN note_initialization_items i ON i.note_id = n.id
-             GROUP BY n.id, n.title, n.subtitle_path, r.status, r.updated_at, n.updated_at
-             ORDER BY updated_at DESC, n.rowid DESC"
+             GROUP BY n.id, n.title, n.subtitle_path, r.status, r.updated_at, n.updated_at, n.created_at
+             ORDER BY n.created_at ASC, n.rowid ASC"
         )?;
 
         let rows = stmt.query_map([], |row| {
