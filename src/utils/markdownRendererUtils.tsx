@@ -4,7 +4,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 const BRACKET_TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/;
 const CLOCK_TIMESTAMP_RE = /⏱\s*(\d{1,2}:\d{2}(?::\d{2})?)/;
 const CHINESE_TIMESTAMP_RE = /（时间：(\d{1,2}:\d{2}(?::\d{2})?)）/;
-const DECORATION_REGEX = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\))|(#[^\s#]+)/g;
+const DECORATION_REGEX = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\))|(#[^\s#]+)|(==[^=]+==)/g;
 
 export interface MarkdownDecorationOptions {
   enableSeekTimestamps?: boolean;
@@ -193,6 +193,17 @@ function renderDecoratedString(
         >
           {matchedText}
         </span>,
+      );
+    } else if (match[6]) {
+      // Obsidian-style highlight syntax: ==text==
+      const highlightText_content = matchedText.slice(2, -2);
+      result.push(
+        <mark
+          key={`${keyPrefix}-highlight-${partIndex++}`}
+          className="bg-yellow-200 dark:bg-yellow-500/30 text-inherit px-0.5 rounded-sm"
+        >
+          {highlightText_content}
+        </mark>,
       );
     } else {
       result.push(matchedText);
