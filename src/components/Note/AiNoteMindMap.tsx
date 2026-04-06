@@ -194,9 +194,12 @@ function enhanceNodeKeys(root: IPureNode, items: OutlineItem[], noteTitle: strin
     const isHeadingNode = isHeadingTag(tag);
 
     if (isRoot) {
-      if (isHeadingNode && headingIndex < items.length) {
+      // Root node: consume items[0] which is the root title item
+      if (headingIndex < items.length) {
         headingIndex += 1;
       }
+      // Override root content with note title for consistent display
+      nextNode.content = noteTitle || "大纲笔记";
       nextNode.payload = {
         ...nextNode.payload,
         uid: "ai-note-root",
@@ -288,8 +291,19 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
     if (!normalized.hasHeadings) {
       return [];
     }
-    return collectOutlineItems(normalized.normalizedMarkdown);
-  }, [normalized.hasHeadings, normalized.normalizedMarkdown]);
+    // Collect items from original markdown, but skip H1 headings since H1 becomes the root node
+    const collectedItems = collectOutlineItems(markdown);
+    const nonH1Items = collectedItems.filter((item) => item.level > 1);
+    // Prepend root title item for the mind map root node
+    const rootTitleItem: OutlineItem = {
+      level: 1,
+      text: normalized.rootTitle,
+      uid: "ai-note-root",
+      seekTime: null,
+      isSyncTarget: false,
+    };
+    return [rootTitleItem, ...nonH1Items];
+  }, [normalized.hasHeadings, normalized.rootTitle, markdown]);
   const syncItems = useMemo(() => items.filter((item) => item.isSyncTarget), [items]);
   const syncUidSet = useMemo(() => new Set(syncItems.map((item) => item.uid)), [syncItems]);
   const transformed = useMemo(() => {
