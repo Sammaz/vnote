@@ -1555,7 +1555,7 @@ export function KnowledgeBaseChat() {
                   </div>
                   <button
                     onClick={handleCancelEdit}
-                    className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 cursor-pointer"
+                    className="text-xs text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 cursor-pointer"
                   >
                     取消编辑
                   </button>

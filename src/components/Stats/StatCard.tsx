@@ -57,10 +57,10 @@ export function StatCard({
 
         {/* 内容 */}
         <div className="flex-1 min-w-0">
-          <p className="text-sm text-slate-500 mb-1">{label}</p>
+          <p className="text-sm text-slate-700 dark:text-slate-400 mb-1">{label}</p>
           <p className="text-2xl font-bold text-slate-700 dark:text-slate-100">{value}</p>
           {subValue && (
-            <p className="text-xs text-slate-500 mt-1">{subValue}</p>
+            <p className="text-xs text-slate-700/90 dark:text-slate-400 mt-1">{subValue}</p>
           )}
         </div>
       </div>

@@ -243,7 +243,7 @@ function CollectionNoteItem({
               onClick={handleMenuClick}
               className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-neutral-700 flex-shrink-0 cursor-pointer"
             >
-              <MoreHorizontal className="w-4 h-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
+              <MoreHorizontal className="w-4 h-4 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300" />
             </div>
           )}
         </button>
@@ -464,13 +464,13 @@ export function CollectionItem({
           <span className="flex-1 truncate text-left">{collection.name}</span>
           {(hasChildren || hasNotes) && (
             <>
-              <span className="text-xs text-slate-400 dark:text-slate-500 flex-shrink-0">
+              <span className="text-xs text-slate-500 dark:text-slate-500 flex-shrink-0">
                 {collection.item_count}
               </span>
               <div onClick={handleToggleExpand} className="flex-shrink-0 p-0.5 cursor-pointer">
                 <ChevronUp
                   className={cn(
-                    "w-3.5 h-3.5 transition-transform duration-200 text-slate-400",
+                    "w-3.5 h-3.5 transition-transform duration-200 text-slate-500",
                     !isExpanded && "rotate-180"
                   )}
                 />

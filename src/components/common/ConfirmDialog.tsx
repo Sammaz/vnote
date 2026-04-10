@@ -153,7 +153,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               </div>
               <button
                 onClick={onCancel}
-                className="cursor-pointer rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-white/5 dark:hover:text-slate-200"
+                className="cursor-pointer rounded-xl p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-white/5 dark:hover:text-slate-200"
                 data-tauri-drag-region="false"
               >
                 <X className="h-4 w-4" />
@@ -218,7 +218,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <h3 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h3>
           <button
             onClick={onCancel}
-            className="cursor-pointer rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-vnote-hover dark:hover:text-slate-200"
+            className="cursor-pointer rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-vnote-hover dark:hover:text-slate-200"
             data-tauri-drag-region="false"
           >
             <X className="w-4 h-4" />

@@ -74,13 +74,13 @@ function ParentCollectionTreeItem({
         >
           {hasChildren && (
             expanded ? (
-              <ChevronDown className="w-3 h-3 text-slate-400" />
+              <ChevronDown className="w-3 h-3 text-slate-500 dark:text-neutral-400" />
             ) : (
-              <ChevronRight className="w-3 h-3 text-slate-400" />
+              <ChevronRight className="w-3 h-3 text-slate-500 dark:text-neutral-400" />
             )
           )}
         </span>
-        <Library className="w-4 h-4 flex-shrink-0 text-slate-400" />
+        <Library className="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-neutral-400" />
         <span className="truncate">{collection.name}</span>
       </button>
       {hasChildren && expanded && (
@@ -249,7 +249,7 @@ export function CreateCollectionModal({
           onClick={onClose}
           className="absolute right-4 top-4 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
         >
-          <X className="w-5 h-5 text-slate-400 dark:text-neutral-500" />
+          <X className="w-5 h-5 text-slate-500 dark:text-neutral-500" />
         </button>
 
         {/* 内容区域 */}
@@ -316,11 +316,11 @@ export function CreateCollectionModal({
                       "truncate",
                       selectedParentName
                         ? "text-slate-800 dark:text-slate-200"
-                        : "text-slate-400 dark:text-neutral-500"
+                        : "text-slate-500 dark:text-neutral-500"
                     )}>
                       {selectedParentName ?? "无（顶级合集）"}
                     </span>
-                    <ChevronsUpDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                    <ChevronsUpDown className="w-4 h-4 text-slate-500 dark:text-neutral-400 flex-shrink-0" />
                   </button>
                   {showParentDropdown && (
                     <div className={cn("absolute z-10 mt-1 w-full max-h-52 overflow-y-auto border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg", glassMenu)}>

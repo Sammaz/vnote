@@ -473,7 +473,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
         </span>
         <div className="flex items-center gap-1">
           <button
-            className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
+            className="p-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
             onClick={(e) => {
               e.stopPropagation();
               handleClearMessages();
@@ -484,7 +484,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
           </button>
           {isPopout ? (
             <button
-              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
+              className="p-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
               onClick={(e) => {
                 e.stopPropagation();
                 handleMinimize();
@@ -494,7 +494,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
             </button>
           ) : (
             <button
-              className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
+              className="p-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded transition-colors cursor-pointer"
               onClick={handlePopout}
             >
               <Maximize2 className="w-4 h-4" />

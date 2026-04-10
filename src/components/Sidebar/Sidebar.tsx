@@ -45,7 +45,7 @@ const NavItem = memo(function NavItem({ icon, label, active, collapsed, onClick 
       className={cn(
         "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 cursor-pointer",
         "hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 hover:scale-[1.02]",
-        active ? "bg-blue-50/90 dark:bg-blue-600/20 text-blue-500 dark:text-blue-400 shadow-sm" : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200",
+        active ? "bg-blue-50/90 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400 shadow-sm" : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200",
         collapsed && "justify-center px-0"
       )}
       title={collapsed ? label : undefined}
@@ -80,7 +80,7 @@ const CollectionTreeMenuItem = memo(function CollectionTreeMenuItem({
           e.stopPropagation();
           onSelect(collection.id);
         }}
-        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
         style={{ paddingLeft: `${12 + level * 12}px` }}
       >
         <span
@@ -95,13 +95,13 @@ const CollectionTreeMenuItem = memo(function CollectionTreeMenuItem({
         >
           {hasChildren && (
             expanded ? (
-              <ChevronDown className="w-3 h-3 text-slate-400" />
+              <ChevronDown className="w-3 h-3 text-slate-500" />
             ) : (
-              <ChevronRight className="w-3 h-3 text-slate-400" />
+              <ChevronRight className="w-3 h-3 text-slate-500" />
             )
           )}
         </span>
-        <Library className="w-3.5 h-3.5 flex-shrink-0" />
+        <Library className="w-3.5 h-3.5 flex-shrink-0 text-slate-600 dark:text-slate-400" />
         <span className="truncate">{collection.name}</span>
       </button>
       {hasChildren && expanded && (
@@ -257,7 +257,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
               onClick={handleMenuClick}
               className="p-0.5 rounded hover:bg-slate-200 dark:hover:bg-neutral-700 flex-shrink-0 cursor-pointer"
             >
-              <MoreHorizontal className="w-4 h-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300" />
+              <MoreHorizontal className="w-4 h-4 text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300" />
             </div>
           )}
         </button>
@@ -315,7 +315,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
                 )}
                 <button
                   onClick={handleCreateNewCollection}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
                 >
                   <FolderPlus className="w-3.5 h-3.5" />
                   <span>新合集</span>
@@ -332,7 +332,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
               setShowMenu(false);
               setShowEditNoteModal(true);
             }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
           >
             <Edit3 className="w-3.5 h-3.5" />
             <span>编辑笔记</span>
@@ -432,7 +432,7 @@ export function Sidebar() {
               onClick={handleCollapse}
               className={cn(
                 "flex items-center justify-center w-7 h-7 rounded-md transition-all duration-200 cursor-pointer",
-                "text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                "text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
               )}
               title="折叠侧边栏"
             >
@@ -447,7 +447,7 @@ export function Sidebar() {
               title="展开侧边栏"
             >
               {isHovered ? (
-                <PanelLeft className="w-5 h-5 text-slate-500 dark:text-slate-400" />
+                <PanelLeft className="w-5 h-5 text-slate-600 dark:text-slate-400" />
               ) : (
                 <img src={logoImg} alt="VNote" className="w-7 h-7 rounded-lg" />
               )}

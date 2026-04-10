@@ -95,7 +95,7 @@ export function InputArea({
           onKeyDown={handleKeyDown}
           onPaste={onPaste}
           placeholder="你的问题..."
-          className="w-full px-4 py-3 bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border rounded-xl text-sm text-slate-700 dark:text-slate-200 placeholder-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+          className="w-full px-4 py-3 bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border rounded-xl text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
           rows={2}
         />
       </div>
@@ -105,7 +105,7 @@ export function InputArea({
         <div className="flex items-center gap-1">
           <button
             onClick={onAttachClick}
-            className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+            className="p-2 text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
             title="上传图片"
           >
             <Paperclip className="w-5 h-5" />
@@ -116,7 +116,7 @@ export function InputArea({
               "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
               basedOnVideo
                 ? "text-cyan-400 border border-cyan-400/50 bg-cyan-400/10"
-                : "text-slate-400 hover:text-slate-300"
+                : "text-slate-600 hover:text-slate-800 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-300 dark:hover:bg-vnote-hover"
             )}
           >
             <Video className="w-4 h-4" />
@@ -131,12 +131,12 @@ export function InputArea({
                 "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
                 showQuestionPopover
                   ? "text-amber-400 border border-amber-400/50 bg-amber-400/10"
-                  : "text-slate-400 hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                  : "text-slate-600 hover:text-slate-800 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-slate-300 dark:hover:bg-vnote-hover"
               )}
             >
               <span>💡</span>
               <span>推荐问题</span>
-              <span className="ml-0.5 px-1.5 py-0.5 text-xs bg-slate-200 dark:bg-vnote-surface rounded-full">
+              <span className="ml-0.5 px-1.5 py-0.5 text-xs text-slate-600 dark:text-slate-300 bg-slate-200 dark:bg-vnote-surface rounded-full">
                 {questions.length}
               </span>
             </button>
@@ -158,7 +158,7 @@ export function InputArea({
               "w-10 h-10 flex items-center justify-center rounded-full transition-colors cursor-pointer",
               input.trim() || uploadedImages.length > 0
                 ? "bg-slate-700 dark:bg-slate-600 text-white hover:bg-slate-600 dark:hover:bg-slate-500"
-                : "bg-slate-200 dark:bg-vnote-surface text-slate-400 cursor-not-allowed"
+                : "bg-slate-200 dark:bg-vnote-surface text-slate-500 dark:text-slate-400 cursor-not-allowed"
             )}
           >
             <Send className="w-5 h-5" />

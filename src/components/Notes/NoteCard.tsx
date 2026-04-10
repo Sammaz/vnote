@@ -119,7 +119,7 @@ export const NoteCard = memo(function NoteCard({ note, onClick, onEdit, onDelete
           ) : (
             <>
               <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 dark:from-vnote-surface to-slate-200 dark:to-vnote-elevated">
-                <Video className="w-12 h-12 text-slate-400 dark:text-vnote-muted" />
+                <Video className="w-12 h-12 text-slate-500 dark:text-vnote-muted" />
               </div>
               <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/10 transition-colors duration-200" />
             </>

@@ -240,7 +240,7 @@ function TableFloatingMenu({ editor, editorContainerRef }: TableFloatingMenuProp
         >
           <button
             onClick={() => setActiveMenu(activeMenu?.type === 'column' && activeMenu.index === colIndex ? null : { type: 'column', index: colIndex })}
-            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
             title={`列 ${colIndex + 1} 操作`}
           >
             <GripVertical className="w-3 h-3" />
@@ -314,7 +314,7 @@ function TableFloatingMenu({ editor, editorContainerRef }: TableFloatingMenuProp
         >
           <button
             onClick={() => setActiveMenu(activeMenu?.type === 'row' && activeMenu.index === rowIndex ? null : { type: 'row', index: rowIndex })}
-            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
             title={`行 ${rowIndex + 1} 操作`}
           >
             <GripVertical className="w-3 h-3 rotate-90" />
@@ -385,7 +385,7 @@ function TableFloatingMenu({ editor, editorContainerRef }: TableFloatingMenuProp
       >
         <button
           onClick={() => editor.chain().focus().addRowAfter().run()}
-          className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
+          className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
           title="添加行"
         >
           <Plus className="w-3 h-3" />
@@ -402,7 +402,7 @@ function TableFloatingMenu({ editor, editorContainerRef }: TableFloatingMenuProp
       >
         <button
           onClick={() => editor.chain().focus().addColumnAfter().run()}
-          className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
+          className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
           title="添加列"
         >
           <Plus className="w-3 h-3" />
@@ -419,7 +419,7 @@ function TableFloatingMenu({ editor, editorContainerRef }: TableFloatingMenuProp
       >
         <button
           onClick={() => editor.chain().focus().deleteTable().run()}
-          className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-400 hover:text-red-500 transition-colors cursor-pointer"
+          className="w-5 h-5 flex items-center justify-center rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-slate-500 hover:text-red-500 transition-colors cursor-pointer"
           title="删除表格"
         >
           <Trash2 className="w-3 h-3" />
@@ -1024,7 +1024,7 @@ export function QuickNotesContent({
                 </div>
                 <button
                   onClick={() => setShowLinkPopover(false)}
-                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
+                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1092,7 +1092,7 @@ export function QuickNotesContent({
                 </div>
                 <button
                   onClick={() => setShowImagePopover(false)}
-                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
+                  className="p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
                 >
                   <X className="w-4 h-4" />
                 </button>

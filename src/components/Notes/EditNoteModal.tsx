@@ -75,7 +75,7 @@ export function EditNoteModal({ note, onClose }: EditNoteModalProps) {
           onClick={onClose}
           className="absolute right-4 top-4 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
         >
-          <X className="w-5 h-5 text-slate-400 dark:text-neutral-500" />
+          <X className="w-5 h-5 text-slate-500 dark:text-neutral-500" />
         </button>
 
         <div className="p-6">

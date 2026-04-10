@@ -23,7 +23,7 @@ export function RecentNotes() {
         <button
           onClick={() => setCurrentView("recent-notes")}
           className={cn(
-            "flex items-center gap-1 text-sm text-slate-500 hover:text-blue-400",
+            "flex items-center gap-1 text-sm text-slate-700 hover:text-blue-700",
             "transition-colors duration-200 cursor-pointer"
           )}
         >

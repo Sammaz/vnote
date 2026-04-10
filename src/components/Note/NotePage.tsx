@@ -179,7 +179,7 @@ export function NotePage() {
               setSelectedNoteId(null);
               setCurrentView("collection");
             }}
-            className="p-1.5 hover:bg-slate-100 dark:hover:bg-neutral-700 rounded-lg transition-colors text-slate-600 dark:text-slate-300 cursor-pointer"
+            className="p-1.5 hover:bg-slate-100 dark:hover:bg-neutral-700 rounded-lg transition-colors text-slate-700 dark:text-slate-300 cursor-pointer"
             title="返回合集"
           >
             <ArrowLeft className="w-4 h-4" />
@@ -210,7 +210,7 @@ export function NotePage() {
             </h1>
             <button
               onClick={() => setShowEditModal(true)}
-              className="flex-shrink-0 p-1.5 rounded-md text-slate-400 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+              className="flex-shrink-0 p-1.5 rounded-md text-slate-500 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
               title="编辑笔记"
             >
               <Pencil className="w-4 h-4" />

@@ -36,8 +36,8 @@ function TooltipButton({ icon, tooltip, onClick, active }: TooltipButtonProps) {
         className={cn(
           "w-8 h-8 flex items-center justify-center rounded-md transition-colors cursor-pointer",
           active
-            ? "bg-slate-200 dark:bg-neutral-700 text-slate-700 dark:text-neutral-200"
-            : "bg-slate-100 dark:bg-neutral-800 text-slate-500 dark:text-neutral-400 hover:bg-slate-200 dark:hover:bg-neutral-700 hover:text-slate-700 dark:hover:text-neutral-200"
+            ? "bg-slate-200/90 dark:bg-neutral-700 text-slate-700 dark:text-neutral-200"
+            : "bg-slate-100/90 dark:bg-neutral-800 text-slate-600 dark:text-neutral-400 hover:bg-slate-200 dark:hover:bg-neutral-700 hover:text-slate-800 dark:hover:text-neutral-200"
         )}
       >
         {icon}

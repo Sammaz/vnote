@@ -51,7 +51,7 @@ function SortableCollection({ collection, childCollections, allCollections, onEd
         className={cn(
           "absolute left-0 top-1.5 p-0.5 rounded cursor-grab z-10",
           "opacity-0 group-hover:opacity-100 transition-opacity",
-          "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
         )}
       >
         <GripVertical className="w-3 h-3" />

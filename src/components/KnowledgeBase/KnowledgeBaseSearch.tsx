@@ -49,7 +49,7 @@ export function KnowledgeBaseSearch() {
     <div className="flex flex-col h-full p-6">
       {/* Search input */}
       <div className="relative mb-4">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 dark:text-slate-400" />
         <input
           ref={inputRef}
           type="text"
@@ -57,7 +57,7 @@ export function KnowledgeBaseSearch() {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="输入关键词进行语义搜索..."
-          className={cn("w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-slate-800 dark:text-slate-200 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400", glassInput)}
+          className={cn("w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-slate-800 dark:text-slate-200 text-sm placeholder:text-slate-500 dark:placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-400", glassInput)}
           autoFocus
         />
       </div>
@@ -65,20 +65,20 @@ export function KnowledgeBaseSearch() {
       {/* Results */}
       <div className="flex-1 overflow-y-auto space-y-3">
         {searching && (
-          <div className="flex items-center justify-center py-12 text-slate-400 text-sm">
+          <div className="flex items-center justify-center py-12 text-slate-500 text-sm">
             <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mr-2" />
             搜索中...
           </div>
         )}
 
         {!searching && searched && results.length === 0 && (
-          <div className="text-center py-12 text-slate-400 text-sm">
+          <div className="text-center py-12 text-slate-500 text-sm">
             未找到相关内容，请尝试其他关键词
           </div>
         )}
 
         {!searching && !searched && (
-          <div className="text-center py-12 text-slate-400 text-sm">
+          <div className="text-center py-12 text-slate-500 text-sm">
             输入关键词搜索知识库中的笔记内容
           </div>
         )}
@@ -113,15 +113,15 @@ function SearchResultCard({
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-slate-600 dark:text-slate-400">
             {(result.score * 100).toFixed(1)}%
           </span>
           <button
             onClick={() => onNavigate(result.note_id)}
-            className="p-1 rounded hover:bg-slate-100 dark:hover:bg-neutral-700 transition-colors cursor-pointer"
+            className="p-1 rounded text-slate-700 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-neutral-700 dark:hover:text-slate-200 transition-colors cursor-pointer"
             title="跳转到笔记"
           >
-            <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
+            <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>

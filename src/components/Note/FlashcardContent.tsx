@@ -401,7 +401,7 @@ export function FlashcardContent({
                   <span className="text-sm text-slate-500 dark:text-slate-400">答案</span>
                   <button
                     onClick={handleCopyAnswer}
-                    className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors cursor-pointer"
+                    className="p-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors cursor-pointer"
                     title="复制答案"
                   >
                     <Copy className="w-4 h-4" />

@@ -96,8 +96,8 @@ export function BatchActionBar({ collectionId, onMoveClick }: BatchActionBarProp
           onClick={handleCancel}
           className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
-            "text-slate-500 dark:text-slate-400",
-            "hover:bg-slate-100 dark:hover:bg-neutral-700"
+            "text-slate-600 dark:text-slate-400",
+            "hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-neutral-700"
           )}
         >
           取消

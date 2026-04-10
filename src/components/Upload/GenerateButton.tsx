@@ -69,7 +69,7 @@ export function GenerateButton() {
         "font-medium text-white transition-all duration-200",
         canGenerate
           ? "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 btn-glow cursor-pointer"
-          : "bg-slate-200 dark:bg-slate-700 text-slate-400 cursor-not-allowed"
+          : "bg-slate-200 dark:bg-slate-700 text-slate-500 dark:text-slate-400 cursor-not-allowed"
       )}
     >
       {isGenerating ? (

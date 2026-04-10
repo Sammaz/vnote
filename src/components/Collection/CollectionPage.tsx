@@ -129,7 +129,7 @@ function SortableMixedCard({
             "opacity-0 group-hover:opacity-100",
             glassMenu,
             "hover:bg-slate-100 dark:hover:bg-neutral-700",
-            "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
           )}
           title="拖拽排序"
         >
@@ -170,7 +170,7 @@ function SortableMixedCard({
           {isSelected ? (
             <CheckSquare className="w-5 h-5 text-blue-500" />
           ) : (
-            <Square className="w-5 h-5 text-slate-400" />
+            <Square className="w-5 h-5 text-slate-500" />
           )}
         </div>
       )}
@@ -187,7 +187,7 @@ function SortableMixedCard({
               "opacity-0 group-hover:opacity-100",
               glassMenu,
               "hover:bg-slate-100 dark:hover:bg-neutral-700",
-              "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+              "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
             )}
             title="拖拽排序"
           >
@@ -203,7 +203,7 @@ function SortableMixedCard({
               "opacity-0 group-hover:opacity-100",
               glassMenu,
               "hover:bg-red-50 dark:hover:bg-red-500/20",
-              "text-slate-400 hover:text-red-500"
+              "text-slate-500 hover:text-red-500"
             )}
             title="删除笔记"
           >
