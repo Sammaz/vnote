@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { X, Video, Check, Search } from "lucide-react";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 
 interface AddNotesToCollectionModalProps {
@@ -16,6 +17,7 @@ export function AddNotesToCollectionModal({
   onSuccess,
 }: AddNotesToCollectionModalProps) {
   const { notes, addNoteToCollection, notesInCollections } = useApp();
+  const glassModal = useGlassBg("modal");
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -80,7 +82,7 @@ export function AddNotesToCollectionModal({
       />
 
       {/* 弹窗内容 */}
-      <div className="relative w-full max-w-2xl max-h-[80vh] mx-4 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700 flex flex-col">
+      <div className={cn("relative w-full max-w-2xl max-h-[80vh] mx-4 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700 flex flex-col", glassModal)}>
         {/* 关闭按钮 */}
         <button
           onClick={onClose}

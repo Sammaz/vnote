@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import type { ReactNode } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 
 export interface TabItem {
   id: string;
@@ -29,6 +30,7 @@ export function ResponsiveTabs({
   const [visibleCount, setVisibleCount] = useState(items.length);
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const glassMenu = useGlassBg("menu");
 
   // 监听容器宽度变化
   useLayoutEffect(() => {
@@ -111,7 +113,7 @@ export function ResponsiveTabs({
             {showDropdown && (
               <div
                 ref={dropdownRef}
-                className="absolute top-full right-0 mt-1 w-48 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1 overflow-hidden"
+                className={`absolute top-full right-0 mt-1 w-48 ${glassMenu} rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1 overflow-hidden`}
               >
                 {hiddenItems.map(item => (
                   <div

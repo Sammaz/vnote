@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Clock, Loader2, AlertCircle, RefreshCw } from "
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { DetailedReadingChapter, SubtitleEntry } from "../../types";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 
 interface DetailedReadingChapterCardProps {
   chapter: DetailedReadingChapter;
@@ -388,6 +389,7 @@ export function DetailedReadingChapterCard({
   onReoptimize,
 }: DetailedReadingChapterCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const glassBg = useGlassBg("card");
 
   const handleSeek = (time: number) => {
     window.dispatchEvent(new CustomEvent("seek-video", { detail: { time } }));
@@ -417,7 +419,8 @@ export function DetailedReadingChapterCard({
     <div
       id={`chapter-${chapter.id}`}
       className={cn(
-        "bg-white dark:bg-vnote-card rounded-lg border overflow-hidden transition-all",
+        "rounded-lg border overflow-hidden transition-all",
+        glassBg,
         isCurrent ? "border-blue-500 ring-2 ring-blue-500/50" : "border-slate-200 dark:border-vnote-border"
       )}
     >

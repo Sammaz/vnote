@@ -19,6 +19,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 import { useInitializationRuntime } from "../../context/InitializationRuntimeContext";
@@ -57,6 +58,8 @@ function SortableMixedCard({
   isSelected: boolean;
   onToggleSelect: (noteId: string) => void;
 }) {
+  const glassCard = useGlassBg("card");
+  const glassMenu = useGlassBg("menu");
   const noteCardRef = useRef<HTMLDivElement>(null);
   const {
     attributes,
@@ -86,8 +89,8 @@ function SortableMixedCard({
           onClick={() => onOpenCollection(item.data.id)}
           className={cn(
             "group relative rounded-xl overflow-hidden cursor-pointer",
-            "bg-white/90 dark:bg-vnote-card/90 border border-slate-200/60 dark:border-vnote-border/60",
-            "backdrop-blur-xl shadow-sm hover:shadow-xl"
+            glassCard, "border border-slate-200/60 dark:border-vnote-border/60",
+            "shadow-sm hover:shadow-xl"
           )}
         >
           <div className="aspect-video bg-slate-100 dark:bg-vnote-surface relative overflow-hidden">
@@ -124,7 +127,7 @@ function SortableMixedCard({
           className={cn(
             "absolute top-2 left-2 p-1.5 rounded-lg transition-all cursor-grab z-10",
             "opacity-0 group-hover:opacity-100",
-            "bg-white/90 dark:bg-neutral-800/90",
+            glassMenu,
             "hover:bg-slate-100 dark:hover:bg-neutral-700",
             "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
           )}
@@ -162,7 +165,7 @@ function SortableMixedCard({
             e.stopPropagation();
             onToggleSelect(noteItem.note_id);
           }}
-          className="absolute top-2 left-2 z-20 p-1 rounded bg-white/90 dark:bg-neutral-800/90 cursor-pointer"
+          className={cn("absolute top-2 left-2 z-20 p-1 rounded cursor-pointer", glassMenu)}
         >
           {isSelected ? (
             <CheckSquare className="w-5 h-5 text-blue-500" />
@@ -182,7 +185,7 @@ function SortableMixedCard({
             className={cn(
               "absolute top-2 left-2 p-1.5 rounded-lg transition-all cursor-grab z-10",
               "opacity-0 group-hover:opacity-100",
-              "bg-white/90 dark:bg-neutral-800/90",
+              glassMenu,
               "hover:bg-slate-100 dark:hover:bg-neutral-700",
               "text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
             )}
@@ -198,7 +201,7 @@ function SortableMixedCard({
             className={cn(
               "absolute top-2 right-2 p-1.5 rounded-lg transition-all cursor-pointer z-10",
               "opacity-0 group-hover:opacity-100",
-              "bg-white/90 dark:bg-neutral-800/90",
+              glassMenu,
               "hover:bg-red-50 dark:hover:bg-red-500/20",
               "text-slate-400 hover:text-red-500"
             )}
@@ -226,6 +229,9 @@ export function CollectionPage() {
     toggleNoteSelection,
     refreshCollections,
   } = useApp();
+  const glassModal = useGlassBg("modal");
+  const glassMenu = useGlassBg("menu");
+  const glassInput = useGlassBg("input");
   const { removeNoteFromRuntime } = useInitializationRuntime();
   const { expandCollectionPathForNote, expandCollectionPath } = useCollections();
 
@@ -513,7 +519,7 @@ export function CollectionPage() {
                 className={cn(
                   "flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer",
                   "text-slate-600 dark:text-slate-300 text-sm",
-                  "bg-white dark:bg-neutral-700",
+                  glassInput,
                   "border border-slate-200 dark:border-neutral-600",
                   "hover:bg-slate-50 dark:hover:bg-neutral-600"
                 )}
@@ -562,7 +568,7 @@ export function CollectionPage() {
               onClick={() => setShowAddNotesModal(true)}
               className={cn(
                 "px-4 py-2 rounded-lg transition-colors cursor-pointer",
-                "bg-white dark:bg-neutral-700",
+                glassInput,
                 "text-slate-700 dark:text-slate-200 text-sm",
                 "border border-slate-200 dark:border-neutral-600",
                 "hover:bg-slate-50 dark:hover:bg-neutral-600"
@@ -617,7 +623,7 @@ export function CollectionPage() {
       {showMenu && createPortal(
         <div
           ref={menuRef}
-          className="fixed w-44 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-lg shadow-xl z-[9999]"
+          className={cn("fixed w-44 py-1 border border-slate-200 dark:border-neutral-700 rounded-lg shadow-xl z-[9999]", glassMenu)}
           style={{ top: menuPosition.top, left: menuPosition.left }}
         >
           <button
@@ -654,7 +660,7 @@ export function CollectionPage() {
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setShowDeleteConfirm(false)}
           />
-          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
+          <div className={cn("relative w-full max-w-md mx-4 p-6 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700", glassModal)}>
             <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
               确定要删除整个合集吗?
             </h3>

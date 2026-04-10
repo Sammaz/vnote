@@ -4,6 +4,7 @@ import { AlertTriangle, Check, ChevronDown, Database, FolderOpen, HardDrive, Loa
 
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { message } from "../../utils/message";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import type {
   CleanupPreview,
   CleanupRequest,
@@ -35,6 +36,9 @@ const integrityActionLabelMap: Record<string, string> = {
 };
 
 export function DataManagementSection({ notes }: DataManagementSectionProps) {
+  const glassCard = useGlassBg("card");
+  const glassInput = useGlassBg("input");
+  const glassMenu = useGlassBg("menu");
   const [selectedNoteId, setSelectedNoteId] = useState<string>("all");
   const [overview, setOverview] = useState<DataManagementOverview | null>(null);
   const [scanResult, setScanResult] = useState<DataManagementScanResult | null>(null);
@@ -166,7 +170,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border border-slate-200 dark:border-vnote-border bg-white dark:bg-vnote-card p-4 md:p-5 space-y-4">
+      <div className={`rounded-2xl border border-slate-200 dark:border-vnote-border p-4 md:p-5 space-y-4 ${glassCard}`}>
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-vnote-surface px-2.5 py-1">
@@ -188,13 +192,13 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
               <button
                 type="button"
                 onClick={() => setShowNoteDropdown((prev) => !prev)}
-                className="min-w-[220px] px-3 py-2 pr-10 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate"
+                className={`min-w-[220px] px-3 py-2 pr-10 rounded-xl border border-slate-200 dark:border-slate-600 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate ${glassInput}`}
               >
                 {selectedNoteLabel}
               </button>
               <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${showNoteDropdown ? "rotate-180" : ""}`} />
               {showNoteDropdown && (
-                <div className="absolute z-50 mt-2 w-full right-0 bg-white dark:bg-slate-800 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1 max-h-60 overflow-auto">
+                <div className={`absolute z-50 mt-2 w-full right-0 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1 max-h-60 overflow-auto ${glassMenu}`}>
                   {[
                     { id: "all", title: "全部笔记" },
                     ...notes.map((note) => ({ id: note.id, title: note.title })),
@@ -370,7 +374,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
           <div className="font-medium text-slate-900 dark:text-slate-100 mb-3">清理预览</div>
           <div className="space-y-3">
             {preview.groups.map((group) => (
-              <div key={group.key} className="rounded-lg bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border px-3 py-3">
+              <div key={group.key} className={`rounded-lg border border-slate-200 dark:border-vnote-border px-3 py-3 ${glassCard}`}>
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{group.label}</div>

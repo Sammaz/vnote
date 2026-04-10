@@ -6,6 +6,8 @@
 import { createPortal } from "react-dom";
 import { X, Keyboard } from "lucide-react";
 import { useEffect } from "react";
+import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 
 interface KeyboardShortcutsHelpProps {
   onClose: () => void;
@@ -28,6 +30,8 @@ const shortcuts = [
 ];
 
 export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
+  const glassModal = useGlassBg("modal");
+
   // 监听 Escape 键关闭面板
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -50,7 +54,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
       />
 
       {/* 弹窗内容 */}
-      <div className="relative w-full max-w-md mx-4 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700">
+      <div className={cn("relative w-full max-w-md mx-4 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700", glassModal)}>
         {/* 关闭按钮 */}
         <button
           onClick={onClose}

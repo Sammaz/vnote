@@ -18,6 +18,7 @@ import {
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useInitializationRuntime } from "../../context/InitializationRuntimeContext";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { useCollections } from "../../context/CollectionsContext";
 import { CollectionSection } from "../Collection";
 import { CreateCollectionModal } from "../Collection/CreateCollectionModal";
@@ -129,6 +130,7 @@ interface NoteItemProps {
 const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
   const { setSelectedNoteId, setCurrentView, selectedNoteId, deleteNote, setSelectedFolder, setSelectedCollection, collections, addNoteToCollection } = useApp();
   const { removeNoteFromRuntime } = useInitializationRuntime();
+  const glassMenu = useGlassBg("menu");
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
   const [showCollectionSubmenu, setShowCollectionSubmenu] = useState(false);
@@ -265,7 +267,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
       {showMenu && createPortal(
         <div
           ref={menuRef}
-          className="fixed w-44 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-[9999]"
+          className={`fixed w-44 py-1 ${glassMenu} border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-[9999]`}
           style={{ top: menuPosition.top, left: menuPosition.left }}
         >
           <div className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-neutral-400 border-b border-slate-100 dark:border-neutral-700">
@@ -298,7 +300,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
 
             {/* 合集子菜单 - 树形展示 */}
             {showCollectionSubmenu && (
-              <div className={`absolute left-full ${submenuAlignBottom ? 'bottom-0' : 'top-0'} ml-1 w-48 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg max-h-64 overflow-y-auto`}>
+              <div className={`absolute left-full ${submenuAlignBottom ? 'bottom-0' : 'top-0'} ml-1 w-48 py-1 ${glassMenu} border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg max-h-64 overflow-y-auto`}>
                 {collections.filter((c) => c.parent_id === null).map((collection) => (
                   <CollectionTreeMenuItem
                     key={collection.id}
@@ -380,6 +382,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
 export function Sidebar() {
   const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, notesInCollections } = useApp();
   const { collapsed } = sidebar;
+  const glassPanel = useGlassBg("panel");
   const [isHovered, setIsHovered] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
 
@@ -412,7 +415,8 @@ export function Sidebar() {
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       className={cn(
-        "sidebar h-full border-r border-slate-200 dark:border-vnote-border bg-white/80 dark:bg-vnote-card/50 backdrop-blur-xl",
+        "sidebar h-full border-r border-slate-200 dark:border-vnote-border",
+        glassPanel,
         "flex flex-col relative transition-all duration-300 ease-in-out",
         collapsed ? "w-16" : "w-60"
       )}

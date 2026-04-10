@@ -5,6 +5,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { Play, Clock, Image as ImageIcon, Loader2, ChevronDown, ChevronUp, AlertCircle, RefreshCw } from "lucide-react";
 import type { Chapter, ChapterData, ChapterGenerationEvent, SubtitleEntry } from "../../types";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { setChapterGenerating } from "../../utils/noteGenerationState";
 
 interface ChapterGridProps {
@@ -314,6 +315,7 @@ function ChapterCard({
   optimizationFailed = false,
   onReoptimize,
 }: ChapterCardProps) {
+  const glassBg = useGlassBg("card");
   const [expanded, setExpanded] = useState(false); // 是否展开字幕
 
   // 当前选中章节自动展开字幕，非选中时收起
@@ -385,7 +387,8 @@ function ChapterCard({
     <div
       id={id}
       className={cn(
-        "group bg-white dark:bg-vnote-card rounded-lg border overflow-hidden hover:shadow-md transition-all",
+        "group rounded-lg border overflow-hidden hover:shadow-md transition-all",
+        glassBg,
         isCurrent
           ? "border-blue-500 dark:border-blue-400 ring-2 ring-blue-500/50 shadow-md"
           : "border-slate-200 dark:border-vnote-border hover:border-blue-400 dark:hover:border-blue-500"

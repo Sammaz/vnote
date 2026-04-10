@@ -7,6 +7,7 @@ import { cn } from "../../utils/cn";
 import { highlightText } from "../../utils/markdownRendererUtils";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
+import { useGlassBg } from "../../hooks/useGlassBg";
 
 import { parseDetailedReading, type Note, type ChapterData, type DetailedReadingData } from "../../types";
 
@@ -81,6 +82,7 @@ interface GlobalSearchModalProps {
 export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
   const { notes, setSelectedNoteId, setCurrentView } = useApp();
   const { expandCollectionPathForNote } = useCollections();
+  const glassModal = useGlassBg("modal");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedNote, setSelectedNote] = useState<Note | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -167,7 +169,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
       <div
         className={cn(
           "relative flex w-full max-w-5xl mx-4 rounded-[26px] shadow-[0_28px_90px_rgba(15,23,42,0.30)] overflow-hidden",
-          "bg-white/70 dark:bg-vnote-card/44 backdrop-blur-2xl",
+          glassModal,
           "border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5",
           "animate-fade-in"
         )}

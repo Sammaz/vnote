@@ -5,6 +5,8 @@
 
 import { useMemo, useEffect } from "react";
 import { BarChart3 } from "lucide-react";
+import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { TableOfContents } from "./TableOfContents";
 import { MarkdownRenderer } from "../Markdown/MarkdownRenderer";
 
@@ -24,6 +26,8 @@ export function VisualSummaryContent({
   showTimestamp = true,
   savedMarkdownContent,
 }: VisualSummaryContentProps) {
+  const glassPanel = useGlassBg("panel");
+
   // 从数据库字段读取 Markdown 内容
   const markdownContent = useMemo(() => {
     return savedMarkdownContent || "";
@@ -55,7 +59,7 @@ export function VisualSummaryContent({
         <textarea
           value={editContent}
           onChange={(e) => onEditContentChange?.(e.target.value)}
-          className="flex-1 w-full p-4 bg-white dark:bg-vnote-bg text-slate-800 dark:text-slate-200 font-mono text-sm resize-none focus:outline-none border-none"
+          className={cn("flex-1 w-full p-4 text-slate-800 dark:text-slate-200 font-mono text-sm resize-none focus:outline-none border-none", glassPanel)}
           placeholder="编辑 Markdown 内容..."
         />
       </div>

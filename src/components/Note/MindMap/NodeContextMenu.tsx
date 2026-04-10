@@ -18,6 +18,8 @@ import {
   Image,
   Camera,
 } from "lucide-react";
+import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 
 export interface NodeContextMenuProps {
   /** 菜单显示位置 X 坐标 */
@@ -46,6 +48,7 @@ export function NodeContextMenu({
   isExpanded = true,
 }: NodeContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
+  const glassMenu = useGlassBg("menu");
 
   // 点击外部关闭菜单
   useEffect(() => {
@@ -181,7 +184,7 @@ export function NodeContextMenu({
   return (
     <div
       ref={menuRef}
-      className="fixed z-[9999] min-w-[220px] bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1"
+      className={cn("fixed z-[9999] min-w-[220px] rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1", glassMenu)}
       style={{
         left: `${x}px`,
         top: `${y}px`,

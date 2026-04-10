@@ -4,6 +4,7 @@ import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 import { useInitializationRuntime } from "../../context/InitializationRuntimeContext";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { VirtualizedNoteGrid } from "./VirtualizedNoteGrid";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import type { Note } from "../../types";
@@ -12,6 +13,7 @@ export function RecentNotesPage() {
   const { notes, setSelectedNoteId, setCurrentView, deleteNote } = useApp();
   const { expandCollectionPathForNote } = useCollections();
   const { removeNoteFromRuntime } = useInitializationRuntime();
+  const glassPanel = useGlassBg("panel");
   const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
   const [deleteTriggerRect, setDeleteTriggerRect] = useState<DOMRect | null>(null);
 
@@ -42,7 +44,7 @@ export function RecentNotesPage() {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50/20 dark:bg-vnote-bg/10 backdrop-blur-[2px]">
+    <div className={`flex-1 flex flex-col h-full overflow-hidden ${glassPanel}`}>
       {/* 头部区域 */}
       <div className="flex-shrink-0 px-6 pt-6 pb-4">
         <div className="flex items-center gap-3">

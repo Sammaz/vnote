@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, AlertCircle, Info, X } from "lucide-react";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 
 export type MessageType = "success" | "error" | "warning" | "info";
 
@@ -29,6 +30,7 @@ const STYLES = {
 export function MessageItem({ content, type = "info", duration = 3000, onClose }: MessageProps) {
   const [isVisible, setIsVisible] = useState(true);
   const [isExiting, setIsExiting] = useState(false);
+  const glassCard = useGlassBg("card");
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -51,7 +53,9 @@ export function MessageItem({ content, type = "info", duration = 3000, onClose }
   return (
     <div
       className={cn(
-        "flex items-start gap-3 px-4 py-3 rounded-lg shadow-lg border-l-4 bg-white dark:bg-vnote-card min-w-[300px] max-w-md transition-all duration-200",
+        "flex items-start gap-3 px-4 py-3 rounded-lg shadow-lg border-l-4",
+        glassCard,
+        "min-w-[300px] max-w-md transition-all duration-200",
         STYLES[type],
         isExiting ? "opacity-0 -translate-y-2" : "opacity-100 translate-y-0"
       )}

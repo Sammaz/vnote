@@ -4,6 +4,7 @@
 
 import { RefreshCw, Loader2 } from "lucide-react";
 import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 import type { HighlightType } from "../../../types";
 import { HIGHLIGHT_TYPE_LABELS, HIGHLIGHT_TYPE_DESCRIPTIONS } from "../../../types";
 
@@ -24,6 +25,7 @@ export function HighlightToolbar({
   isGenerating,
   highlightCount,
 }: HighlightToolbarProps) {
+  const glassInput = useGlassBg("input");
   return (
     <div className="space-y-3">
       {/* 类型切换标签页 */}
@@ -37,7 +39,7 @@ export function HighlightToolbar({
               className={cn(
                 "px-3 py-1.5 text-sm font-medium rounded-md transition-all duration-200 cursor-pointer",
                 activeType === type
-                  ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm"
+                  ? `${glassInput} text-blue-600 dark:text-blue-400 shadow-sm`
                   : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200",
                 isGenerating && "opacity-50 cursor-not-allowed"
               )}

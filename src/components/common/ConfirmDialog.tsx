@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Trash2, X } from "lucide-react";
+import { useGlassBg } from "../../hooks/useGlassBg";
 
 interface ConfirmDialogProps {
   open: boolean;
@@ -36,6 +37,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
 }) => {
   const panelRef = useRef<HTMLDivElement>(null);
   const [anchoredPosition, setAnchoredPosition] = useState<AnchoredPosition | null>(null);
+  const glassModal = useGlassBg("modal");
 
   const isAnchored = placement === "anchored" && triggerRect;
 
@@ -125,7 +127,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       <div className="fixed inset-0 z-[10000] pointer-events-none">
         <div
           ref={panelRef}
-          className="pointer-events-auto fixed z-[10001] w-[420px] max-w-[calc(100vw-1.5rem)] overflow-visible rounded-[22px] border border-slate-200/80 dark:border-vnote-border/80 bg-white/96 dark:bg-vnote-card/92 shadow-[0_24px_80px_rgba(15,23,42,0.16)] animate-fade-in"
+          className={`pointer-events-auto fixed z-[10001] w-[420px] max-w-[calc(100vw-1.5rem)] overflow-visible rounded-[22px] border border-slate-200/80 dark:border-vnote-border/80 ${glassModal} shadow-[0_24px_80px_rgba(15,23,42,0.16)] animate-fade-in`}
           style={anchoredPosition ? { top: anchoredPosition.top, left: anchoredPosition.left } : { visibility: "hidden", left: 0, top: 0 }}
         >
           {anchoredPosition && (
@@ -209,7 +211,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
       onClick={onCancel}
     >
       <div
-        className="w-[420px] max-w-[90vw] overflow-hidden rounded-[24px] border border-white/45 dark:border-vnote-border/80 bg-white/74 dark:bg-vnote-card/46 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_24px_70px_rgba(15,23,42,0.26)]"
+        className={`w-[420px] max-w-[90vw] overflow-hidden rounded-[24px] border border-white/45 dark:border-vnote-border/80 ${glassModal} ring-1 ring-white/30 dark:ring-white/5 shadow-[0_24px_70px_rgba(15,23,42,0.26)]`}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200/80 bg-white/16 p-6 backdrop-blur-md dark:border-vnote-border/80 dark:bg-black/8">

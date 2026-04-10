@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Video, Calendar, Edit3, Trash2 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import type { Note, ChapterData, DetailedReadingData } from "../../types";
 
 interface NoteCardProps {
@@ -55,6 +56,8 @@ function getFirstChapterScreenshot(detailedReading: string | ChapterData | Detai
 
 // NoteCard 组件 - 使用 memo 优化避免不必要的重渲染
 export const NoteCard = memo(function NoteCard({ note, onClick, onEdit, onDelete }: NoteCardProps) {
+  const glassCard = useGlassBg("card");
+  const glassMenu = useGlassBg("menu");
   // 获取第一章截图路径
   const screenshotPath = getFirstChapterScreenshot(note.detailed_reading);
   const thumbnailUrl = screenshotPath ? convertFileSrc(screenshotPath) : null;
@@ -101,8 +104,8 @@ export const NoteCard = memo(function NoteCard({ note, onClick, onEdit, onDelete
         onContextMenu={handleContextMenu}
         className={cn(
           "note-card group relative rounded-xl overflow-hidden",
-          "bg-white/90 dark:bg-vnote-card/90 border border-slate-200/60 dark:border-vnote-border/60",
-          "backdrop-blur-xl shadow-sm hover:shadow-xl",
+          glassCard, "border border-slate-200/60 dark:border-vnote-border/60",
+          "shadow-sm hover:shadow-xl",
           "cursor-pointer"
         )}
       >
@@ -141,7 +144,7 @@ export const NoteCard = memo(function NoteCard({ note, onClick, onEdit, onDelete
       {contextMenu.visible && createPortal(
         <div
           ref={menuRef}
-          className="fixed z-[9999] min-w-[160px] py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-lg shadow-xl"
+          className={`fixed z-[9999] min-w-[160px] py-1 ${glassMenu} border border-slate-200 dark:border-neutral-700 rounded-lg shadow-xl`}
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           {onEdit && (

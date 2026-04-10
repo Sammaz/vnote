@@ -7,6 +7,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Eraser, Maximize2, Minimize2 } from "lucide-react";
 import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 
@@ -26,6 +27,7 @@ interface ChatWindowProps {
 
 export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWindowProps) {
   const questions = suggestedQuestions;
+  const glassPanel = useGlassBg("panel");
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -460,7 +462,8 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
       {/* 头部 */}
       <div
         className={cn(
-          "flex items-center justify-between px-4 py-2 border-b border-slate-200/80 dark:border-vnote-border/80 bg-white/35 dark:bg-black/10 backdrop-blur-md",
+          "flex items-center justify-between px-4 py-2 border-b border-slate-200/80 dark:border-vnote-border/80",
+          glassPanel,
           isPopout && "cursor-move select-none"
         )}
         onMouseDown={isPopout ? handleMouseDown : undefined}
@@ -547,7 +550,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
       <>
         <div
           ref={containerRef}
-          className="flex flex-col h-full bg-white/68 dark:bg-vnote-card/40 backdrop-blur-2xl rounded-lg border border-slate-200/75 dark:border-vnote-border/80 overflow-hidden shadow-soft items-center justify-center"
+          className={cn("flex flex-col h-full rounded-lg border border-slate-200/75 dark:border-vnote-border/80 overflow-hidden shadow-soft items-center justify-center", glassPanel)}
         >
           <div className="text-slate-400 dark:text-slate-500 text-sm">
             聊天窗口已弹出
@@ -572,7 +575,8 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
               zIndex: 9999,
             }}
             className={cn(
-              "flex flex-col bg-white/72 dark:bg-vnote-card/46 backdrop-blur-2xl rounded-lg border border-slate-200/75 dark:border-vnote-border/80 shadow-2xl overflow-hidden",
+              "flex flex-col rounded-lg border border-slate-200/75 dark:border-vnote-border/80 shadow-2xl overflow-hidden",
+              glassPanel,
               isDragging && "cursor-grabbing",
               isResizing && "select-none"
             )}
@@ -590,7 +594,7 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
   return (
     <div
       ref={containerRef}
-      className="flex flex-col h-full bg-white/68 dark:bg-vnote-card/40 backdrop-blur-2xl rounded-lg border border-slate-200/75 dark:border-vnote-border/80 overflow-hidden shadow-soft"
+      className={cn("flex flex-col h-full rounded-lg border border-slate-200/75 dark:border-vnote-border/80 overflow-hidden shadow-soft", glassPanel)}
     >
       {chatContent}
     </div>

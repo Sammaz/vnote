@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData, FlashcardGenerationEvent, DetailedReadingData, DetailedReadingChapter, ChapterGenerationEvent } from "../../types";
@@ -157,6 +158,12 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
 }
 
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, defaultAiConfigId, promptConfigs = [] }: NoteContentPanelProps) {
+
+  const glassPanel = useGlassBg("panel");
+  const glassCard = useGlassBg("card");
+  const glassModal = useGlassBg("modal");
+  const glassInput = useGlassBg("input");
+  const glassMenu = useGlassBg("menu");
 
   // 当前激活的标签页
   const [activeTab, setActiveTab] = useState<TabId>("summary");
@@ -2247,9 +2254,9 @@ Video subtitles content:`;
   };
 
   return (
-    <div className="flex flex-col h-full bg-white/68 dark:bg-vnote-card/40 backdrop-blur-2xl rounded-lg border border-slate-200/70 dark:border-vnote-border/80 overflow-hidden shadow-soft">
+    <div className={cn("flex flex-col h-full rounded-lg border border-slate-200/70 dark:border-vnote-border/80 overflow-hidden shadow-soft", glassPanel)}>
       {/* 标签页头部 */}
-      <div className="border-b border-slate-200/80 dark:border-vnote-border/80 bg-white/28 dark:bg-black/10 backdrop-blur-md select-none">
+      <div className={cn("border-b border-slate-200/80 dark:border-vnote-border/80 select-none", glassPanel)}>
         <div className="flex items-center">
           {/* 当前分组的标签 */}
           <ResponsiveTabs
@@ -2306,7 +2313,7 @@ Video subtitles content:`;
                 className={cn(
                   "flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer",
                   activeGroup === group.id
-                    ? "bg-white dark:bg-vnote-card text-blue-600 dark:text-blue-400 shadow-sm"
+                    ? cn(glassCard, "text-blue-600 dark:text-blue-400 shadow-sm")
                     : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                 )}
               >
@@ -2388,9 +2395,9 @@ Video subtitles content:`;
                   <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
                 </button>
                 {showChapterDropdown && detailedReadingData && (
-                  <div className="absolute top-full left-0 mt-2 w-96 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 max-h-80 overflow-auto">
+                  <div className={cn("absolute top-full left-0 mt-2 w-96 rounded-2xl border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 max-h-80 overflow-auto", glassMenu)}>
                     {/* 下拉框头部 */}
-                    <div className="sticky top-0 bg-white/72 dark:bg-vnote-card/72 px-4 py-2 border-b border-slate-200/80 dark:border-vnote-border/80 backdrop-blur-md flex items-center gap-2">
+                    <div className={cn("sticky top-0 px-4 py-2 border-b border-slate-200/80 dark:border-vnote-border/80 flex items-center gap-2", glassMenu)}>
                       <List className="w-4 h-4 text-slate-500" />
                       <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
                     </div>
@@ -2489,10 +2496,10 @@ Video subtitles content:`;
                       onClick={() => setShowSubtitleModeDropdown(!showSubtitleModeDropdown)}
                       disabled={subtitleOptimizing}
                       className={cn(
-                        "px-3 py-1.5 pr-8 text-sm rounded-xl border transition-all cursor-pointer relative backdrop-blur-md",
+                        "px-3 py-1.5 pr-8 text-sm rounded-xl border transition-all cursor-pointer relative",
                         subtitleOptimizationEnabled
                           ? "bg-blue-50/85 dark:bg-blue-500/14 text-blue-600 dark:text-blue-400 border-blue-200/80 dark:border-blue-500/30"
-                          : "bg-white/72 dark:bg-vnote-card/48 text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-vnote-border/80 hover:border-slate-300 dark:hover:border-slate-500",
+                          : cn(glassInput, "text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-vnote-border/80 hover:border-slate-300 dark:hover:border-slate-500"),
                         "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
                         subtitleOptimizing && "opacity-50 cursor-not-allowed"
                       )}
@@ -2505,7 +2512,7 @@ Video subtitles content:`;
                       )} />
                     </button>
                     {showSubtitleModeDropdown && !subtitleOptimizing && (
-                      <div className="absolute z-50 mt-2 w-28 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1">
+                      <div className={cn("absolute z-50 mt-2 w-28 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1", glassMenu)}>
                         {[
                           { value: "original", label: "原文" },
                           { value: "optimized", label: "智能优化" },
@@ -2693,8 +2700,8 @@ Video subtitles content:`;
                     <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showVisualChapterDropdown ? "rotate-180" : ""}`} />
                   </button>
                   {showVisualChapterDropdown && (
-                    <div className="absolute top-full left-0 mt-1 w-96 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-auto">
-                      <div className="sticky top-0 bg-white dark:bg-slate-800 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                    <div className={cn("absolute top-full left-0 mt-1 w-96 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-auto", glassMenu)}>
+                      <div className={cn("sticky top-0 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2", glassMenu)}>
                         <List className="w-4 h-4 text-slate-500" />
                         <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
                       </div>
@@ -3282,7 +3289,7 @@ Video subtitles content:`;
       {/* 自定义总结弹窗 */}
       {showPromptDialog && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowPromptDialog(false)}>
-          <div className="bg-white dark:bg-vnote-card rounded-2xl shadow-2xl w-[600px] max-w-[90vw]" onClick={e => e.stopPropagation()}>
+          <div className={cn("rounded-2xl shadow-2xl w-[600px] max-w-[90vw]", glassModal)} onClick={e => e.stopPropagation()}>
             {/* 标题和关闭按钮 */}
             <div className="flex items-center justify-between px-8 pt-6 pb-4">
               <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
@@ -3304,7 +3311,7 @@ Video subtitles content:`;
                   onClick={() => setDialogTab("default")}
                   className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
                     dialogTab === "default"
-                      ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm"
+                      ? cn(glassInput, "text-blue-600 dark:text-blue-400 shadow-sm")
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
                   }`}
                 >
@@ -3314,7 +3321,7 @@ Video subtitles content:`;
                   onClick={() => setDialogTab("custom")}
                   className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
                     dialogTab === "custom"
-                      ? "bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm"
+                      ? cn(glassInput, "text-blue-600 dark:text-blue-400 shadow-sm")
                       : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
                   }`}
                 >
@@ -3335,13 +3342,13 @@ Video subtitles content:`;
                       <button
                         type="button"
                         onClick={() => setShowModelDropdown(!showModelDropdown)}
-                        className="w-44 px-3 py-2 pr-10 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/48 backdrop-blur-md text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate"
+                        className={cn("w-44 px-3 py-2 pr-10 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate", glassInput)}
                       >
                         {aiConfigs.find(c => c.id === selectedModelId)?.title || "选择模型"}
                       </button>
                       <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${showModelDropdown ? "rotate-180" : ""}`} />
                       {showModelDropdown && (
-                        <div className="absolute z-50 mt-2 w-56 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1 max-h-60 overflow-auto">
+                        <div className={cn("absolute z-50 mt-2 w-56 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1 max-h-60 overflow-auto", glassMenu)}>
                           {aiConfigs.map(config => (
                             <button
                               key={config.id}
@@ -3370,13 +3377,13 @@ Video subtitles content:`;
                       <button
                         type="button"
                         onClick={() => setShowLanguageDropdown(!showLanguageDropdown)}
-                        className="w-32 px-3 py-2 pr-10 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/48 backdrop-blur-md text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
+                        className={cn("w-32 px-3 py-2 pr-10 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all", glassInput)}
                       >
                         {configLanguage === "zh" ? "中文" : "English"}
                       </button>
                       <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${showLanguageDropdown ? "rotate-180" : ""}`} />
                       {showLanguageDropdown && (
-                        <div className="absolute z-50 mt-2 w-32 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1">
+                        <div className={cn("absolute z-50 mt-2 w-32 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1", glassMenu)}>
                           {[
                             { value: "zh", label: "中文" },
                             { value: "en", label: "English" },
@@ -3481,13 +3488,13 @@ Video subtitles content:`;
                     <button
                       type="button"
                       onClick={() => setShowModelDropdown(!showModelDropdown)}
-                      className="w-48 px-3 py-2 pr-10 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/48 backdrop-blur-md text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate"
+                      className={cn("w-48 px-3 py-2 pr-10 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate", glassInput)}
                     >
                       {aiConfigs.find(c => c.id === selectedModelId)?.title || "选择模型"}
                     </button>
                     <ChevronDown className={`absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${showModelDropdown ? "rotate-180" : ""}`} />
                     {showModelDropdown && (
-                      <div className="absolute z-50 mt-2 w-56 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1 max-h-60 overflow-auto">
+                      <div className={cn("absolute z-50 mt-2 w-56 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1 max-h-60 overflow-auto", glassMenu)}>
                         {aiConfigs.map(config => (
                           <button
                             key={config.id}
@@ -3518,13 +3525,13 @@ Video subtitles content:`;
                         <button
                           type="button"
                           onClick={() => setShowPromptDropdown(!showPromptDropdown)}
-                          className="px-3 py-1.5 pr-8 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/48 backdrop-blur-md text-sm text-slate-600 dark:text-slate-300 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all"
+                          className={cn("px-3 py-1.5 pr-8 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-sm text-slate-600 dark:text-slate-300 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all", glassInput)}
                         >
                           选择已配置的提示词
                         </button>
                         <ChevronDown className={`absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform ${showPromptDropdown ? "rotate-180" : ""}`} />
                         {showPromptDropdown && (
-                          <div className="absolute z-50 mt-2 w-64 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/82 dark:bg-vnote-card/58 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1 max-h-60 overflow-auto">
+                          <div className={cn("absolute z-50 mt-2 w-64 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1 max-h-60 overflow-auto", glassMenu)}>
                             {customSummaryPromptConfigs.map(prompt => (
                               <button
                                 key={prompt.id}
@@ -3557,7 +3564,7 @@ Video subtitles content:`;
 ## 亮点
 - [emoji] 要点`}
                     rows={8}
-                    className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-500 bg-white dark:bg-slate-700 text-sm text-slate-900 dark:text-slate-100 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400"
+                    className={cn("w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-500 text-sm text-slate-900 dark:text-slate-100 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400", glassInput)}
                   />
                 </div>
               </div>

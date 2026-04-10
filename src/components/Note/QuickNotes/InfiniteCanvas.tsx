@@ -26,6 +26,7 @@ import "@xyflow/react/dist/style.css";
 import { Type, StickyNote as StickyNoteIcon, Image as ImageIcon, FileText, Code, Square, Circle, Diamond, Copy, Trash2 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 import { MarkdownRenderer } from "../../Markdown/MarkdownRenderer";
 
 // 自定义节点组件（带选中状态和内联编辑）
@@ -749,6 +750,8 @@ const edgeTypeOptions: { value: EdgeType; label: string; description: string }[]
 export function InfiniteCanvas({ noteId, initialData, onContentChange }: InfiniteCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  const glassMenu = useGlassBg("menu");
+  const glassPanel = useGlassBg("panel");
   const [selectedTool, setSelectedTool] = useState<string>("select");
   const [selectedEdgeType] = useState<EdgeType>('smoothstep');
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId?: string; edgeId?: string } | null>(null);
@@ -1165,7 +1168,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
   return (
     <div className={`flex flex-col ${
       isFullscreen
-        ? "fixed inset-0 z-50 bg-white dark:bg-slate-900"
+        ? cn("fixed inset-0 z-50", glassPanel)
         : "h-full"
     }`}>
       {/* React Flow 画布 */}
@@ -1182,7 +1185,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
         }}
       >
         {/* 浮动工具栏 */}
-        <div className="absolute top-2 left-1/2 transform -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-2 rounded-xl bg-white/88 dark:bg-[rgba(20,20,20,0.88)] backdrop-blur-md shadow-[0_12px_32px_rgba(15,23,42,0.14)] dark:shadow-[0_14px_36px_rgba(0,0,0,0.45)] border border-slate-200/60 dark:border-white/8">
+        <div className={cn("absolute top-2 left-1/2 transform -translate-x-1/2 z-10 flex items-center gap-1 px-2 py-2 rounded-xl shadow-[0_12px_32px_rgba(15,23,42,0.14)] dark:shadow-[0_14px_36px_rgba(0,0,0,0.45)] border border-slate-200/60 dark:border-white/8", glassPanel)}>
           <button
             onClick={() => addNode("textNode")}
             title="文本"
@@ -1285,7 +1288,7 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
         {/* 右键菜单 */}
         {contextMenu && (
           <div
-            className="absolute bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1 z-50 w-48"
+            className={cn("absolute rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1 z-50 w-48", glassMenu)}
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
             {contextMenu.nodeId && (

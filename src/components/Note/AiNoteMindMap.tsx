@@ -6,6 +6,8 @@ import { Markmap, loadCSS, loadJS } from "markmap-view";
 import type { INode, IPureNode } from "markmap-common";
 import { deriveOptions } from "markmap-view";
 import { cleanMarkdownText, extractFirstTimestamp } from "../../utils/markdownRendererUtils";
+import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 
 interface AiNoteMindMapProps {
   markdown: string;
@@ -277,6 +279,7 @@ function findMarkmapNode(root: INode | null | undefined, predicate: (node: INode
 }
 
 export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSvgReady }: AiNoteMindMapProps) {
+  const glassMenu = useGlassBg("menu");
   const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const mmRef = useRef<Markmap | null>(null);
@@ -625,7 +628,7 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
         }}
       />
       {depthControl && depthControlContainer ? createPortal(depthControl, depthControlContainer) : null}
-      <div className="absolute bottom-4 left-4 z-10 flex flex-col items-center gap-2 rounded-xl bg-white/85 p-1.5 shadow-sm backdrop-blur-sm dark:bg-slate-900/85">
+      <div className={cn("absolute bottom-4 left-4 z-10 flex flex-col items-center gap-2 rounded-xl p-1.5 shadow-sm", glassMenu)}>
         <button
           onClick={handleZoomOut}
           className="rounded-lg p-2 text-slate-600 transition-colors hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 cursor-pointer"

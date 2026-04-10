@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 
 interface StatCardProps {
   icon: ReactNode;
@@ -24,12 +25,13 @@ export function StatCard({
   subValue,
   color = "blue",
 }: StatCardProps) {
+  const glassCard = useGlassBg("card");
   return (
     <div
       className={cn(
         "relative p-5 rounded-xl overflow-hidden",
-        "bg-white/90 dark:bg-vnote-card/90 border border-slate-200/60 dark:border-vnote-border/60",
-        "backdrop-blur-xl shadow-sm",
+        glassCard, "border border-slate-200/60 dark:border-vnote-border/60",
+        "shadow-sm",
         "hover:border-slate-300 dark:hover:border-vnote-muted hover:shadow-lg transition-all duration-300 hover:scale-[1.02]"
       )}
     >

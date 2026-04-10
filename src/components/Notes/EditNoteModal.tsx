@@ -4,6 +4,7 @@ import { X, FolderOpen } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import type { Note } from "../../types";
 
 interface EditNoteModalProps {
@@ -13,6 +14,7 @@ interface EditNoteModalProps {
 
 export function EditNoteModal({ note, onClose }: EditNoteModalProps) {
   const { updateNote } = useApp();
+  const glassModal = useGlassBg("modal");
   const [title, setTitle] = useState(note.title);
   const [videoPath, setVideoPath] = useState(note.video_path);
   const [subtitlePath, setSubtitlePath] = useState(note.subtitle_path ?? "");
@@ -68,7 +70,7 @@ export function EditNoteModal({ note, onClose }: EditNoteModalProps) {
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-lg mx-4 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700">
+      <div className={`relative w-full max-w-lg mx-4 ${glassModal} rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700`}>
         <button
           onClick={onClose}
           className="absolute right-4 top-4 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { X, Library, ChevronRight, ChevronDown } from "lucide-react";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 import type { Collection } from "../../types";
 
@@ -94,6 +95,7 @@ export function MoveToCollectionModal({
   onSuccess,
 }: MoveToCollectionModalProps) {
   const { collections, batchMoveToCollection } = useApp();
+  const glassModal = useGlassBg("modal");
 
   // 获取顶级合集（排除当前合集）
   const rootCollections = collections.filter((c) => c.parent_id === null && c.id !== fromCollectionId);
@@ -114,7 +116,7 @@ export function MoveToCollectionModal({
         className="absolute inset-0 bg-black/50 backdrop-blur-sm"
         onClick={onClose}
       />
-      <div className="relative w-full max-w-md mx-4 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
+      <div className={cn("relative w-full max-w-md mx-4 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700", glassModal)}>
         <button
           onClick={onClose}
           className="absolute right-4 top-4 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"

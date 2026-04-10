@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { invoke } from "@tauri-apps/api/core";
 import { ChevronUp, ChevronDown, MoreHorizontal, Trash2, Edit3, Video, Library, ChevronRight, FolderPlus } from "lucide-react";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 import { useInitializationRuntime } from "../../context/InitializationRuntimeContext";
 import { CreateCollectionModal } from "./CreateCollectionModal";
@@ -127,6 +128,7 @@ function CollectionNoteItem({
     removeNoteFromCollection,
   } = useApp();
   const { removeNoteFromRuntime } = useInitializationRuntime();
+  const glassMenu = useGlassBg("menu");
 
   const [isHovered, setIsHovered] = useState(false);
   const [showMenu, setShowMenu] = useState(false);
@@ -250,7 +252,7 @@ function CollectionNoteItem({
       {showMenu && createPortal(
         <div
           ref={menuRef}
-          className="fixed w-44 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-[9999]"
+          className={cn("fixed w-44 py-1 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-[9999]", glassMenu)}
           style={{ top: menuPosition.top, left: menuPosition.left }}
         >
           <div className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-neutral-400 border-b border-slate-100 dark:border-neutral-700">
@@ -272,7 +274,7 @@ function CollectionNoteItem({
             </button>
 
             {showCollectionSubmenu && (
-              <div className="absolute left-full top-0 ml-1 w-48 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg max-h-64 overflow-y-auto">
+              <div className={cn("absolute left-full top-0 ml-1 w-48 py-1 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg max-h-64 overflow-y-auto", glassMenu)}>
                 {collections.filter((c) => c.parent_id === null).map((col) => (
                   <CollectionTreeMenuItem
                     key={col.id}
@@ -379,6 +381,7 @@ export function CollectionItem({
     notes,
     currentView,
   } = useApp();
+  const glassModal = useGlassBg("modal");
 
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [collectionNotes, setCollectionNotes] = useState<NoteWithDetails[]>([]);
@@ -509,7 +512,7 @@ export function CollectionItem({
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setShowDeleteConfirm(false)}
           />
-          <div className="relative w-full max-w-md mx-4 p-6 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700">
+          <div className={cn("relative w-full max-w-md mx-4 p-6 rounded-lg shadow-2xl border border-slate-200 dark:border-neutral-700", glassModal)}>
             <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
               确定要删除整个合集吗?
             </h3>

@@ -4,6 +4,7 @@
 
 import { Play } from "lucide-react";
 import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 import { formatTime, getScoreColor, getHighlightTypeIcon } from "../../../utils/highlightUtils";
 import type { HighlightSegment } from "../../../types";
 
@@ -20,6 +21,7 @@ export function HighlightCard({
   onClick,
   isActive = false,
 }: HighlightCardProps) {
+  const glassCard = useGlassBg("card");
   const scoreColors = getScoreColor(highlight.score);
   const typeIcon = getHighlightTypeIcon(highlight.highlight_type);
 
@@ -32,7 +34,7 @@ export function HighlightCard({
         "hover:shadow-sm hover:border-blue-300 dark:hover:border-blue-600",
         isActive
           ? "border-blue-400 dark:border-blue-500 bg-blue-50/50 dark:bg-blue-900/20 shadow-sm"
-          : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800/50"
+          : cn("border-slate-200 dark:border-slate-700", glassCard)
       )}
     >
       {/* 序号和类型图标 */}

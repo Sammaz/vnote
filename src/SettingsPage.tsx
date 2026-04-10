@@ -2,6 +2,7 @@ import {
     ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, MessageSquareText, Search, HardDrive, ImagePlus, X as XIcon, SlidersHorizontal, Focus, ScanText, RefreshCw, ListChecks
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
+import { useGlassBg } from "./hooks/useGlassBg";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useApp } from "./context/AppContext";
@@ -23,6 +24,8 @@ type EditingType = "ai" | "embedding" | "reranker" | null;
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
     const { notes, refreshAiConfigs, refreshPromptConfigs } = useApp();
     const { backgroundImage, backgroundSettings, setBackgroundImage, updateBackgroundSettings, resetBackgroundSettings } = useSettings();
+    const glassCard = useGlassBg("card");
+    const glassInput = useGlassBg("input");
     const [activeTab, setActiveTab] = useState<SettingsTab>("general");
     const [trayEnabled, setTrayEnabled] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -1014,7 +1017,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         value={editingPromptConfig.title || ""}
                                         onChange={e => setEditingPromptConfig({ ...editingPromptConfig, title: e.target.value })}
                                         placeholder="例如：视频内容总结助手"
-                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                        className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput}`}
                                     />
                                     <p className="text-sm text-slate-500 mt-2">为提示词设置一个易于识别的名称</p>
                                 </div>
@@ -1026,7 +1029,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         value={editingPromptConfig.description || ""}
                                         onChange={e => setEditingPromptConfig({ ...editingPromptConfig, description: e.target.value || null })}
                                         placeholder="简要说明提示词的用途和使用场景"
-                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                        className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput}`}
                                     />
                                     <p className="text-sm text-slate-500 mt-2">可选，帮助你快速了解这个提示词的作用</p>
                                 </div>
@@ -1038,7 +1041,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         onChange={e => setEditingPromptConfig({ ...editingPromptConfig, content: e.target.value })}
                                         placeholder="输入完整的 Prompt 指令内容"
                                         rows={8}
-                                        className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm resize-y min-h-[200px]"
+                                        className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm resize-y min-h-[200px] ${glassInput}`}
                                     />
                                     <p className="text-sm text-slate-500 mt-2">编写清晰、详细的 Prompt 指令，让 AI 能够准确理解你的需求</p>
                                 </div>
@@ -1072,13 +1075,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         value={promptSearchQuery}
                                         onChange={e => setPromptSearchQuery(e.target.value)}
                                         placeholder="搜索提示词..."
-                                        className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        className={`w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 ${glassInput}`}
                                     />
                                 </div>
                                 <select
                                     value={promptSortBy}
                                     onChange={e => setPromptSortBy(e.target.value as "recent" | "name")}
-                                    className="px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    className={`px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500 ${glassInput}`}
                                 >
                                     <option value="recent">最近更新</option>
                                     <option value="name">名称排序</option>
@@ -1099,7 +1102,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         return (
                                             <div
                                                 key={prompt.id}
-                                                className="group relative rounded-xl overflow-hidden p-5 bg-white dark:bg-vnote-card border border-slate-200 dark:border-vnote-border hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 flex flex-col h-full"
+                                                className={`group relative rounded-xl overflow-hidden p-5 border border-slate-200 dark:border-vnote-border hover:border-slate-300 dark:hover:border-slate-600 transition-all duration-200 flex flex-col h-full ${glassCard}`}
                                             >
                                                 <h3 className="text-slate-900 dark:text-slate-100 font-medium line-clamp-1">
                                                     {prompt.title}
@@ -1174,7 +1177,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     value={currentConfig?.title || ""}
                                     onChange={e => setCurrentEditingConfig({ title: e.target.value })}
                                     placeholder={editingType === "ai" ? "例如：OpenAI、DeepSeek" : editingType === "embedding" ? "例如：OpenAI Embedding" : "例如：Cohere Reranker"}
-                                    className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm"
+                                    className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput}`}
                                 />
                                 <p className="text-sm text-slate-500 mt-2">为此配置设置一个易于识别的名称</p>
                             </div>
@@ -1186,7 +1189,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     value={currentConfig?.base_url || ""}
                                     onChange={e => setCurrentEditingConfig({ base_url: e.target.value })}
                                     placeholder="例如：https://api.openai.com/v1"
-                                    className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-mono"
+                                    className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm font-mono ${glassInput}`}
                                 />
                                 <p className="text-sm text-slate-500 mt-2">API 服务的基础地址</p>
                             </div>
@@ -1199,12 +1202,12 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         value={currentConfig?.api_key || ""}
                                         onChange={e => setCurrentEditingConfig({ api_key: e.target.value })}
                                         placeholder="sk-..."
-                                        className="flex-1 px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-mono"
+                                        className={`flex-1 px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm font-mono ${glassInput}`}
                                     />
                                     <button
                                         type="button"
                                         onClick={() => setApiKeyVisible(!apiKeyVisible)}
-                                        className="px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                                        className={`px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer ${glassInput}`}
                                     >
                                         {apiKeyVisible ? <Eye size={16} /> : <EyeOff size={16} />}
                                     </button>
@@ -1218,7 +1221,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     value={currentConfig?.model || ""}
                                     onChange={e => setCurrentEditingConfig({ model: e.target.value })}
                                     placeholder={editingType === "ai" ? "例如：gpt-4o、deepseek-chat" : editingType === "embedding" ? "例如：text-embedding-3-small" : "例如：rerank-multilingual-v3.0"}
-                                    className="w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm font-mono"
+                                    className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm font-mono ${glassInput}`}
                                 />
                                 <p className="text-sm text-slate-500 mt-2">要使用的模型 ID</p>
                             </div>

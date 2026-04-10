@@ -37,6 +37,7 @@ import {
   Upload,
 } from "lucide-react";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readFile } from "@tauri-apps/plugin-fs";
@@ -65,6 +66,7 @@ interface TableFloatingMenuProps {
 }
 
 function TableFloatingMenu({ editor, editorContainerRef }: TableFloatingMenuProps) {
+  const glassMenu = useGlassBg("menu");
   const [menuState, setMenuState] = useState<{
     visible: boolean;
     tableRect: DOMRect | null;
@@ -244,7 +246,7 @@ function TableFloatingMenu({ editor, editorContainerRef }: TableFloatingMenuProp
             <GripVertical className="w-3 h-3" />
           </button>
           {activeMenu?.type === 'column' && activeMenu.index === colIndex && (
-            <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1 min-w-[120px]">
+            <div className={cn("absolute top-full left-1/2 -translate-x-1/2 mt-1 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1 min-w-[120px]", glassMenu)}>
               <button
                 onClick={() => {
                   // Select this column first
@@ -318,7 +320,7 @@ function TableFloatingMenu({ editor, editorContainerRef }: TableFloatingMenuProp
             <GripVertical className="w-3 h-3 rotate-90" />
           </button>
           {activeMenu?.type === 'row' && activeMenu.index === rowIndex && (
-            <div className="absolute top-1/2 left-full -translate-y-1/2 ml-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1 min-w-[120px]">
+            <div className={cn("absolute top-1/2 left-full -translate-y-1/2 ml-1 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1 min-w-[120px]", glassMenu)}>
               <button
                 onClick={() => {
                   const tableNode = editor.view.dom.querySelector("table");
@@ -432,6 +434,9 @@ export function QuickNotesContent({
   initialContent,
   onContentChange,
 }: QuickNotesContentProps) {
+  const glassMenu = useGlassBg("menu");
+  const glassPanel = useGlassBg("panel");
+  const glassInput = useGlassBg("input");
   const [showBlockTypeDropdown, setShowBlockTypeDropdown] = useState(false);
   const [showLinkPopover, setShowLinkPopover] = useState(false);
   const [showImagePopover, setShowImagePopover] = useState(false);
@@ -892,7 +897,7 @@ export function QuickNotesContent({
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+      <div className={cn("flex items-center gap-1 px-4 py-2 border-b border-slate-200 dark:border-vnote-border", glassPanel)}>
         {/* Undo/Redo */}
         <button
           onClick={() => editor.chain().focus().undo().run()}
@@ -980,7 +985,7 @@ export function QuickNotesContent({
             <ChevronDown className={cn("w-3 h-3 transition-transform", showBlockTypeDropdown && "rotate-180")} />
           </button>
           {showBlockTypeDropdown && (
-            <div className="absolute top-full left-0 mt-1 w-32 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1">
+            <div className={cn("absolute top-full left-0 mt-1 w-32 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1", glassMenu)}>
               {BLOCK_TYPES.map((type) => (
                 <button
                   key={type.value}
@@ -1011,8 +1016,8 @@ export function QuickNotesContent({
             <LinkIcon className="w-4 h-4" />
           </button>
           {showLinkPopover && (
-            <div className="absolute top-full left-0 mt-2 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 z-50 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+            <div className={cn("absolute top-full left-0 mt-2 w-80 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 z-50 overflow-hidden", glassMenu)}>
+              <div className={cn("flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700", glassPanel)}>
                 <div className="flex items-center gap-2">
                   <LinkIcon className="w-4 h-4 text-blue-500" />
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-200">插入链接</span>
@@ -1033,7 +1038,7 @@ export function QuickNotesContent({
                     onChange={(e) => setLinkUrl(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleApplyLink()}
                     placeholder="https://example.com"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    className={cn("w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all", glassInput)}
                     autoFocus
                   />
                 </div>
@@ -1079,8 +1084,8 @@ export function QuickNotesContent({
             <ImageIcon className="w-4 h-4" />
           </button>
           {showImagePopover && (
-            <div className="absolute top-full left-0 mt-2 w-80 bg-white dark:bg-slate-800 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 z-50 overflow-hidden">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50">
+            <div className={cn("absolute top-full left-0 mt-2 w-80 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 z-50 overflow-hidden", glassMenu)}>
+              <div className={cn("flex items-center justify-between px-4 py-3 border-b border-slate-100 dark:border-slate-700", glassPanel)}>
                 <div className="flex items-center gap-2">
                   <ImageIcon className="w-4 h-4 text-blue-500" />
                   <span className="text-sm font-medium text-slate-700 dark:text-slate-200">插入图片</span>
@@ -1119,7 +1124,7 @@ export function QuickNotesContent({
                     onChange={(e) => setImageUrl(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleApplyImage()}
                     placeholder="https://example.com/image.jpg"
-                    className="w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
+                    className={cn("w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all", glassInput)}
                   />
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-1">

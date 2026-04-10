@@ -5,6 +5,7 @@
 import { ChevronDown, Check } from "lucide-react";
 import { useState, useRef, useEffect } from "react";
 import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 
 export type MindMapLayout =
   | "logicalStructure"
@@ -37,6 +38,7 @@ interface LayoutSelectorProps {
 export function LayoutSelector({ value, onChange }: LayoutSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const glassMenu = useGlassBg("menu");
 
   const currentLayout = LAYOUT_OPTIONS.find(opt => opt.value === value);
 
@@ -61,7 +63,7 @@ export function LayoutSelector({ value, onChange }: LayoutSelectorProps) {
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-64 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1">
+        <div className={cn("absolute top-full left-0 mt-2 w-64 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1", glassMenu)}>
           {LAYOUT_OPTIONS.map((option) => (
             <button
               key={option.value}

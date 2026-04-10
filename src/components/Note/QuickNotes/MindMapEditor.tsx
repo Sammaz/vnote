@@ -19,6 +19,8 @@ import { message } from "../../../utils/message";
 import { LayoutSelector, type MindMapLayout } from "./LayoutSelector";
 import { StylePanel, type NodeStyle } from "./StylePanel";
 import { NodeContextMenu } from "../../Note/MindMap/NodeContextMenu";
+import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 
 // 注册插件
 MindMap.usePlugin(Drag);
@@ -39,6 +41,8 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
   const containerRef = useRef<HTMLDivElement>(null);
   const mindMapRef = useRef<MindMap | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const glassPanel = useGlassBg("panel");
+  const glassMenu = useGlassBg("menu");
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains("dark")
   );
@@ -580,7 +584,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         }}
       />
       {/* 工具栏 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+      <div className={cn("flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-vnote-border", glassPanel)}>
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
             <Network className="w-5 h-5 text-white" />
@@ -611,7 +615,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
               <ChevronDown className="w-3 h-3" />
             </button>
             {showExportMenu && (
-              <div className="absolute top-full right-0 mt-2 w-40 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1">
+              <div className={cn("absolute top-full right-0 mt-2 w-40 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1", glassMenu)}>
                 <button
                   onClick={() => handleExport('png')}
                   className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
@@ -651,7 +655,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         />
 
         {/* 缩放控制工具栏 */}
-        <div className="absolute bottom-4 left-4 flex flex-col items-center gap-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-1 z-[100]">
+        <div className={cn("absolute bottom-4 left-4 flex flex-col items-center gap-1 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-1 z-[100]", glassPanel)}>
           <button
             onClick={handleZoomOut}
             className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors cursor-pointer"

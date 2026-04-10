@@ -1,5 +1,6 @@
 import { X, Trash2, FolderInput } from "lucide-react";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 
 interface BatchActionBarProps {
@@ -15,6 +16,8 @@ export function BatchActionBar({ collectionId, onMoveClick }: BatchActionBarProp
     batchRemoveFromCollection,
     batchDeleteNotes,
   } = useApp();
+
+  const glassMenu = useGlassBg("menu");
 
   const selectedCount = batchSelection.selectedNoteIds.size;
 
@@ -47,7 +50,7 @@ export function BatchActionBar({ collectionId, onMoveClick }: BatchActionBarProp
           disabled={selectedCount === 0}
           className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
-            "bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700",
+            glassMenu, "border border-slate-200 dark:border-neutral-700",
             "text-slate-600 dark:text-slate-300",
             "hover:bg-slate-50 dark:hover:bg-neutral-700",
             "disabled:opacity-50 disabled:cursor-not-allowed"
@@ -62,7 +65,7 @@ export function BatchActionBar({ collectionId, onMoveClick }: BatchActionBarProp
           disabled={selectedCount === 0}
           className={cn(
             "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer",
-            "bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700",
+            glassMenu, "border border-slate-200 dark:border-neutral-700",
             "text-slate-600 dark:text-slate-300",
             "hover:bg-slate-50 dark:hover:bg-neutral-700",
             "disabled:opacity-50 disabled:cursor-not-allowed"

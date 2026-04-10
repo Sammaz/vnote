@@ -163,13 +163,13 @@ input[type="password"]::-ms-clear {
 /* 笔记卡片悬停效果 - 现代化优化 */
 .note-card {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
 .dark .note-card {
-  background: rgba(20, 20, 20, 0.8);
+  background: rgba(20, 20, 20, 0.72);
 }
 
 .note-card:hover {
@@ -925,13 +925,13 @@ input[type="password"]::-ms-clear {
   overflow: hidden;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.22);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.78);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.08);
 }
 
 .dark .markdown-code-block {
   border-color: rgba(255, 255, 255, 0.08);
-  background: rgba(15, 23, 42, 0.88);
+  background: rgba(15, 23, 42, 0.72);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.34);
 }
 
@@ -942,11 +942,11 @@ input[type="password"]::-ms-clear {
 
 .markdown-code-block-body {
   overflow-x: auto;
-  background: rgba(248, 250, 252, 0.88);
+  background: rgba(248, 250, 252, 0.82);
 }
 
 .dark .markdown-code-block-body {
-  background: rgba(15, 23, 42, 0.96);
+  background: rgba(15, 23, 42, 0.82);
 }
 
 .markdown-code-block-body > div {
@@ -1031,7 +1031,7 @@ input[type="password"]::-ms-clear {
   overflow: hidden;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.22) !important;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
@@ -1062,7 +1062,7 @@ input[type="password"]::-ms-clear {
 
 .dark .react-flow__controls {
   border-color: rgba(255, 255, 255, 0.08) !important;
-  background: rgba(20, 20, 20, 0.88);
+  background: rgba(20, 20, 20, 0.72);
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.42);
 }
 
@@ -1080,7 +1080,7 @@ input[type="password"]::-ms-clear {
   overflow: hidden;
   border-radius: 18px;
   border: 1px solid rgba(148, 163, 184, 0.2) !important;
-  background: rgba(255, 255, 255, 0.82) !important;
+  background: rgba(255, 255, 255, 0.78) !important;
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.12);
@@ -1098,7 +1098,7 @@ input[type="password"]::-ms-clear {
 
 .dark .react-flow__minimap {
   border-color: rgba(255, 255, 255, 0.08) !important;
-  background: rgba(20, 20, 20, 0.9) !important;
+  background: rgba(20, 20, 20, 0.72) !important;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.46);
 }
 
@@ -1206,9 +1206,8 @@ input[type="password"]::-ms-clear {
 }
 
 /* 中等毛玻璃 - 适用于侧边栏、导航栏 */
-/* 注意：backdrop-filter 在某些 WebView 环境中可能不生效，因此使用较高的背景不透明度作为回退 */
 .glass-medium {
-  background: rgba(255, 255, 255, 0.98);
+  background: rgba(255, 255, 255, 0.82);
   backdrop-filter: blur(16px) saturate(180%);
   -webkit-backdrop-filter: blur(16px) saturate(180%);
   border: 1px solid rgba(0, 0, 0, 0.1);
@@ -1216,7 +1215,7 @@ input[type="password"]::-ms-clear {
 }
 
 .dark .glass-medium {
-  background: rgba(30, 41, 59, 0.98);
+  background: rgba(30, 41, 59, 0.72);
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
 }

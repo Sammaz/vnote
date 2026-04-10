@@ -4,6 +4,7 @@
 
 import { FileText, Network, Palette } from "lucide-react";
 import { cn } from "../../../utils/cn";
+import { useGlassBg } from "../../../hooks/useGlassBg";
 
 export type QuickNotesSubTab = "richtext" | "mindmap" | "canvas";
 
@@ -25,8 +26,10 @@ interface SubTabBarProps {
 }
 
 export function SubTabBar({ activeTab, onTabChange }: SubTabBarProps) {
+  const glassCard = useGlassBg("card");
+  const glassPanel = useGlassBg("panel");
   return (
-    <div className="flex items-center gap-1 px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
+    <div className={cn("flex items-center gap-1 px-4 py-2 border-b border-slate-200 dark:border-vnote-border", glassPanel)}>
       {SUB_TABS.map((tab) => (
         <button
           key={tab.id}
@@ -34,7 +37,7 @@ export function SubTabBar({ activeTab, onTabChange }: SubTabBarProps) {
           className={cn(
             "flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors cursor-pointer",
             activeTab === tab.id
-              ? "bg-white dark:bg-vnote-card text-blue-600 dark:text-blue-400 shadow-sm"
+              ? cn(glassCard, "text-blue-600 dark:text-blue-400 shadow-sm")
               : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
           )}
         >

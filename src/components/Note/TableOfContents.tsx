@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { List, ChevronRight } from "lucide-react";
 import { cleanMarkdownText, generateHeadingId, getTextFromReactNode } from "../../utils/markdownRendererUtils";
+import { useGlassBg } from "../../hooks/useGlassBg";
 
 const NOTE_MARKDOWN_SELECTOR = ".note-markdown";
 const HEADING_SELECTOR = "h1, h2, h3";
@@ -126,6 +127,7 @@ interface TableOfContentsProps {
 export function TableOfContents({ markdown }: TableOfContentsProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState<number>(-1);
+  const glassPanel = useGlassBg("panel");
 
   // Flag to temporarily disable observer updates during manual navigation
   const isManualScrollingRef = useRef(false);
@@ -254,7 +256,7 @@ export function TableOfContents({ markdown }: TableOfContentsProps) {
           isOpen ? "translate-x-0 opacity-100" : "translate-x-[120%] opacity-0 pointer-events-none"
         }`}
       >
-        <div className="flex items-center justify-between p-4 pb-2 border-b border-slate-200/50 dark:border-slate-700/50 bg-white/60 dark:bg-slate-800/60 rounded-t-2xl backdrop-blur-sm">
+        <div className={`flex items-center justify-between p-4 pb-2 border-b border-slate-200/50 dark:border-slate-700/50 ${glassPanel} rounded-t-2xl`}>
           <h3 className="font-semibold text-slate-800 dark:text-slate-100 text-sm flex items-center gap-2">
             <List size={16} className="text-blue-500" />
             目录导航

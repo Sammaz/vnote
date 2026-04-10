@@ -4,6 +4,7 @@ import { X, FolderPlus, ListPlus, Image, ChevronDown, ChevronRight, Library, Che
 import { open } from "@tauri-apps/plugin-dialog";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 import type { Collection } from "../../types";
 
@@ -113,6 +114,9 @@ export function CreateCollectionModal({
   defaultParentId,
 }: CreateCollectionModalProps) {
   const { collections, createCollection, updateCollection } = useApp();
+  const glassModal = useGlassBg("modal");
+  const glassInput = useGlassBg("input");
+  const glassMenu = useGlassBg("menu");
   const [mode, setMode] = useState<"create" | "addTo">("create");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -239,7 +243,7 @@ export function CreateCollectionModal({
       />
 
       {/* 弹窗内容 */}
-      <div className="relative w-full max-w-lg mx-4 bg-white dark:bg-neutral-900 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700">
+      <div className={cn("relative w-full max-w-lg mx-4 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700", glassModal)}>
         {/* 关闭按钮 */}
         <button
           onClick={onClose}
@@ -302,7 +306,7 @@ export function CreateCollectionModal({
                     onClick={() => setShowParentDropdown(!showParentDropdown)}
                     className={cn(
                       "w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors cursor-pointer",
-                      "bg-slate-50 dark:bg-neutral-800",
+                      glassInput,
                       "border-slate-200 dark:border-neutral-700",
                       "text-sm",
                       showParentDropdown && "border-blue-500 dark:border-blue-400 ring-1 ring-blue-500/20"
@@ -319,7 +323,7 @@ export function CreateCollectionModal({
                     <ChevronsUpDown className="w-4 h-4 text-slate-400 flex-shrink-0" />
                   </button>
                   {showParentDropdown && (
-                    <div className="absolute z-10 mt-1 w-full max-h-52 overflow-y-auto bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg">
+                    <div className={cn("absolute z-10 mt-1 w-full max-h-52 overflow-y-auto border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg", glassMenu)}>
                       <button
                         type="button"
                         onClick={() => {
@@ -367,7 +371,7 @@ export function CreateCollectionModal({
                 placeholder="例如：OpenAI 技术视频"
                 className={cn(
                   "flex-1 px-3 py-2.5 rounded-md border transition-colors",
-                  "bg-slate-50 dark:bg-neutral-800",
+                  glassInput,
                   "border-slate-200 dark:border-neutral-700",
                   "focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20",
                   "text-slate-800 dark:text-slate-200 text-sm",
@@ -389,7 +393,7 @@ export function CreateCollectionModal({
                 rows={3}
                 className={cn(
                   "flex-1 px-3 py-2.5 rounded-md border transition-colors resize-none",
-                  "bg-slate-50 dark:bg-neutral-800",
+                  glassInput,
                   "border-slate-200 dark:border-neutral-700",
                   "focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20",
                   "text-slate-800 dark:text-slate-200 text-sm",

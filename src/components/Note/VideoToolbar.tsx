@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import type { AiConfig } from "../../types";
 
 interface VideoToolbarProps {
@@ -59,6 +60,7 @@ interface ModelSelectorProps {
 function ModelSelector({ models, currentModelId, onModelChange }: ModelSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const glassMenu = useGlassBg("menu");
 
   const currentModel = models.find((m) => m.id === currentModelId);
 
@@ -91,7 +93,7 @@ function ModelSelector({ models, currentModelId, onModelChange }: ModelSelectorP
       </button>
 
       {isOpen && (
-        <div className="absolute top-full right-0 mt-1 w-44 py-1 bg-white dark:bg-neutral-800 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-50">
+        <div className={cn("absolute top-full right-0 mt-1 w-44 py-1 border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg z-50", glassMenu)}>
           {models.map((model) => (
             <button
               key={model.id}

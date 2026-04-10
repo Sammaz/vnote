@@ -25,6 +25,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { MarkdownRenderer } from "../Markdown/MarkdownRenderer";
 import { listen } from "@tauri-apps/api/event";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 import type {
@@ -216,6 +217,12 @@ export function KnowledgeBaseChat() {
     setCurrentView,
   } = useApp();
   const { expandCollectionPathForNote } = useCollections();
+
+  const glassPanel = useGlassBg("panel");
+  const glassCard = useGlassBg("card");
+  const glassModal = useGlassBg("modal");
+  const glassInput = useGlassBg("input");
+  const glassMenu = useGlassBg("menu");
 
   const [sessions, setSessions] = useState<KnowledgeChatSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -1137,8 +1144,8 @@ export function KnowledgeBaseChat() {
   }, [messages, persistCurrentSessionMeta, selectedSessionId, sessions, streaming]);
 
   return (
-    <div ref={rootRef} className="flex h-full overflow-hidden bg-white/20 dark:bg-black/10">
-      <aside className="w-[280px] border-r border-slate-200/70 dark:border-vnote-border/70 bg-white/58 dark:bg-vnote-card/36 backdrop-blur-xl flex flex-col">
+    <div ref={rootRef} className={cn("flex h-full overflow-hidden", glassPanel)}>
+      <aside className={cn("w-[280px] border-r border-slate-200/70 dark:border-vnote-border/70 flex flex-col", glassPanel)}>
         <div className="p-4 border-b border-slate-200/70 dark:border-vnote-border/70">
           <button
             onClick={handleCreateSession}
@@ -1157,7 +1164,7 @@ export function KnowledgeBaseChat() {
               className={cn(
                 "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer",
                 mode === "standard"
-                  ? "bg-white dark:bg-neutral-800 text-blue-600 dark:text-blue-400 shadow-sm"
+                  ? cn(glassMenu, "text-blue-600 dark:text-blue-400 shadow-sm")
                   : "text-slate-500 dark:text-slate-400"
               )}
             >
@@ -1168,7 +1175,7 @@ export function KnowledgeBaseChat() {
               className={cn(
                 "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer",
                 mode === "agent"
-                  ? "bg-white dark:bg-neutral-800 text-violet-600 dark:text-violet-400 shadow-sm"
+                  ? cn(glassMenu, "text-violet-600 dark:text-violet-400 shadow-sm")
                   : "text-slate-500 dark:text-slate-400"
               )}
             >
@@ -1238,7 +1245,7 @@ export function KnowledgeBaseChat() {
                                 setEditingSessionTitle("");
                               }
                             }}
-                            className="w-full px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-800 bg-white/90 dark:bg-neutral-900/80 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                            className={cn("w-full px-2 py-1 rounded-lg border border-blue-200 dark:border-blue-800 text-sm text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20", glassInput)}
                             autoFocus
                           />
                         ) : (
@@ -1296,12 +1303,12 @@ export function KnowledgeBaseChat() {
         {deleteConfirmOpen && deleteConfirmPosition && (
           <div
             ref={deleteConfirmPanelRef}
-            className="absolute z-20 w-[420px] max-w-[calc(100%-1.5rem)] rounded-[22px] border border-slate-200/80 dark:border-vnote-border/80 bg-white/96 dark:bg-vnote-card/92 shadow-[0_24px_80px_rgba(15,23,42,0.16)] overflow-visible animate-fade-in"
+            className={cn("absolute z-20 w-[420px] max-w-[calc(100%-1.5rem)] rounded-[22px] border border-slate-200/80 dark:border-vnote-border/80 shadow-[0_24px_80px_rgba(15,23,42,0.16)] overflow-visible animate-fade-in", glassModal)}
             style={{ top: deleteConfirmPosition.top, left: deleteConfirmPosition.left, minWidth: deleteConfirmPanelMinWidth ?? undefined }}
           >
             <div
               className={cn(
-                "absolute h-3.5 w-3.5 border-t border-l border-slate-200/80 dark:border-vnote-border/80 bg-white/96 dark:bg-vnote-card/92",
+                cn("absolute h-3.5 w-3.5 border-t border-l border-slate-200/80 dark:border-vnote-border/80", glassModal),
                 deleteConfirmPosition.arrowSide === "left"
                   ? "-left-[7px] rotate-[-45deg]"
                   : "-right-[7px] rotate-[135deg]"
@@ -1309,7 +1316,7 @@ export function KnowledgeBaseChat() {
               style={{ top: deleteConfirmPosition.arrowTop }}
             />
             <div className="overflow-hidden rounded-[22px]">
-              <div className="flex items-start justify-between gap-4 border-b border-slate-200/70 bg-white/80 px-5 py-4 dark:border-vnote-border/70 dark:bg-white/5">
+              <div className={cn("flex items-start justify-between gap-4 border-b border-slate-200/70 px-5 py-4 dark:border-vnote-border/70", glassModal)}>
                 <div className="min-w-0">
                   <div className="text-[11px] font-medium uppercase tracking-[0.16em] text-red-500/80 dark:text-red-300/80">
                     Danger Zone
@@ -1376,7 +1383,7 @@ export function KnowledgeBaseChat() {
         )}
 
         <div className="flex-1 min-w-0 flex flex-col">
-          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-200/70 dark:border-vnote-border/70 bg-white/54 dark:bg-vnote-card/28 backdrop-blur-xl">
+          <div className={cn("flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-200/70 dark:border-vnote-border/70", glassPanel)}>
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
@@ -1436,7 +1443,7 @@ export function KnowledgeBaseChat() {
                       : "适合快速追问某个主题。系统会先检索知识片段，再基于证据生成回答。"}
                   </div>
                   <div className="mt-5 grid gap-3 text-left sm:grid-cols-2">
-                    <div className="rounded-2xl border border-white/60 dark:border-white/8 bg-white/70 dark:bg-white/5 p-4">
+                    <div className={cn("rounded-2xl border border-white/60 dark:border-white/8 p-4", glassCard)}>
                       <div className="text-xs font-medium text-slate-700 dark:text-slate-200">推荐提问方式</div>
                       <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">
                         {mode === "agent"
@@ -1444,7 +1451,7 @@ export function KnowledgeBaseChat() {
                           : "例如：这组笔记里如何定义某个概念？有哪些关键结论？"}
                       </div>
                     </div>
-                    <div className="rounded-2xl border border-white/60 dark:border-white/8 bg-white/70 dark:bg-white/5 p-4">
+                    <div className={cn("rounded-2xl border border-white/60 dark:border-white/8 p-4", glassCard)}>
                       <div className="text-xs font-medium text-slate-700 dark:text-slate-200">当前回答范围</div>
                       <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">
                         只基于当前知识库检索结果回答；如果证据不足，会明确说明缺少哪些依据。

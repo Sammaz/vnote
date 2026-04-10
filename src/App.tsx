@@ -9,6 +9,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
 import { cn } from "./utils/cn";
+import { useGlassBg } from "./hooks/useGlassBg";
 import { VIEW_TYPES, type NavigableViewType } from "./types";
 import "./index.css";
 
@@ -35,6 +36,7 @@ function PageLoadingFallback() {
 function AppContent() {
   const { currentView, setCurrentView } = useApp();
   const { backgroundImage, backgroundSettings } = useSettings();
+  const titleBarBg = useGlassBg("panel");
   const [theme, setTheme] = useState<"light" | "dark">("dark");
   const [previousView, setPreviousView] = useState<NavigableViewType>(VIEW_TYPES.HOME);
   const [shouldMountKnowledgeBase, setShouldMountKnowledgeBase] = useState(
@@ -205,7 +207,7 @@ function AppContent() {
       )}
       {/* Title Bar */}
       <header
-        className="relative z-10 flex items-center h-9 border-b border-slate-200/60 dark:border-vnote-border/60 bg-white/70 dark:bg-vnote-card/70 backdrop-blur-2xl flex-shrink-0 shadow-sm"
+        className={cn("relative z-10 flex items-center h-9 border-b border-slate-200/60 dark:border-vnote-border/60 flex-shrink-0 shadow-sm", titleBarBg)}
         data-tauri-drag-region
         onMouseDown={handleTitleBarMouseDown}
       >

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Search, MessageSquare, Settings2, BookOpen } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
+import { useGlassBg } from "../../hooks/useGlassBg";
 import { KnowledgeBaseSearch } from "./KnowledgeBaseSearch";
 import { KnowledgeBaseChat } from "./KnowledgeBaseChat";
 import { KnowledgeBaseManage } from "./KnowledgeBaseManage";
@@ -12,6 +13,9 @@ type TabType = "search" | "chat" | "manage";
 export function KnowledgeBasePage() {
   const [activeTab, setActiveTab] = useState<TabType>("search");
   const [stats, setStats] = useState<KnowledgeBaseStats | null>(null);
+  const glassPanel = useGlassBg("panel");
+  const glassMenu = useGlassBg("menu");
+  const glassCard = useGlassBg("card");
 
   const loadStats = useCallback(async () => {
     try {
@@ -35,7 +39,7 @@ export function KnowledgeBasePage() {
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-slate-50/12 dark:bg-vnote-bg/8 backdrop-blur-[2px]">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/36 backdrop-blur-xl">
+      <div className={cn("flex items-center justify-between px-6 py-4 border-b border-slate-200/80 dark:border-vnote-border/80", glassPanel)}>
         <div className="flex items-center gap-3">
           <BookOpen className="w-5 h-5 text-blue-500" />
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
@@ -50,7 +54,7 @@ export function KnowledgeBasePage() {
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 px-6 pt-3 pb-0 border-b border-slate-200/60 dark:border-vnote-border/60 bg-white/42 dark:bg-vnote-card/20 backdrop-blur-md">
+      <div className={cn("flex gap-1 px-6 pt-3 pb-0 border-b border-slate-200/60 dark:border-vnote-border/60", glassMenu)}>
         {tabs.map((tab) => (
           <button
             key={tab.key}
@@ -69,7 +73,7 @@ export function KnowledgeBasePage() {
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-hidden bg-white/16 dark:bg-black/8 backdrop-blur-[3px]">
+      <div className={cn("flex-1 overflow-hidden", glassCard)}>
         <div className={cn("h-full", activeTab === "search" ? "block" : "hidden")}>
           <KnowledgeBaseSearch />
         </div>
