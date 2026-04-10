@@ -132,7 +132,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         >
           {anchoredPosition && (
             <div
-              className={`absolute h-3.5 w-3.5 border-t border-l border-slate-200/80 dark:border-vnote-border/80 bg-white/96 dark:bg-vnote-card/92 ${
+              className={`absolute h-3.5 w-3.5 border-t border-l border-slate-200/80 dark:border-vnote-border/80 bg-white/48 dark:bg-vnote-card/92 ${
                 anchoredPosition.arrowSide === "left"
                   ? "-left-[7px] rotate-[-45deg]"
                   : "-right-[7px] rotate-[135deg]"
@@ -142,7 +142,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           )}
 
           <div className="overflow-hidden rounded-[22px]">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200/70 bg-white/80 px-5 py-4 dark:border-vnote-border/70 dark:bg-white/5">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200/70 bg-white/40 px-5 py-4 dark:border-vnote-border/70 dark:bg-white/5">
               <div className="min-w-0">
                 <div className={`text-[11px] font-medium uppercase tracking-[0.16em] ${danger ? "text-red-500/80 dark:text-red-300/80" : "text-blue-500/80 dark:text-blue-300/80"}`}>
                   {danger ? "Danger Zone" : "Please Confirm"}

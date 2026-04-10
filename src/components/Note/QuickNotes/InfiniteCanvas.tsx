@@ -213,7 +213,7 @@ function TextNode({ data, selected, width, height }: { data: any; selected?: boo
       <div
         style={{ width: nodeWidth, height: nodeHeight }}
         className={cn(
-          "box-border px-4 py-2 bg-white/96 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] transition-all backdrop-blur-sm overflow-hidden flex items-center",
+          "box-border px-4 py-2 bg-white/48 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] transition-all backdrop-blur-sm overflow-hidden flex items-center",
           isEditing ? "cursor-text" : "cursor-pointer",
           selected
             ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200/80 dark:ring-blue-400/45"
@@ -361,7 +361,7 @@ function ImageNode({ data, selected, width, height }: { data: any; selected?: bo
       <div
         style={{ width: nodeWidth, height: nodeHeight }}
         className={cn(
-          "bg-white/96 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] overflow-hidden transition-all cursor-pointer backdrop-blur-sm",
+          "bg-white/48 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] overflow-hidden transition-all cursor-pointer backdrop-blur-sm",
           selected
             ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200/80 dark:ring-blue-400/45"
             : "border-slate-300 dark:border-slate-600"
@@ -420,7 +420,7 @@ function MarkdownNode({ data, selected, width, height }: { data: any; selected?:
       <div
         style={{ width: nodeWidth, height: nodeHeight }}
         className={cn(
-          "box-border bg-white/96 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] p-4 transition-all backdrop-blur-sm overflow-hidden flex flex-col",
+          "box-border bg-white/48 dark:bg-[rgba(24,24,27,0.96)] border-2 rounded-lg shadow-[0_8px_24px_rgba(15,23,42,0.08)] dark:shadow-[0_10px_26px_rgba(0,0,0,0.38)] p-4 transition-all backdrop-blur-sm overflow-hidden flex flex-col",
           isEditing ? "cursor-text" : "cursor-pointer",
           selected
             ? "border-blue-500 dark:border-blue-400 shadow-lg ring-2 ring-blue-200/80 dark:ring-blue-400/45"

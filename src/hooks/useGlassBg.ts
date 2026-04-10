@@ -20,11 +20,11 @@ const DARK_NO_BG: Record<GlassLevel, string> = {
 };
 
 const LIGHT_WITH_BG: Record<GlassLevel, string> = {
-  card: "bg-white/80",
-  panel: "bg-white/72",
-  modal: "bg-white/74",
-  input: "bg-white/70",
-  menu: "bg-white/82",
+  card: "bg-white/42",
+  panel: "bg-white/36",
+  modal: "bg-white/38",
+  input: "bg-white/46",
+  menu: "bg-white/44",
 };
 
 const DARK_WITH_BG: Record<GlassLevel, string> = {

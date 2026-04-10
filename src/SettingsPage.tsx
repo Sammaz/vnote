@@ -579,7 +579,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         onConfirm: () => void;
     }) => (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/34 backdrop-blur-md" onClick={onCancel}>
-            <div className="w-[360px] max-w-[90vw] rounded-[24px] border border-white/45 dark:border-vnote-border/80 bg-white/74 dark:bg-vnote-card/46 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.26)]" onClick={e => e.stopPropagation()}>
+            <div className="w-[360px] max-w-[90vw] rounded-[24px] border border-white/45 dark:border-vnote-border/80 bg-white/38 dark:bg-vnote-card/46 backdrop-blur-2xl ring-1 ring-white/30 dark:ring-white/5 p-6 shadow-[0_24px_70px_rgba(15,23,42,0.26)]" onClick={e => e.stopPropagation()}>
                 <div className="flex items-start gap-3 mb-5">
                     <div className="mt-0.5 h-10 w-10 rounded-2xl bg-red-50 dark:bg-red-500/12 border border-red-100 dark:border-red-500/20 flex items-center justify-center">
                         <Trash2 size={16} className="text-red-500 dark:text-red-400" />
@@ -742,7 +742,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     </button>
                                 </div>
                                 {/* 背景图片设置 */}
-                                <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/70 dark:bg-vnote-card/40 backdrop-blur-xl shadow-soft overflow-hidden">
+                                <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/36 dark:bg-vnote-card/40 backdrop-blur-xl shadow-soft overflow-hidden">
                                     <div className="flex items-center gap-4 p-5 border-b border-slate-200/70 dark:border-vnote-border/70">
                                         <div className="h-10 w-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 border border-blue-100 dark:border-blue-500/20 flex items-center justify-center shadow-sm">
                                             <ImagePlus size={18} className="text-blue-500 dark:text-blue-400" />
@@ -860,7 +860,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
                                         <div className="space-y-4">
                                             <div className="text-xs font-semibold tracking-[0.18em] uppercase text-slate-400 dark:text-slate-500">Controls</div>
-                                            <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/75 dark:bg-vnote-card/35 backdrop-blur-lg p-4 space-y-4 shadow-soft">
+                                            <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/38 dark:bg-vnote-card/35 backdrop-blur-lg p-4 space-y-4 shadow-soft">
                                                 <div className="flex items-center justify-between gap-3">
                                                     <div>
                                                         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">图片来源</div>

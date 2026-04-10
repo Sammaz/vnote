@@ -274,7 +274,7 @@ function getItemStatusBadgeClass(status: ItemStatus) {
 }
 
 const glassPanelClass =
-  "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/85 shadow-[0_10px_30px_rgba(15,23,42,0.06)] dark:shadow-[0_16px_40px_rgba(2,6,23,0.32)] backdrop-blur-xl";
+  "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/36 dark:bg-vnote-card/85 shadow-[0_10px_30px_rgba(15,23,42,0.06)] dark:shadow-[0_16px_40px_rgba(2,6,23,0.32)] backdrop-blur-xl";
 const softSurfaceClass =
   "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(248,250,252,0.58))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.58),rgba(15,23,42,0.7))] shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 const secondaryButtonClass =
@@ -294,11 +294,11 @@ const chipButtonClass =
 const subtleDangerButtonClass =
   "text-[11px] font-medium text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 transition-colors cursor-pointer";
 const premiumInputClass =
-  "w-full px-3 py-2.5 rounded-xl border border-slate-200/80 dark:border-slate-600/80 bg-white/68 dark:bg-slate-800/80 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-all";
+  "w-full px-3 py-2.5 rounded-xl border border-slate-200/80 dark:border-slate-600/80 bg-white/35 dark:bg-slate-800/80 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] transition-all";
 const premiumDropdownButtonClass =
-  "w-full px-3 py-2.5 pr-10 rounded-xl border border-slate-200/80 dark:border-slate-600/80 bg-white/68 dark:bg-slate-800/80 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";
+  "w-full px-3 py-2.5 pr-10 rounded-xl border border-slate-200/80 dark:border-slate-600/80 bg-white/35 dark:bg-slate-800/80 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500/70 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]";
 const premiumDropdownMenuClass =
-  "absolute z-50 mt-2 w-full right-0 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 bg-white/78 dark:bg-slate-800/95 shadow-[0_18px_40px_rgba(15,23,42,0.12)] dark:shadow-[0_20px_44px_rgba(2,6,23,0.5)] backdrop-blur-xl py-1.5 max-h-72 overflow-auto";
+  "absolute z-50 mt-2 w-full right-0 rounded-2xl border border-slate-200/90 dark:border-slate-700/80 bg-white/40 dark:bg-slate-800/95 shadow-[0_18px_40px_rgba(15,23,42,0.12)] dark:shadow-[0_20px_44px_rgba(2,6,23,0.5)] backdrop-blur-xl py-1.5 max-h-72 overflow-auto";
 const summaryStripClass =
   "rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-[linear-gradient(180deg,rgba(255,255,255,0.62),rgba(248,250,252,0.52))] dark:bg-[linear-gradient(180deg,rgba(30,41,59,0.42),rgba(15,23,42,0.72))] px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.76)] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 const infoSurfaceClass =

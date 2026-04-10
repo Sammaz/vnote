@@ -1349,7 +1349,7 @@ export function KnowledgeBaseChat() {
                           <>
                             你将删除对话
                             <span
-                              className="mx-1 inline-flex max-w-[240px] truncate rounded-lg bg-white/80 px-2 py-0.5 align-bottom font-medium text-slate-700 dark:bg-black/20 dark:text-slate-200"
+                              className="mx-1 inline-flex max-w-[240px] truncate rounded-lg bg-white/40 px-2 py-0.5 align-bottom font-medium text-slate-700 dark:bg-black/20 dark:text-slate-200"
                               title={pendingDeleteSessionTitle}
                             >
                               “{pendingDeleteSessionTitle}”
@@ -1465,7 +1465,7 @@ export function KnowledgeBaseChat() {
                 {messages.map((message, index) => (
                   <Fragment key={message.id}>
                     {statusText && index === streamingAssistantIndex && (
-                      <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/42 backdrop-blur-xl px-4 py-3 shadow-soft">
+                      <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/36 dark:bg-vnote-card/42 backdrop-blur-xl px-4 py-3 shadow-soft">
                         <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                           <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                           <span>{statusText}</span>
@@ -1507,7 +1507,7 @@ export function KnowledgeBaseChat() {
                   </Fragment>
                 ))}
                 {statusText && streamingAssistantIndex === -1 && (
-                  <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/42 backdrop-blur-xl px-4 py-3 shadow-soft">
+                  <div className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/36 dark:bg-vnote-card/42 backdrop-blur-xl px-4 py-3 shadow-soft">
                     <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
                       <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
                       <span>{statusText}</span>
@@ -1547,7 +1547,7 @@ export function KnowledgeBaseChat() {
               className="hidden"
             />
 
-            <div className="rounded-[24px] border border-slate-200/80 dark:border-vnote-border/80 bg-white/78 dark:bg-vnote-card/44 backdrop-blur-xl overflow-hidden shadow-soft focus-within:ring-2 focus-within:ring-blue-500/20">
+            <div className="rounded-[24px] border border-slate-200/80 dark:border-vnote-border/80 bg-white/40 dark:bg-vnote-card/44 backdrop-blur-xl overflow-hidden shadow-soft focus-within:ring-2 focus-within:ring-blue-500/20">
               {editingMessageId && (
                 <div className="px-4 pt-4 pb-1 flex items-center justify-between gap-3">
                   <div className="text-xs text-amber-600 dark:text-amber-300">
@@ -1632,7 +1632,7 @@ export function KnowledgeBaseChat() {
                       <ChevronDown className="w-3 h-3" />
                     </button>
                     {showModelDropdown && (
-                      <div className="absolute bottom-full left-0 mb-2 w-60 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/90 dark:bg-vnote-card/68 backdrop-blur-2xl shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 p-1 max-h-64 overflow-y-auto">
+                      <div className="absolute bottom-full left-0 mb-2 w-60 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/45 dark:bg-vnote-card/68 backdrop-blur-2xl shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 p-1 max-h-64 overflow-y-auto">
                         {aiConfigs.length === 0 ? (
                           <div className="px-3 py-2 text-xs text-slate-400">未配置 AI 模型</div>
                         ) : (
@@ -1668,7 +1668,7 @@ export function KnowledgeBaseChat() {
                       <ChevronDown className="w-3 h-3" />
                     </button>
                     {showPromptDropdown && (
-                      <div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/90 dark:bg-vnote-card/68 backdrop-blur-2xl shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 p-1 max-h-72 overflow-y-auto">
+                      <div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/45 dark:bg-vnote-card/68 backdrop-blur-2xl shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 p-1 max-h-72 overflow-y-auto">
                         <button
                           onClick={() => void handlePromptChange(null)}
                           className={cn(
@@ -1775,7 +1775,7 @@ export function KnowledgeBaseChat() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <section className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/38 backdrop-blur-xl overflow-hidden shadow-soft">
+              <section className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/36 dark:bg-vnote-card/38 backdrop-blur-xl overflow-hidden shadow-soft">
                 <div className="px-4 py-3 border-b border-slate-200/60 dark:border-vnote-border/60 flex items-center gap-2">
                   <Search className="w-4 h-4 text-blue-500" />
                   <div className="text-sm font-medium text-slate-700 dark:text-slate-200">引用来源</div>
@@ -1797,7 +1797,7 @@ export function KnowledgeBaseChat() {
                       <button
                         key={source.chunk_id}
                         onClick={() => void handleNavigateToNote(source.note_id)}
-                        className="w-full text-left p-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 hover:border-blue-300 dark:hover:border-blue-700 bg-white/70 dark:bg-black/10 transition-colors cursor-pointer"
+                        className="w-full text-left p-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 hover:border-blue-300 dark:hover:border-blue-700 bg-white/36 dark:bg-black/10 transition-colors cursor-pointer"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
@@ -1822,7 +1822,7 @@ export function KnowledgeBaseChat() {
               </section>
 
               {showAgentTrace && (
-                <section className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/72 dark:bg-vnote-card/38 backdrop-blur-xl overflow-hidden shadow-soft">
+                <section className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/36 dark:bg-vnote-card/38 backdrop-blur-xl overflow-hidden shadow-soft">
                   <div className="px-4 py-3 border-b border-slate-200/60 dark:border-vnote-border/60 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-violet-500" />
                     <div className="text-sm font-medium text-slate-700 dark:text-slate-200">Agent 轨迹</div>
@@ -1847,7 +1847,7 @@ export function KnowledgeBaseChat() {
                           return (
                             <div
                               key={step.id}
-                              className="p-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-white/70 dark:bg-black/10"
+                              className="p-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-white/36 dark:bg-black/10"
                             >
                               <div className="flex items-center gap-2 mb-2 flex-wrap">
                                 <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-violet-100 dark:bg-violet-900/30 text-[11px] font-semibold text-violet-700 dark:text-violet-300">
@@ -1948,7 +1948,7 @@ function MessageCard({
             compact ? "py-3" : "py-3.5",
             isUser
               ? "bg-slate-200 dark:bg-neutral-700 text-slate-800 dark:text-slate-100 rounded-tr-sm"
-              : "bg-white/82 dark:bg-vnote-card/56 border border-slate-200/80 dark:border-vnote-border/80 text-slate-700 dark:text-slate-200 rounded-tl-sm shadow-soft cursor-pointer",
+              : "bg-white/42 dark:bg-vnote-card/56 border border-slate-200/80 dark:border-vnote-border/80 text-slate-700 dark:text-slate-200 rounded-tl-sm shadow-soft cursor-pointer",
             !isUser && isSelected && "border-blue-300 dark:border-blue-700 ring-2 ring-blue-500/10"
           )}
         >
