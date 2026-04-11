@@ -13,6 +13,7 @@ import {
   RefreshCw,
   X,
   ChevronDown,
+  ChevronRight,
   Check,
   List,
   Clock,
@@ -157,10 +158,45 @@ function parseFlashcardData(flashcardsJson: string | null): FlashcardData | null
   }
 }
 
+interface SharedEmptyStateProps {
+  icon: React.ReactNode;
+  title: string;
+  description?: string;
+  hint?: React.ReactNode;
+  action?: React.ReactNode;
+  cardClassName?: string;
+  iconWrapClassName?: string;
+}
+
+function SharedEmptyState({
+  icon,
+  title,
+  description,
+  hint,
+  action,
+  cardClassName,
+  iconWrapClassName,
+}: SharedEmptyStateProps) {
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <div className={cn("mx-auto flex w-full max-w-lg flex-col items-center rounded-3xl border border-slate-200/80 bg-white/70 px-6 py-8 text-center shadow-[0_18px_45px_rgba(15,23,42,0.08)] backdrop-blur-sm dark:border-vnote-border/80 dark:bg-white/5 sm:px-8 sm:py-10", cardClassName)}>
+        <div className={cn("mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200/80 bg-slate-100/90 shadow-sm dark:border-vnote-border/80 dark:bg-slate-800/80", iconWrapClassName)}>
+          {icon}
+        </div>
+        <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{title}</h3>
+        {description ? (
+          <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{description}</p>
+        ) : null}
+        {action ? <div className="mt-6 flex w-full justify-center">{action}</div> : null}
+        {hint ? <div className="mt-3 text-xs text-slate-400 dark:text-slate-500">{hint}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, defaultAiConfigId, promptConfigs = [] }: NoteContentPanelProps) {
 
   const glassPanel = useGlassBg("panel");
-  const glassCard = useGlassBg("card");
   const glassModal = useGlassBg("modal");
   const glassInput = useGlassBg("input");
   const glassMenu = useGlassBg("menu");
@@ -1037,6 +1073,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setActiveTab(group.tabs[0].id);
     }
   };
+
+  const nextGroup = TAB_GROUPS.find(group => group.id !== activeGroup) ?? TAB_GROUPS[0];
 
   const visualChaptersForMarkdown = useCallback((): ChapterData | null => {
     if (!detailedReadingData) return null;
@@ -2253,74 +2291,98 @@ Video subtitles content:`;
     }
   };
 
+  const toolbarButtonClass = "inline-flex h-9 min-w-0 max-w-full items-center justify-center gap-1.5 rounded-xl border border-transparent bg-white/55 px-3 text-sm font-medium text-slate-600 shadow-sm shadow-transparent transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-200/90 hover:bg-white hover:text-slate-800 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:border-transparent dark:bg-white/[0.03] dark:text-slate-400 dark:hover:border-white/8 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
+  const toolbarButtonActiveClass = "border-blue-200/80 bg-blue-50/90 text-blue-600 shadow-sm shadow-blue-100/60 dark:border-blue-500/30 dark:bg-blue-500/14 dark:text-blue-400 dark:shadow-transparent";
+  const toolbarButtonDisabledClass = "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none";
+  const toolbarBarClass = "relative z-40 flex flex-wrap items-start gap-2.5 border-b border-slate-200/80 bg-slate-50/90 px-4 py-2.5 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80 sm:items-center sm:justify-between";
+  const toolbarSectionClass = "flex max-w-full flex-wrap items-center gap-2 min-w-0";
+  const toolbarSectionResponsiveClass = cn(toolbarSectionClass, "w-full xl:w-auto");
+  const toolbarSectionEndClass = cn(toolbarSectionClass, "w-full justify-start sm:justify-end xl:w-auto xl:ml-auto");
+  const toolbarActionClusterClass = "flex w-full max-w-full flex-wrap items-center gap-2 rounded-2xl border border-slate-200/75 bg-white/55 p-1 shadow-sm shadow-slate-200/40 dark:w-auto dark:border-vnote-border/80 dark:bg-white/5 dark:shadow-none sm:w-auto sm:justify-end";
+  const toolbarActionButtonClass = "min-w-0 flex-1 justify-center sm:flex-none sm:justify-start";
+  const toolbarMetaPillClass = "inline-flex min-h-9 items-center rounded-xl border border-slate-200/80 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-500 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-400";
+  const dropdownMenuClass = "absolute top-full left-0 mt-2 z-[120] max-h-80 overflow-auto rounded-2xl border border-slate-200/95 bg-white shadow-[0_28px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-200/80 dark:border-vnote-border/95 dark:bg-slate-900 dark:ring-white/10";
+  const dropdownHeaderClass = "sticky top-0 flex items-center gap-2 border-b border-slate-200/90 bg-white px-4 py-2 dark:border-vnote-border/90 dark:bg-slate-900";
+  const emptyStateActionButtonClass = cn(
+    "inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-medium text-white shadow-sm transition-all cursor-pointer",
+    "bg-blue-500 hover:-translate-y-0.5 hover:bg-blue-600 hover:shadow-md",
+    "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm"
+  );
+
   return (
-    <div className={cn("flex flex-col h-full rounded-lg border border-slate-200/70 dark:border-vnote-border/80 overflow-hidden shadow-soft", glassPanel)}>
+    <div className={cn("isolate flex h-full flex-col overflow-visible rounded-lg border border-slate-200/70 shadow-soft dark:border-vnote-border/80", glassPanel)}>
       {/* 标签页头部 */}
-      <div className={cn("border-b border-slate-200/80 dark:border-vnote-border/80 select-none", glassPanel)}>
-        <div className="flex items-center">
-          {/* 当前分组的标签 */}
-          <ResponsiveTabs
-            items={TAB_GROUPS.find(g => g.id === activeGroup)?.tabs || []}
-            activeTabId={activeTab}
-            onTabClick={(id) => setActiveTab(id as TabId)}
-            renderTab={(tab, isDropdown) => {
-              const generating = isTabGenerating(tab.id as TabId);
-              const error = getTabError(tab.id as TabId);
-              const isActive = activeTab === tab.id;
+      <div className={cn("relative z-50 border-b border-slate-200/80 px-3 py-1.5 select-none dark:border-vnote-border/80", glassPanel)}>
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="min-w-0 flex-1 pr-[96px]">
+            <ResponsiveTabs
+              className="min-w-0"
+              items={TAB_GROUPS.find(g => g.id === activeGroup)?.tabs || []}
+              activeTabId={activeTab}
+              onTabClick={(id) => setActiveTab(id as TabId)}
+              renderTab={(tab, isDropdown) => {
+                const generating = isTabGenerating(tab.id as TabId);
+                const error = getTabError(tab.id as TabId);
+                const isActive = activeTab === tab.id;
 
-              if (isDropdown) {
+                if (isDropdown) {
+                  return (
+                    <div className={cn(
+                      "flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-left transition-all cursor-pointer w-full select-none",
+                      isActive
+                        ? "bg-blue-50/90 text-blue-600 dark:bg-blue-500/14 dark:text-blue-400"
+                        : "text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-white/6"
+                    )}>
+                      {tab.icon}
+                      <span className="flex-1 truncate">{tab.label}</span>
+                      {generating && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />}
+                      {error && !generating && <X className="w-3 h-3 text-red-500" />}
+                    </div>
+                  );
+                }
+
                 return (
-                  <div className={cn(
-                    "flex items-center gap-2 px-4 py-2 text-sm text-left hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer w-full select-none",
-                    isActive ? "text-blue-600 dark:text-blue-400 font-medium bg-blue-50 dark:bg-blue-900/10" : "text-slate-700 dark:text-slate-300"
-                  )}>
+                  <button
+                    className={cn(
+                      "group inline-flex h-[30px] items-center gap-1.5 rounded-xl border px-2.5 text-sm font-medium transition-all relative cursor-pointer whitespace-nowrap",
+                      isActive
+                        ? "border-blue-200/85 bg-blue-50/95 text-blue-600 shadow-sm dark:border-blue-500/30 dark:bg-blue-500/14 dark:text-blue-400"
+                        : "border-transparent text-slate-500 hover:border-slate-200/80 hover:bg-white/80 hover:text-slate-700 dark:text-slate-400 dark:hover:border-white/8 dark:hover:bg-white/6 dark:hover:text-slate-200"
+                    )}
+                  >
                     {tab.icon}
-                    <span className="flex-1 truncate">{tab.label}</span>
-                    {generating && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-ping" />}
-                    {error && !generating && <X className="w-3 h-3 text-red-500" />}
-                  </div>
+                    {tab.label}
+                    {generating && (
+                      <span className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
+                    )}
+                    {error && !generating && (
+                      <X className="w-3 h-3 text-red-500" />
+                    )}
+                  </button>
                 );
-              }
+              }}
+            />
+          </div>
 
-              return (
+          <div className="absolute inset-y-0 right-0 z-[90] flex w-[96px] items-center justify-end">
                 <button
-                  className={cn(
-                    "flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 -mb-px transition-colors relative cursor-pointer whitespace-nowrap",
-                    isActive
-                      ? "border-blue-500 text-blue-500"
-                      : "border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                  )}
+                  type="button"
+                  onClick={() => handleGroupChange(nextGroup.id)}
+                  title={`切换到${nextGroup.label}`}
+                  className="group relative flex h-[39px] w-full items-center overflow-hidden rounded-[20px] border border-slate-200/84 bg-gradient-to-b from-slate-100/98 via-slate-100/94 to-slate-200/84 px-[7px] text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(15,23,42,0.045)] ring-1 ring-white/72 backdrop-blur-sm transition-all duration-200 cursor-pointer hover:border-blue-200/85 hover:text-blue-600 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.96),0_10px_24px_rgba(59,130,246,0.11)] dark:border-vnote-border/80 dark:bg-gradient-to-b dark:from-slate-800/92 dark:via-slate-800/88 dark:to-slate-900/82 dark:text-slate-300 dark:ring-white/6 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] dark:hover:border-blue-500/30 dark:hover:text-blue-300 dark:hover:shadow-[0_10px_24px_rgba(2,6,23,0.32)]"
                 >
-                  {tab.icon}
-                  {tab.label}
-                  {generating && (
-                    <span className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
-                  )}
-                  {error && !generating && (
-                    <X className="w-3 h-3 text-red-500" />
-                  )}
+                  <span className="pointer-events-none absolute inset-y-[4px] left-[4px] w-[31px] rounded-[15px] border border-white/78 bg-gradient-to-b from-white via-white to-slate-100/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.96),0_5px_12px_rgba(15,23,42,0.055)] transition-all duration-200 group-hover:w-[33px] group-hover:border-blue-100/80 group-hover:shadow-[inset_0_1px_0_rgba(255,255,255,1),0_6px_14px_rgba(59,130,246,0.08)] dark:border-white/8 dark:bg-gradient-to-b dark:from-slate-700/78 dark:via-slate-700/64 dark:to-slate-800/70 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_10px_rgba(2,6,23,0.24)] dark:group-hover:border-blue-400/18 dark:group-hover:bg-slate-700/82" />
+                  <span className="pointer-events-none absolute right-[8px] top-1/2 h-4.5 w-4.5 -translate-y-1/2 rounded-full bg-white/44 opacity-0 blur-[1px] transition-opacity duration-200 group-hover:opacity-100 dark:bg-blue-400/10" />
+                  <span className="relative z-10 flex w-full items-center gap-1.5">
+                    <span className="flex h-5.5 w-5.5 flex-shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors duration-200 group-hover:text-blue-500 dark:text-slate-400 dark:group-hover:text-blue-300">
+                      {nextGroup.icon}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold leading-none tracking-[0.01em]">{nextGroup.label}</span>
+                    <span className="flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded-full border border-slate-200/78 bg-white/82 text-slate-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:border-blue-200/85 group-hover:bg-blue-50 group-hover:text-blue-500 dark:border-white/8 dark:bg-white/6 dark:text-slate-500 dark:group-hover:border-blue-400/20 dark:group-hover:bg-blue-500/14 dark:group-hover:text-blue-300">
+                      <ChevronRight className="h-[11px] w-[11px]" strokeWidth={2.4} />
+                    </span>
+                  </span>
                 </button>
-              );
-            }}
-          />
-
-          {/* 分组切换器 */}
-          <div className="flex items-center gap-0.5 p-1 mr-2 bg-slate-100 dark:bg-vnote-surface rounded-lg">
-            {TAB_GROUPS.map((group) => (
-              <button
-                key={group.id}
-                onClick={() => handleGroupChange(group.id)}
-                className={cn(
-                  "flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer",
-                  activeGroup === group.id
-                    ? cn(glassCard, "text-blue-600 dark:text-blue-400 shadow-sm")
-                    : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                )}
-              >
-                {group.icon}
-                {group.label}
-              </button>
-            ))}
           </div>
         </div>
       </div>
@@ -2328,380 +2390,345 @@ Video subtitles content:`;
       {/* 次级工具栏 - 根据标签页显示不同内容 */}
       {activeTab === "summary" ? (
         // 全文总结标签页的工具栏
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div className="flex items-center gap-2">
+        <div className={toolbarBarClass}>
+          <div className={toolbarSectionClass}>
             <button
               onClick={() => setIsEditMode(!isEditMode)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                isEditMode
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
+              className={cn(toolbarButtonClass, isEditMode && toolbarButtonActiveClass)}
             >
               <Edit3 className="w-4 h-4" />
               {isEditMode ? "预览" : "编辑"}
             </button>
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Copy className="w-4 h-4" />
-              复制
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              下载
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={openPromptDialog}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-4 h-4" />
-              重新总结
-            </button>
+          <div className={toolbarSectionEndClass}>
+            <div className={toolbarActionClusterClass}>
+              <button
+                onClick={handleCopy}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+              >
+                <Copy className="w-4 h-4" />
+                复制
+              </button>
+              <button
+                onClick={handleDownload}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+              >
+                <Download className="w-4 h-4" />
+                下载
+              </button>
+              <button
+                onClick={openPromptDialog}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+              >
+                <RefreshCw className="w-4 h-4" />
+                重新总结
+              </button>
+            </div>
           </div>
         </div>
       ) : activeTab === "original" ? (
         // 原文细读标签页的工具栏（不管有无章节数据都显示相同）
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div className="flex items-center gap-3">
-            {/* 辅助模式提示 - 仅在辅助模式下显示 */}
-            {isAssistModeActive && (
-              <div className="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <div className={toolbarBarClass}>
+          <div className={toolbarSectionResponsiveClass}>
+            {isAssistModeActive ? (
+              <div className={cn(toolbarMetaPillClass, "max-w-full gap-2 text-blue-600 dark:text-blue-400 sm:text-sm")}>
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                <span>点击"添加截图"按钮在字幕行上方添加章节分隔点</span>
-                <span className="text-xs text-blue-500 dark:text-blue-500 ml-2">已添加 {assistModeMarkers.length} 个截图标记</span>
+                <span className="truncate">点击"添加截图"按钮在字幕行上方添加章节分隔点</span>
+                <span className="text-xs text-blue-500 dark:text-blue-300">已添加 {assistModeMarkers.length} 个截图标记</span>
               </div>
-            )}
-            {/* 章节下拉框 - 辅助模式下隐藏 */}
-            {!isAssistModeActive && (
-              <div className="relative" ref={chapterDropdownRef}>
-                <button
-                  onClick={() => setShowChapterDropdown(!showChapterDropdown)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-                >
-                  <List className="w-4 h-4" />
-                  共 {detailedReadingData?.chapters.length || 0} 个章节
-                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
-                </button>
-                {showChapterDropdown && detailedReadingData && (
-                  <div className={cn("absolute top-full left-0 mt-2 w-96 rounded-2xl border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 max-h-80 overflow-auto", glassMenu)}>
-                    {/* 下拉框头部 */}
-                    <div className={cn("sticky top-0 px-4 py-2 border-b border-slate-200/80 dark:border-vnote-border/80 flex items-center gap-2", glassMenu)}>
-                      <List className="w-4 h-4 text-slate-500" />
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
-                    </div>
-                    {/* 章节列表 */}
-                    <div className="py-1">
-                      {detailedReadingData.chapters.map((chapter, index) => {
-                        const isCurrentChapter = chapter.id === getCurrentChapter(currentTime)?.id;
-                        const formatTime = (seconds: number): string => {
-                          const hours = Math.floor(seconds / 3600);
-                          const minutes = Math.floor((seconds % 3600) / 60);
-                          const secs = Math.floor(seconds % 60);
-                          if (hours > 0) {
-                            return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-                          }
-                          return `${minutes}:${secs.toString().padStart(2, "0")}`;
-                        };
-                        return (
-                          <button
-                            key={chapter.id}
-                            onClick={() => {
-                              // 记录用户点击时间，防止视频时间更新干扰
-                              userClickTimeRef.current = Date.now();
-                              // 跳转到视频时间
-                              window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
-                              // 滚动到对应章节卡片
-                              const chapterElement = document.getElementById(`chapter-${chapter.id}`);
-                              if (chapterElement) {
-                                chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
-                              }
-                              setShowChapterDropdown(false);
-                            }}
-                            className={cn(
-                              "w-full px-4 py-2 flex items-center gap-3 transition-colors cursor-pointer text-left",
-                              isCurrentChapter
-                                ? "bg-blue-50/90 dark:bg-blue-500/16"
-                                : "hover:bg-white/75 dark:hover:bg-white/6"
-                            )}
-                          >
-                            <span className="text-xs text-blue-400 dark:text-blue-400 font-mono w-12 flex-shrink-0">
-                              {formatTime(chapter.start_time)}
-                            </span>
-                            <span className="text-xs w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
-                              {index + 1}
-                            </span>
-                            <span className={cn(
-                              "text-sm truncate",
-                              isCurrentChapter
-                                ? "text-blue-600 dark:text-blue-400 font-medium"
-                                : "text-slate-700 dark:text-slate-200"
-                            )}>
-                              {chapter.title}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            {/* 字幕滚动开关 - 辅助模式下隐藏 */}
-            {!isAssistModeActive && (
-              <button
-                onClick={() => setAutoScroll(!autoScroll)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                  autoScroll
-                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-                )}
-              >
-                <Clock className="w-4 h-4" />
-                字幕滚动
-              </button>
-            )}
-            {/* 显示字幕开关 - 辅助模式下隐藏 */}
-            {!isAssistModeActive && note.subtitle_path && (
+            ) : (
               <>
-                <button
-                  onClick={() => setShowChapterSubtitles(!showChapterSubtitles)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                    showChapterSubtitles
-                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
+                <div className="relative min-w-0 max-w-full" ref={chapterDropdownRef}>
+                  <button
+                    onClick={() => setShowChapterDropdown(!showChapterDropdown)}
+                    className={cn(toolbarButtonClass, toolbarActionButtonClass, "max-w-full")}
+                  >
+                    <List className="w-4 h-4" />
+                    <span className="truncate">共 {detailedReadingData?.chapters.length || 0} 个章节</span>
+                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
+                  </button>
+                  {showChapterDropdown && detailedReadingData && (
+                    <div className={cn(dropdownMenuClass, "w-96")}>
+                      <div className={dropdownHeaderClass}>
+                        <List className="w-4 h-4 text-slate-500" />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
+                      </div>
+                      <div className="py-1">
+                        {detailedReadingData.chapters.map((chapter, index) => {
+                          const isCurrentChapter = chapter.id === getCurrentChapter(currentTime)?.id;
+                          const formatTime = (seconds: number): string => {
+                            const hours = Math.floor(seconds / 3600);
+                            const minutes = Math.floor((seconds % 3600) / 60);
+                            const secs = Math.floor(seconds % 60);
+                            if (hours > 0) {
+                              return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+                            }
+                            return `${minutes}:${secs.toString().padStart(2, "0")}`;
+                          };
+                          return (
+                            <button
+                              key={chapter.id}
+                              onClick={() => {
+                                userClickTimeRef.current = Date.now();
+                                window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
+                                const chapterElement = document.getElementById(`chapter-${chapter.id}`);
+                                if (chapterElement) {
+                                  chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
+                                }
+                                setShowChapterDropdown(false);
+                              }}
+                              className={cn(
+                                "w-full px-4 py-2 flex items-center gap-3 transition-colors cursor-pointer text-left",
+                                isCurrentChapter
+                                  ? "bg-blue-50/90 dark:bg-blue-500/16"
+                                  : "hover:bg-white/75 dark:hover:bg-white/6"
+                              )}
+                            >
+                              <span className="text-xs text-blue-400 dark:text-blue-400 font-mono w-12 flex-shrink-0">
+                                {formatTime(chapter.start_time)}
+                              </span>
+                              <span className="text-xs w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
+                                {index + 1}
+                              </span>
+                              <span className={cn(
+                                "text-sm truncate",
+                                isCurrentChapter
+                                  ? "text-blue-600 dark:text-blue-400 font-medium"
+                                  : "text-slate-700 dark:text-slate-200"
+                              )}>
+                                {chapter.title}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   )}
+                </div>
+
+                <button
+                  onClick={() => setAutoScroll(!autoScroll)}
+                  className={cn(toolbarButtonClass, toolbarActionButtonClass, autoScroll ? toolbarButtonActiveClass : "")}
                 >
-                  <SubtitlesIcon className="w-4 h-4" />
-                  {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
+                  <Clock className="w-4 h-4" />
+                  字幕滚动
                 </button>
-                {/* 字幕模式切换下拉框 - 放在显示/隐藏字幕按钮右侧 */}
-                {showChapterSubtitles && detailedReadingData && (
-                  <div className="relative" ref={subtitleModeDropdownRef}>
+
+                {note.subtitle_path && (
+                  <>
                     <button
-                      type="button"
-                      onClick={() => setShowSubtitleModeDropdown(!showSubtitleModeDropdown)}
-                      disabled={subtitleOptimizing}
-                      className={cn(
-                        "px-3 py-1.5 pr-8 text-sm rounded-xl border transition-all cursor-pointer relative",
-                        subtitleOptimizationEnabled
-                          ? "bg-blue-50/85 dark:bg-blue-500/14 text-blue-600 dark:text-blue-400 border-blue-200/80 dark:border-blue-500/30"
-                          : cn(glassInput, "text-slate-700 dark:text-slate-300 border-slate-200/80 dark:border-vnote-border/80 hover:border-slate-300 dark:hover:border-slate-500"),
-                        "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
-                        subtitleOptimizing && "opacity-50 cursor-not-allowed"
-                      )}
+                      onClick={() => setShowChapterSubtitles(!showChapterSubtitles)}
+                      className={cn(toolbarButtonClass, toolbarActionButtonClass, showChapterSubtitles && toolbarButtonActiveClass)}
                     >
-                      {subtitleOptimizationEnabled ? "智能优化" : "原文"}
-                      <ChevronDown className={cn(
-                        "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 transition-transform pointer-events-none",
-                        subtitleOptimizationEnabled ? "text-blue-400" : "text-slate-400",
-                        showSubtitleModeDropdown && "rotate-180"
-                      )} />
+                      <SubtitlesIcon className="w-4 h-4" />
+                      {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
                     </button>
-                    {showSubtitleModeDropdown && !subtitleOptimizing && (
-                      <div className={cn("absolute z-50 mt-2 w-28 right-0 rounded-2xl border border-white/45 dark:border-vnote-border/80 ring-1 ring-white/30 dark:ring-white/5 shadow-[0_20px_55px_rgba(15,23,42,0.22)] py-1", glassMenu)}>
-                        {[
-                          { value: "original", label: "原文" },
-                          { value: "optimized", label: "智能优化" },
-                        ].map(mode => (
-                          <button
-                            key={mode.value}
-                            type="button"
-                            onClick={async () => {
-                              const shouldEnable = mode.value === "optimized";
-                              if (shouldEnable !== subtitleOptimizationEnabled) {
-                                await handleSubtitleOptimizationToggle();
-                              }
-                              setShowSubtitleModeDropdown(false);
-                            }}
-                            className={cn(
-                              "w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between cursor-pointer",
-                              (mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled)
-                                ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20"
-                                : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"
-                            )}
-                          >
-                            {mode.label}
-                            {(mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled) && (
-                              <Check className="w-4 h-4" />
-                            )}
-                          </button>
-                        ))}
+                    {showChapterSubtitles && detailedReadingData && (
+                      <div className="relative min-w-0 max-w-full" ref={subtitleModeDropdownRef}>
+                        <button
+                          type="button"
+                          onClick={() => setShowSubtitleModeDropdown(!showSubtitleModeDropdown)}
+                          disabled={subtitleOptimizing}
+                          className={cn(
+                            toolbarButtonClass,
+                            toolbarActionButtonClass,
+                            "max-w-full pr-8 relative focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                            subtitleOptimizationEnabled
+                              ? toolbarButtonActiveClass
+                              : "border-slate-200/80 bg-white/80 text-slate-600 dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-300",
+                            subtitleOptimizing && "opacity-50 cursor-not-allowed"
+                          )}
+                        >
+                          {subtitleOptimizationEnabled ? "智能优化" : "原文"}
+                          <ChevronDown className={cn(
+                            "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 transition-transform pointer-events-none",
+                            subtitleOptimizationEnabled ? "text-blue-400" : "text-slate-400",
+                            showSubtitleModeDropdown && "rotate-180"
+                          )} />
+                        </button>
+                        {showSubtitleModeDropdown && !subtitleOptimizing && (
+                          <div className={cn(dropdownMenuClass, "right-0 left-auto w-28 py-1")}>
+                            {[
+                              { value: "original", label: "原文" },
+                              { value: "optimized", label: "智能优化" },
+                            ].map(mode => (
+                              <button
+                                key={mode.value}
+                                type="button"
+                                onClick={async () => {
+                                  const shouldEnable = mode.value === "optimized";
+                                  if (shouldEnable !== subtitleOptimizationEnabled) {
+                                    await handleSubtitleOptimizationToggle();
+                                  }
+                                  setShowSubtitleModeDropdown(false);
+                                }}
+                                className={cn(
+                                  "w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between cursor-pointer",
+                                  (mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled)
+                                    ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20"
+                                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                                )}
+                              >
+                                {mode.label}
+                                {(mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled) && (
+                                  <Check className="w-4 h-4" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
+                  </>
                 )}
               </>
             )}
           </div>
-          <div className="flex items-center gap-2">
-            {/* 辅助模式切换按钮 */}
-            <button
-              onClick={() => setIsAssistModeActive(!isAssistModeActive)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                isAssistModeActive
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
-            >
-              <MousePointer2 className="w-4 h-4" />
-              辅助模式
-            </button>
-            {/* 重新生成按钮 */}
-            <button
-              onClick={() => {
-                setConfirmDialogConfig({
-                  title: "确认重新生成",
-                  message: "重新生成将覆盖当前的章节内容，此操作不可撤销。是否继续？",
-                  onConfirm: async () => {
-                    setShowConfirmDialog(false);
-                    if (isAssistModeActive) {
-                      // 辅助模式下：使用截图标记生成章节
-                      generateChaptersWithMarkers(assistModeMarkers);
-                    } else {
-                      // 普通模式下：清除缓存并重新生成
-                      // 清除字幕优化缓存（内存和数据库）
-                      setOptimizedSubtitles(new Map());
-                      setSubtitleOptimizationEnabled(false);
-                      setFailedChapterIds(new Set());
-                      try {
-                        await invoke("delete_optimized_subtitles", { noteId: note.id });
-                      } catch (err) {
-                        console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
-                      }
-                      // 清除之前生成的截图
-                      try {
-                        await invoke("clear_chapter_screenshots", { noteId: note.id });
-                      } catch (err) {
-                        console.error("[NoteContentPanel] 清除截图缓存失败:", err);
-                      }
-                      // 重新生成章节（统一走详细阅读链路）
-                      setChapterIsGenerating(true);
-                      setChapterGenerating(note.id, true);
-                      const generationId = crypto.randomUUID();
-                      registerActiveGenerationId(note.id, generationId);
-                      try {
-                        await invoke("generate_note_content", {
-                          generationId,
-                          noteId: note.id,
-                          modelId: currentModelId || defaultAiConfigId,
-                          concurrent: true,
-                          regenerate: true,
-                          tabsToGenerate: ["detailed_reading"],
-                        });
-                      } catch (error) {
-                        setChapterIsGenerating(false);
-                        setChapterGenerating(note.id, false);
-                        unregisterActiveGenerationId(note.id, generationId);
-                        message.error(`重新生成章节失败: ${error}`);
+          <div className={toolbarSectionEndClass}>
+            <div className={toolbarActionClusterClass}>
+              <button
+                onClick={() => setIsAssistModeActive(!isAssistModeActive)}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass, isAssistModeActive && toolbarButtonActiveClass)}
+              >
+                <MousePointer2 className="w-4 h-4" />
+                辅助模式
+              </button>
+              {/* 重新生成按钮 */}
+              <button
+                onClick={() => {
+                  setConfirmDialogConfig({
+                    title: "确认重新生成",
+                    message: "重新生成将覆盖当前的章节内容，此操作不可撤销。是否继续？",
+                    onConfirm: async () => {
+                      setShowConfirmDialog(false);
+                      if (isAssistModeActive) {
+                        // 辅助模式下：使用截图标记生成章节
+                        generateChaptersWithMarkers(assistModeMarkers);
+                      } else {
+                        // 普通模式下：清除缓存并重新生成
+                        // 清除字幕优化缓存（内存和数据库）
+                        setOptimizedSubtitles(new Map());
+                        setSubtitleOptimizationEnabled(false);
+                        setFailedChapterIds(new Set());
+                        try {
+                          await invoke("delete_optimized_subtitles", { noteId: note.id });
+                        } catch (err) {
+                          console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
+                        }
+                        // 清除之前生成的截图
+                        try {
+                          await invoke("clear_chapter_screenshots", { noteId: note.id });
+                        } catch (err) {
+                          console.error("[NoteContentPanel] 清除截图缓存失败:", err);
+                        }
+                        // 重新生成章节（统一走详细阅读链路）
+                        setChapterIsGenerating(true);
+                        setChapterGenerating(note.id, true);
+                        const generationId = crypto.randomUUID();
+                        registerActiveGenerationId(note.id, generationId);
+                        try {
+                          await invoke("generate_note_content", {
+                            generationId,
+                            noteId: note.id,
+                            modelId: currentModelId || defaultAiConfigId,
+                            concurrent: true,
+                            regenerate: true,
+                            tabsToGenerate: ["detailed_reading"],
+                          });
+                        } catch (error) {
+                          setChapterIsGenerating(false);
+                          setChapterGenerating(note.id, false);
+                          unregisterActiveGenerationId(note.id, generationId);
+                          message.error(`重新生成章节失败: ${error}`);
+                        }
                       }
                     }
-                  }
-                });
-                setShowConfirmDialog(true);
-              }}
-              disabled={assistModeGenerating}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover",
-                assistModeGenerating && "opacity-50 cursor-not-allowed"
-              )}
-            >
-              {assistModeGenerating ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  生成中...
-                  {assistModeProgress && (
-                    <span className="text-xs ml-1">
-                      ({assistModeProgress.current}/{assistModeProgress.total})
-                    </span>
-                  )}
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-4 h-4" />
-                  重新生成
-                </>
-              )}
-            </button>
+                  });
+                  setShowConfirmDialog(true);
+                }}
+                disabled={assistModeGenerating}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass, toolbarButtonDisabledClass)}
+              >
+                {assistModeGenerating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    生成中...
+                    {assistModeProgress && (
+                      <span className="text-xs ml-1">
+                        ({assistModeProgress.current}/{assistModeProgress.total})
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    重新生成
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       ) : activeTab === "script" ? (
         // 字幕脚本标签页的专用工具栏
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div className="flex items-center gap-3">
-            {/* 字幕滚动开关 */}
+        <div className={toolbarBarClass}>
+          <div className={cn(toolbarSectionClass, "w-full sm:w-auto")}>
             <button
               onClick={() => setAutoScroll(!autoScroll)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                autoScroll
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
+              className={cn(toolbarButtonClass, toolbarActionButtonClass, autoScroll && toolbarButtonActiveClass)}
             >
               <Clock className="w-4 h-4" />
               字幕滚动
             </button>
           </div>
-          {/* 右侧留空，不显示复制和下载按钮 */}
-          <div />
+          <div className={toolbarSectionEndClass} />
         </div>
       ) : activeTab === "highlights" ? (
         // 高光笔记标签页的专用工具栏
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div />
-          {/* 重新生成按钮 */}
-          <button
-            onClick={handleHighlightRegenerate}
-            disabled={highlightIsGenerating}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {highlightIsGenerating ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                生成中...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="w-4 h-4" />
-                重新生成
-              </>
-            )}
-          </button>
+        <div className={toolbarBarClass}>
+          <div className={cn(toolbarSectionClass, "w-full sm:w-auto")} />
+          <div className={toolbarSectionEndClass}>
+            <div className={toolbarActionClusterClass}>
+              <button
+                onClick={handleHighlightRegenerate}
+                disabled={highlightIsGenerating}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass, toolbarButtonDisabledClass)}
+              >
+                {highlightIsGenerating ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    重新生成
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       ) : activeTab === "visual" ? (
         // 视觉化总结标签页的专用工具栏
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface select-none">
-          <div className="flex items-center gap-1">
+        <div className={cn(toolbarBarClass, "select-none")}>
+          <div className={toolbarSectionClass}>
             {!isVisualEditMode && visualChapterItems.length > 0 && (
               <>
                 <div className="relative" ref={visualChapterDropdownRef}>
                   <button
                     onClick={() => setShowVisualChapterDropdown(!showVisualChapterDropdown)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                    className={cn(toolbarButtonClass, toolbarActionButtonClass)}
                   >
                     <List className="w-4 h-4" />
                     {`共 ${visualChapterItems.length} 个章节`}
                     <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showVisualChapterDropdown ? "rotate-180" : ""}`} />
                   </button>
                   {showVisualChapterDropdown && (
-                    <div className={cn("absolute top-full left-0 mt-1 w-96 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 max-h-80 overflow-auto", glassMenu)}>
-                      <div className={cn("sticky top-0 px-4 py-2 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2", glassMenu)}>
+                    <div className={cn(dropdownMenuClass, "w-96")}>
+                      <div className={dropdownHeaderClass}>
                         <List className="w-4 h-4 text-slate-500" />
                         <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
                       </div>
@@ -2715,8 +2742,8 @@ Video subtitles content:`;
                               className={cn(
                                 "w-full px-4 py-2 flex items-center gap-3 transition-colors cursor-pointer text-left",
                                 isCurrentChapter
-                                  ? "bg-blue-50 dark:bg-blue-900/20"
-                                  : "hover:bg-slate-100 dark:hover:bg-slate-700"
+                                  ? "bg-blue-50/90 dark:bg-blue-500/16"
+                                  : "hover:bg-white/75 dark:hover:bg-white/6"
                               )}
                             >
                               <span className="text-xs w-5 h-5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
@@ -2743,12 +2770,7 @@ Video subtitles content:`;
                 </div>
                 <button
                   onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                    showVisualTimestamp
-                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-                  )}
+                  className={cn(toolbarButtonClass, toolbarActionButtonClass, showVisualTimestamp && toolbarButtonActiveClass)}
                 >
                   <Clock className="w-4 h-4" />
                   时间戳
@@ -2756,86 +2778,75 @@ Video subtitles content:`;
               </>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleVisualEditToggle}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                isVisualEditMode
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
-            >
-              <Edit3 className="w-4 h-4" />
-              {isVisualEditMode ? "预览" : "编辑"}
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={handleVisualCopy}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Copy className="w-4 h-4" />
-              复制
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={handleVisualDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              下载
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={handleVisualExport}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Package className="w-4 h-4" />
-              导出
-            </button>
+          <div className={toolbarSectionEndClass}>
+            <div className={toolbarActionClusterClass}>
+              <button
+                onClick={handleVisualEditToggle}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass, isVisualEditMode && toolbarButtonActiveClass)}
+              >
+                <Edit3 className="w-4 h-4" />
+                {isVisualEditMode ? "预览" : "编辑"}
+              </button>
+              <button
+                onClick={handleVisualCopy}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+              >
+                <Copy className="w-4 h-4" />
+                复制
+              </button>
+              <button
+                onClick={handleVisualDownload}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+              >
+                <Download className="w-4 h-4" />
+                下载
+              </button>
+              <button
+                onClick={handleVisualExport}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+              >
+                <Package className="w-4 h-4" />
+                导出
+              </button>
+            </div>
           </div>
         </div>
       ) : activeTab === "custom" && note.custom_summary ? (
         // 自定义总结标签页的工具栏（有内容时显示完整工具栏）
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div className="flex items-center gap-2">
+        <div className={toolbarBarClass}>
+          <div className={toolbarSectionClass}>
             <button
               onClick={() => setIsEditMode(!isEditMode)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                isEditMode
-                  ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                  : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-              )}
+              className={cn(toolbarButtonClass, isEditMode && toolbarButtonActiveClass)}
             >
               <Edit3 className="w-4 h-4" />
               {isEditMode ? "预览" : "编辑"}
             </button>
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Copy className="w-4 h-4" />
-              复制
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              下载
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={openCustomPromptDialog}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-4 h-4" />
-              重新总结
-            </button>
+          <div className={toolbarSectionEndClass}>
+            <div className={toolbarActionClusterClass}>
+              <button
+                onClick={handleCopy}
+                className={toolbarButtonClass}
+              >
+                <Copy className="w-4 h-4" />
+                复制
+              </button>
+              <button
+                onClick={handleDownload}
+                className={toolbarButtonClass}
+              >
+                <Download className="w-4 h-4" />
+                下载
+              </button>
+              <button
+                onClick={openCustomPromptDialog}
+                className={toolbarButtonClass}
+              >
+                <RefreshCw className="w-4 h-4" />
+                重新总结
+              </button>
+            </div>
           </div>
         </div>
       ) : activeTab === "custom" && !note.custom_summary ? (
@@ -2843,56 +2854,57 @@ Video subtitles content:`;
         null
       ) : activeTab === "flashcard" ? (
         // 闪记卡标签页的专用工具栏
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div />
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => {
-                setConfirmDialogConfig({
-                  title: "确认重新生成",
-                  message: "重新生成将覆盖当前的闪记卡，此操作不可撤销。是否继续？",
-                  onConfirm: () => {
-                    setShowConfirmDialog(false);
-                    window.dispatchEvent(new CustomEvent('flashcard-regenerate', { detail: { noteId: note.id } }));
-                  }
-                });
-                setShowConfirmDialog(true);
-              }}
-              disabled={isTabGenerating("flashcard")}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isTabGenerating("flashcard") ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  生成中...
-                </>
-              ) : (
-                <>
-                  <RefreshCw className="w-4 h-4" />
-                  重新生成
-                </>
-              )}
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('flashcard-download-csv', { detail: { noteId: note.id } }));
-              }}
-              disabled={!note.flashcards}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download className="w-4 h-4" />
-              下载CSV
-            </button>
+        <div className={toolbarBarClass}>
+          <div className={toolbarSectionClass} />
+          <div className={toolbarSectionEndClass}>
+            <div className={toolbarActionClusterClass}>
+              <button
+                onClick={() => {
+                  setConfirmDialogConfig({
+                    title: "确认重新生成",
+                    message: "重新生成将覆盖当前的闪记卡，此操作不可撤销。是否继续？",
+                    onConfirm: () => {
+                      setShowConfirmDialog(false);
+                      window.dispatchEvent(new CustomEvent('flashcard-regenerate', { detail: { noteId: note.id } }));
+                    }
+                  });
+                  setShowConfirmDialog(true);
+                }}
+                disabled={isTabGenerating("flashcard")}
+                className={cn(toolbarButtonClass, toolbarButtonDisabledClass)}
+              >
+                {isTabGenerating("flashcard") ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4" />
+                    重新生成
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent('flashcard-download-csv', { detail: { noteId: note.id } }));
+                }}
+                disabled={!note.flashcards}
+                className={cn(toolbarButtonClass, toolbarButtonDisabledClass)}
+              >
+                <Download className="w-4 h-4" />
+                下载CSV
+              </button>
+            </div>
           </div>
         </div>
       ) : activeTab === "panoramic_blueprint" && note.panoramic_blueprint ? (
         // 深度蓝图标签页的工具栏（有内容时显示）
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div className="flex items-center gap-2">
+        <div className={toolbarBarClass}>
+          <div className={toolbarSectionClass}>
             {/* 进度提示 */}
             {blueprintIsGenerating && blueprintProgress ? (
-              <div className="flex items-center gap-2">
+              <div className={toolbarSectionClass}>
                 <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
                 <span className="text-sm text-blue-800 dark:text-blue-300">
                   正在生成深度蓝图... ({blueprintProgress.current}/{blueprintProgress.total})
@@ -2901,73 +2913,68 @@ Video subtitles content:`;
             ) : (
               <button
                 onClick={() => setBlueprintEditMode(!blueprintEditMode)}
-                className={cn(
-                  "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                  blueprintEditMode
-                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-                )}
+                className={cn(toolbarButtonClass, blueprintEditMode && toolbarButtonActiveClass)}
               >
                 <Edit3 className="w-4 h-4" />
                 {blueprintEditMode ? "预览" : "编辑"}
               </button>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={async () => {
-                if (note.panoramic_blueprint) {
-                  await navigator.clipboard.writeText(note.panoramic_blueprint);
-                  message.success('已复制到剪贴板');
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Copy className="w-4 h-4" /> 复制
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={async () => {
-                if (!note.panoramic_blueprint) return;
-                try {
-                  const filePath = await save({
-                    defaultPath: `${note.title}_深度蓝图.md`,
-                    filters: [{ name: 'Markdown', extensions: ['md'] }]
-                  });
-                  if (filePath) {
-                    await invoke('save_file_content', {
-                      path: filePath,
-                      content: note.panoramic_blueprint
+          <div className={toolbarSectionEndClass}>
+            <div className={toolbarActionClusterClass}>
+              <button
+                onClick={async () => {
+                  if (note.panoramic_blueprint) {
+                    await navigator.clipboard.writeText(note.panoramic_blueprint);
+                    message.success('已复制到剪贴板');
+                  }
+                }}
+                className={toolbarButtonClass}
+              >
+                <Copy className="w-4 h-4" /> 复制
+              </button>
+              <button
+                onClick={async () => {
+                  if (!note.panoramic_blueprint) return;
+                  try {
+                    const filePath = await save({
+                      defaultPath: `${note.title}_深度蓝图.md`,
+                      filters: [{ name: 'Markdown', extensions: ['md'] }]
                     });
-                    message.success('下载成功');
+                    if (filePath) {
+                      await invoke('save_file_content', {
+                        path: filePath,
+                        content: note.panoramic_blueprint
+                      });
+                      message.success('下载成功');
+                    }
+                  } catch (error) {
+                    message.error('下载失败');
                   }
-                } catch (error) {
-                  message.error('下载失败');
-                }
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4" /> 下载
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={() => {
-                setConfirmDialogConfig({
-                  title: "确认重新生成",
-                  message: "重新生成将覆盖当前的深度蓝图，此操作不可撤销。是否继续？",
-                  onConfirm: () => {
-                    setShowConfirmDialog(false);
-                    generatePanoramicBlueprint();
-                  }
-                });
-                setShowConfirmDialog(true);
-              }}
-              disabled={blueprintIsGenerating}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <RefreshCw className={cn("w-4 h-4", blueprintIsGenerating && "animate-spin")} />
-              重新生成
-            </button>
+                }}
+                className={toolbarButtonClass}
+              >
+                <Download className="w-4 h-4" /> 下载
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmDialogConfig({
+                    title: "确认重新生成",
+                    message: "重新生成将覆盖当前的深度蓝图，此操作不可撤销。是否继续？",
+                    onConfirm: () => {
+                      setShowConfirmDialog(false);
+                      generatePanoramicBlueprint();
+                    }
+                  });
+                  setShowConfirmDialog(true);
+                }}
+                disabled={blueprintIsGenerating}
+                className={cn(toolbarButtonClass, toolbarButtonDisabledClass)}
+              >
+                <RefreshCw className={cn("w-4 h-4", blueprintIsGenerating && "animate-spin")} />
+                重新生成
+              </button>
+            </div>
           </div>
         </div>
       ) : activeTab === "ai_note" || activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas" || activeTab === "panoramic_blueprint" ? (
@@ -2975,31 +2982,32 @@ Video subtitles content:`;
         null
       ) : (
         // 其他标签页的简化工具栏
-        <div className="flex items-center justify-end px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleCopy}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Copy className="w-4 h-4" />
-              复制
-            </button>
-            <span className="text-slate-300 dark:text-slate-600">|</span>
-            <button
-              onClick={handleDownload}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
-            >
-              <Download className="w-4 h-4" />
-              下载
-            </button>
+        <div className={toolbarBarClass}>
+          <div className={toolbarSectionClass} />
+          <div className={toolbarSectionEndClass}>
+            <div className={toolbarActionClusterClass}>
+              <button
+                onClick={handleCopy}
+                className={toolbarButtonClass}
+              >
+                <Copy className="w-4 h-4" />
+                复制
+              </button>
+              <button
+                onClick={handleDownload}
+                className={toolbarButtonClass}
+              >
+                <Download className="w-4 h-4" />
+                下载
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* 内容区域 */}
       <div
-        className={cn(
-          "flex-1 min-h-0", // min-h-0 确保 flex 子元素可以正确收缩，让虚拟列表获得正确高度
+        className={cn("relative z-0 flex-1 min-h-0",
           activeTab === "ai_note"
             ? "p-0 overflow-hidden"
             : activeTab === "quicknotes" || activeTab === "mindmap" || activeTab === "canvas"
@@ -3033,34 +3041,26 @@ Video subtitles content:`;
               onContentUpdate={onGenerationComplete}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full">
-              <div className="text-center">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                  <FileText className="w-8 h-8 text-slate-400 dark:text-slate-500" />
-                </div>
-                <h3 className="text-lg font-medium text-slate-700 dark:text-slate-300 mb-2">暂无全文总结</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-md">
-                  AI 可以根据视频字幕自动生成结构化的全文总结，包含摘要、核心亮点和关键术语。
-                </p>
+            <SharedEmptyState
+              icon={<FileText className="w-8 h-8 text-slate-400 dark:text-slate-500" />}
+              title="暂无全文总结"
+              description="AI 可以根据视频字幕自动生成结构化的全文总结，包含摘要、核心亮点和关键术语。"
+              action={
                 <button
                   onClick={handleGenerateFullSummaryWithDefaults}
                   disabled={!note.subtitle_path || aiConfigs.length === 0}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all mx-auto",
-                    "bg-blue-500 hover:bg-blue-600 text-white",
-                    "disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                  )}
+                  className={emptyStateActionButtonClass}
                 >
                   <Sparkles className="w-4 h-4" />
                   生成全文总结
                 </button>
-                {(!note.subtitle_path || aiConfigs.length === 0) && (
-                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
-                    {!note.subtitle_path ? "请先上传字幕文件" : "请先配置 AI 模型"}
-                  </p>
-                )}
-              </div>
-            </div>
+              }
+              hint={
+                (!note.subtitle_path || aiConfigs.length === 0)
+                  ? (!note.subtitle_path ? "请先上传字幕文件" : "请先配置 AI 模型")
+                  : undefined
+              }
+            />
           )
         )}
         {activeTab === "original" && (() => {
@@ -3099,9 +3099,13 @@ Video subtitles content:`;
 
           // 空状态
           return (
-            <div className="flex items-center justify-center h-full">
-              <p className="text-slate-500">暂无原文细读数据，请点击右上角"重新生成"按钮生成</p>
-            </div>
+            <SharedEmptyState
+              icon={<BookOpen className="w-8 h-8 text-slate-400 dark:text-slate-500" />}
+              title="暂无原文细读数据"
+              description="先生成章节与细读内容后，这里会展示结构化章节、字幕片段与精读结果。"
+              hint="请点击上方“重新生成”按钮开始生成"
+              cardClassName="max-w-xl"
+            />
           );
         })()}
         {activeTab === "highlights" && (
@@ -3151,24 +3155,21 @@ Video subtitles content:`;
               onContentUpdate={onGenerationComplete}
             />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full">
-              <div className="text-center">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/30 dark:to-purple-900/30 flex items-center justify-center">
-                  <Sparkles className="w-8 h-8 text-blue-500" />
-                </div>
-                <h3 className="text-lg font-medium text-slate-700 dark:text-slate-200 mb-2">自定义总结</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-xs">
-                  根据您的需求定制总结内容，输入自定义提示词生成个性化笔记
-                </p>
+            <SharedEmptyState
+              icon={<Sparkles className="w-8 h-8 text-blue-500" />}
+              title="自定义总结"
+              description="根据您的需求定制总结内容，输入自定义提示词生成更贴合当前学习目标的个性化笔记。"
+              action={
                 <button
                   onClick={openCustomPromptDialog}
-                  className="inline-flex items-center gap-2 px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-xl transition-colors cursor-pointer"
+                  className={emptyStateActionButtonClass}
                 >
                   <Sparkles className="w-4 h-4" />
                   开始生成
                 </button>
-              </div>
-            </div>
+              }
+              iconWrapClassName="bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/30 dark:to-purple-900/30"
+            />
           )
         )}
         {activeTab === "ai_note" && (
@@ -3239,45 +3240,38 @@ Video subtitles content:`;
               onContentUpdate={onGenerationComplete}
             />
           ) : (
-            // 空状态：显示生成按钮
-            <div className="flex flex-col items-center justify-center h-full">
-              <div className="text-center">
-                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/30 dark:to-purple-900/30 flex items-center justify-center">
-                  <MapIcon className="w-8 h-8 text-blue-500" />
-                </div>
-                <h3 className="text-lg font-medium text-slate-900 dark:text-slate-100 mb-2">
-                  生成全景深度重构蓝图
-                </h3>
-                <p className="text-sm text-slate-600 dark:text-slate-400 mb-6 max-w-md">
-                  使用AI深度分析视频内容，生成5倍字数扩展的结构化知识文档
-                </p>
-                {(currentModelId || defaultAiConfigId) ? (
+            <SharedEmptyState
+              icon={<MapIcon className="w-8 h-8 text-blue-500" />}
+              title="生成全景深度重构蓝图"
+              description="使用 AI 深度分析视频内容，生成更完整的结构化知识文档，便于复盘、重构与延展学习。"
+              action={
+                (currentModelId || defaultAiConfigId) ? (
                   <button
                     onClick={generatePanoramicBlueprint}
                     disabled={blueprintIsGenerating || !note.subtitle_path}
-                    className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    className={emptyStateActionButtonClass}
                   >
                     {blueprintIsGenerating ? (
-                      <span className="flex items-center gap-2">
+                      <>
                         <Loader2 className="w-4 h-4 animate-spin" />
                         生成中...
-                      </span>
+                      </>
                     ) : (
-                      '开始生成'
+                      <>
+                        <MapIcon className="w-4 h-4" />
+                        开始生成
+                      </>
                     )}
                   </button>
-                ) : (
-                  <p className="text-sm text-red-500 dark:text-red-400">
-                    请先在视频播放器右上角选择AI模型
-                  </p>
-                )}
-                {!note.subtitle_path && (currentModelId || defaultAiConfigId) && (
-                  <p className="text-xs text-slate-400 dark:text-slate-500 mt-2">
-                    请先上传字幕文件
-                  </p>
-                )}
-              </div>
-            </div>
+                ) : undefined
+              }
+              hint={
+                (currentModelId || defaultAiConfigId)
+                  ? (!note.subtitle_path ? "请先上传字幕文件" : undefined)
+                  : <span className="text-sm font-medium text-red-500 dark:text-red-400">请先在视频播放器右上角选择 AI 模型</span>
+              }
+              iconWrapClassName="bg-gradient-to-br from-blue-100 to-purple-100 dark:from-blue-900/30 dark:to-purple-900/30"
+            />
           )
         )}
       </div>
@@ -3689,36 +3683,43 @@ function ScriptContent({ subtitlePath, autoScroll }: ScriptContentProps) {
 
   if (!subtitlePath) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400">
-        <Captions className="w-12 h-12 mb-4 opacity-50" />
-        <p>未上传字幕文件</p>
-        <p className="text-sm mt-2">上传视频时可选择添加字幕文件</p>
-      </div>
+      <SharedEmptyState
+        icon={<Captions className="w-8 h-8 text-slate-400 dark:text-slate-500" />}
+        title="未上传字幕文件"
+        description="上传视频时可选择添加字幕文件，导入后这里会展示完整字幕脚本并支持自动跟随播放。"
+      />
     );
   }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-400">
-        <p>加载字幕中...</p>
-      </div>
+      <SharedEmptyState
+        icon={<Loader2 className="w-8 h-8 animate-spin text-blue-500" />}
+        title="加载字幕中"
+        description="正在解析字幕文件，请稍候。"
+        iconWrapClassName="bg-blue-50/90 dark:bg-blue-900/20"
+      />
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400">
-        <p className="text-red-400">{error}</p>
-      </div>
+      <SharedEmptyState
+        icon={<Captions className="w-8 h-8 text-red-500 dark:text-red-400" />}
+        title="字幕解析失败"
+        description={error}
+        iconWrapClassName="border-red-200/80 bg-red-50/90 dark:border-red-500/30 dark:bg-red-500/10"
+      />
     );
   }
 
   if (subtitleEntries.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-400">
-        <Captions className="w-12 h-12 mb-4 opacity-50" />
-        <p>字幕文件为空</p>
-      </div>
+      <SharedEmptyState
+        icon={<Captions className="w-8 h-8 text-slate-400 dark:text-slate-500" />}
+        title="字幕文件为空"
+        description="当前字幕文件中没有可展示的字幕内容，请检查文件内容后重试。"
+      />
     );
   }
 

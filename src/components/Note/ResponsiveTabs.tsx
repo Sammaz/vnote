@@ -93,8 +93,8 @@ export function ResponsiveTabs({
   const isOverflowing = hiddenItems.length > 0;
 
   return (
-    <div className={cn("relative flex-1 min-w-0", className)} ref={containerRef}>
-      <div className="flex items-center w-full">
+    <div className={cn("relative z-40 flex-1 min-w-0 overflow-visible", className)} ref={containerRef}>
+      <div className="flex items-center gap-1.5 w-full min-w-0">
         {visibleItems.map(item => (
           <div key={item.id} className="flex-shrink-0 cursor-pointer" onClick={() => onTabClick(item.id)}>
             {renderTab(item, false)}
@@ -102,10 +102,10 @@ export function ResponsiveTabs({
         ))}
 
         {isOverflowing && (
-          <div className="relative dropdown-trigger flex-shrink-0 ml-1">
+          <div className="relative dropdown-trigger z-20 flex-shrink-0 ml-auto pl-1">
             <button
               onClick={() => setShowDropdown(!showDropdown)}
-              className="flex items-center justify-center w-8 h-8 rounded-lg transition-colors text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-700 cursor-pointer"
+              className="flex items-center justify-center w-[30px] h-[30px] rounded-lg border border-slate-200/75 bg-white/72 text-slate-500 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-white hover:text-slate-700 hover:shadow-md dark:border-slate-700/80 dark:bg-slate-800/78 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200 cursor-pointer"
             >
               <MoreHorizontal className="w-4 h-4" />
             </button>
@@ -113,7 +113,7 @@ export function ResponsiveTabs({
             {showDropdown && (
               <div
                 ref={dropdownRef}
-                className={`absolute top-full right-0 mt-1 w-48 ${glassMenu} rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 py-1 overflow-hidden`}
+                className={`absolute top-full right-0 mt-2 w-52 ${glassMenu} rounded-2xl border border-slate-200/90 bg-white/96 shadow-[0_24px_70px_rgba(15,23,42,0.24)] ring-1 ring-slate-200/70 backdrop-blur-xl dark:border-slate-700/90 dark:bg-slate-900/96 dark:ring-white/8 z-[80] py-1.5 overflow-hidden`}
               >
                 {hiddenItems.map(item => (
                   <div
@@ -165,8 +165,8 @@ function WidthMeasurer({ items, containerWidth, onMeasure }: {
 
     let currentWidth = 0;
     let count = 0;
-    // 预留 More 按钮的宽度（32px 按钮 + 4px margin = 36px）
-    const moreButtonWidth = 36;
+    // 预留 More 按钮的宽度（按钮与间距合计约 32px）
+    const moreButtonWidth = 32;
 
     for (let i = 0; i < items.length; i++) {
       const element = itemsRef.current[i];

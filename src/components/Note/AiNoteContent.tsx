@@ -144,11 +144,30 @@ export function AiNoteContent({
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const promptDropdownRef = useRef<HTMLDivElement>(null);
 
-  const glassCard = useGlassBg("card");
   const glassPanel = useGlassBg("panel");
   const glassMenu = useGlassBg("menu");
   const glassInput = useGlassBg("input");
   const glassModal = useGlassBg("modal");
+
+  const toolbarButtonClass = "inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-sm font-medium text-slate-600 transition-all cursor-pointer hover:-translate-y-0.5 hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100";
+  const toolbarButtonActiveClass = "bg-blue-50/90 text-blue-600 shadow-sm dark:bg-blue-500/14 dark:text-blue-400";
+  const toolbarBarClass = "flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-slate-50/85 px-4 py-3 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80";
+  const toolbarSectionClass = "flex flex-wrap items-center gap-2 min-w-0";
+  const toolbarSectionEndClass = cn(toolbarSectionClass, "justify-end sm:ml-auto");
+  const toolbarMetaPillClass = "inline-flex h-9 items-center rounded-xl border border-slate-200/80 bg-white/75 px-3 text-xs font-medium text-slate-500 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-400";
+  const modalFieldLabelClass = "text-sm font-medium text-slate-700 dark:text-slate-300";
+  const modalSelectButtonClass = "h-11 rounded-xl border border-slate-200/80 px-3 pr-10 text-left text-sm font-medium text-slate-900 transition-all truncate cursor-pointer hover:border-slate-300/90 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:border-vnote-border/80 dark:text-slate-100 dark:hover:border-slate-500";
+  const modalOptionCardClass = "rounded-2xl border border-slate-200/80 bg-white/72 px-4 py-3 text-left transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-300/90 hover:shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:hover:border-slate-500";
+  const modalOptionCardActiveClass = "border-blue-200/80 bg-blue-50/90 text-blue-700 shadow-sm dark:border-blue-400/40 dark:bg-blue-900/20 dark:text-blue-300";
+  const modalOptionCardIdleClass = "text-slate-700 dark:text-slate-300";
+  const modalCompactOptionClass = "h-11 w-full rounded-xl border border-slate-200/80 bg-white/72 px-2.5 text-center transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-300/90 hover:shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:hover:border-slate-500";
+  const modalCompactOptionActiveClass = "border-blue-200/80 bg-blue-50/90 text-blue-700 shadow-sm dark:border-blue-400/40 dark:bg-blue-900/20 dark:text-blue-300";
+  const modalSecondaryButtonClass = "inline-flex h-11 items-center justify-center rounded-xl border border-slate-200/80 px-4 text-sm font-medium text-slate-600 transition-all cursor-pointer hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:border-vnote-border/80 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100";
+  const modalPrimaryButtonClass = "inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white transition-all cursor-pointer hover:bg-blue-700 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed";
+  const modalSectionClass = cn("rounded-2xl border border-slate-200/80 bg-white/55 p-4 shadow-sm dark:border-vnote-border/80 dark:bg-white/5", glassPanel);
+  const modalDropdownClass = cn("absolute right-0 z-50 mt-2 w-full overflow-auto rounded-2xl border border-slate-200/80 py-1 shadow-[0_18px_45px_rgba(15,23,42,0.16)] max-h-60 dark:border-vnote-border/80", glassMenu);
+  const modalTextareaClass = cn("mt-4 w-full rounded-2xl border border-slate-200/80 px-4 py-3 text-sm text-slate-900 placeholder:text-slate-400 shadow-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-vnote-border/80 dark:text-slate-100", glassInput);
+  const toolbarDivider = <div className="hidden h-5 w-px bg-slate-200/90 dark:bg-vnote-border/80 sm:block" aria-hidden="true" />;
 
   const aiNoteMeta = parseAiNoteMeta(note.ai_note_meta);
   const aiNoteStyle = parseAiNoteStyle(aiNoteMeta?.style) ?? "detailed";
@@ -170,6 +189,8 @@ export function AiNoteContent({
     setSelectedStyle(parseAiNoteStyle(aiNoteMeta?.style) ?? "detailed");
     setSelectedScreenshotDensity(parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density));
     setCustomPrompt(aiNoteMeta?.custom_prompt || "");
+    setShowModelDropdown(false);
+    setShowPromptDropdown(false);
     setShowPromptDialog(true);
   }, [aiNoteMeta?.custom_prompt, aiNoteMeta?.screenshot_density, aiNoteMeta?.style, getDefaultModelId]);
 
@@ -311,28 +332,18 @@ export function AiNoteContent({
   return (
     <div className="h-full flex flex-col">
       {note.ai_note_markdown && (
-        <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface">
-          <div className="flex items-center gap-2">
-            <div className={cn("flex items-center rounded-lg border border-slate-200 p-1 dark:border-slate-700", glassPanel)}>
+        <div className={toolbarBarClass}>
+          <div className={toolbarSectionClass}>
+            <div className={cn("inline-flex items-center gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1 shadow-sm dark:border-vnote-border/80 dark:bg-white/5", glassPanel)}>
               <button
                 onClick={() => setViewMode("markdown")}
-                className={cn(
-                  "px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer",
-                  viewMode === "markdown"
-                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                )}
+                className={cn(toolbarButtonClass, viewMode === "markdown" && toolbarButtonActiveClass)}
               >
                 文档
               </button>
               <button
                 onClick={() => setViewMode("mindmap")}
-                className={cn(
-                  "px-3 py-1.5 text-sm rounded-md transition-colors cursor-pointer",
-                  viewMode === "mindmap"
-                    ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                    : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                )}
+                className={cn(toolbarButtonClass, viewMode === "mindmap" && toolbarButtonActiveClass)}
               >
                 脑图
               </button>
@@ -340,7 +351,7 @@ export function AiNoteContent({
             {viewMode === "mindmap" ? (
               <div
                 ref={setMindMapDepthControlContainer}
-                className={cn("flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 px-3 py-1.5 dark:border-slate-700", glassPanel)}
+                className={cn("flex min-w-0 items-center gap-2 rounded-xl border border-slate-200/80 px-3 py-1.5 dark:border-vnote-border/80", glassPanel)}
                 title="显示层级"
               />
             ) : null}
@@ -348,47 +359,42 @@ export function AiNoteContent({
               <>
                 <button
                   onClick={() => setIsEditMode(!isEditMode)}
-                  className={cn(
-                    "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer",
-                    isEditMode
-                      ? "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400"
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover"
-                  )}
+                  className={cn(toolbarButtonClass, isEditMode && toolbarButtonActiveClass)}
                 >
                   <Edit3 className="w-4 h-4" />
                   {isEditMode ? "预览" : "编辑"}
                 </button>
-                <span className="text-xs text-slate-500 dark:text-slate-400 px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800">
+                <span className={toolbarMetaPillClass}>
                   风格：{hasCustomPrompt ? "自定义" : AI_NOTE_STYLE_LABELS[aiNoteStyle]}
                 </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400 px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800">
+                <span className={toolbarMetaPillClass}>
                   截图：{AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]}
                 </span>
               </>
             )}
           </div>
-          <div className="flex items-center gap-1">
+          <div className={toolbarSectionEndClass}>
             {viewMode === "markdown" ? (
               <>
                 <button
                   onClick={handleCopy}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                  className={toolbarButtonClass}
                 >
                   <Copy className="w-4 h-4" />
                   复制
                 </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
+                {toolbarDivider}
                 <button
                   onClick={handleDownloadMarkdown}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                  className={toolbarButtonClass}
                 >
                   <Download className="w-4 h-4" />
                   下载
                 </button>
-                <span className="text-slate-300 dark:text-slate-600">|</span>
+                {toolbarDivider}
                 <button
                   onClick={openPromptDialog}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                  className={toolbarButtonClass}
                 >
                   <RefreshCw className="w-4 h-4" />
                   重新生成
@@ -397,7 +403,7 @@ export function AiNoteContent({
             ) : (
               <button
                 onClick={handleDownloadMindMap}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
+                className={toolbarButtonClass}
               >
                 <Download className="w-4 h-4" />
                 下载
@@ -469,72 +475,131 @@ export function AiNoteContent({
       </div>
 
       {showPromptDialog && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowPromptDialog(false)}>
-          <div className={cn("rounded-2xl shadow-2xl w-[600px] max-w-[90vw]", glassModal)} onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-8 pt-6 pb-4">
-              <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-blue-500" />
-                大纲笔记
-              </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm" onClick={() => setShowPromptDialog(false)}>
+          <div className={cn("w-full max-w-3xl overflow-hidden rounded-[28px] border border-slate-200/80 shadow-[0_24px_80px_rgba(15,23,42,0.18)]", glassModal)} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between border-b border-slate-200/80 px-6 py-5 dark:border-vnote-border/80 sm:px-8">
+              <div>
+                <h3 className="flex items-center gap-2 text-xl font-semibold text-slate-900 dark:text-slate-100">
+                  <Sparkles className="h-5 w-5 text-blue-500" />
+                  大纲笔记
+                </h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">选择模型、风格与截图密度后重新生成当前 ai_note。</p>
+              </div>
               <button
                 onClick={() => setShowPromptDialog(false)}
-                className="p-1.5 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors cursor-pointer"
+                className="rounded-xl p-2 text-slate-500 transition-all hover:bg-white/80 hover:text-slate-700 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-200 cursor-pointer"
               >
-                <X className="w-5 h-5 text-slate-500" />
+                <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="px-8 py-6">
-              <div className="flex items-center justify-between mb-5">
-                <span className="text-sm font-medium text-slate-700 dark:text-slate-300">大语言模型</span>
-                <div className="relative" ref={modelDropdownRef}>
-                  <button
-                    type="button"
-                    onClick={() => setShowModelDropdown(!showModelDropdown)}
-                    className={cn("w-48 px-3 py-2 pr-10 rounded-xl border border-slate-200 dark:border-slate-600 text-sm text-slate-900 dark:text-slate-100 font-medium text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all truncate", glassInput)}
-                  >
-                    {aiConfigs.find((config) => config.id === selectedModelId)?.title || "选择模型"}
-                  </button>
-                  <ChevronDown className={cn("absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform", showModelDropdown && "rotate-180")} />
-                  {showModelDropdown && (
-                    <div className={cn("absolute z-50 mt-2 w-56 right-0 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1 max-h-60 overflow-auto", glassMenu)}>
-                      {aiConfigs.map((config) => (
-                        <button
-                          key={config.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedModelId(config.id);
-                            setShowModelDropdown(false);
-                          }}
-                          className={cn(
-                            "w-full px-4 py-2.5 text-left text-sm flex items-center justify-between hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer",
-                            selectedModelId === config.id
-                              ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20"
-                              : "text-slate-700 dark:text-slate-300"
-                          )}
-                        >
-                          <span className="truncate">{config.title}</span>
-                          {selectedModelId === config.id && <Check className="w-4 h-4 flex-shrink-0 ml-2" />}
-                        </button>
-                      ))}
+            <div className="flex max-h-[min(78vh,760px)] flex-col gap-5 overflow-y-auto px-6 py-5 sm:px-8 sm:py-6">
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(260px,300px)] lg:items-start">
+                <div className={modalSectionClass}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className={modalFieldLabelClass}>大语言模型</span>
+                    <div className="relative w-full sm:w-64" ref={modelDropdownRef}>
+                      <button
+                        type="button"
+                        onClick={() => setShowModelDropdown(!showModelDropdown)}
+                        className={cn("w-full", modalSelectButtonClass, glassInput)}
+                      >
+                        {aiConfigs.find((config) => config.id === selectedModelId)?.title || "选择模型"}
+                      </button>
+                      <ChevronDown className={cn("pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-transform", showModelDropdown && "rotate-180")} />
+                      {showModelDropdown && (
+                        <div className={modalDropdownClass}>
+                          {aiConfigs.map((config) => (
+                            <button
+                              key={config.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedModelId(config.id);
+                                setShowModelDropdown(false);
+                              }}
+                              className={cn(
+                                "flex w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm transition-colors cursor-pointer hover:bg-white/80 dark:hover:bg-white/8",
+                                selectedModelId === config.id
+                                  ? "bg-blue-50/90 text-blue-600 dark:bg-blue-500/14 dark:text-blue-400"
+                                  : "text-slate-700 dark:text-slate-300"
+                              )}
+                            >
+                              <span className="truncate">{config.title}</span>
+                              {selectedModelId === config.id && <Check className="ml-2 h-4 w-4 flex-shrink-0" />}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  )}
+                  </div>
+                </div>
+
+                <div className={modalSectionClass}>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <label className={modalFieldLabelClass}>补充提示词（可选）</label>
+                    {aiNotePromptConfigs.length > 0 && (
+                      <div className="relative w-full sm:w-64" ref={promptDropdownRef}>
+                        <button
+                          type="button"
+                          onClick={() => setShowPromptDropdown(!showPromptDropdown)}
+                          className={cn("w-full text-slate-600 dark:text-slate-300", modalSelectButtonClass, glassInput)}
+                        >
+                          选择已配置的提示词
+                        </button>
+                        <ChevronDown className={cn("pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 transition-transform", showPromptDropdown && "rotate-180")} />
+                        {showPromptDropdown && (
+                          <div className={modalDropdownClass}>
+                            {aiNotePromptConfigs.map((prompt) => (
+                              <button
+                                key={prompt.id}
+                                type="button"
+                                onClick={() => {
+                                  setCustomPrompt(prompt.content);
+                                  setShowPromptDropdown(false);
+                                }}
+                                className="w-full px-4 py-3 text-left text-sm text-slate-700 transition-colors hover:bg-white/80 dark:text-slate-300 dark:hover:bg-white/8 cursor-pointer"
+                              >
+                                <div className="truncate font-medium">{prompt.title}</div>
+                                {prompt.description && (
+                                  <div className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">{prompt.description}</div>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <textarea
+                    value={customPrompt}
+                    onChange={(e) => setCustomPrompt(e.target.value)}
+                    placeholder={`可选：补充你希望 AI 额外关注的重点，比如：
+- 更关注案例拆解
+- 在关键小节保留时间戳
+- 额外总结行动建议`}
+                    rows={8}
+                    className={modalTextareaClass}
+                  />
+                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    不填写时将使用当前风格的默认大纲笔记提示词。
+                  </p>
                 </div>
               </div>
 
-              <div className="mb-6">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">笔记风格</label>
-                <div className="grid grid-cols-3 gap-3 mt-3">
+              <div className={modalSectionClass}>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <label className={modalFieldLabelClass}>笔记风格</label>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">与右侧工具栏风格标签保持一致</span>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {AI_NOTE_STYLE_OPTIONS.map((option) => (
                     <button
                       key={option.value}
                       type="button"
                       onClick={() => setSelectedStyle(option.value)}
                       className={cn(
-                        "rounded-xl border px-4 py-3 text-left transition-colors cursor-pointer",
-                        selectedStyle === option.value
-                          ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
-                          : cn("border-slate-200 text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:text-slate-300 dark:hover:border-slate-500", glassCard)
+                        modalOptionCardClass,
+                        selectedStyle === option.value ? modalOptionCardActiveClass : modalOptionCardIdleClass
                       )}
                     >
                       <div className="text-sm font-medium">{option.label}</div>
@@ -544,96 +609,46 @@ export function AiNoteContent({
                 </div>
               </div>
 
-              <div className="mb-6">
-                <label className="text-sm font-medium text-slate-700 dark:text-slate-300">关键帧截图</label>
-                <div className="grid grid-cols-4 gap-2 mt-3">
+              <div className={modalSectionClass}>
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <label className={modalFieldLabelClass}>关键帧截图</label>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">控制插图密度与回看信息量</span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
                   {AI_NOTE_SCREENSHOT_OPTIONS.map((option) => (
-                    <div key={option.value} className="relative group">
+                    <div key={option.value} className="group relative">
                       <button
                         type="button"
                         onClick={() => setSelectedScreenshotDensity(option.value)}
                         className={cn(
-                          "w-full rounded-lg border px-2.5 py-2 text-center transition-colors cursor-pointer",
-                          selectedScreenshotDensity === option.value
-                            ? "border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-400 dark:bg-blue-900/20 dark:text-blue-300"
-                            : cn("border-slate-200 text-slate-700 hover:border-slate-300 dark:border-slate-600 dark:text-slate-300 dark:hover:border-slate-500", glassCard)
+                          modalCompactOptionClass,
+                          selectedScreenshotDensity === option.value ? modalCompactOptionActiveClass : modalOptionCardIdleClass
                         )}
                       >
                         <div className="text-sm font-medium">{option.label}</div>
                       </button>
-                      <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 px-3 py-1.5 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 bg-slate-800 text-slate-100 dark:bg-slate-200 dark:text-slate-800 shadow-lg">
+                      <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-max max-w-[220px] -translate-x-1/2 rounded-lg bg-slate-800 px-3 py-1.5 text-xs text-slate-100 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 dark:bg-slate-200 dark:text-slate-800">
                         {option.description}
-                        <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-slate-800 dark:border-t-slate-200" />
+                        <div className="absolute left-1/2 top-full h-0 w-0 -translate-x-1/2 border-x-4 border-x-transparent border-t-4 border-t-slate-800 dark:border-t-slate-200" />
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <label className="text-sm font-medium text-slate-700 dark:text-slate-300">补充提示词（可选）</label>
-                  {aiNotePromptConfigs.length > 0 && (
-                    <div className="relative" ref={promptDropdownRef}>
-                      <button
-                        type="button"
-                        onClick={() => setShowPromptDropdown(!showPromptDropdown)}
-                        className={cn("px-3 py-1.5 pr-8 rounded-lg border border-slate-200 dark:border-slate-600 text-sm text-slate-600 dark:text-slate-300 text-left focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent cursor-pointer hover:border-slate-300 dark:hover:border-slate-500 transition-all", glassInput)}
-                      >
-                        选择已配置的提示词
-                      </button>
-                      <ChevronDown className={cn("absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none transition-transform", showPromptDropdown && "rotate-180")} />
-                      {showPromptDropdown && (
-                        <div className={cn("absolute z-50 mt-2 w-64 right-0 rounded-xl shadow-lg border border-slate-200 dark:border-slate-700 py-1 max-h-60 overflow-auto", glassMenu)}>
-                          {aiNotePromptConfigs.map((prompt) => (
-                            <button
-                              key={prompt.id}
-                              type="button"
-                              onClick={() => {
-                                setCustomPrompt(prompt.content);
-                                setShowPromptDropdown(false);
-                              }}
-                              className="w-full px-4 py-2.5 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors text-slate-700 dark:text-slate-300 cursor-pointer"
-                            >
-                              <div className="font-medium truncate">{prompt.title}</div>
-                              {prompt.description && (
-                                <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{prompt.description}</div>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <textarea
-                  value={customPrompt}
-                  onChange={(e) => setCustomPrompt(e.target.value)}
-                  placeholder={`可选：补充你希望 AI 额外关注的重点，比如：
-- 更关注案例拆解
-- 在关键小节保留时间戳
-- 额外总结行动建议`}
-                  rows={8}
-                  className={cn("w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-slate-500 text-sm text-slate-900 dark:text-slate-100 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder:text-slate-400", glassInput)}
-                />
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                  不填写时将使用当前风格的默认大纲笔记提示词。
-                </p>
-              </div>
             </div>
 
-            <div className="flex gap-3 px-8 pb-6 pt-2">
+            <div className="flex flex-col-reverse gap-3 border-t border-slate-200/80 px-6 py-5 dark:border-vnote-border/80 sm:flex-row sm:justify-end sm:px-8">
               <button
                 onClick={() => setShowPromptDialog(false)}
-                className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-xl transition-colors cursor-pointer"
+                className={modalSecondaryButtonClass}
               >
                 取消
               </button>
               <button
                 onClick={handleGenerate}
-                className="flex-1 px-4 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 cursor-pointer"
+                className={modalPrimaryButtonClass}
               >
-                <Sparkles className="w-4 h-4" />
+                <Sparkles className="h-4 w-4" />
                 开始生成
               </button>
             </div>

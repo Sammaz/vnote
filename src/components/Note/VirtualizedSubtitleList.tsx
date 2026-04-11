@@ -74,7 +74,6 @@ export function VirtualizedSubtitleList({
     <div
       ref={parentRef}
       className="h-full overflow-auto"
-      style={{ contain: "strict" }}
       onScroll={handleUserScroll}
     >
       <div
