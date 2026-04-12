@@ -154,10 +154,14 @@ export function AiNoteContent({
   const toolbarButtonClass = "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-medium text-slate-600 transition-all cursor-pointer hover:-translate-y-0.5 hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
   const toolbarIconButtonClass = "inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-600 transition-all cursor-pointer hover:-translate-y-0.5 hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100";
   const toolbarButtonActiveClass = "bg-blue-50/90 text-blue-600 shadow-sm dark:bg-blue-500/14 dark:text-blue-400";
-  const toolbarBarClass = "flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/80 bg-slate-50/85 px-4 py-3 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80";
-  const toolbarSectionClass = "flex flex-wrap items-center gap-2 min-w-0";
+  const toolbarBarClass = "flex items-center gap-3 border-b border-slate-200/80 bg-slate-50/85 px-4 py-3 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80";
+  const toolbarCompactBarClass = "gap-2 px-3 py-2.5 overflow-x-auto overflow-y-hidden scrollbar-thin";
+  const toolbarSectionClass = "flex items-center gap-2 min-w-0";
+  const toolbarCompactSectionClass = "flex-nowrap gap-1.5 shrink-0";
   const toolbarSectionEndClass = cn(toolbarSectionClass, "justify-end sm:ml-auto");
+  const toolbarCompactSectionEndClass = "ml-auto flex-nowrap gap-1 shrink-0";
   const toolbarMetaPillClass = "inline-flex h-9 items-center rounded-xl border border-slate-200/80 bg-white/75 px-3 text-xs font-medium text-slate-500 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-400";
+  const toolbarCompactMetaPillClass = "px-2.5 text-[11px] whitespace-nowrap shrink-0";
   const modalFieldLabelClass = "text-sm font-medium text-slate-700 dark:text-slate-300";
   const modalSelectButtonClass = "h-11 rounded-xl border border-slate-200/80 px-3 pr-10 text-left text-sm font-medium text-slate-900 transition-all truncate cursor-pointer hover:border-slate-300/90 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:border-vnote-border/80 dark:text-slate-100 dark:hover:border-slate-500";
   const modalOptionCardClass = "rounded-2xl border border-slate-200/80 bg-white/72 px-4 py-3 text-left transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-300/90 hover:shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:hover:border-slate-500";
@@ -347,9 +351,9 @@ export function AiNoteContent({
   return (
     <div className="h-full flex flex-col">
       {note.ai_note_markdown && (
-        <div ref={toolbarRef} className={toolbarBarClass}>
-          <div className={toolbarSectionClass}>
-            <div className={cn("inline-flex items-center gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1 shadow-sm dark:border-vnote-border/80 dark:bg-white/5", glassPanel)}>
+        <div ref={toolbarRef} className={cn(toolbarBarClass, isCompactToolbar && toolbarCompactBarClass)}>
+          <div className={cn(toolbarSectionClass, isCompactToolbar && toolbarCompactSectionClass)}>
+            <div className={cn("inline-flex items-center gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 shrink-0", glassPanel)}>
               <button
                 onClick={() => setViewMode("markdown")}
                 className={cn(toolbarButtonClass, viewMode === "markdown" && toolbarButtonActiveClass)}
@@ -366,7 +370,7 @@ export function AiNoteContent({
             {viewMode === "mindmap" ? (
               <div
                 ref={setMindMapDepthControlContainer}
-                className={cn("flex min-w-0 items-center gap-2 rounded-xl border border-slate-200/80 px-3 py-1.5 dark:border-vnote-border/80", glassPanel)}
+                className={cn("flex min-w-0 items-center gap-2 rounded-xl border border-slate-200/80 px-3 py-1.5 dark:border-vnote-border/80 shrink-0", glassPanel)}
                 title="显示层级"
               />
             ) : null}
@@ -383,14 +387,14 @@ export function AiNoteContent({
                   <Edit3 className="w-4 h-4" />
                   {!isCompactToolbar && (isEditMode ? "预览" : "编辑")}
                 </button>
-                <span className={toolbarMetaPillClass}>
+                <span className={cn(toolbarMetaPillClass, isCompactToolbar && toolbarCompactMetaPillClass)}>
                   {hasCustomPrompt
                     ? "自定义"
                     : isCompactToolbar
                       ? AI_NOTE_STYLE_LABELS[aiNoteStyle]
                       : `风格：${AI_NOTE_STYLE_LABELS[aiNoteStyle]}`}
                 </span>
-                <span className={toolbarMetaPillClass}>
+                <span className={cn(toolbarMetaPillClass, isCompactToolbar && toolbarCompactMetaPillClass)}>
                   {isCompactToolbar
                     ? AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]
                     : `截图：${AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]}`}
@@ -398,7 +402,7 @@ export function AiNoteContent({
               </>
             )}
           </div>
-          <div className={toolbarSectionEndClass}>
+          <div className={cn(toolbarSectionEndClass, isCompactToolbar && toolbarCompactSectionEndClass)}>
             {viewMode === "markdown" ? (
               <>
                 <button

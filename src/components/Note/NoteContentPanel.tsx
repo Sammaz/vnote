@@ -2528,11 +2528,21 @@ Video subtitles content:`;
                 <div className="relative min-w-0 max-w-full" ref={chapterDropdownRef}>
                   <button
                     onClick={() => setShowChapterDropdown(!showChapterDropdown)}
-                    className={cn(toolbarButtonClass, toolbarActionButtonClass, "max-w-full")}
+                    className={cn(
+                      toolbarButtonClass,
+                      isCompactOriginalToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass,
+                      !isCompactOriginalToolbar && "max-w-full"
+                    )}
+                    title="章节目录"
+                    aria-label="章节目录"
                   >
                     <List className="w-4 h-4" />
-                    <span className="truncate">共 {detailedReadingData?.chapters.length || 0} 个章节</span>
-                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
+                    {!isCompactOriginalToolbar && (
+                      <>
+                        <span className="truncate">共 {detailedReadingData?.chapters.length || 0} 个章节</span>
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
+                      </>
+                    )}
                   </button>
                   {showChapterDropdown && detailedReadingData && (
                     <div className={cn(dropdownMenuClass, "w-96")}>
@@ -2821,11 +2831,20 @@ Video subtitles content:`;
                 <div className="relative" ref={visualChapterDropdownRef}>
                   <button
                     onClick={() => setShowVisualChapterDropdown(!showVisualChapterDropdown)}
-                    className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+                    className={cn(
+                      toolbarButtonClass,
+                      isCompactVisualToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass
+                    )}
+                    title="章节目录"
+                    aria-label="章节目录"
                   >
                     <List className="w-4 h-4" />
-                    {`共 ${visualChapterItems.length} 个章节`}
-                    <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showVisualChapterDropdown ? "rotate-180" : ""}`} />
+                    {!isCompactVisualToolbar && (
+                      <>
+                        <span className="truncate">{`共 ${visualChapterItems.length} 个章节`}</span>
+                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showVisualChapterDropdown ? "rotate-180" : ""}`} />
+                      </>
+                    )}
                   </button>
                   {showVisualChapterDropdown && (
                     <div className={cn(dropdownMenuClass, "w-96")}>
@@ -2871,10 +2890,16 @@ Video subtitles content:`;
                 </div>
                 <button
                   onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
-                  className={cn(toolbarButtonClass, toolbarActionButtonClass, showVisualTimestamp && toolbarButtonActiveClass)}
+                  className={cn(
+                    toolbarButtonClass,
+                    isCompactVisualToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass,
+                    showVisualTimestamp && toolbarButtonActiveClass
+                  )}
+                  title="时间戳"
+                  aria-label="时间戳"
                 >
                   <Clock className="w-4 h-4" />
-                  时间戳
+                  {!isCompactVisualToolbar && "时间戳"}
                 </button>
               </>
             )}
