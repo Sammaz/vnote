@@ -2405,10 +2405,11 @@ Video subtitles content:`;
               items={TAB_GROUPS.find(g => g.id === activeGroup)?.tabs || []}
               activeTabId={activeTab}
               onTabClick={(id) => setActiveTab(id as TabId)}
-              renderTab={(tab, isDropdown) => {
+              renderTab={(tab, isDropdown, displayMode) => {
                 const generating = isTabGenerating(tab.id as TabId);
                 const error = getTabError(tab.id as TabId);
                 const isActive = activeTab === tab.id;
+                const iconOnly = !isDropdown && displayMode === "icon";
 
                 if (isDropdown) {
                   return (
@@ -2429,19 +2430,22 @@ Video subtitles content:`;
                 return (
                   <button
                     className={cn(
-                      "group inline-flex h-[30px] items-center gap-1.5 rounded-xl border px-2.5 text-sm font-medium transition-all relative cursor-pointer whitespace-nowrap",
+                      "group inline-flex h-[30px] items-center rounded-xl border text-sm font-medium transition-all relative cursor-pointer whitespace-nowrap",
+                      iconOnly ? "w-[30px] justify-center px-0" : "gap-1.5 px-2.5",
                       isActive
                         ? "border-blue-200/85 bg-blue-50/95 text-blue-600 shadow-sm dark:border-blue-500/30 dark:bg-blue-500/14 dark:text-blue-400"
                         : "border-transparent text-slate-500 hover:border-slate-200/80 hover:bg-white/80 hover:text-slate-700 dark:text-slate-400 dark:hover:border-white/8 dark:hover:bg-white/6 dark:hover:text-slate-200"
                     )}
+                    title={tab.label}
+                    aria-label={tab.label}
                   >
                     {tab.icon}
-                    {tab.label}
+                    {!iconOnly && tab.label}
                     {generating && (
-                      <span className="w-2 h-2 bg-blue-500 rounded-full animate-ping" />
+                      <span className={cn("bg-blue-500 rounded-full animate-ping", iconOnly ? "absolute -top-0.5 -right-0.5 w-2 h-2" : "w-2 h-2")} />
                     )}
                     {error && !generating && (
-                      <X className="w-3 h-3 text-red-500" />
+                      <X className={cn("text-red-500", iconOnly ? "absolute -top-0.5 -right-0.5 w-3 h-3" : "w-3 h-3")} />
                     )}
                   </button>
                 );
