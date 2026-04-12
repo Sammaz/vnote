@@ -51,8 +51,10 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [isCompactToolbar, setIsCompactToolbar] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const toolbarRef = useRef<HTMLDivElement>(null);
   const pendingImageNodeRef = useRef<any>(null);
 
   // 右键菜单状态
@@ -99,6 +101,24 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showExportMenu]);
+
+  useEffect(() => {
+    const toolbarElement = toolbarRef.current;
+    if (!toolbarElement) return;
+
+    const updateCompactMode = () => {
+      setIsCompactToolbar(toolbarElement.clientWidth < 520);
+    };
+
+    updateCompactMode();
+
+    const observer = new ResizeObserver(() => {
+      updateCompactMode();
+    });
+    observer.observe(toolbarElement);
+
+    return () => observer.disconnect();
+  }, [currentLayout, showExportMenu]);
 
   // 全屏时按 ESC 退出
   useEffect(() => {
@@ -584,9 +604,15 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         }}
       />
       {/* 工具栏 */}
-      <div className={cn("flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-vnote-border", glassPanel)}>
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center">
+      <div
+        ref={toolbarRef}
+        className={cn(
+          "flex flex-col gap-3 px-4 py-3 border-b border-slate-200 dark:border-vnote-border sm:flex-row sm:items-center sm:justify-between",
+          glassPanel
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
             <Network className="w-5 h-5 text-white" />
           </div>
           <div>
@@ -596,23 +622,33 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <LayoutSelector value={currentLayout} onChange={handleLayoutChange} />
           <button
             onClick={() => setShowStylePanel(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
+            className={cn(
+              "flex items-center justify-center rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors cursor-pointer",
+              isCompactToolbar ? "h-9 w-9 px-0" : "gap-1.5 px-3 py-2"
+            )}
+            title="样式"
+            aria-label="样式"
           >
             <Palette className="w-4 h-4" />
-            样式
+            {!isCompactToolbar && "样式"}
           </button>
           <div className="relative" ref={exportMenuRef}>
             <button
               onClick={() => setShowExportMenu(!showExportMenu)}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
+              className={cn(
+                "flex items-center justify-center rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors cursor-pointer",
+                isCompactToolbar ? "h-9 w-9 px-0" : "gap-1.5 px-3 py-2"
+              )}
+              title="导出"
+              aria-label="导出"
             >
               <Download className="w-4 h-4" />
-              导出
-              <ChevronDown className="w-3 h-3" />
+              {!isCompactToolbar && "导出"}
+              {!isCompactToolbar && <ChevronDown className="w-3 h-3" />}
             </button>
             {showExportMenu && (
               <div className={cn("absolute top-full right-0 mt-2 w-40 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1", glassMenu)}>
