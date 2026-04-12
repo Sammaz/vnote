@@ -33,9 +33,11 @@ const LAYOUT_OPTIONS: LayoutOption[] = [
 interface LayoutSelectorProps {
   value: MindMapLayout;
   onChange: (layout: MindMapLayout) => void;
+  compact?: boolean;
+  compactLabel?: string;
 }
 
-export function LayoutSelector({ value, onChange }: LayoutSelectorProps) {
+export function LayoutSelector({ value, onChange, compact = false, compactLabel }: LayoutSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const glassMenu = useGlassBg("menu");
@@ -56,9 +58,16 @@ export function LayoutSelector({ value, onChange }: LayoutSelectorProps) {
     <div className="relative" ref={dropdownRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer"
+        className={cn(
+          "flex items-center text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer whitespace-nowrap",
+          compact ? "h-9 gap-1.5 px-2.5" : "gap-2 px-3 py-2"
+        )}
+        title={currentLayout?.label || "选择布局"}
+        aria-label={currentLayout?.label || "选择布局"}
       >
-        <span>{currentLayout?.label || "选择布局"}</span>
+        <span className={cn("min-w-0 truncate", compact && "max-w-[8.5rem]")}>
+          {compact ? (compactLabel || currentLayout?.label || "布局") : (currentLayout?.label || "选择布局")}
+        </span>
         <ChevronDown className={cn("w-4 h-4 transition-transform", isOpen && "rotate-180")} />
       </button>
 

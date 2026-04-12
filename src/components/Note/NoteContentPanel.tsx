@@ -207,6 +207,53 @@ interface ToolbarIconButtonProps {
   children?: React.ReactNode;
 }
 
+function toolbarNeedsCompact(root: HTMLElement | null): boolean {
+  if (!root) return false;
+
+  const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-toolbar-row]"));
+  const targets = rows.length > 0 ? rows : [root];
+
+  return targets.some((row) => {
+    if (row.scrollWidth > row.clientWidth + 1) {
+      return true;
+    }
+
+    const children = Array.from(row.children) as HTMLElement[];
+    if (children.length < 2) {
+      return false;
+    }
+
+    const firstTop = children[0].offsetTop;
+    return children.some((child) => child.offsetTop - firstTop > 1);
+  });
+}
+
+function elementNeedsCompact(element: HTMLElement | null): boolean {
+  if (!element) return false;
+
+  if (element.scrollWidth > element.clientWidth + 1) {
+    return true;
+  }
+
+  const children = Array.from(element.children) as HTMLElement[];
+  if (children.length < 2) {
+    return false;
+  }
+
+  const firstTop = children[0].offsetTop;
+  return children.some((child) => child.offsetTop - firstTop > 1);
+}
+
+function canFitToolbarContent(container: HTMLElement | null, content: HTMLElement | null): boolean {
+  if (!container || !content) return false;
+  return content.scrollWidth <= container.clientWidth + 1;
+}
+
+function getElementContentWidth(element: HTMLElement | null): number {
+  if (!element) return 0;
+  return Math.max(element.scrollWidth, element.offsetWidth);
+}
+
 function ToolbarIconButton({
   icon: Icon,
   label,
@@ -259,7 +306,17 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [showChapterDropdown, setShowChapterDropdown] = useState(false);
   const chapterDropdownRef = useRef<HTMLDivElement>(null);
   const originalToolbarRef = useRef<HTMLDivElement>(null);
+  const originalToolbarLeftRef = useRef<HTMLDivElement>(null);
+  const originalToolbarRightRef = useRef<HTMLDivElement>(null);
+  const originalToolbarMeasureLeftExpandedRef = useRef<HTMLDivElement>(null);
+  const originalToolbarMeasureRightCompactRef = useRef<HTMLDivElement>(null);
+  const originalToolbarMeasureRightExpandedRef = useRef<HTMLDivElement>(null);
   const visualToolbarRef = useRef<HTMLDivElement>(null);
+  const visualToolbarLeftRef = useRef<HTMLDivElement>(null);
+  const visualToolbarRightRef = useRef<HTMLDivElement>(null);
+  const visualToolbarMeasureLeftExpandedRef = useRef<HTMLDivElement>(null);
+  const visualToolbarMeasureRightCompactRef = useRef<HTMLDivElement>(null);
+  const visualToolbarMeasureRightExpandedRef = useRef<HTMLDivElement>(null);
 
   const getCurrentChapter = useCallback((time: number): DetailedReadingChapter | null => {
     if (!detailedReadingData) return null;
@@ -280,8 +337,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const { shouldAutoScroll, handleUserScroll, isAutoScrollingRef } = useAutoScroll(autoScroll);
   // 显示章节字幕开关
   const [showChapterSubtitles, setShowChapterSubtitles] = useState(false);
-  const [isCompactOriginalToolbar, setIsCompactOriginalToolbar] = useState(false);
-  const [isCompactVisualToolbar, setIsCompactVisualToolbar] = useState(false);
+  const [isCompactOriginalToolbarLeft, setIsCompactOriginalToolbarLeft] = useState(false);
+  const [isCompactOriginalToolbarRight, setIsCompactOriginalToolbarRight] = useState(true);
+  const originalToolbarCompactStateRef = useRef<{ left: boolean; right: boolean }>({ left: false, right: true });
+  const [isCompactVisualToolbarLeft, setIsCompactVisualToolbarLeft] = useState(false);
+  const [isCompactVisualToolbarRight, setIsCompactVisualToolbarRight] = useState(true);
+  const visualToolbarCompactStateRef = useRef<{ left: boolean; right: boolean }>({ left: false, right: true });
 
   // 辅助模式状态
   const [isAssistModeActive, setIsAssistModeActive] = useState(false);
@@ -996,23 +1057,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
   }, [autoScroll, activeTab, detailedReadingData, shouldAutoScroll, isAutoScrollingRef, getCurrentChapter]);
 
-  useEffect(() => {
-    const toolbarElement = originalToolbarRef.current;
-    if (!toolbarElement) return;
-
-    const updateCompactMode = () => {
-      setIsCompactOriginalToolbar(toolbarElement.clientWidth < 820);
-    };
-
-    updateCompactMode();
-
-    const observer = new ResizeObserver(() => {
-      updateCompactMode();
-    });
-    observer.observe(toolbarElement);
-
-    return () => observer.disconnect();
-  }, [activeTab, isAssistModeActive, showChapterSubtitles, subtitleOptimizationEnabled, subtitleOptimizing, detailedReadingData?.chapters.length]);
 
 
   // 检查标签页是否正在生成
@@ -1191,11 +1235,33 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   }, [visualSummaryDisplayMarkdown]);
 
   useEffect(() => {
-    const toolbarElement = visualToolbarRef.current;
-    if (!toolbarElement) return;
+    const toolbarElement = originalToolbarRef.current;
+    const leftElement = originalToolbarLeftRef.current;
+    const rightElement = originalToolbarRightRef.current;
+    const measureLeftExpandedElement = originalToolbarMeasureLeftExpandedRef.current;
+    const measureRightCompactElement = originalToolbarMeasureRightCompactRef.current;
+    const measureRightExpandedElement = originalToolbarMeasureRightExpandedRef.current;
+    if (!toolbarElement || !measureLeftExpandedElement || !measureRightCompactElement || !measureRightExpandedElement) return;
 
     const updateCompactMode = () => {
-      setIsCompactVisualToolbar(toolbarElement.clientWidth < 760);
+      const toolbarWidth = toolbarElement.clientWidth;
+      const leftExpandedWidth = getElementContentWidth(measureLeftExpandedElement);
+      const rightCompactWidth = getElementContentWidth(measureRightCompactElement);
+      const rightExpandedWidth = getElementContentWidth(measureRightExpandedElement);
+
+      const nextLeftCompact = leftExpandedWidth + rightCompactWidth > toolbarWidth + 1;
+      const nextRightCompact = nextLeftCompact || leftExpandedWidth + rightExpandedWidth > toolbarWidth + 1;
+      const prevState = originalToolbarCompactStateRef.current;
+
+      if (prevState.left !== nextLeftCompact) {
+        originalToolbarCompactStateRef.current.left = nextLeftCompact;
+        setIsCompactOriginalToolbarLeft(nextLeftCompact);
+      }
+
+      if (prevState.right !== nextRightCompact) {
+        originalToolbarCompactStateRef.current.right = nextRightCompact;
+        setIsCompactOriginalToolbarRight(nextRightCompact);
+      }
     };
 
     updateCompactMode();
@@ -1203,10 +1269,62 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     const observer = new ResizeObserver(() => {
       updateCompactMode();
     });
+
     observer.observe(toolbarElement);
+    if (leftElement) observer.observe(leftElement);
+    if (rightElement) observer.observe(rightElement);
+    observer.observe(measureLeftExpandedElement);
+    observer.observe(measureRightCompactElement);
+    observer.observe(measureRightExpandedElement);
 
     return () => observer.disconnect();
-  }, [activeTab, isVisualEditMode, visualChapterItems.length]);
+  }, [activeTab, isAssistModeActive, showChapterSubtitles, subtitleOptimizationEnabled, subtitleOptimizing, detailedReadingData?.chapters.length, assistModeGenerating, assistModeProgress?.current, assistModeProgress?.total]);
+
+  useEffect(() => {
+    const toolbarElement = visualToolbarRef.current;
+    const leftElement = visualToolbarLeftRef.current;
+    const rightElement = visualToolbarRightRef.current;
+    const measureLeftExpandedElement = visualToolbarMeasureLeftExpandedRef.current;
+    const measureRightCompactElement = visualToolbarMeasureRightCompactRef.current;
+    const measureRightExpandedElement = visualToolbarMeasureRightExpandedRef.current;
+    if (!toolbarElement || !measureLeftExpandedElement || !measureRightCompactElement || !measureRightExpandedElement) return;
+
+    const updateCompactMode = () => {
+      const toolbarWidth = toolbarElement.clientWidth;
+      const leftExpandedWidth = getElementContentWidth(measureLeftExpandedElement);
+      const rightCompactWidth = getElementContentWidth(measureRightCompactElement);
+      const rightExpandedWidth = getElementContentWidth(measureRightExpandedElement);
+
+      const nextLeftCompact = leftExpandedWidth + rightCompactWidth > toolbarWidth + 1;
+      const nextRightCompact = nextLeftCompact || leftExpandedWidth + rightExpandedWidth > toolbarWidth + 1;
+      const prevState = visualToolbarCompactStateRef.current;
+
+      if (prevState.left !== nextLeftCompact) {
+        visualToolbarCompactStateRef.current.left = nextLeftCompact;
+        setIsCompactVisualToolbarLeft(nextLeftCompact);
+      }
+
+      if (prevState.right !== nextRightCompact) {
+        visualToolbarCompactStateRef.current.right = nextRightCompact;
+        setIsCompactVisualToolbarRight(nextRightCompact);
+      }
+    };
+
+    updateCompactMode();
+
+    const observer = new ResizeObserver(() => {
+      updateCompactMode();
+    });
+
+    observer.observe(toolbarElement);
+    if (leftElement) observer.observe(leftElement);
+    if (rightElement) observer.observe(rightElement);
+    observer.observe(measureLeftExpandedElement);
+    observer.observe(measureRightCompactElement);
+    observer.observe(measureRightExpandedElement);
+
+    return () => observer.disconnect();
+  }, [activeTab, isVisualEditMode, visualChapterItems.length, showVisualTimestamp]);
 
   const handleVisualChapterJump = useCallback((index: number) => {
     const didScroll = scrollToMarkdownHeading(index);
@@ -2378,12 +2496,16 @@ Video subtitles content:`;
   const toolbarButtonClass = "inline-flex h-9 min-w-0 max-w-full items-center justify-center gap-1.5 rounded-xl border border-transparent bg-white/55 px-3 text-sm font-medium text-slate-600 shadow-sm shadow-transparent transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-200/90 hover:bg-white hover:text-slate-800 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:border-transparent dark:bg-white/[0.03] dark:text-slate-400 dark:hover:border-white/8 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
   const toolbarButtonActiveClass = "border-blue-200/80 bg-blue-50/90 text-blue-600 shadow-sm shadow-blue-100/60 dark:border-blue-500/30 dark:bg-blue-500/14 dark:text-blue-400 dark:shadow-transparent";
   const toolbarButtonDisabledClass = "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none";
-  const toolbarBarClass = "relative z-40 flex flex-wrap items-start gap-2.5 border-b border-slate-200/80 bg-slate-50/90 px-4 py-2.5 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80 sm:items-center sm:justify-between";
-  const toolbarSectionClass = "flex max-w-full flex-wrap items-center gap-2 min-w-0";
-  const toolbarSectionResponsiveClass = cn(toolbarSectionClass, "w-full xl:w-auto");
-  const toolbarSectionEndClass = cn(toolbarSectionClass, "w-full justify-start sm:justify-end xl:w-auto xl:ml-auto");
-  const toolbarActionClusterClass = "flex w-full max-w-full flex-wrap items-center gap-2 rounded-2xl border border-slate-200/75 bg-white/55 p-1 shadow-sm shadow-slate-200/40 dark:w-auto dark:border-vnote-border/80 dark:bg-white/5 dark:shadow-none sm:w-auto sm:justify-end";
-  const toolbarActionButtonClass = "min-w-0 flex-1 justify-center sm:flex-none sm:justify-start";
+  const toolbarBarClass = "relative z-40 flex flex-wrap items-center gap-2.5 border-b border-slate-200/80 bg-slate-50/90 px-4 py-2.5 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80";
+  const toolbarBarNoWrapClass = cn(toolbarBarClass, "flex-nowrap overflow-hidden");
+  const toolbarSectionClass = "flex min-w-0 max-w-full flex-wrap items-center gap-2";
+  const toolbarSectionNoWrapClass = "flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-hidden";
+  const toolbarSectionResponsiveClass = cn(toolbarSectionClass, "min-w-0 flex-1");
+  const toolbarSectionResponsiveNoWrapClass = cn(toolbarSectionNoWrapClass, "min-w-0 flex-1");
+  const toolbarSectionEndClass = cn(toolbarSectionClass, "ml-auto shrink-0 justify-end");
+  const toolbarSectionEndNoWrapClass = cn(toolbarSectionNoWrapClass, "ml-auto shrink-0 justify-end");
+  const toolbarActionClusterClass = "flex max-w-full shrink-0 items-center gap-2 rounded-2xl border border-slate-200/75 bg-white/55 p-1 shadow-sm shadow-slate-200/40 dark:border-vnote-border/80 dark:bg-white/5 dark:shadow-none";
+  const toolbarActionButtonClass = "min-w-0 flex-1 justify-center whitespace-nowrap sm:flex-none sm:justify-start";
   const toolbarCompactButtonClass = "min-w-0 justify-center";
   const toolbarMetaPillClass = "inline-flex min-h-9 items-center rounded-xl border border-slate-200/80 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-500 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-400";
   const dropdownMenuClass = "absolute top-full left-0 mt-2 z-[120] max-h-80 overflow-auto rounded-2xl border border-slate-200/95 bg-white shadow-[0_28px_80px_rgba(15,23,42,0.28)] ring-1 ring-slate-200/80 dark:border-vnote-border/95 dark:bg-slate-900 dark:ring-white/10";
@@ -2476,20 +2598,235 @@ Video subtitles content:`;
         </div>
       </div>
 
+      {/* 次级工具栏测量节点 */}
+      <div className="pointer-events-none absolute -left-[9999px] top-0 z-[-1] h-0 overflow-hidden opacity-0" aria-hidden="true">
+        <div className={toolbarBarNoWrapClass}>
+          <div ref={originalToolbarMeasureLeftExpandedRef} className={toolbarSectionResponsiveNoWrapClass}>
+            {isAssistModeActive ? (
+              <div className={cn(toolbarMetaPillClass, "max-w-full gap-2 text-blue-600 dark:text-blue-400 sm:text-sm")}>
+                <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span className="truncate">点击"添加截图"按钮在字幕行上方添加章节分隔点</span>
+                <span className="text-xs text-blue-500 dark:text-blue-300">已添加 {assistModeMarkers.length} 个截图标记</span>
+              </div>
+            ) : (
+              <>
+                <div className="relative min-w-0 max-w-full">
+                  <button className={cn(toolbarButtonClass, toolbarActionButtonClass, "max-w-full")} type="button">
+                    <List className="w-4 h-4" />
+                    <span className="truncate">共 {detailedReadingData?.chapters.length || 0} 个章节</span>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <button className={cn(toolbarActionButtonClass, toolbarButtonClass, autoScroll ? toolbarButtonActiveClass : "")} type="button">
+                  <Clock className="w-4 h-4" />
+                  字幕滚动
+                </button>
+                {note.subtitle_path && (
+                  <>
+                    <button
+                      className={cn(toolbarActionButtonClass, toolbarButtonClass, showChapterSubtitles && toolbarButtonActiveClass)}
+                      type="button"
+                    >
+                      <SubtitlesIcon className="w-4 h-4" />
+                      {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
+                    </button>
+                    {showChapterSubtitles && detailedReadingData && (
+                      <div className="relative min-w-0 max-w-full">
+                        <button
+                          type="button"
+                          disabled={subtitleOptimizing}
+                          className={cn(
+                            toolbarButtonClass,
+                            toolbarActionButtonClass,
+                            "max-w-full pr-8 relative focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent",
+                            subtitleOptimizationEnabled
+                              ? toolbarButtonActiveClass
+                              : "border-slate-200/80 bg-white/80 text-slate-600 dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-300",
+                            subtitleOptimizing && "opacity-50 cursor-not-allowed"
+                          )}
+                        >
+                          {subtitleOptimizationEnabled ? "智能优化" : "原文"}
+                          <ChevronDown className={cn(
+                            "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none",
+                            subtitleOptimizationEnabled ? "text-blue-400" : "text-slate-400"
+                          )} />
+                        </button>
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          <div className={toolbarSectionEndNoWrapClass}>
+            <div ref={originalToolbarMeasureRightCompactRef} className={cn(toolbarActionClusterClass, "absolute opacity-0 pointer-events-none")}>
+              <ToolbarIconButton
+                icon={MousePointer2}
+                label="辅助模式"
+                active={isAssistModeActive}
+                compact={true}
+                className={cn(toolbarButtonClass, toolbarCompactButtonClass)}
+                onClick={() => {}}
+              >
+                辅助模式
+              </ToolbarIconButton>
+              <ToolbarIconButton
+                icon={assistModeGenerating ? Loader2 : RefreshCw}
+                label={assistModeGenerating ? "生成中" : "重新生成"}
+                disabled={assistModeGenerating}
+                spinning={assistModeGenerating}
+                compact={true}
+                className={cn(toolbarButtonClass, toolbarCompactButtonClass)}
+                onClick={() => {}}
+              >
+                重新生成
+              </ToolbarIconButton>
+            </div>
+            <div ref={originalToolbarMeasureRightExpandedRef} className={toolbarActionClusterClass}>
+              <ToolbarIconButton
+                icon={MousePointer2}
+                label="辅助模式"
+                active={isAssistModeActive}
+                compact={false}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+                onClick={() => {}}
+              >
+                辅助模式
+              </ToolbarIconButton>
+              <ToolbarIconButton
+                icon={assistModeGenerating ? Loader2 : RefreshCw}
+                label={assistModeGenerating ? "生成中" : "重新生成"}
+                disabled={assistModeGenerating}
+                spinning={assistModeGenerating}
+                compact={false}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+                onClick={() => {}}
+              >
+                {assistModeGenerating ? "生成中..." : "重新生成"}
+              </ToolbarIconButton>
+            </div>
+          </div>
+        </div>
+        <div className={cn(toolbarBarNoWrapClass, "select-none")}>
+          <div ref={visualToolbarMeasureLeftExpandedRef} className={toolbarSectionResponsiveNoWrapClass}>
+            {!isVisualEditMode && visualChapterItems.length > 0 && (
+              <>
+                <div className="relative min-w-0 max-w-full">
+                  <button className={cn(toolbarButtonClass, toolbarActionButtonClass, "max-w-full")} type="button">
+                    <List className="w-4 h-4" />
+                    <span className="truncate">共 {visualChapterItems.length} 个章节</span>
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  className={cn(toolbarButtonClass, toolbarActionButtonClass, showVisualTimestamp && toolbarButtonActiveClass)}
+                >
+                  <Clock className="w-4 h-4" />
+                  时间戳
+                </button>
+              </>
+            )}
+          </div>
+          <div className={toolbarSectionEndNoWrapClass}>
+            <div ref={visualToolbarMeasureRightCompactRef} className={cn(toolbarActionClusterClass, "absolute opacity-0 pointer-events-none")}>
+              <ToolbarIconButton
+                icon={Edit3}
+                label={isVisualEditMode ? "预览" : "编辑"}
+                active={isVisualEditMode}
+                compact={true}
+                className={cn(toolbarButtonClass, toolbarCompactButtonClass)}
+                onClick={() => {}}
+              >
+                {isVisualEditMode ? "预览" : "编辑"}
+              </ToolbarIconButton>
+              <ToolbarIconButton
+                icon={Copy}
+                label="复制"
+                compact={true}
+                className={cn(toolbarButtonClass, toolbarCompactButtonClass)}
+                onClick={() => {}}
+              >
+                复制
+              </ToolbarIconButton>
+              <ToolbarIconButton
+                icon={Download}
+                label="下载"
+                compact={true}
+                className={cn(toolbarButtonClass, toolbarCompactButtonClass)}
+                onClick={() => {}}
+              >
+                下载
+              </ToolbarIconButton>
+              <ToolbarIconButton
+                icon={Package}
+                label="导出"
+                compact={true}
+                className={cn(toolbarButtonClass, toolbarCompactButtonClass)}
+                onClick={() => {}}
+              >
+                导出
+              </ToolbarIconButton>
+            </div>
+            <div ref={visualToolbarMeasureRightExpandedRef} className={toolbarActionClusterClass}>
+              <ToolbarIconButton
+                icon={Edit3}
+                label={isVisualEditMode ? "预览" : "编辑"}
+                active={isVisualEditMode}
+                compact={false}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+                onClick={() => {}}
+              >
+                {isVisualEditMode ? "预览" : "编辑"}
+              </ToolbarIconButton>
+              <ToolbarIconButton
+                icon={Copy}
+                label="复制"
+                compact={false}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+                onClick={() => {}}
+              >
+                复制
+              </ToolbarIconButton>
+              <ToolbarIconButton
+                icon={Download}
+                label="下载"
+                compact={false}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+                onClick={() => {}}
+              >
+                下载
+              </ToolbarIconButton>
+              <ToolbarIconButton
+                icon={Package}
+                label="导出"
+                compact={false}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
+                onClick={() => {}}
+              >
+                导出
+              </ToolbarIconButton>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* 次级工具栏 - 根据标签页显示不同内容 */}
       {activeTab === "summary" ? (
         // 全文总结标签页的工具栏
-        <div className={toolbarBarClass}>
-          <div className={toolbarSectionClass}>
+        <div className={toolbarBarNoWrapClass}>
+          <div className={toolbarSectionResponsiveNoWrapClass}>
             <button
               onClick={() => setIsEditMode(!isEditMode)}
-              className={cn(toolbarButtonClass, isEditMode && toolbarButtonActiveClass)}
+              className={cn(toolbarButtonClass, toolbarActionButtonClass, isEditMode && toolbarButtonActiveClass)}
             >
               <Edit3 className="w-4 h-4" />
               {isEditMode ? "预览" : "编辑"}
             </button>
           </div>
-          <div className={toolbarSectionEndClass}>
+          <div className={toolbarSectionEndNoWrapClass}>
             <div className={toolbarActionClusterClass}>
               <button
                 onClick={handleCopy}
@@ -2517,8 +2854,8 @@ Video subtitles content:`;
         </div>
       ) : activeTab === "original" ? (
         // 原文细读标签页的工具栏（不管有无章节数据都显示相同）
-        <div ref={originalToolbarRef} className={toolbarBarClass}>
-          <div className={toolbarSectionResponsiveClass}>
+        <div ref={originalToolbarRef} className={toolbarBarNoWrapClass}>
+          <div ref={originalToolbarLeftRef} className={toolbarSectionResponsiveNoWrapClass} data-toolbar-row>
             {isAssistModeActive ? (
               <div className={cn(toolbarMetaPillClass, "max-w-full gap-2 text-blue-600 dark:text-blue-400 sm:text-sm")}>
                 <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -2534,14 +2871,14 @@ Video subtitles content:`;
                     onClick={() => setShowChapterDropdown(!showChapterDropdown)}
                     className={cn(
                       toolbarButtonClass,
-                      isCompactOriginalToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass,
-                      !isCompactOriginalToolbar && "max-w-full"
+                      isCompactOriginalToolbarLeft ? toolbarCompactButtonClass : toolbarActionButtonClass,
+                      !isCompactOriginalToolbarLeft && "max-w-full"
                     )}
                     title="章节目录"
                     aria-label="章节目录"
                   >
                     <List className="w-4 h-4" />
-                    {!isCompactOriginalToolbar && (
+                    {!isCompactOriginalToolbarLeft && (
                       <>
                         <span className="truncate">共 {detailedReadingData?.chapters.length || 0} 个章节</span>
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showChapterDropdown ? "rotate-180" : ""}`} />
@@ -2610,7 +2947,7 @@ Video subtitles content:`;
                 <button
                   onClick={() => setAutoScroll(!autoScroll)}
                   className={cn(
-                    isCompactOriginalToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass,
+                    isCompactOriginalToolbarLeft ? toolbarCompactButtonClass : toolbarActionButtonClass,
                     toolbarButtonClass,
                     autoScroll ? toolbarButtonActiveClass : ""
                   )}
@@ -2618,7 +2955,7 @@ Video subtitles content:`;
                   aria-label="字幕滚动"
                 >
                   <Clock className="w-4 h-4" />
-                  {!isCompactOriginalToolbar && "字幕滚动"}
+                  {!isCompactOriginalToolbarLeft && "字幕滚动"}
                 </button>
 
                 {note.subtitle_path && (
@@ -2626,7 +2963,7 @@ Video subtitles content:`;
                     <button
                       onClick={() => setShowChapterSubtitles(!showChapterSubtitles)}
                       className={cn(
-                        isCompactOriginalToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass,
+                        isCompactOriginalToolbarLeft ? toolbarCompactButtonClass : toolbarActionButtonClass,
                         toolbarButtonClass,
                         showChapterSubtitles && toolbarButtonActiveClass
                       )}
@@ -2634,7 +2971,7 @@ Video subtitles content:`;
                       aria-label={showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
                     >
                       <SubtitlesIcon className="w-4 h-4" />
-                      {!isCompactOriginalToolbar && (showChapterSubtitles ? "隐藏字幕" : "显示字幕")}
+                      {!isCompactOriginalToolbarLeft && (showChapterSubtitles ? "隐藏字幕" : "显示字幕")}
                     </button>
                     {showChapterSubtitles && detailedReadingData && (
                       <div className="relative min-w-0 max-w-full" ref={subtitleModeDropdownRef}>
@@ -2653,7 +2990,7 @@ Video subtitles content:`;
                           )}
                         >
                           {subtitleOptimizationEnabled
-                            ? (isCompactOriginalToolbar ? "优化" : "智能优化")
+                            ? (isCompactOriginalToolbarLeft ? "优化" : "智能优化")
                             : "原文"}
                           <ChevronDown className={cn(
                             "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 transition-transform pointer-events-none",
@@ -2699,14 +3036,14 @@ Video subtitles content:`;
               </>
             )}
           </div>
-          <div className={toolbarSectionEndClass}>
+          <div ref={originalToolbarRightRef} className={toolbarSectionEndNoWrapClass} data-toolbar-row>
             <div className={toolbarActionClusterClass}>
               <ToolbarIconButton
                 icon={MousePointer2}
                 label="辅助模式"
                 active={isAssistModeActive}
-                compact={isCompactOriginalToolbar}
-                className={cn(toolbarButtonClass, isCompactOriginalToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass)}
+                compact={isCompactOriginalToolbarRight}
+                className={cn(toolbarButtonClass, isCompactOriginalToolbarRight ? toolbarCompactButtonClass : toolbarActionButtonClass)}
                 onClick={() => setIsAssistModeActive(!isAssistModeActive)}
               >
                 辅助模式
@@ -2716,8 +3053,8 @@ Video subtitles content:`;
                 label={assistModeGenerating ? "生成中" : "重新生成"}
                 disabled={assistModeGenerating}
                 spinning={assistModeGenerating}
-                compact={isCompactOriginalToolbar}
-                className={cn(toolbarButtonClass, isCompactOriginalToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass)}
+                compact={isCompactOriginalToolbarRight}
+                className={cn(toolbarButtonClass, isCompactOriginalToolbarRight ? toolbarCompactButtonClass : toolbarActionButtonClass)}
                 onClick={() => {
                   setConfirmDialogConfig({
                     title: "确认重新生成",
@@ -2773,7 +3110,7 @@ Video subtitles content:`;
                 {assistModeGenerating ? (
                   <>
                     生成中...
-                    {assistModeProgress && !isCompactOriginalToolbar && (
+                    {assistModeProgress && !isCompactOriginalToolbarRight && (
                       <span className="text-xs ml-1">
                         ({assistModeProgress.current}/{assistModeProgress.total})
                       </span>
@@ -2788,8 +3125,8 @@ Video subtitles content:`;
         </div>
       ) : activeTab === "script" ? (
         // 字幕脚本标签页的专用工具栏
-        <div className={toolbarBarClass}>
-          <div className={cn(toolbarSectionClass, "w-full sm:w-auto")}>
+        <div className={toolbarBarNoWrapClass}>
+          <div className={cn(toolbarSectionResponsiveNoWrapClass)}>
             <button
               onClick={() => setAutoScroll(!autoScroll)}
               className={cn(toolbarButtonClass, toolbarActionButtonClass, autoScroll && toolbarButtonActiveClass)}
@@ -2798,13 +3135,13 @@ Video subtitles content:`;
               字幕滚动
             </button>
           </div>
-          <div className={toolbarSectionEndClass} />
+          <div className={toolbarSectionEndNoWrapClass} />
         </div>
       ) : activeTab === "highlights" ? (
         // 高光笔记标签页的专用工具栏
-        <div className={toolbarBarClass}>
-          <div className={cn(toolbarSectionClass, "w-full sm:w-auto")} />
-          <div className={toolbarSectionEndClass}>
+        <div className={toolbarBarNoWrapClass}>
+          <div className={toolbarSectionResponsiveNoWrapClass} />
+          <div className={toolbarSectionEndNoWrapClass}>
             <div className={toolbarActionClusterClass}>
               <button
                 onClick={handleHighlightRegenerate}
@@ -2828,22 +3165,23 @@ Video subtitles content:`;
         </div>
       ) : activeTab === "visual" ? (
         // 视觉化总结标签页的专用工具栏
-        <div ref={visualToolbarRef} className={cn(toolbarBarClass, "select-none")}>
-          <div className={toolbarSectionClass}>
+        <div ref={visualToolbarRef} className={cn(toolbarBarNoWrapClass, "select-none")}>
+          <div ref={visualToolbarLeftRef} className={toolbarSectionResponsiveNoWrapClass} data-toolbar-row>
             {!isVisualEditMode && visualChapterItems.length > 0 && (
               <>
-                <div className="relative" ref={visualChapterDropdownRef}>
+                <div className="relative min-w-0 max-w-full" ref={visualChapterDropdownRef}>
                   <button
                     onClick={() => setShowVisualChapterDropdown(!showVisualChapterDropdown)}
                     className={cn(
                       toolbarButtonClass,
-                      isCompactVisualToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass
+                      isCompactVisualToolbarLeft ? toolbarCompactButtonClass : toolbarActionButtonClass,
+                      !isCompactVisualToolbarLeft && "max-w-full"
                     )}
                     title="章节目录"
                     aria-label="章节目录"
                   >
                     <List className="w-4 h-4" />
-                    {!isCompactVisualToolbar && (
+                    {!isCompactVisualToolbarLeft && (
                       <>
                         <span className="truncate">{`共 ${visualChapterItems.length} 个章节`}</span>
                         <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showVisualChapterDropdown ? "rotate-180" : ""}`} />
@@ -2896,26 +3234,26 @@ Video subtitles content:`;
                   onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
                   className={cn(
                     toolbarButtonClass,
-                    isCompactVisualToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass,
+                    isCompactVisualToolbarLeft ? toolbarCompactButtonClass : toolbarActionButtonClass,
                     showVisualTimestamp && toolbarButtonActiveClass
                   )}
                   title="时间戳"
                   aria-label="时间戳"
                 >
                   <Clock className="w-4 h-4" />
-                  {!isCompactVisualToolbar && "时间戳"}
+                  {!isCompactVisualToolbarLeft && "时间戳"}
                 </button>
               </>
             )}
           </div>
-          <div className={toolbarSectionEndClass}>
+          <div ref={visualToolbarRightRef} className={toolbarSectionEndNoWrapClass} data-toolbar-row>
             <div className={toolbarActionClusterClass}>
               <ToolbarIconButton
                 icon={Edit3}
                 label={isVisualEditMode ? "预览" : "编辑"}
                 active={isVisualEditMode}
-                compact={isCompactVisualToolbar}
-                className={cn(toolbarButtonClass, isCompactVisualToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass)}
+                compact={isCompactVisualToolbarRight}
+                className={cn(toolbarButtonClass, isCompactVisualToolbarRight ? toolbarCompactButtonClass : toolbarActionButtonClass)}
                 onClick={handleVisualEditToggle}
               >
                 {isVisualEditMode ? "预览" : "编辑"}
@@ -2923,8 +3261,8 @@ Video subtitles content:`;
               <ToolbarIconButton
                 icon={Copy}
                 label="复制"
-                compact={isCompactVisualToolbar}
-                className={cn(toolbarButtonClass, isCompactVisualToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass)}
+                compact={isCompactVisualToolbarRight}
+                className={cn(toolbarButtonClass, isCompactVisualToolbarRight ? toolbarCompactButtonClass : toolbarActionButtonClass)}
                 onClick={handleVisualCopy}
               >
                 复制
@@ -2932,8 +3270,8 @@ Video subtitles content:`;
               <ToolbarIconButton
                 icon={Download}
                 label="下载"
-                compact={isCompactVisualToolbar}
-                className={cn(toolbarButtonClass, isCompactVisualToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass)}
+                compact={isCompactVisualToolbarRight}
+                className={cn(toolbarButtonClass, isCompactVisualToolbarRight ? toolbarCompactButtonClass : toolbarActionButtonClass)}
                 onClick={handleVisualDownload}
               >
                 下载
@@ -2941,8 +3279,8 @@ Video subtitles content:`;
               <ToolbarIconButton
                 icon={Package}
                 label="导出"
-                compact={isCompactVisualToolbar}
-                className={cn(toolbarButtonClass, isCompactVisualToolbar ? toolbarCompactButtonClass : toolbarActionButtonClass)}
+                compact={isCompactVisualToolbarRight}
+                className={cn(toolbarButtonClass, isCompactVisualToolbarRight ? toolbarCompactButtonClass : toolbarActionButtonClass)}
                 onClick={handleVisualExport}
               >
                 导出
@@ -2952,35 +3290,35 @@ Video subtitles content:`;
         </div>
       ) : activeTab === "custom" && note.custom_summary ? (
         // 自定义总结标签页的工具栏（有内容时显示完整工具栏）
-        <div className={toolbarBarClass}>
-          <div className={toolbarSectionClass}>
+        <div className={toolbarBarNoWrapClass}>
+          <div className={toolbarSectionResponsiveNoWrapClass}>
             <button
               onClick={() => setIsEditMode(!isEditMode)}
-              className={cn(toolbarButtonClass, isEditMode && toolbarButtonActiveClass)}
+              className={cn(toolbarButtonClass, toolbarActionButtonClass, isEditMode && toolbarButtonActiveClass)}
             >
               <Edit3 className="w-4 h-4" />
               {isEditMode ? "预览" : "编辑"}
             </button>
           </div>
-          <div className={toolbarSectionEndClass}>
+          <div className={toolbarSectionEndNoWrapClass}>
             <div className={toolbarActionClusterClass}>
               <button
                 onClick={handleCopy}
-                className={toolbarButtonClass}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
               >
                 <Copy className="w-4 h-4" />
                 复制
               </button>
               <button
                 onClick={handleDownload}
-                className={toolbarButtonClass}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
               >
                 <Download className="w-4 h-4" />
                 下载
               </button>
               <button
                 onClick={openCustomPromptDialog}
-                className={toolbarButtonClass}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
               >
                 <RefreshCw className="w-4 h-4" />
                 重新总结
@@ -2993,9 +3331,9 @@ Video subtitles content:`;
         null
       ) : activeTab === "flashcard" ? (
         // 闪记卡标签页的专用工具栏
-        <div className={toolbarBarClass}>
-          <div className={toolbarSectionClass} />
-          <div className={toolbarSectionEndClass}>
+        <div className={toolbarBarNoWrapClass}>
+          <div className={toolbarSectionResponsiveNoWrapClass} />
+          <div className={toolbarSectionEndNoWrapClass}>
             <div className={toolbarActionClusterClass}>
               <button
                 onClick={() => {
@@ -3010,7 +3348,7 @@ Video subtitles content:`;
                   setShowConfirmDialog(true);
                 }}
                 disabled={isTabGenerating("flashcard")}
-                className={cn(toolbarButtonClass, toolbarButtonDisabledClass)}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass, toolbarButtonDisabledClass)}
               >
                 {isTabGenerating("flashcard") ? (
                   <>
@@ -3029,7 +3367,7 @@ Video subtitles content:`;
                   window.dispatchEvent(new CustomEvent('flashcard-download-csv', { detail: { noteId: note.id } }));
                 }}
                 disabled={!note.flashcards}
-                className={cn(toolbarButtonClass, toolbarButtonDisabledClass)}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass, toolbarButtonDisabledClass)}
               >
                 <Download className="w-4 h-4" />
                 下载CSV
@@ -3039,27 +3377,27 @@ Video subtitles content:`;
         </div>
       ) : activeTab === "panoramic_blueprint" && note.panoramic_blueprint ? (
         // 深度蓝图标签页的工具栏（有内容时显示）
-        <div className={toolbarBarClass}>
-          <div className={toolbarSectionClass}>
+        <div className={toolbarBarNoWrapClass}>
+          <div className={toolbarSectionResponsiveNoWrapClass}>
             {/* 进度提示 */}
             {blueprintIsGenerating && blueprintProgress ? (
-              <div className={toolbarSectionClass}>
+              <div className={toolbarSectionNoWrapClass}>
                 <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400" />
-                <span className="text-sm text-blue-800 dark:text-blue-300">
+                <span className="truncate text-sm text-blue-800 dark:text-blue-300">
                   正在生成深度蓝图... ({blueprintProgress.current}/{blueprintProgress.total})
                 </span>
               </div>
             ) : (
               <button
                 onClick={() => setBlueprintEditMode(!blueprintEditMode)}
-                className={cn(toolbarButtonClass, blueprintEditMode && toolbarButtonActiveClass)}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass, blueprintEditMode && toolbarButtonActiveClass)}
               >
                 <Edit3 className="w-4 h-4" />
                 {blueprintEditMode ? "预览" : "编辑"}
               </button>
             )}
           </div>
-          <div className={toolbarSectionEndClass}>
+          <div className={toolbarSectionEndNoWrapClass}>
             <div className={toolbarActionClusterClass}>
               <button
                 onClick={async () => {
@@ -3068,7 +3406,7 @@ Video subtitles content:`;
                     message.success('已复制到剪贴板');
                   }
                 }}
-                className={toolbarButtonClass}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
               >
                 <Copy className="w-4 h-4" /> 复制
               </button>
@@ -3091,7 +3429,7 @@ Video subtitles content:`;
                     message.error('下载失败');
                   }
                 }}
-                className={toolbarButtonClass}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
               >
                 <Download className="w-4 h-4" /> 下载
               </button>
@@ -3108,7 +3446,7 @@ Video subtitles content:`;
                   setShowConfirmDialog(true);
                 }}
                 disabled={blueprintIsGenerating}
-                className={cn(toolbarButtonClass, toolbarButtonDisabledClass)}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass, toolbarButtonDisabledClass)}
               >
                 <RefreshCw className={cn("w-4 h-4", blueprintIsGenerating && "animate-spin")} />
                 重新生成
@@ -3121,20 +3459,20 @@ Video subtitles content:`;
         null
       ) : (
         // 其他标签页的简化工具栏
-        <div className={toolbarBarClass}>
-          <div className={toolbarSectionClass} />
-          <div className={toolbarSectionEndClass}>
+        <div className={toolbarBarNoWrapClass}>
+          <div className={toolbarSectionResponsiveNoWrapClass} />
+          <div className={toolbarSectionEndNoWrapClass}>
             <div className={toolbarActionClusterClass}>
               <button
                 onClick={handleCopy}
-                className={toolbarButtonClass}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
               >
                 <Copy className="w-4 h-4" />
                 复制
               </button>
               <button
                 onClick={handleDownload}
-                className={toolbarButtonClass}
+                className={cn(toolbarButtonClass, toolbarActionButtonClass)}
               >
                 <Download className="w-4 h-4" />
                 下载

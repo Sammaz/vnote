@@ -4,7 +4,6 @@
  */
 import { Component, type ReactNode, type ErrorInfo } from "react";
 import { AlertTriangle, RefreshCw, Home } from "lucide-react";
-import { useGlassBg } from "../hooks/useGlassBg";
 
 interface Props {
   children: ReactNode;
@@ -24,12 +23,9 @@ function ErrorFallback({ error, errorInfo, onRetry, onGoHome, onReload }: {
   onGoHome: () => void;
   onReload: () => void;
 }) {
-  const glassPanel = useGlassBg("panel");
-  const glassCard = useGlassBg("card");
-
   return (
-    <div className={`flex flex-col items-center justify-center min-h-screen p-8 ${glassPanel}`}>
-      <div className={`max-w-md w-full ${glassCard} rounded-xl shadow-lg p-8 text-center`}>
+    <div className="flex min-h-screen flex-col items-center justify-center bg-white p-8 dark:bg-vnote-card">
+      <div className="w-full max-w-md rounded-xl bg-white p-8 text-center shadow-lg dark:bg-vnote-card">
         {/* 错误图标 */}
         <div className="flex justify-center mb-6">
           <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">

@@ -37,6 +37,20 @@ interface MindMapEditorProps {
   onContentChange?: (content: string) => void;
 }
 
+function getElementContentWidth(element: HTMLElement | null): number {
+  if (!element) return 0;
+  return Math.max(element.scrollWidth, element.offsetWidth);
+}
+
+const LAYOUT_LABELS: Record<MindMapLayout, string> = {
+  logicalStructure: "逻辑结构图",
+  mindMap: "思维导图",
+  organizationStructure: "组织架构图",
+  catalogOrganization: "目录组织图",
+  timeline: "时间轴",
+  fishbone: "鱼骨图",
+};
+
 export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange }: MindMapEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindMapRef = useRef<MindMap | null>(null);
@@ -51,10 +65,17 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [isCompactLayoutSelector, setIsCompactLayoutSelector] = useState(false);
   const [isCompactToolbar, setIsCompactToolbar] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const toolbarLeftRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureSelectorExpandedRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureSelectorCompactRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureRightExpandedRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureRightCompactRef = useRef<HTMLDivElement>(null);
+  const toolbarCompactStateRef = useRef({ selector: false, right: false });
   const pendingImageNodeRef = useRef<any>(null);
 
   // 右键菜单状态
@@ -104,10 +125,45 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
 
   useEffect(() => {
     const toolbarElement = toolbarRef.current;
-    if (!toolbarElement) return;
+    const leftElement = toolbarLeftRef.current;
+    const selectorExpandedElement = toolbarMeasureSelectorExpandedRef.current;
+    const selectorCompactElement = toolbarMeasureSelectorCompactRef.current;
+    const rightExpandedElement = toolbarMeasureRightExpandedRef.current;
+    const rightCompactElement = toolbarMeasureRightCompactRef.current;
+    if (!toolbarElement || !leftElement || !selectorExpandedElement || !selectorCompactElement || !rightExpandedElement || !rightCompactElement) {
+      return;
+    }
 
     const updateCompactMode = () => {
-      setIsCompactToolbar(toolbarElement.clientWidth < 520);
+      const toolbarWidth = toolbarElement.clientWidth;
+      const leftWidth = leftElement.offsetWidth;
+      const selectorExpandedWidth = getElementContentWidth(selectorExpandedElement);
+      const selectorCompactWidth = getElementContentWidth(selectorCompactElement);
+      const rightExpandedWidth = getElementContentWidth(rightExpandedElement);
+      const rightCompactWidth = getElementContentWidth(rightCompactElement);
+
+      let nextSelectorCompact = false;
+      let nextRightCompact = false;
+
+      if (leftWidth + selectorExpandedWidth + rightExpandedWidth <= toolbarWidth + 1) {
+        nextSelectorCompact = false;
+        nextRightCompact = false;
+      } else if (leftWidth + selectorCompactWidth + rightExpandedWidth <= toolbarWidth + 1) {
+        nextSelectorCompact = true;
+        nextRightCompact = false;
+      } else {
+        nextSelectorCompact = true;
+        nextRightCompact = true;
+      }
+
+      if (
+        toolbarCompactStateRef.current.selector !== nextSelectorCompact ||
+        toolbarCompactStateRef.current.right !== nextRightCompact
+      ) {
+        toolbarCompactStateRef.current = { selector: nextSelectorCompact, right: nextRightCompact };
+        setIsCompactLayoutSelector(nextSelectorCompact);
+        setIsCompactToolbar(nextRightCompact);
+      }
     };
 
     updateCompactMode();
@@ -116,9 +172,14 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
       updateCompactMode();
     });
     observer.observe(toolbarElement);
+    observer.observe(leftElement);
+    observer.observe(selectorExpandedElement);
+    observer.observe(selectorCompactElement);
+    observer.observe(rightExpandedElement);
+    observer.observe(rightCompactElement);
 
     return () => observer.disconnect();
-  }, [currentLayout, showExportMenu]);
+  }, [currentLayout]);
 
   // 全屏时按 ESC 退出
   useEffect(() => {
@@ -604,26 +665,80 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         }}
       />
       {/* 工具栏 */}
+      <div className="pointer-events-none absolute left-0 top-0 -z-10 opacity-0">
+        <div className={cn("flex items-center justify-between gap-3 overflow-hidden px-4 py-3 border-b border-slate-200 dark:border-vnote-border", glassPanel)}>
+          <div className="flex items-center gap-2 shrink-0 overflow-hidden">
+            <div ref={toolbarMeasureSelectorExpandedRef}>
+              <LayoutSelector value={currentLayout} onChange={handleLayoutChange} />
+            </div>
+            <div ref={toolbarMeasureSelectorCompactRef}>
+              <LayoutSelector
+                value={currentLayout}
+                onChange={handleLayoutChange}
+                compact
+                compactLabel={LAYOUT_LABELS[currentLayout]}
+              />
+            </div>
+            <div ref={toolbarMeasureRightExpandedRef} className="flex items-center gap-2 shrink-0 overflow-hidden">
+              <button
+                type="button"
+                className="flex items-center justify-center rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover gap-1.5 px-3 py-2"
+              >
+                <Palette className="w-4 h-4" />
+                样式
+              </button>
+              <button
+                type="button"
+                className="flex items-center justify-center rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover gap-1.5 px-3 py-2"
+              >
+                <Download className="w-4 h-4" />
+                导出
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            </div>
+            <div ref={toolbarMeasureRightCompactRef} className="flex items-center gap-2 shrink-0 overflow-hidden">
+              <button
+                type="button"
+                className="flex items-center justify-center rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover h-9 w-9 px-0"
+              >
+                <Palette className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                className="flex items-center justify-center rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover h-9 w-9 px-0"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
       <div
         ref={toolbarRef}
         className={cn(
-          "flex flex-col gap-3 px-4 py-3 border-b border-slate-200 dark:border-vnote-border sm:flex-row sm:items-center sm:justify-between",
+          "flex items-center justify-between gap-3 overflow-hidden border-b border-slate-200 dark:border-vnote-border flex-nowrap",
+          (isCompactLayoutSelector || isCompactToolbar) ? "px-3 py-2.5" : "px-4 py-3",
           glassPanel
         )}
       >
-        <div className="flex min-w-0 items-center gap-3">
+        <div ref={toolbarLeftRef} className="flex min-w-0 items-center gap-3 overflow-hidden" data-toolbar-row>
           <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
             <Network className="w-5 h-5 text-white" />
           </div>
-          <div>
-            <h3 className="text-base font-medium text-slate-800 dark:text-slate-100">思维导图</h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
+          <div className="min-w-0 overflow-hidden">
+            <h3 className="truncate text-base font-medium text-slate-800 dark:text-slate-100">思维导图</h3>
+            <p className="truncate text-sm text-slate-500 dark:text-slate-400">
               双击节点编辑，Tab 添加子节点，Enter 添加兄弟节点，右键打开菜单
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <LayoutSelector value={currentLayout} onChange={handleLayoutChange} />
+        <div className={cn("flex items-center gap-2 shrink-0 overflow-hidden flex-nowrap", (isCompactLayoutSelector || isCompactToolbar) && "gap-1.5")}>
+          <LayoutSelector
+            value={currentLayout}
+            onChange={handleLayoutChange}
+            compact={isCompactLayoutSelector}
+            compactLabel={LAYOUT_LABELS[currentLayout]}
+          />
           <button
             onClick={() => setShowStylePanel(true)}
             className={cn(

@@ -120,6 +120,11 @@ function buildMindMapSvgContent(svg: SVGSVGElement): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clonedSvg)}`;
 }
 
+function getElementContentWidth(element: HTMLElement | null): number {
+  if (!element) return 0;
+  return Math.max(element.scrollWidth, element.offsetWidth);
+}
+
 export function AiNoteContent({
   note,
   aiConfigs,
@@ -140,9 +145,15 @@ export function AiNoteContent({
   const [showPromptDropdown, setShowPromptDropdown] = useState(false);
   const [mindMapSvg, setMindMapSvg] = useState<SVGSVGElement | null>(null);
   const [mindMapDepthControlContainer, setMindMapDepthControlContainer] = useState<HTMLDivElement | null>(null);
-  const [isCompactToolbar, setIsCompactToolbar] = useState(false);
+  const [isCompactToolbarLeft, setIsCompactToolbarLeft] = useState(false);
+  const [isCompactToolbarRight, setIsCompactToolbarRight] = useState(false);
 
   const toolbarRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureLeftExpandedRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureLeftCompactRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureRightExpandedRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasureRightCompactRef = useRef<HTMLDivElement>(null);
+  const toolbarCompactStateRef = useRef({ left: false, right: false });
   const modelDropdownRef = useRef<HTMLDivElement>(null);
   const promptDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -151,16 +162,16 @@ export function AiNoteContent({
   const glassInput = useGlassBg("input");
   const glassModal = useGlassBg("modal");
 
-  const toolbarButtonClass = "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-medium text-slate-600 transition-all cursor-pointer hover:-translate-y-0.5 hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
+  const toolbarButtonClass = "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-sm font-medium text-slate-600 transition-all cursor-pointer hover:-translate-y-0.5 hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
   const toolbarIconButtonClass = "inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-600 transition-all cursor-pointer hover:-translate-y-0.5 hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100";
   const toolbarButtonActiveClass = "bg-blue-50/90 text-blue-600 shadow-sm dark:bg-blue-500/14 dark:text-blue-400";
   const toolbarBarClass = "flex items-center gap-3 border-b border-slate-200/80 bg-slate-50/85 px-4 py-3 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80";
-  const toolbarCompactBarClass = "gap-2 px-3 py-2.5 overflow-x-auto overflow-y-hidden scrollbar-thin";
-  const toolbarSectionClass = "flex items-center gap-2 min-w-0";
-  const toolbarCompactSectionClass = "flex-nowrap gap-1.5 shrink-0";
+  const toolbarCompactBarClass = "gap-2 px-3 py-2.5 overflow-hidden";
+  const toolbarSectionClass = "flex items-center gap-2 min-w-0 flex-nowrap overflow-hidden";
+  const toolbarCompactSectionClass = "flex-nowrap gap-1.5 shrink-0 overflow-hidden";
   const toolbarSectionEndClass = cn(toolbarSectionClass, "justify-end sm:ml-auto");
-  const toolbarCompactSectionEndClass = "ml-auto flex-nowrap gap-1 shrink-0";
-  const toolbarMetaPillClass = "inline-flex h-9 items-center rounded-xl border border-slate-200/80 bg-white/75 px-3 text-xs font-medium text-slate-500 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-400";
+  const toolbarCompactSectionEndClass = "ml-auto flex-nowrap gap-1 shrink-0 overflow-hidden";
+  const toolbarMetaPillClass = "inline-flex h-9 items-center whitespace-nowrap rounded-xl border border-slate-200/80 bg-white/75 px-3 text-xs font-medium text-slate-500 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-400";
   const toolbarCompactMetaPillClass = "px-2.5 text-[11px] whitespace-nowrap shrink-0";
   const modalFieldLabelClass = "text-sm font-medium text-slate-700 dark:text-slate-300";
   const modalSelectButtonClass = "h-11 rounded-xl border border-slate-200/80 px-3 pr-10 text-left text-sm font-medium text-slate-900 transition-all truncate cursor-pointer hover:border-slate-300/90 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:border-vnote-border/80 dark:text-slate-100 dark:hover:border-slate-500";
@@ -180,6 +191,7 @@ export function AiNoteContent({
   const aiNoteStyle = parseAiNoteStyle(aiNoteMeta?.style) ?? "detailed";
   const hasCustomPrompt = Boolean(aiNoteMeta?.custom_prompt?.trim());
   const aiNotePromptConfigs = promptConfigs;
+  const aiNoteScreenshotLabel = AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)];
 
   const getDefaultModelId = useCallback(() => {
     if (currentModelId) return currentModelId;
@@ -332,10 +344,43 @@ export function AiNoteContent({
 
   useEffect(() => {
     const toolbarElement = toolbarRef.current;
-    if (!toolbarElement) return;
+    const measureLeftExpandedElement = toolbarMeasureLeftExpandedRef.current;
+    const measureLeftCompactElement = toolbarMeasureLeftCompactRef.current;
+    const measureRightExpandedElement = toolbarMeasureRightExpandedRef.current;
+    const measureRightCompactElement = toolbarMeasureRightCompactRef.current;
+    if (!toolbarElement || !measureLeftExpandedElement || !measureLeftCompactElement || !measureRightExpandedElement || !measureRightCompactElement) {
+      return;
+    }
 
     const updateCompactMode = () => {
-      setIsCompactToolbar(toolbarElement.clientWidth < 980);
+      const toolbarWidth = toolbarElement.clientWidth;
+      const leftExpandedWidth = getElementContentWidth(measureLeftExpandedElement);
+      const leftCompactWidth = getElementContentWidth(measureLeftCompactElement);
+      const rightExpandedWidth = getElementContentWidth(measureRightExpandedElement);
+      const rightCompactWidth = getElementContentWidth(measureRightCompactElement);
+
+      let nextLeftCompact = false;
+      let nextRightCompact = false;
+
+      if (leftExpandedWidth + rightExpandedWidth <= toolbarWidth + 1) {
+        nextLeftCompact = false;
+        nextRightCompact = false;
+      } else if (leftExpandedWidth + rightCompactWidth <= toolbarWidth + 1) {
+        nextLeftCompact = false;
+        nextRightCompact = true;
+      } else {
+        nextLeftCompact = true;
+        nextRightCompact = leftCompactWidth + rightExpandedWidth > toolbarWidth + 1;
+      }
+
+      if (
+        toolbarCompactStateRef.current.left !== nextLeftCompact ||
+        toolbarCompactStateRef.current.right !== nextRightCompact
+      ) {
+        toolbarCompactStateRef.current = { left: nextLeftCompact, right: nextRightCompact };
+        setIsCompactToolbarLeft(nextLeftCompact);
+        setIsCompactToolbarRight(nextRightCompact);
+      }
     };
 
     updateCompactMode();
@@ -344,15 +389,135 @@ export function AiNoteContent({
       updateCompactMode();
     });
     observer.observe(toolbarElement);
+    observer.observe(measureLeftExpandedElement);
+    observer.observe(measureLeftCompactElement);
+    observer.observe(measureRightExpandedElement);
+    observer.observe(measureRightCompactElement);
 
     return () => observer.disconnect();
-  }, [note.ai_note_markdown, viewMode]);
+  }, [note.ai_note_markdown, viewMode, isEditMode, hasCustomPrompt, aiNoteStyle, aiNoteScreenshotLabel]);
 
   return (
     <div className="h-full flex flex-col">
       {note.ai_note_markdown && (
-        <div ref={toolbarRef} className={cn(toolbarBarClass, isCompactToolbar && toolbarCompactBarClass)}>
-          <div className={cn(toolbarSectionClass, isCompactToolbar && toolbarCompactSectionClass)}>
+        <div className="pointer-events-none absolute left-0 top-0 -z-10 opacity-0">
+          <div ref={toolbarMeasureLeftExpandedRef} className={cn(toolbarBarClass, "w-max flex-nowrap") }>
+            <div className={toolbarSectionClass}>
+              <div className={cn("inline-flex items-center gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 shrink-0", glassPanel)}>
+                <button type="button" className={cn(toolbarButtonClass, viewMode === "markdown" && toolbarButtonActiveClass)}>
+                  文档
+                </button>
+                <button type="button" className={cn(toolbarButtonClass, viewMode === "mindmap" && toolbarButtonActiveClass)}>
+                  脑图
+                </button>
+              </div>
+              {viewMode === "mindmap" ? (
+                <div className={cn("flex min-w-0 items-center gap-2 rounded-xl border border-slate-200/80 px-3 py-1.5 dark:border-vnote-border/80 shrink-0", glassPanel)}>
+                  <span className="text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">显示层级</span>
+                </div>
+              ) : null}
+              {viewMode === "markdown" && (
+                <>
+                  <button type="button" className={cn(toolbarButtonClass, isEditMode && toolbarButtonActiveClass)}>
+                    <Edit3 className="w-4 h-4" />
+                    {isEditMode ? "预览" : "编辑"}
+                  </button>
+                  <span className={toolbarMetaPillClass}>
+                    {hasCustomPrompt ? "自定义" : `风格：${AI_NOTE_STYLE_LABELS[aiNoteStyle]}`}
+                  </span>
+                  <span className={toolbarMetaPillClass}>{`截图：${aiNoteScreenshotLabel}`}</span>
+                </>
+              )}
+            </div>
+          </div>
+          <div ref={toolbarMeasureLeftCompactRef} className={cn(toolbarBarClass, toolbarCompactBarClass, "w-max flex-nowrap") }>
+            <div className={cn(toolbarSectionClass, toolbarCompactSectionClass)}>
+              <div className={cn("inline-flex items-center gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 shrink-0", glassPanel)}>
+                <button type="button" className={cn(toolbarButtonClass, viewMode === "markdown" && toolbarButtonActiveClass)}>
+                  文档
+                </button>
+                <button type="button" className={cn(toolbarButtonClass, viewMode === "mindmap" && toolbarButtonActiveClass)}>
+                  脑图
+                </button>
+              </div>
+              {viewMode === "mindmap" ? (
+                <div className={cn("flex min-w-0 items-center gap-2 rounded-xl border border-slate-200/80 px-3 py-1.5 dark:border-vnote-border/80 shrink-0", glassPanel)}>
+                  <span className="text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">显示层级</span>
+                </div>
+              ) : null}
+              {viewMode === "markdown" && (
+                <>
+                  <button type="button" className={cn(toolbarIconButtonClass, isEditMode && toolbarButtonActiveClass)}>
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <span className={cn(toolbarMetaPillClass, toolbarCompactMetaPillClass)}>
+                    {hasCustomPrompt ? "自定义" : AI_NOTE_STYLE_LABELS[aiNoteStyle]}
+                  </span>
+                  <span className={cn(toolbarMetaPillClass, toolbarCompactMetaPillClass)}>{aiNoteScreenshotLabel}</span>
+                </>
+              )}
+            </div>
+          </div>
+          <div ref={toolbarMeasureRightExpandedRef} className={cn(toolbarBarClass, "w-max flex-nowrap") }>
+            <div className={toolbarSectionEndClass}>
+              {viewMode === "markdown" ? (
+                <>
+                  <button type="button" className={toolbarButtonClass}>
+                    <Copy className="w-4 h-4" />
+                    复制
+                  </button>
+                  {toolbarDivider}
+                  <button type="button" className={toolbarButtonClass}>
+                    <Download className="w-4 h-4" />
+                    下载
+                  </button>
+                  {toolbarDivider}
+                  <button type="button" className={toolbarButtonClass}>
+                    <RefreshCw className="w-4 h-4" />
+                    重新生成
+                  </button>
+                </>
+              ) : (
+                <button type="button" className={toolbarButtonClass}>
+                  <Download className="w-4 h-4" />
+                  下载
+                </button>
+              )}
+            </div>
+          </div>
+          <div ref={toolbarMeasureRightCompactRef} className={cn(toolbarBarClass, toolbarCompactBarClass, "w-max flex-nowrap") }>
+            <div className={cn(toolbarSectionEndClass, toolbarCompactSectionEndClass)}>
+              {viewMode === "markdown" ? (
+                <>
+                  <button type="button" className={toolbarIconButtonClass}>
+                    <Copy className="w-4 h-4" />
+                  </button>
+                  <button type="button" className={toolbarIconButtonClass}>
+                    <Download className="w-4 h-4" />
+                  </button>
+                  <button type="button" className={toolbarIconButtonClass}>
+                    <RefreshCw className="w-4 h-4" />
+                  </button>
+                </>
+              ) : (
+                <button type="button" className={toolbarIconButtonClass}>
+                  <Download className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {note.ai_note_markdown && (
+        <div
+          ref={toolbarRef}
+          className={cn(
+            toolbarBarClass,
+            (isCompactToolbarLeft || isCompactToolbarRight) && toolbarCompactBarClass,
+            "flex-nowrap"
+          )}
+        >
+          <div className={cn(toolbarSectionClass, isCompactToolbarLeft && toolbarCompactSectionClass)} data-toolbar-row>
             <div className={cn("inline-flex items-center gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 shrink-0", glassPanel)}>
               <button
                 onClick={() => setViewMode("markdown")}
@@ -379,67 +544,67 @@ export function AiNoteContent({
                 <button
                   onClick={() => setIsEditMode(!isEditMode)}
                   className={cn(
-                    isCompactToolbar ? toolbarIconButtonClass : toolbarButtonClass,
+                    isCompactToolbarLeft ? toolbarIconButtonClass : toolbarButtonClass,
                     isEditMode && toolbarButtonActiveClass
                   )}
                   title={isEditMode ? "预览" : "编辑"}
                 >
                   <Edit3 className="w-4 h-4" />
-                  {!isCompactToolbar && (isEditMode ? "预览" : "编辑")}
+                  {!isCompactToolbarLeft && (isEditMode ? "预览" : "编辑")}
                 </button>
-                <span className={cn(toolbarMetaPillClass, isCompactToolbar && toolbarCompactMetaPillClass)}>
+                <span className={cn(toolbarMetaPillClass, isCompactToolbarLeft && toolbarCompactMetaPillClass)}>
                   {hasCustomPrompt
                     ? "自定义"
-                    : isCompactToolbar
+                    : isCompactToolbarLeft
                       ? AI_NOTE_STYLE_LABELS[aiNoteStyle]
                       : `风格：${AI_NOTE_STYLE_LABELS[aiNoteStyle]}`}
                 </span>
-                <span className={cn(toolbarMetaPillClass, isCompactToolbar && toolbarCompactMetaPillClass)}>
-                  {isCompactToolbar
-                    ? AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]
-                    : `截图：${AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]}`}
+                <span className={cn(toolbarMetaPillClass, isCompactToolbarLeft && toolbarCompactMetaPillClass)}>
+                  {isCompactToolbarLeft
+                    ? aiNoteScreenshotLabel
+                    : `截图：${aiNoteScreenshotLabel}`}
                 </span>
               </>
             )}
           </div>
-          <div className={cn(toolbarSectionEndClass, isCompactToolbar && toolbarCompactSectionEndClass)}>
+          <div className={cn(toolbarSectionEndClass, isCompactToolbarRight && toolbarCompactSectionEndClass)} data-toolbar-row>
             {viewMode === "markdown" ? (
               <>
                 <button
                   onClick={handleCopy}
-                  className={isCompactToolbar ? toolbarIconButtonClass : toolbarButtonClass}
+                  className={isCompactToolbarRight ? toolbarIconButtonClass : toolbarButtonClass}
                   title="复制"
                 >
                   <Copy className="w-4 h-4" />
-                  {!isCompactToolbar && "复制"}
+                  {!isCompactToolbarRight && "复制"}
                 </button>
-                {!isCompactToolbar && toolbarDivider}
+                {!isCompactToolbarRight && toolbarDivider}
                 <button
                   onClick={handleDownloadMarkdown}
-                  className={isCompactToolbar ? toolbarIconButtonClass : toolbarButtonClass}
+                  className={isCompactToolbarRight ? toolbarIconButtonClass : toolbarButtonClass}
                   title="下载"
                 >
                   <Download className="w-4 h-4" />
-                  {!isCompactToolbar && "下载"}
+                  {!isCompactToolbarRight && "下载"}
                 </button>
-                {!isCompactToolbar && toolbarDivider}
+                {!isCompactToolbarRight && toolbarDivider}
                 <button
                   onClick={openPromptDialog}
-                  className={isCompactToolbar ? toolbarIconButtonClass : toolbarButtonClass}
+                  className={isCompactToolbarRight ? toolbarIconButtonClass : toolbarButtonClass}
                   title="重新生成"
                 >
                   <RefreshCw className="w-4 h-4" />
-                  {!isCompactToolbar && "重新生成"}
+                  {!isCompactToolbarRight && "重新生成"}
                 </button>
               </>
             ) : (
               <button
                 onClick={handleDownloadMindMap}
-                className={isCompactToolbar ? toolbarIconButtonClass : toolbarButtonClass}
+                className={isCompactToolbarRight ? toolbarIconButtonClass : toolbarButtonClass}
                 title="下载"
               >
                 <Download className="w-4 h-4" />
-                {!isCompactToolbar && "下载"}
+                {!isCompactToolbarRight && "下载"}
               </button>
             )}
           </div>
