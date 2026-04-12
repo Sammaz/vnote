@@ -331,7 +331,7 @@ export function AiNoteContent({
     if (!toolbarElement) return;
 
     const updateCompactMode = () => {
-      setIsCompactToolbar(toolbarElement.clientWidth < 560);
+      setIsCompactToolbar(toolbarElement.clientWidth < 980);
     };
 
     updateCompactMode();
@@ -384,10 +384,16 @@ export function AiNoteContent({
                   {!isCompactToolbar && (isEditMode ? "预览" : "编辑")}
                 </button>
                 <span className={toolbarMetaPillClass}>
-                  风格：{hasCustomPrompt ? "自定义" : AI_NOTE_STYLE_LABELS[aiNoteStyle]}
+                  {hasCustomPrompt
+                    ? "自定义"
+                    : isCompactToolbar
+                      ? AI_NOTE_STYLE_LABELS[aiNoteStyle]
+                      : `风格：${AI_NOTE_STYLE_LABELS[aiNoteStyle]}`}
                 </span>
                 <span className={toolbarMetaPillClass}>
-                  截图：{AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]}
+                  {isCompactToolbar
+                    ? AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]
+                    : `截图：${AI_NOTE_SCREENSHOT_LABELS[parseAiNoteScreenshotDensity(aiNoteMeta?.screenshot_density)]}`}
                 </span>
               </>
             )}

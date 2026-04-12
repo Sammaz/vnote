@@ -2638,7 +2638,9 @@ Video subtitles content:`;
                             subtitleOptimizing && "opacity-50 cursor-not-allowed"
                           )}
                         >
-                          {subtitleOptimizationEnabled ? "智能优化" : "原文"}
+                          {subtitleOptimizationEnabled
+                            ? (isCompactOriginalToolbar ? "优化" : "智能优化")
+                            : "原文"}
                           <ChevronDown className={cn(
                             "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 transition-transform pointer-events-none",
                             subtitleOptimizationEnabled ? "text-blue-400" : "text-slate-400",
