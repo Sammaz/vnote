@@ -3,6 +3,10 @@ import { useSettings } from "../context/SettingsContext";
 
 export type GlassLevel = "card" | "panel" | "modal" | "input" | "menu";
 
+interface UseGlassBgOptions {
+  blur?: boolean;
+}
+
 const LIGHT_NO_BG: Record<GlassLevel, string> = {
   card: "bg-white",
   panel: "bg-white",
@@ -35,13 +39,14 @@ const DARK_WITH_BG: Record<GlassLevel, string> = {
   menu: "dark:bg-neutral-800/72",
 };
 
-export function useGlassBg(level: GlassLevel = "card") {
+export function useGlassBg(level: GlassLevel = "card", options: UseGlassBgOptions = {}) {
   const { backgroundImage } = useSettings();
   const hasBackground = Boolean(backgroundImage);
+  const { blur = true } = options;
 
   return useMemo(() => {
     const light = hasBackground ? LIGHT_WITH_BG[level] : LIGHT_NO_BG[level];
     const dark = hasBackground ? DARK_WITH_BG[level] : DARK_NO_BG[level];
-    return `${light} ${dark} backdrop-blur-sm`;
-  }, [hasBackground, level]);
+    return blur ? `${light} ${dark} backdrop-blur-sm` : `${light} ${dark}`;
+  }, [blur, hasBackground, level]);
 }

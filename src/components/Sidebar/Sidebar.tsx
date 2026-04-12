@@ -382,7 +382,7 @@ const NoteItem = memo(function NoteItem({ note }: NoteItemProps) {
 export function Sidebar() {
   const { sidebar, toggleSidebar, notes, currentView, setCurrentView, setSelectedFolder, setSelectedNoteId, notesInCollections } = useApp();
   const { collapsed } = sidebar;
-  const glassPanel = useGlassBg("panel");
+  const glassPanel = useGlassBg("panel", { blur: false });
   const [isHovered, setIsHovered] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
 
