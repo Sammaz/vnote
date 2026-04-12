@@ -82,13 +82,13 @@ export function AddNotesToCollectionModal({
       />
 
       {/* 弹窗内容 */}
-      <div className={cn("relative w-full max-w-2xl max-h-[80vh] mx-4 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700 flex flex-col", glassModal)}>
+      <div className={cn("relative w-full max-w-2xl max-h-[80vh] mx-4 rounded-lg shadow-2xl animate-fade-in border border-slate-300 dark:border-neutral-600 flex flex-col", glassModal)}>
         {/* 关闭按钮 */}
         <button
           onClick={onClose}
           className="absolute right-4 top-4 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer z-10"
         >
-          <X className="w-5 h-5 text-slate-400 dark:text-neutral-500" />
+          <X className="w-5 h-5 text-slate-400 dark:text-neutral-400" />
         </button>
 
         {/* 头部 */}
@@ -96,13 +96,13 @@ export function AddNotesToCollectionModal({
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
             添加笔记到合集
           </h2>
-          <p className="mt-1 text-sm text-slate-500 dark:text-neutral-400">
+          <p className="mt-1 text-sm text-slate-600 dark:text-neutral-300">
             选择要添加到合集的笔记
           </p>
 
           {/* 搜索框 */}
           <div className="mt-4 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-neutral-500" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-neutral-400" />
             <input
               type="text"
               value={searchQuery}
@@ -111,10 +111,10 @@ export function AddNotesToCollectionModal({
               className={cn(
                 "w-full pl-10 pr-4 py-2.5 rounded-lg border transition-colors",
                 "bg-slate-50 dark:bg-neutral-800",
-                "border-slate-200 dark:border-neutral-700",
+                "border-slate-300 dark:border-neutral-600",
                 "focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20",
                 "text-slate-800 dark:text-slate-200 text-sm",
-                "placeholder:text-slate-400 dark:placeholder:text-neutral-500"
+                "placeholder:text-slate-500 dark:placeholder:text-neutral-400"
               )}
             />
           </div>

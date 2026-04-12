@@ -52,7 +52,7 @@ export function RecentNotesPage() {
             onClick={() => setCurrentView("home")}
             className={cn(
               "p-1.5 rounded-lg transition-colors cursor-pointer",
-              "text-slate-400 dark:text-slate-500",
+              "text-slate-400 dark:text-slate-400",
               "hover:text-slate-600 dark:hover:text-slate-300",
               "hover:bg-slate-200 dark:hover:bg-neutral-700"
             )}
@@ -72,7 +72,7 @@ export function RecentNotesPage() {
       {/* 内容列表 - 使用虚拟滚动 */}
       {recentNotes.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center">
-          <FileText className="w-12 h-12 text-slate-500 dark:text-slate-600 mb-4" />
+          <FileText className="w-12 h-12 text-slate-500 dark:text-slate-400 mb-4" />
           <p className="text-slate-500 dark:text-slate-400">
             还没有任何笔记
           </p>

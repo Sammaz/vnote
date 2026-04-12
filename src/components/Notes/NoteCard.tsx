@@ -131,7 +131,7 @@ export const NoteCard = memo(function NoteCard({ note, onClick, onEdit, onDelete
           <h3 className="font-medium text-slate-700 dark:text-slate-100 truncate group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
             {note.title}
           </h3>
-          <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
+          <div className="flex items-center gap-3 mt-2 text-xs text-slate-500 dark:text-slate-400">
             <span className="flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5" />
               {formatDate(note.created_at)}

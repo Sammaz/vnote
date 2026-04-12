@@ -196,7 +196,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
                   "bg-slate-100 dark:bg-vnote-surface",
                   "border border-slate-200 dark:border-vnote-border",
                   "text-slate-700 dark:text-slate-200",
-                  "placeholder:text-slate-500 dark:placeholder:text-slate-500",
+                  "placeholder:text-slate-500 dark:placeholder:text-slate-400",
                   "focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-blue-500/50",
                   "transition-all duration-200"
                 )}
@@ -233,7 +233,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
           {/* 笔记列表 */}
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             {filteredNotes.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-500 dark:text-slate-500">
+              <div className="flex flex-col items-center justify-center h-full text-slate-500 dark:text-slate-400">
                 <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-vnote-surface flex items-center justify-center mb-3">
                   <FileText className="w-7 h-7" />
                 </div>
@@ -241,7 +241,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
                   {searchQuery.trim() ? "未找到匹配的笔记" : "暂无笔记"}
                 </p>
                 {searchQuery.trim() && (
-                  <p className="text-xs mt-1 text-slate-500 dark:text-slate-500">
+                  <p className="text-xs mt-1 text-slate-500 dark:text-slate-400">
                     试试其他关键词
                   </p>
                 )}
@@ -284,10 +284,10 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
                         )}>
                           {note.title}
                         </div>
-                        <div className="text-xs text-slate-500 dark:text-slate-500 line-clamp-1 mt-0.5">
+                        <div className="text-xs text-slate-500 dark:text-slate-400 line-clamp-1 mt-0.5">
                           {getSnippet(note)}
                         </div>
-                        <div className="flex items-center gap-1 mt-1 text-[11px] text-slate-500 dark:text-slate-500">
+                        <div className="flex items-center gap-1 mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                           <Calendar className="w-3 h-3" />
                           <span>{formatRelativeDate(note.created_at)}</span>
                         </div>
@@ -330,7 +330,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
                     </div>
                   </>
                 ) : (
-                  <h3 className="text-sm text-slate-500 dark:text-slate-500">
+                  <h3 className="text-sm text-slate-500 dark:text-slate-400">
                     视觉化总结预览
                   </h3>
                 )}
@@ -358,17 +358,17 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
           {/* 预览内容 */}
           <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 text-slate-700 dark:text-slate-300 bg-white/8 dark:bg-transparent">
             {!selectedNote ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-500 dark:text-slate-500">
+              <div className="flex flex-col items-center justify-center h-full text-slate-500 dark:text-slate-400">
                 <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-vnote-surface flex items-center justify-center mb-4">
                   <Search className="w-8 h-8" />
                 </div>
                 <p className="text-sm font-medium">选择一条笔记查看视觉化总结</p>
-                <p className="text-xs mt-1.5 text-slate-500 dark:text-slate-500">
+                <p className="text-xs mt-1.5 text-slate-500 dark:text-slate-400">
                   单击选择预览，双击打开笔记
                 </p>
               </div>
             ) : !preview.content ? (
-              <div className="flex flex-col items-center justify-center h-full text-slate-500 dark:text-slate-500">
+              <div className="flex flex-col items-center justify-center h-full text-slate-500 dark:text-slate-400">
                 <div className="w-16 h-16 rounded-2xl bg-slate-100 dark:bg-vnote-surface flex items-center justify-center mb-4">
                   <FileText className="w-8 h-8" />
                 </div>

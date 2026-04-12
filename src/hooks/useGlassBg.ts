@@ -24,19 +24,19 @@ const DARK_NO_BG: Record<GlassLevel, string> = {
 };
 
 const LIGHT_WITH_BG: Record<GlassLevel, string> = {
-  card: "bg-white/42",
-  panel: "bg-white/36",
-  modal: "bg-white/38",
-  input: "bg-white/46",
-  menu: "bg-white/44",
+  card: "bg-white/72",
+  panel: "bg-white/78",
+  modal: "bg-white/84",
+  input: "bg-white/88",
+  menu: "bg-white/90",
 };
 
 const DARK_WITH_BG: Record<GlassLevel, string> = {
-  card: "dark:bg-vnote-card/56",
-  panel: "dark:bg-vnote-card/50",
-  modal: "dark:bg-neutral-900/60",
-  input: "dark:bg-slate-800/70",
-  menu: "dark:bg-neutral-800/72",
+  card: "dark:bg-vnote-card/76",
+  panel: "dark:bg-vnote-card/72",
+  modal: "dark:bg-neutral-900/82",
+  input: "dark:bg-slate-800/84",
+  menu: "dark:bg-neutral-800/86",
 };
 
 export function useGlassBg(level: GlassLevel = "card", options: UseGlassBgOptions = {}) {

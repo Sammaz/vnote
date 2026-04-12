@@ -464,7 +464,7 @@ export function CollectionItem({
           <span className="flex-1 truncate text-left">{collection.name}</span>
           {(hasChildren || hasNotes) && (
             <>
-              <span className="text-xs text-slate-500 dark:text-slate-500 flex-shrink-0">
+              <span className="text-xs text-slate-500 dark:text-slate-400 flex-shrink-0">
                 {collection.item_count}
               </span>
               <div onClick={handleToggleExpand} className="flex-shrink-0 p-0.5 cursor-pointer">

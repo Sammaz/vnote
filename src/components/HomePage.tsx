@@ -12,7 +12,7 @@ export function HomePage() {
             <span className="gradient-text">VNote</span>
             <span className="text-slate-700 dark:text-slate-200"> 智能视频笔记</span>
           </h1>
-          <p className="text-slate-500 dark:text-slate-500">
+          <p className="text-slate-500 dark:text-slate-400">
             上传视频和字幕，AI 自动生成结构化笔记
           </p>
         </div>

@@ -51,7 +51,7 @@ function SortableCollection({ collection, childCollections, allCollections, onEd
         className={cn(
           "absolute left-0 top-1.5 p-0.5 rounded cursor-grab z-10",
           "opacity-0 group-hover:opacity-100 transition-opacity",
-          "text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+          "text-slate-600 hover:text-slate-800 dark:hover:text-slate-200"
         )}
       >
         <GripVertical className="w-3 h-3" />
@@ -108,7 +108,7 @@ export function CollectionSection() {
     <div>
       {/* 标题区域 */}
       <div className="flex items-center justify-between px-2 mb-2">
-        <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+        <span className="text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wider">
           合集
         </span>
       </div>
@@ -119,7 +119,7 @@ export function CollectionSection() {
         className={cn(
           "w-full flex items-center gap-2.5 px-2 py-1.5 pl-6 rounded-md transition-all duration-150 cursor-pointer",
           "hover:bg-slate-100/80 dark:hover:bg-vnote-hover/80 text-sm",
-          "text-slate-600 dark:text-slate-300"
+          "text-slate-700 dark:text-slate-200"
         )}
       >
         <FolderPlus className="w-4 h-4 flex-shrink-0" />

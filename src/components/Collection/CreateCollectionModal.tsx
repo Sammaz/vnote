@@ -74,13 +74,13 @@ function ParentCollectionTreeItem({
         >
           {hasChildren && (
             expanded ? (
-              <ChevronDown className="w-3 h-3 text-slate-500 dark:text-neutral-400" />
+              <ChevronDown className="w-3 h-3 text-slate-600 dark:text-neutral-300" />
             ) : (
-              <ChevronRight className="w-3 h-3 text-slate-500 dark:text-neutral-400" />
+              <ChevronRight className="w-3 h-3 text-slate-600 dark:text-neutral-300" />
             )
           )}
         </span>
-        <Library className="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-neutral-400" />
+        <Library className="w-4 h-4 flex-shrink-0 text-slate-600 dark:text-neutral-300" />
         <span className="truncate">{collection.name}</span>
       </button>
       {hasChildren && expanded && (
@@ -243,13 +243,13 @@ export function CreateCollectionModal({
       />
 
       {/* 弹窗内容 */}
-      <div className={cn("relative w-full max-w-lg mx-4 rounded-lg shadow-2xl animate-fade-in border border-slate-200 dark:border-neutral-700", glassModal)}>
+      <div className={cn("relative w-full max-w-lg mx-4 rounded-lg shadow-2xl animate-fade-in border border-slate-300 dark:border-neutral-600", glassModal)}>
         {/* 关闭按钮 */}
         <button
           onClick={onClose}
           className="absolute right-4 top-4 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
         >
-          <X className="w-5 h-5 text-slate-500 dark:text-neutral-500" />
+          <X className="w-5 h-5 text-slate-600 dark:text-neutral-300" />
         </button>
 
         {/* 内容区域 */}
@@ -259,7 +259,7 @@ export function CreateCollectionModal({
             {isEditing ? "编辑合集" : "创建新合集"}
           </h2>
           {!isEditing && (
-            <p className="mt-1 text-sm text-slate-500 dark:text-neutral-400">
+            <p className="mt-1 text-sm text-slate-600 dark:text-neutral-300">
               从侧边栏合集区域触发。创建空合集，稍后可以添加内容。
             </p>
           )}
@@ -297,7 +297,7 @@ export function CreateCollectionModal({
             {/* 选择父级合集 - 在编辑模式或 addTo 模式显示 */}
             {(isEditing || mode === "addTo") && (
               <div className="flex items-start gap-4">
-                <label className="w-12 flex-shrink-0 text-sm text-slate-600 dark:text-neutral-400 pt-2.5">
+                <label className="w-12 flex-shrink-0 text-sm text-slate-700 dark:text-neutral-300 pt-2.5">
                   父合集
                 </label>
                 <div className="flex-1 relative" ref={parentDropdownRef}>
@@ -307,7 +307,7 @@ export function CreateCollectionModal({
                     className={cn(
                       "w-full flex items-center justify-between px-3 py-2.5 rounded-md border transition-colors cursor-pointer",
                       glassInput,
-                      "border-slate-200 dark:border-neutral-700",
+                      "border-slate-300 dark:border-neutral-600",
                       "text-sm",
                       showParentDropdown && "border-blue-500 dark:border-blue-400 ring-1 ring-blue-500/20"
                     )}
@@ -316,14 +316,14 @@ export function CreateCollectionModal({
                       "truncate",
                       selectedParentName
                         ? "text-slate-800 dark:text-slate-200"
-                        : "text-slate-500 dark:text-neutral-500"
+                        : "text-slate-600 dark:text-neutral-300"
                     )}>
                       {selectedParentName ?? "无（顶级合集）"}
                     </span>
-                    <ChevronsUpDown className="w-4 h-4 text-slate-500 dark:text-neutral-400 flex-shrink-0" />
+                    <ChevronsUpDown className="w-4 h-4 text-slate-600 dark:text-neutral-300 flex-shrink-0" />
                   </button>
                   {showParentDropdown && (
-                    <div className={cn("absolute z-10 mt-1 w-full max-h-52 overflow-y-auto border border-slate-200 dark:border-neutral-700 rounded-md shadow-lg", glassMenu)}>
+                    <div className={cn("absolute z-10 mt-1 w-full max-h-52 overflow-y-auto border border-slate-300 dark:border-neutral-600 rounded-md shadow-lg", glassMenu)}>
                       <button
                         type="button"
                         onClick={() => {
@@ -361,7 +361,7 @@ export function CreateCollectionModal({
 
             {/* 名称 */}
             <div className="flex items-start gap-4">
-              <label className="w-12 flex-shrink-0 text-sm text-slate-600 dark:text-neutral-400 pt-2.5">
+              <label className="w-12 flex-shrink-0 text-sm text-slate-700 dark:text-neutral-300 pt-2.5">
                 名称
               </label>
               <input
@@ -372,10 +372,10 @@ export function CreateCollectionModal({
                 className={cn(
                   "flex-1 px-3 py-2.5 rounded-md border transition-colors",
                   glassInput,
-                  "border-slate-200 dark:border-neutral-700",
+                  "border-slate-300 dark:border-neutral-600",
                   "focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20",
                   "text-slate-800 dark:text-slate-200 text-sm",
-                  "placeholder:text-slate-400 dark:placeholder:text-neutral-500"
+                  "placeholder:text-slate-500 dark:placeholder:text-neutral-400"
                 )}
                 autoFocus
               />
@@ -383,7 +383,7 @@ export function CreateCollectionModal({
 
             {/* 描述 */}
             <div className="flex items-start gap-4">
-              <label className="w-12 flex-shrink-0 text-sm text-slate-600 dark:text-neutral-400 pt-2.5">
+              <label className="w-12 flex-shrink-0 text-sm text-slate-700 dark:text-neutral-300 pt-2.5">
                 描述
               </label>
               <textarea
@@ -394,17 +394,17 @@ export function CreateCollectionModal({
                 className={cn(
                   "flex-1 px-3 py-2.5 rounded-md border transition-colors resize-none",
                   glassInput,
-                  "border-slate-200 dark:border-neutral-700",
+                  "border-slate-300 dark:border-neutral-600",
                   "focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20",
                   "text-slate-800 dark:text-slate-200 text-sm",
-                  "placeholder:text-slate-400 dark:placeholder:text-neutral-500"
+                  "placeholder:text-slate-500 dark:placeholder:text-neutral-400"
                 )}
               />
             </div>
 
             {/* 封面图片 */}
             <div className="flex items-start gap-4">
-              <label className="w-12 flex-shrink-0 text-sm text-slate-600 dark:text-neutral-400 pt-2.5">
+              <label className="w-12 flex-shrink-0 text-sm text-slate-700 dark:text-neutral-300 pt-2.5">
                 封面
               </label>
               <div className="flex-1">
@@ -429,8 +429,8 @@ export function CreateCollectionModal({
                     onClick={handleSelectCover}
                     className={cn(
                       "flex items-center gap-2 px-3 py-2 rounded-md border border-dashed transition-colors cursor-pointer",
-                      "border-slate-300 dark:border-neutral-600",
-                      "text-slate-500 dark:text-neutral-400 text-sm",
+                      "border-slate-400 dark:border-neutral-500",
+                      "text-slate-600 dark:text-neutral-300 text-sm",
                       "hover:border-blue-400 hover:text-blue-500 dark:hover:border-blue-500 dark:hover:text-blue-400"
                     )}
                   >
