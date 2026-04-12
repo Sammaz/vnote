@@ -207,48 +207,6 @@ interface ToolbarIconButtonProps {
   children?: React.ReactNode;
 }
 
-function toolbarNeedsCompact(root: HTMLElement | null): boolean {
-  if (!root) return false;
-
-  const rows = Array.from(root.querySelectorAll<HTMLElement>("[data-toolbar-row]"));
-  const targets = rows.length > 0 ? rows : [root];
-
-  return targets.some((row) => {
-    if (row.scrollWidth > row.clientWidth + 1) {
-      return true;
-    }
-
-    const children = Array.from(row.children) as HTMLElement[];
-    if (children.length < 2) {
-      return false;
-    }
-
-    const firstTop = children[0].offsetTop;
-    return children.some((child) => child.offsetTop - firstTop > 1);
-  });
-}
-
-function elementNeedsCompact(element: HTMLElement | null): boolean {
-  if (!element) return false;
-
-  if (element.scrollWidth > element.clientWidth + 1) {
-    return true;
-  }
-
-  const children = Array.from(element.children) as HTMLElement[];
-  if (children.length < 2) {
-    return false;
-  }
-
-  const firstTop = children[0].offsetTop;
-  return children.some((child) => child.offsetTop - firstTop > 1);
-}
-
-function canFitToolbarContent(container: HTMLElement | null, content: HTMLElement | null): boolean {
-  if (!container || !content) return false;
-  return content.scrollWidth <= container.clientWidth + 1;
-}
-
 function getElementContentWidth(element: HTMLElement | null): number {
   if (!element) return 0;
   return Math.max(element.scrollWidth, element.offsetWidth);
@@ -2498,11 +2456,8 @@ Video subtitles content:`;
   const toolbarButtonDisabledClass = "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none";
   const toolbarBarClass = "relative z-40 flex flex-wrap items-center gap-2.5 border-b border-slate-200/80 bg-slate-50/90 px-4 py-2.5 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80";
   const toolbarBarNoWrapClass = cn(toolbarBarClass, "flex-nowrap overflow-hidden");
-  const toolbarSectionClass = "flex min-w-0 max-w-full flex-wrap items-center gap-2";
   const toolbarSectionNoWrapClass = "flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-hidden";
-  const toolbarSectionResponsiveClass = cn(toolbarSectionClass, "min-w-0 flex-1");
   const toolbarSectionResponsiveNoWrapClass = cn(toolbarSectionNoWrapClass, "min-w-0 flex-1");
-  const toolbarSectionEndClass = cn(toolbarSectionClass, "ml-auto shrink-0 justify-end");
   const toolbarSectionEndNoWrapClass = cn(toolbarSectionNoWrapClass, "ml-auto shrink-0 justify-end");
   const toolbarActionClusterClass = "flex max-w-full shrink-0 items-center gap-2 rounded-2xl border border-slate-200/75 bg-white/55 p-1 shadow-sm shadow-slate-200/40 dark:border-vnote-border/80 dark:bg-white/5 dark:shadow-none";
   const toolbarActionButtonClass = "min-w-0 flex-1 justify-center whitespace-nowrap sm:flex-none sm:justify-start";

@@ -140,7 +140,6 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
       const selectorExpandedWidth = getElementContentWidth(selectorExpandedElement);
       const selectorCompactWidth = getElementContentWidth(selectorCompactElement);
       const rightExpandedWidth = getElementContentWidth(rightExpandedElement);
-      const rightCompactWidth = getElementContentWidth(rightCompactElement);
 
       let nextSelectorCompact = false;
       let nextRightCompact = false;
