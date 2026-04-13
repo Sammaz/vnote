@@ -75,7 +75,7 @@ export function EditNoteModal({ note, onClose }: EditNoteModalProps) {
           onClick={onClose}
           className="absolute right-4 top-4 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer"
         >
-          <X className="w-5 h-5 text-slate-500 dark:text-neutral-500" />
+          <X className="w-5 h-5 text-slate-600 dark:text-neutral-400" />
         </button>
 
         <div className="p-6">
@@ -95,7 +95,7 @@ export function EditNoteModal({ note, onClose }: EditNoteModalProps) {
                   "border-slate-200 dark:border-neutral-700",
                   "focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20",
                   "text-slate-800 dark:text-slate-200 text-sm",
-                  "placeholder:text-slate-400 dark:placeholder:text-neutral-500"
+                  "placeholder:text-slate-500 dark:placeholder:text-neutral-500"
                 )}
                 autoFocus
               />
@@ -148,7 +148,7 @@ export function EditNoteModal({ note, onClose }: EditNoteModalProps) {
                     "border-slate-200 dark:border-neutral-700",
                     "focus:border-blue-500 dark:focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-500/20",
                     "text-slate-800 dark:text-slate-200 text-sm",
-                    "placeholder:text-slate-400 dark:placeholder:text-neutral-500"
+                    "placeholder:text-slate-500 dark:placeholder:text-neutral-500"
                   )}
                 />
                 <button

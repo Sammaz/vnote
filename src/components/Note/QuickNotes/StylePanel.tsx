@@ -11,6 +11,7 @@ interface StylePanelProps {
   isOpen: boolean;
   onClose: () => void;
   onStyleChange: (style: NodeStyle) => void;
+  initialStyle?: NodeStyle;
 }
 
 export interface NodeStyle {
@@ -39,15 +40,26 @@ const PRESET_COLORS = [
 const FONT_SIZES = [12, 14, 16, 18, 20, 24];
 const BORDER_WIDTHS = [0, 1, 2, 3, 4];
 
-export function StylePanel({ isOpen, onClose, onStyleChange }: StylePanelProps) {
-  const [fillColor, setFillColor] = useState("#3b82f6");
-  const [textColor, setTextColor] = useState("#ffffff");
-  const [borderColor, setBorderColor] = useState("#3b82f6");
-  const [borderWidth, setBorderWidth] = useState(2);
-  const [fontSize, setFontSize] = useState(14);
+export function StylePanel({ isOpen, onClose, onStyleChange, initialStyle }: StylePanelProps) {
+  const [fillColor, setFillColor] = useState(initialStyle?.fillColor ?? "#3b82f6");
+  const [textColor, setTextColor] = useState(initialStyle?.color ?? "#ffffff");
+  const [borderColor, setBorderColor] = useState(initialStyle?.borderColor ?? "#3b82f6");
+  const [borderWidth, setBorderWidth] = useState(initialStyle?.borderWidth ?? 2);
+  const [fontSize, setFontSize] = useState(initialStyle?.fontSize ?? 14);
   const panelRef = useRef<HTMLDivElement>(null);
   const glassCard = useGlassBg("card");
   const glassPanel = useGlassBg("panel");
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+    setFillColor(initialStyle?.fillColor ?? "#3b82f6");
+    setTextColor(initialStyle?.color ?? "#ffffff");
+    setBorderColor(initialStyle?.borderColor ?? "#3b82f6");
+    setBorderWidth(initialStyle?.borderWidth ?? 2);
+    setFontSize(initialStyle?.fontSize ?? 14);
+  }, [initialStyle, isOpen]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {

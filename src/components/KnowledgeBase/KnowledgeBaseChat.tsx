@@ -28,6 +28,7 @@ import { cn } from "../../utils/cn";
 import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
+import { copyText } from "../../utils/clipboard";
 import type {
   KnowledgeAgentRunRecord,
   KnowledgeChatEvent,
@@ -1082,7 +1083,7 @@ export function KnowledgeBaseChat() {
   }, []);
 
   const handleCopyMessage = useCallback((content: string) => {
-    void navigator.clipboard.writeText(content);
+    void copyText(content);
   }, []);
 
   const handleModeChange = useCallback(async (nextMode: KnowledgeChatMode) => {

@@ -88,7 +88,7 @@ export function AddNotesToCollectionModal({
           onClick={onClose}
           className="absolute right-4 top-4 p-1 rounded-md hover:bg-slate-100 dark:hover:bg-neutral-800 transition-colors cursor-pointer z-10"
         >
-          <X className="w-5 h-5 text-slate-400 dark:text-neutral-400" />
+          <X className="w-5 h-5 text-slate-500 dark:text-neutral-300" />
         </button>
 
         {/* 头部 */}
@@ -102,7 +102,7 @@ export function AddNotesToCollectionModal({
 
           {/* 搜索框 */}
           <div className="mt-4 relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 dark:text-neutral-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 dark:text-neutral-300" />
             <input
               type="text"
               value={searchQuery}
@@ -134,7 +134,7 @@ export function AddNotesToCollectionModal({
         <div className="flex-1 overflow-y-auto px-6">
           {filteredNotes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Video className="w-12 h-12 text-slate-300 dark:text-neutral-600 mb-4" />
+              <Video className="w-12 h-12 text-slate-400 dark:text-neutral-500 mb-4" />
               <p className="text-slate-500 dark:text-neutral-400">
                 {availableNotes.length === 0
                   ? "没有可添加的笔记"

@@ -3,6 +3,7 @@ import { Check, Copy } from "lucide-react";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark, oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { cn } from "../../utils/cn";
+import { copyText } from "../../utils/clipboard";
 
 interface MarkdownCodeBlockProps {
   code: string;
@@ -30,7 +31,7 @@ export function MarkdownCodeBlock({
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(code);
+      await copyText(code);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1200);
     } catch (error) {

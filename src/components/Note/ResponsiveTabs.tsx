@@ -102,7 +102,7 @@ export function ResponsiveTabs({
           <div className="relative dropdown-trigger z-20 flex-shrink-0 ml-auto pl-1" ref={dropdownRef}>
             <button
               onClick={() => setShowDropdown(!showDropdown)}
-              className="flex items-center justify-center w-[30px] h-[30px] rounded-lg border border-slate-200/75 bg-white/72 text-slate-500 shadow-sm transition-all hover:-translate-y-0.5 hover:bg-white hover:text-slate-700 hover:shadow-md dark:border-slate-700/80 dark:bg-slate-800/78 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200 cursor-pointer"
+              className="flex items-center justify-center w-[30px] h-[30px] rounded-lg border border-slate-200/75 bg-white/72 text-slate-500 shadow-sm transition-all hover:bg-white hover:text-slate-700 hover:shadow-md dark:border-slate-700/80 dark:bg-slate-800/78 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200 cursor-pointer"
             >
               <MoreHorizontal className="w-4 h-4" />
             </button>

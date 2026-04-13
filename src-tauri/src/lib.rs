@@ -663,6 +663,17 @@ async fn save_file_content(path: String, content: String) -> Result<(), String> 
         .map_err(|e| format!("Failed to write file '{}': {}", path, e))
 }
 
+/// Copy text to system clipboard
+#[tauri::command]
+fn copy_text_to_clipboard(text: String) -> Result<(), String> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("Failed to access clipboard: {}", e))?;
+
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("Failed to write clipboard: {}", e))
+}
+
 /// Event payload for TS to MP4 conversion result
 #[derive(Clone, serde::Serialize)]
 struct TsConversionResult {
@@ -2183,6 +2194,7 @@ pub fn run() {
             set_setting,
             read_file_content,
             save_file_content,
+            copy_text_to_clipboard,
             convert_ts_to_mp4,
             start_ts_conversion,
             check_ffmpeg,

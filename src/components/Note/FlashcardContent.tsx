@@ -15,6 +15,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { message } from "../../utils/message";
+import { copyText } from "../../utils/clipboard";
 import type { FlashcardData, FlashcardGenerationEvent } from "../../types";
 import { FLASHCARD_DIFFICULTY_LABELS } from "../../types";
 
@@ -79,7 +80,7 @@ export function FlashcardContent({
   const handleCopyAnswer = useCallback(async () => {
     if (currentCard) {
       try {
-        await navigator.clipboard.writeText(currentCard.answer);
+        await copyText(currentCard.answer);
         message.success("答案已复制到剪贴板");
       } catch {
         message.error("复制失败");

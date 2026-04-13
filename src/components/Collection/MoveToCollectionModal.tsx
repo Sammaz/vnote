@@ -128,7 +128,7 @@ export function MoveToCollectionModal({
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
             移动到合集
           </h2>
-          <p className="mt-1 text-sm text-slate-600 dark:text-neutral-300">
+          <p className="mt-1 text-sm text-slate-700 dark:text-neutral-300">
             选择要移动到的目标合集（{noteIds.length} 个笔记）
           </p>
 

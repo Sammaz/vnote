@@ -184,7 +184,7 @@ export function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
           {/* 搜索框 */}
           <div className="flex-shrink-0 p-4 border-b border-slate-200/70 dark:border-vnote-border/80 bg-white/18 dark:bg-black/8 backdrop-blur-md">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500 dark:text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600 dark:text-slate-400" />
               <input
                 ref={inputRef}
                 type="text"
