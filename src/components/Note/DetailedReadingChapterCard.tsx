@@ -424,37 +424,37 @@ export function DetailedReadingChapterCard({
         isCurrent ? "border-blue-500 ring-2 ring-blue-500/50" : "border-slate-200 dark:border-vnote-border"
       )}
     >
-      <div className="flex flex-col @sm:flex-row cursor-pointer hover:bg-slate-50 dark:hover:bg-vnote-hover" onClick={() => handleSeek(chapter.start_time)}>
+      <div className="flex flex-col @md:flex-row cursor-pointer hover:bg-slate-50 dark:hover:bg-vnote-hover" onClick={() => handleSeek(chapter.start_time)}>
         {chapter.screenshot_path && (
-          <div className="relative w-full @sm:w-40 @lg:w-48 @sm:flex-shrink-0 aspect-video @sm:aspect-auto bg-slate-100 dark:bg-slate-800 overflow-hidden">
+          <div className="relative w-full @md:w-[30%] @md:flex-shrink-0 aspect-video bg-slate-100 dark:bg-slate-800 overflow-hidden">
             <img
               src={convertFileSrc(chapter.screenshot_path)}
               alt={chapter.title}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-fill"
             />
-            <div className="absolute top-1.5 left-1.5 @sm:top-2 @sm:left-2 bg-blue-600/90 backdrop-blur-sm text-white text-[11px] @sm:text-xs w-6 h-6 @sm:w-7 @sm:h-7 rounded-full flex items-center justify-center font-medium shadow-sm">
+            <div className="absolute top-1.5 left-1.5 @md:top-2 @md:left-2 bg-blue-600/90 backdrop-blur-sm text-white text-[11px] @md:text-xs w-6 h-6 @md:w-7 @md:h-7 rounded-full flex items-center justify-center font-medium shadow-sm">
               {index + 1}
             </div>
             {/* 窄屏：时间标签浮于截图右下角 */}
-            <div className="@sm:hidden absolute bottom-1.5 right-1.5 flex items-center gap-1 bg-black/50 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded-full">
+            <div className="@md:hidden absolute bottom-1.5 right-1.5 flex items-center gap-1 bg-black/50 backdrop-blur-sm text-white text-[10px] px-1.5 py-0.5 rounded-full">
               <Clock className="w-2.5 h-2.5" />
               {formatTime(chapter.start_time)} - {formatTime(chapter.end_time)}
             </div>
           </div>
         )}
 
-        <div className="flex-1 min-w-0 p-3 @sm:p-4 flex items-center justify-between gap-2">
+        <div className="flex-1 min-w-0 @md:w-[70%] p-3 @md:p-4 flex items-center justify-between gap-2">
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-slate-900 dark:text-slate-100 mb-1">{chapter.title}</h3>
             <p className={cn(
               "text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1",
-              chapter.screenshot_path ? "hidden @sm:flex" : "flex"
+              chapter.screenshot_path ? "hidden @md:flex" : "flex"
             )}>
               <Clock className="w-3 h-3 flex-shrink-0" />
               <span className="whitespace-nowrap">{formatTime(chapter.start_time)} - {formatTime(chapter.end_time)}</span>
             </p>
             {chapter.content?.trim() && (
-              <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed line-clamp-3 @sm:line-clamp-none">
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed @md:line-clamp-3">
                 {chapter.content}
               </p>
             )}
