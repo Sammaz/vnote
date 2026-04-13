@@ -1144,7 +1144,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     }
   };
 
-  const nextGroup = TAB_GROUPS.find(group => group.id !== activeGroup) ?? TAB_GROUPS[0];
 
   const visualChaptersForMarkdown = useCallback((): ChapterData | null => {
     if (!detailedReadingData) return null;
@@ -2535,17 +2534,17 @@ Video subtitles content:`;
           <div className="absolute inset-y-0 right-0 z-[90] flex w-[96px] items-center justify-end">
                 <button
                   type="button"
-                  onClick={() => handleGroupChange(nextGroup.id)}
-                  title={`切换到${nextGroup.label}`}
+                  onClick={() => handleGroupChange(activeGroup === "study" ? "summary" : "study")}
+                  title={`切换到${activeGroup === "study" ? TAB_GROUPS[0].label : TAB_GROUPS[1].label}`}
                   className="group relative flex h-[39px] w-full items-center overflow-hidden rounded-[20px] border border-slate-200/84 bg-gradient-to-b from-slate-100/98 via-slate-100/94 to-slate-200/84 px-[7px] text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_8px_18px_rgba(15,23,42,0.045)] ring-1 ring-white/72 backdrop-blur-sm transition-all duration-200 cursor-pointer hover:border-blue-200/85 hover:text-blue-600 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.96),0_10px_24px_rgba(59,130,246,0.11)] dark:border-vnote-border/80 dark:bg-gradient-to-b dark:from-slate-800/92 dark:via-slate-800/88 dark:to-slate-900/82 dark:text-slate-300 dark:ring-white/6 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] dark:hover:border-blue-500/30 dark:hover:text-blue-300 dark:hover:shadow-[0_10px_24px_rgba(2,6,23,0.32)]"
                 >
                   <span className="pointer-events-none absolute inset-y-[4px] left-[4px] w-[31px] rounded-[15px] border border-white/78 bg-gradient-to-b from-white via-white to-slate-100/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.96),0_5px_12px_rgba(15,23,42,0.055)] transition-all duration-200 group-hover:w-[33px] group-hover:border-blue-100/80 group-hover:shadow-[inset_0_1px_0_rgba(255,255,255,1),0_6px_14px_rgba(59,130,246,0.08)] dark:border-white/8 dark:bg-gradient-to-b dark:from-slate-700/78 dark:via-slate-700/64 dark:to-slate-800/70 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_4px_10px_rgba(2,6,23,0.24)] dark:group-hover:border-blue-400/18 dark:group-hover:bg-slate-700/82" />
                   <span className="pointer-events-none absolute right-[8px] top-1/2 h-4.5 w-4.5 -translate-y-1/2 rounded-full bg-white/44 opacity-0 blur-[1px] transition-opacity duration-200 group-hover:opacity-100 dark:bg-blue-400/10" />
                   <span className="relative z-10 flex w-full items-center gap-1.5">
                     <span className="flex h-5.5 w-5.5 flex-shrink-0 items-center justify-center rounded-full text-slate-500 transition-colors duration-200 group-hover:text-blue-500 dark:text-slate-400 dark:group-hover:text-blue-300">
-                      {nextGroup.icon}
+                      {activeGroup === "study" ? TAB_GROUPS[1].icon : TAB_GROUPS[0].icon}
                     </span>
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold leading-none tracking-[0.01em]">{nextGroup.label}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold leading-none tracking-[0.01em]">{activeGroup === "study" ? TAB_GROUPS[1].label : TAB_GROUPS[0].label}</span>
                     <span className="flex h-4.5 w-4.5 flex-shrink-0 items-center justify-center rounded-full border border-slate-200/78 bg-white/82 text-slate-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.92)] transition-all duration-200 group-hover:translate-x-0.5 group-hover:border-blue-200/85 group-hover:bg-blue-50 group-hover:text-blue-500 dark:border-white/8 dark:bg-white/6 dark:text-slate-500 dark:group-hover:border-blue-400/20 dark:group-hover:bg-blue-500/14 dark:group-hover:text-blue-300">
                       <ChevronRight className="h-[11px] w-[11px]" strokeWidth={2.4} />
                     </span>
