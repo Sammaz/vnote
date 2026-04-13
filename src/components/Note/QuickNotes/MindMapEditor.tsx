@@ -4,6 +4,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Network, ZoomIn, ZoomOut, Maximize2, Download, Palette, ChevronDown, X } from "lucide-react";
 import MindMap from "simple-mind-map";
 import Drag from "simple-mind-map/src/plugins/Drag.js";
@@ -93,6 +94,9 @@ function getLatestActiveNode(mindMap: MindMap | null) {
 export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange }: MindMapEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindMapRef = useRef<MindMap | null>(null);
+  // 只在首次挂载时使用 initialData，后续变化不重建实例
+  const initialDataRef = useRef(initialData);
+  initialDataRef.current = initialData;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const glassPanel = useGlassBg("panel");
   const glassMenu = useGlassBg("menu");
@@ -116,6 +120,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     return "logicalStructure";
   });
   const [showStylePanel, setShowStylePanel] = useState(false);
+  const styleTriggerRef = useRef<HTMLButtonElement>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
@@ -124,6 +129,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
   const [isCompactToolbar, setIsCompactToolbar] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const exportTriggerRef = useRef<HTMLButtonElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const toolbarLeftRef = useRef<HTMLDivElement>(null);
   const toolbarMeasureSelectorExpandedRef = useRef<HTMLDivElement>(null);
@@ -147,65 +153,31 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     node: null,
   });
 
-  const getContextMenuPosition = useCallback((node: any, clientX?: number, clientY?: number) => {
-    // Prefer using mouse event coordinates directly (viewport coords)
-    // These are the most reliable source for menu positioning
-    if (typeof clientX === "number" && typeof clientY === "number") {
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      const maxX = Math.max(CONTEXT_MENU_PADDING, viewportWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_PADDING);
-      const maxY = Math.max(CONTEXT_MENU_PADDING, viewportHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_PADDING);
+  // 记录最近一次原生 contextmenu 事件的视口坐标
+  const lastContextMenuPosRef = useRef<{ x: number; y: number } | null>(null);
 
-      // Place menu to the right of the click point, with a small offset
-      let menuX = clientX + 4;
-      let menuY = clientY + 4;
+  const getContextMenuPosition = useCallback((clientX: number, clientY: number) => {
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const maxX = Math.max(CONTEXT_MENU_PADDING, viewportWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_PADDING);
+    const maxY = Math.max(CONTEXT_MENU_PADDING, viewportHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_PADDING);
 
-      // If menu would go off right edge, place it to the left of the click point
-      if (menuX + CONTEXT_MENU_WIDTH > viewportWidth - CONTEXT_MENU_PADDING) {
-        menuX = clientX - CONTEXT_MENU_WIDTH - 4;
-      }
-      // If menu would go off bottom edge, place it above the click point
-      if (menuY + CONTEXT_MENU_HEIGHT > viewportHeight - CONTEXT_MENU_PADDING) {
-        menuY = clientY - CONTEXT_MENU_HEIGHT - 4;
-      }
+    // Place menu to the right of the click point, with a small offset
+    let menuX = clientX + 4;
+    let menuY = clientY + 4;
 
-      return {
-        x: Math.max(CONTEXT_MENU_PADDING, Math.min(menuX, maxX)),
-        y: Math.max(CONTEXT_MENU_PADDING, Math.min(menuY, maxY)),
-      };
+    // If menu would go off right edge, place it to the left of the click point
+    if (menuX + CONTEXT_MENU_WIDTH > viewportWidth - CONTEXT_MENU_PADDING) {
+      menuX = clientX - CONTEXT_MENU_WIDTH - 4;
+    }
+    // If menu would go off bottom edge, place it above the click point
+    if (menuY + CONTEXT_MENU_HEIGHT > viewportHeight - CONTEXT_MENU_PADDING) {
+      menuY = clientY - CONTEXT_MENU_HEIGHT - 4;
     }
 
-    // Fallback: use node rect to position menu to the right of the node
-    const nodeRect = node?.getRect?.();
-    if (nodeRect) {
-      const scrollX = window.pageXOffset || 0;
-      const scrollY = window.pageYOffset || 0;
-      // Convert page coords to viewport coords
-      const nodeRightX = nodeRect.x + nodeRect.width - scrollX;
-      const nodeCenterY = nodeRect.y + nodeRect.height / 2 - scrollY;
-
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      const maxX = Math.max(CONTEXT_MENU_PADDING, viewportWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_PADDING);
-      const maxY = Math.max(CONTEXT_MENU_PADDING, viewportHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_PADDING);
-
-      // Place menu to the right of the node with a small gap
-      let menuX = nodeRightX + 4;
-      // If not enough space on the right, place it to the left of the node
-      if (menuX + CONTEXT_MENU_WIDTH > viewportWidth - CONTEXT_MENU_PADDING) {
-        menuX = nodeRect.x - scrollX - CONTEXT_MENU_WIDTH - 4;
-      }
-
-      return {
-        x: Math.max(CONTEXT_MENU_PADDING, Math.min(menuX, maxX)),
-        y: Math.max(CONTEXT_MENU_PADDING, Math.min(nodeCenterY, maxY)),
-      };
-    }
-
-    // Ultimate fallback: center of viewport
     return {
-      x: CONTEXT_MENU_PADDING,
-      y: CONTEXT_MENU_PADDING,
+      x: Math.max(CONTEXT_MENU_PADDING, Math.min(menuX, maxX)),
+      y: Math.max(CONTEXT_MENU_PADDING, Math.min(menuY, maxY)),
     };
   }, []);
 
@@ -286,7 +258,9 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
   // 点击外部关闭导出菜单
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+      const clickedOnMenu = exportMenuRef.current && exportMenuRef.current.contains(e.target as Node);
+      const clickedOnTrigger = exportTriggerRef.current && exportTriggerRef.current.contains(e.target as Node);
+      if (!clickedOnMenu && !clickedOnTrigger) {
         setShowExportMenu(false);
       }
     };
@@ -395,16 +369,17 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     }, 1000);
   }, [saveContent]);
 
-  // 初始化思维导图
+  // 初始化思维导图（仅在首次挂载时执行，后续 initialData 变化不重建）
   useEffect(() => {
     if (!containerRef.current) return;
 
     // 解析初始数据或使用默认数据
+    const initVal = initialDataRef.current;
     let data;
     let initialLayout: MindMapLayout = currentLayout;
-    if (initialData) {
+    if (initVal) {
       try {
-        const parsed = JSON.parse(initialData);
+        const parsed = JSON.parse(initVal);
         if (parsed && typeof parsed === "object") {
           if ("root" in parsed) {
             data = parsed.root;
@@ -517,20 +492,28 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     mindMap.on("data_change", handleDataChange);
 
     // 监听节点右键菜单事件
-    const handleNodeContextMenu = (e: any, node: any) => {
-      e.preventDefault();
-      // Try to get viewport coordinates from the event
-      // The event may be a native MouseEvent from simple-mind-map or a wrapped event
-      const mouseX = typeof e?.clientX === "number" ? e.clientX : (typeof e?.event?.clientX === "number" ? e.event.clientX : undefined);
-      const mouseY = typeof e?.clientY === "number" ? e.clientY : (typeof e?.event?.clientY === "number" ? e.event.clientY : undefined);
-      const position = getContextMenuPosition(node, mouseX, mouseY);
-      activateNode(node);
-      setContextMenu({
-        visible: true,
-        x: position.x,
-        y: position.y,
-        node,
-      });
+    // simple-mind-map 事件对象中的坐标可能不在视口坐标系中，
+    // 因此在 window 上监听原生 contextmenu 事件来捕获真实的视口坐标
+    const handleWindowContextMenu = (e: MouseEvent) => {
+      lastContextMenuPosRef.current = { x: e.clientX, y: e.clientY };
+    };
+    window.addEventListener("contextmenu", handleWindowContextMenu, true);
+
+    const handleNodeContextMenu = (_e: any, node: any) => {
+      // 优先使用原生事件捕获的视口坐标，fallback 到事件对象的坐标
+      const pos = lastContextMenuPosRef.current;
+      const mouseX = pos?.x ?? (typeof _e?.clientX === "number" ? _e.clientX : undefined);
+      const mouseY = pos?.y ?? (typeof _e?.clientY === "number" ? _e.clientY : undefined);
+      if (typeof mouseX === "number" && typeof mouseY === "number") {
+        const position = getContextMenuPosition(mouseX, mouseY);
+        activateNode(node);
+        setContextMenu({
+          visible: true,
+          x: position.x,
+          y: position.y,
+          node,
+        });
+      }
     };
 
     mindMap.on("node_contextmenu", handleNodeContextMenu);
@@ -573,6 +556,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
 
     return () => {
       resizeObserver.disconnect();
+      window.removeEventListener("contextmenu", handleWindowContextMenu, true);
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
@@ -584,7 +568,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         mindMapRef.current = null;
       }
     };
-  }, [isDarkMode, initialData, handleContentChange, getContextMenuPosition, activateNode]);
+  }, [isDarkMode, handleContentChange, getContextMenuPosition, activateNode]);
 
   // 缩放控制
   const handleZoomIn = useCallback(() => {
@@ -811,7 +795,9 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         break;
       case "toggleExpand":
         if (contextMenu.node.nodeData.children && contextMenu.node.nodeData.children.length > 0) {
-          mindMap.execCommand("TOGGLE_NODE_EXPAND", contextMenu.node);
+          // 使用 !== false 判断：undefined 表示默认展开，避免库的 !getData() 对 undefined 取反的问题
+          const isExpanded = contextMenu.node.getData('expand') !== false;
+          mindMap.execCommand("SET_NODE_EXPAND", contextMenu.node, !isExpanded);
         }
         break;
       case "moveUp":
@@ -928,6 +914,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
             compactLabel={LAYOUT_LABELS[currentLayout]}
           />
           <button
+            ref={styleTriggerRef}
             onClick={() => setShowStylePanel(true)}
             className={cn(
               "flex items-center justify-center rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors cursor-pointer",
@@ -939,8 +926,8 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
             <Palette className="w-4 h-4" />
             {!isCompactToolbar && "样式"}
           </button>
-          <div className="relative" ref={exportMenuRef}>
-            <button
+          <button
+              ref={exportTriggerRef}
               onClick={() => setShowExportMenu(!showExportMenu)}
               className={cn(
                 "flex items-center justify-center rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors cursor-pointer",
@@ -953,8 +940,15 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
               {!isCompactToolbar && "导出"}
               {!isCompactToolbar && <ChevronDown className="w-3 h-3" />}
             </button>
-            {showExportMenu && (
-              <div className={cn("absolute top-full right-0 mt-2 w-40 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1", glassMenu)}>
+            {showExportMenu && createPortal(
+              <div
+                ref={exportMenuRef}
+                className={cn("fixed w-40 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-[9999] py-1", glassMenu)}
+                style={{
+                  top: exportTriggerRef.current ? `${exportTriggerRef.current.getBoundingClientRect().bottom + 8}px` : 0,
+                  left: exportTriggerRef.current ? `${Math.max(0, exportTriggerRef.current.getBoundingClientRect().right - 160)}px` : 0,
+                }}
+              >
                 <button
                   onClick={() => handleExport('png')}
                   className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors cursor-pointer"
@@ -973,9 +967,9 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
                 >
                   导出为 PDF
                 </button>
-              </div>
+              </div>,
+              document.body
             )}
-          </div>
         </div>
       </div>
 
@@ -1072,6 +1066,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         onClose={() => setShowStylePanel(false)}
         onStyleChange={handleStyleChange}
         initialStyle={defaultNodeStyle}
+        triggerRef={styleTriggerRef}
       />
     </div>
   );

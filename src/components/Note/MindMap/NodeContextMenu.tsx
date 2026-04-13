@@ -3,6 +3,7 @@
  * 提供节点操作功能：插入同级节点、插入子节点、删除节点、编辑节点等
  */
 
+import { createPortal } from "react-dom";
 import { useEffect, useRef } from "react";
 import {
   Plus,
@@ -22,9 +23,9 @@ import { cn } from "../../../utils/cn";
 import { useGlassBg } from "../../../hooks/useGlassBg";
 
 export interface NodeContextMenuProps {
-  /** 菜单显示位置 X 坐标 */
+  /** 菜单显示位置 X 坐标（视口坐标） */
   x: number;
-  /** 菜单显示位置 Y 坐标 */
+  /** 菜单显示位置 Y 坐标（视口坐标） */
   y: number;
   /** 是否显示菜单 */
   visible: boolean;
@@ -181,7 +182,9 @@ export function NodeContextMenu({
     },
   ];
 
-  return (
+  // 使用 createPortal 将菜单渲染到 document.body，
+  // 避免被祖先元素的 overflow-hidden 或 backdrop-filter 裁剪
+  return createPortal(
     <div
       ref={menuRef}
       className={cn("fixed z-[9999] min-w-[220px] rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-1", glassMenu)}
@@ -232,6 +235,7 @@ export function NodeContextMenu({
           </button>
         );
       })}
-    </div>
+    </div>,
+    document.body
   );
 }

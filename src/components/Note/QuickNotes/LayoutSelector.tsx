@@ -2,8 +2,9 @@
  * 思维导图布局选择器组件
  */
 
+import { createPortal } from "react-dom";
 import { ChevronDown, Check } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { cn } from "../../../utils/cn";
 import { useGlassBg } from "../../../hooks/useGlassBg";
 
@@ -39,24 +40,67 @@ interface LayoutSelectorProps {
 
 export function LayoutSelector({ value, onChange, compact = false, compactLabel }: LayoutSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const glassMenu = useGlassBg("menu");
 
   const currentLayout = LAYOUT_OPTIONS.find(opt => opt.value === value);
 
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current || !dropdownRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    dropdownRef.current.style.top = `${rect.bottom + 8}px`;
+    dropdownRef.current.style.left = `${rect.left}px`;
+  }, []);
+
   useEffect(() => {
+    if (isOpen) {
+      updatePosition();
+    }
+  }, [isOpen, updatePosition]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
     const handleClickOutside = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+      if (
+        dropdownRef.current && !dropdownRef.current.contains(e.target as Node) &&
+        triggerRef.current && !triggerRef.current.contains(e.target as Node)
+      ) {
         setIsOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+
+    const handleScroll = () => {
+      if (isOpen) {
+        setIsOpen(false);
+      }
+    };
+    // 监听所有祖先滚动容器，滚动时关闭下拉框
+    const ancestors: Element[] = [];
+    let el: HTMLElement | null = triggerRef.current;
+    while (el) {
+      const parent = el.parentElement;
+      if (parent) {
+        parent.addEventListener("scroll", handleScroll, { passive: true });
+        ancestors.push(parent);
+        el = parent;
+      } else {
+        break;
+      }
+    }
+
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      ancestors.forEach(a => a.removeEventListener("scroll", handleScroll));
+    };
+  }, [isOpen]);
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <>
       <button
+        ref={triggerRef}
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
           "flex items-center text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-vnote-hover hover:bg-slate-200 dark:hover:bg-slate-600 rounded-lg transition-colors cursor-pointer whitespace-nowrap",
@@ -71,8 +115,12 @@ export function LayoutSelector({ value, onChange, compact = false, compactLabel 
         <ChevronDown className={cn("w-4 h-4 transition-transform", isOpen && "rotate-180")} />
       </button>
 
-      {isOpen && (
-        <div className={cn("absolute top-full left-0 mt-2 w-64 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 py-1", glassMenu)}>
+      {isOpen && createPortal(
+        <div
+          ref={dropdownRef}
+          className={cn("fixed w-64 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-[9999] py-1", glassMenu)}
+          style={{ top: 0, left: 0 }}
+        >
           {LAYOUT_OPTIONS.map((option) => (
             <button
               key={option.value}
@@ -103,8 +151,9 @@ export function LayoutSelector({ value, onChange, compact = false, compactLabel 
               </div>
             </button>
           ))}
-        </div>
+        </div>,
+        document.body
       )}
-    </div>
+    </>
   );
 }
