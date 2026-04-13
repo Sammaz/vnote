@@ -33,7 +33,7 @@ export function DetailedReadingView({
   }, [data.chapters, currentTime]);
 
   return (
-    <div className="p-1 h-full">
+    <div className="p-1 h-full @container">
       <div className="space-y-3">
         {data.chapters.map((chapter, index) => (
           <DetailedReadingChapterCard
