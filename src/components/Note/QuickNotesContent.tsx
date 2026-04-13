@@ -466,6 +466,7 @@ export function QuickNotesContent({
         },
       }),
       Image.configure({
+        allowBase64: true,
         HTMLAttributes: {
           class: "max-w-full h-auto rounded-lg my-2",
         },
