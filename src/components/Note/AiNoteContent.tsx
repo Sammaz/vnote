@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Check, ChevronDown, Copy, Download, Edit3, GitBranch, RefreshCw, Sparkles, X } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
@@ -6,6 +7,7 @@ import type { AiConfig, Note, PromptConfig } from "../../types";
 import { cn } from "../../utils/cn";
 import { useGlassBg } from "../../hooks/useGlassBg";
 import { message } from "../../utils/message";
+import { copyText } from "../../utils/clipboard";
 import { EditableMarkdown } from "./EditableMarkdown";
 import { AiNoteMindMap } from "./AiNoteMindMap";
 import { getNoteGenerationState, setNoteGenerationState } from "../../utils/noteGenerationState";
@@ -162,8 +164,8 @@ export function AiNoteContent({
   const glassInput = useGlassBg("input");
   const glassModal = useGlassBg("modal");
 
-  const toolbarButtonClass = "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-sm font-medium text-slate-600 transition-all cursor-pointer hover:-translate-y-0.5 hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
-  const toolbarIconButtonClass = "inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-600 transition-all cursor-pointer hover:-translate-y-0.5 hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100";
+  const toolbarButtonClass = "inline-flex h-9 min-w-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3 text-sm font-medium text-slate-600 transition-all cursor-pointer hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
+  const toolbarIconButtonClass = "inline-flex h-9 w-9 items-center justify-center rounded-xl text-slate-600 transition-all cursor-pointer hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100";
   const toolbarButtonActiveClass = "bg-blue-50/90 text-blue-600 shadow-sm dark:bg-blue-500/14 dark:text-blue-400";
   const toolbarBarClass = "flex items-center gap-3 border-b border-slate-200/80 bg-slate-50/85 px-4 py-3 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80";
   const toolbarCompactBarClass = "gap-2 px-3 py-2.5 overflow-hidden";
@@ -175,10 +177,10 @@ export function AiNoteContent({
   const toolbarCompactMetaPillClass = "px-2.5 text-[11px] whitespace-nowrap shrink-0";
   const modalFieldLabelClass = "text-sm font-medium text-slate-700 dark:text-slate-300";
   const modalSelectButtonClass = "h-11 rounded-xl border border-slate-200/80 px-3 pr-10 text-left text-sm font-medium text-slate-900 transition-all truncate cursor-pointer hover:border-slate-300/90 hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent dark:border-vnote-border/80 dark:text-slate-100 dark:hover:border-slate-500";
-  const modalOptionCardClass = "rounded-2xl border border-slate-200/80 bg-white/72 px-4 py-3 text-left transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-300/90 hover:shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:hover:border-slate-500";
+  const modalOptionCardClass = "rounded-2xl border border-slate-200/80 bg-white/72 px-4 py-3 text-left transition-all cursor-pointer hover:border-slate-300/90 hover:shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:hover:border-slate-500";
   const modalOptionCardActiveClass = "border-blue-200/80 bg-blue-50/90 text-blue-700 shadow-sm dark:border-blue-400/40 dark:bg-blue-900/20 dark:text-blue-300";
   const modalOptionCardIdleClass = "text-slate-700 dark:text-slate-300";
-  const modalCompactOptionClass = "h-11 w-full rounded-xl border border-slate-200/80 bg-white/72 px-2.5 text-center transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-300/90 hover:shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:hover:border-slate-500";
+  const modalCompactOptionClass = "h-11 w-full rounded-xl border border-slate-200/80 bg-white/72 px-2.5 text-center transition-all cursor-pointer hover:border-slate-300/90 hover:shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:hover:border-slate-500";
   const modalCompactOptionActiveClass = "border-blue-200/80 bg-blue-50/90 text-blue-700 shadow-sm dark:border-blue-400/40 dark:bg-blue-900/20 dark:text-blue-300";
   const modalSecondaryButtonClass = "inline-flex h-11 items-center justify-center rounded-xl border border-slate-200/80 px-4 text-sm font-medium text-slate-600 transition-all cursor-pointer hover:bg-white/80 hover:text-slate-800 hover:shadow-sm dark:border-vnote-border/80 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-100";
   const modalPrimaryButtonClass = "inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-sm font-medium text-white transition-all cursor-pointer hover:bg-blue-700 hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed";
@@ -220,7 +222,7 @@ export function AiNoteContent({
     }
 
     try {
-      await navigator.clipboard.writeText(note.ai_note_markdown);
+      await copyText(note.ai_note_markdown);
       message.success("已复制到剪贴板");
     } catch {
       message.error("复制失败");
@@ -672,7 +674,7 @@ export function AiNoteContent({
         )}
       </div>
 
-      {showPromptDialog && (
+      {showPromptDialog && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 px-4 py-6 backdrop-blur-sm" onClick={() => setShowPromptDialog(false)}>
           <div className={cn("w-full max-w-3xl overflow-hidden rounded-[28px] border border-slate-200/80 shadow-[0_24px_80px_rgba(15,23,42,0.18)]", glassModal)} onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between border-b border-slate-200/80 px-6 py-5 dark:border-vnote-border/80 sm:px-8">
@@ -851,7 +853,8 @@ export function AiNoteContent({
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
     </div>

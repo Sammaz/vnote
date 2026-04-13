@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { createPortal } from "react-dom";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 import {
   FileText,
@@ -56,6 +57,7 @@ import { QuickNotesContainer } from "./QuickNotesContainer";
 import { AiNoteContent } from "./AiNoteContent";
 import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
+import { copyText } from "../../utils/clipboard";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import {
@@ -228,9 +230,9 @@ function ToolbarIconButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        compact ? "inline-flex h-9 w-9 items-center justify-center rounded-xl border border-transparent bg-white/55 text-slate-600 shadow-sm shadow-transparent transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-200/90 hover:bg-white hover:text-slate-800 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:border-transparent dark:bg-white/[0.03] dark:text-slate-400 dark:hover:border-white/8 dark:hover:bg-white/8 dark:hover:text-slate-100" : undefined,
+        compact ? "inline-flex h-9 w-9 items-center justify-center rounded-xl border border-transparent bg-white/55 text-slate-600 shadow-sm shadow-transparent transition-all cursor-pointer hover:border-slate-200/90 hover:bg-white hover:text-slate-800 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:border-transparent dark:bg-white/[0.03] dark:text-slate-400 dark:hover:border-white/8 dark:hover:bg-white/8 dark:hover:text-slate-100" : undefined,
         active && "border-blue-200/80 bg-blue-50/90 text-blue-600 shadow-sm shadow-blue-100/60 dark:border-blue-500/30 dark:bg-blue-500/14 dark:text-blue-400 dark:shadow-transparent",
-        disabled && "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none",
+        disabled && "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none",
         className,
       )}
       title={label}
@@ -1092,7 +1094,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       return;
     }
     try {
-      await navigator.clipboard.writeText(content);
+      await copyText(content);
       message.success("已复制到剪贴板");
     } catch {
       message.error("复制失败");
@@ -1391,7 +1393,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       return;
     }
     try {
-      await navigator.clipboard.writeText(content);
+      await copyText(content);
       message.success("已复制到剪贴板");
     } catch {
       message.error("复制失败");
@@ -2451,15 +2453,15 @@ Video subtitles content:`;
     }
   };
 
-  const toolbarButtonClass = "inline-flex h-9 min-w-0 max-w-full items-center justify-center gap-1.5 rounded-xl border border-transparent bg-white/55 px-3 text-sm font-medium text-slate-600 shadow-sm shadow-transparent transition-all cursor-pointer hover:-translate-y-0.5 hover:border-slate-200/90 hover:bg-white hover:text-slate-800 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:border-transparent dark:bg-white/[0.03] dark:text-slate-400 dark:hover:border-white/8 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
+  const toolbarButtonClass = "inline-flex h-9 min-w-0 max-w-full items-center justify-center gap-1.5 rounded-xl border border-transparent bg-white/55 px-3 text-sm font-medium text-slate-600 shadow-sm shadow-transparent transition-all cursor-pointer hover:border-slate-200/90 hover:bg-white hover:text-slate-800 hover:shadow-[0_10px_24px_rgba(15,23,42,0.08)] dark:border-transparent dark:bg-white/[0.03] dark:text-slate-400 dark:hover:border-white/8 dark:hover:bg-white/8 dark:hover:text-slate-100 sm:justify-start";
   const toolbarButtonActiveClass = "border-blue-200/80 bg-blue-50/90 text-blue-600 shadow-sm shadow-blue-100/60 dark:border-blue-500/30 dark:bg-blue-500/14 dark:text-blue-400 dark:shadow-transparent";
-  const toolbarButtonDisabledClass = "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-none";
+  const toolbarButtonDisabledClass = "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none";
   const toolbarBarClass = "relative z-40 flex flex-wrap items-center gap-2.5 border-b border-slate-200/80 bg-slate-50/90 px-4 py-2.5 backdrop-blur-sm dark:border-vnote-border/80 dark:bg-vnote-surface/80";
-  const toolbarBarNoWrapClass = cn(toolbarBarClass, "flex-nowrap overflow-hidden");
-  const toolbarSectionNoWrapClass = "flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-hidden";
+  const toolbarBarNoWrapClass = cn(toolbarBarClass, "flex-nowrap overflow-visible");
+  const toolbarSectionNoWrapClass = "flex min-w-0 max-w-full flex-nowrap items-center gap-2 overflow-visible";
   const toolbarSectionResponsiveNoWrapClass = cn(toolbarSectionNoWrapClass, "min-w-0 flex-1");
   const toolbarSectionEndNoWrapClass = cn(toolbarSectionNoWrapClass, "ml-auto shrink-0 justify-end");
-  const toolbarActionClusterClass = "flex max-w-full shrink-0 items-center gap-2 rounded-2xl border border-slate-200/75 bg-white/55 p-1 shadow-sm shadow-slate-200/40 dark:border-vnote-border/80 dark:bg-white/5 dark:shadow-none";
+  const toolbarActionClusterClass = "flex max-w-full shrink-0 items-center gap-2 overflow-visible rounded-2xl border border-slate-200/75 bg-white/55 p-1 shadow-sm shadow-slate-200/40 dark:border-vnote-border/80 dark:bg-white/5 dark:shadow-none";
   const toolbarActionButtonClass = "min-w-0 flex-1 justify-center whitespace-nowrap sm:flex-none sm:justify-start";
   const toolbarCompactButtonClass = "min-w-0 justify-center";
   const toolbarMetaPillClass = "inline-flex min-h-9 items-center rounded-xl border border-slate-200/80 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-500 shadow-sm dark:border-vnote-border/80 dark:bg-white/5 dark:text-slate-400";
@@ -2467,7 +2469,7 @@ Video subtitles content:`;
   const dropdownHeaderClass = "sticky top-0 flex items-center gap-2 border-b border-slate-200/90 bg-white px-4 py-2 dark:border-vnote-border/90 dark:bg-slate-900";
   const emptyStateActionButtonClass = cn(
     "inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-medium text-white shadow-sm transition-all cursor-pointer",
-    "bg-blue-500 hover:-translate-y-0.5 hover:bg-blue-600 hover:shadow-md",
+    "bg-blue-500 hover:bg-blue-600 hover:shadow-md",
     "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm"
   );
 
@@ -2567,30 +2569,100 @@ Video subtitles content:`;
               </div>
             ) : (
               <>
-                <div className="relative min-w-0 max-w-full">
-                  <button className={cn(toolbarButtonClass, toolbarActionButtonClass, "max-w-full")} type="button">
+                <div className="relative min-w-0 max-w-full" ref={chapterDropdownRef}>
+                  <button
+                    onClick={() => setShowChapterDropdown(!showChapterDropdown)}
+                    className={cn(toolbarButtonClass, toolbarActionButtonClass, "max-w-full")}
+                    type="button"
+                    title="章节目录"
+                    aria-label="章节目录"
+                  >
                     <List className="w-4 h-4" />
                     <span className="truncate">共 {detailedReadingData?.chapters.length || 0} 个章节</span>
-                    <ChevronDown className="w-3.5 h-3.5" />
+                    <ChevronDown className={cn("w-3.5 h-3.5 transition-transform", showChapterDropdown && "rotate-180")} />
                   </button>
+                  {showChapterDropdown && detailedReadingData && (
+                    <div className={cn(dropdownMenuClass, "w-96")}>
+                      <div className={dropdownHeaderClass}>
+                        <List className="w-4 h-4 text-slate-500" />
+                        <span className="text-sm font-medium text-slate-700 dark:text-slate-200">章节目录</span>
+                      </div>
+                      <div className="py-1">
+                        {detailedReadingData.chapters.map((chapter, index) => {
+                          const isCurrentChapter = chapter.id === getCurrentChapter(currentTime)?.id;
+                          const formatTime = (seconds: number): string => {
+                            const hours = Math.floor(seconds / 3600);
+                            const minutes = Math.floor((seconds % 3600) / 60);
+                            const secs = Math.floor(seconds % 60);
+                            if (hours > 0) {
+                              return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+                            }
+                            return `${minutes}:${secs.toString().padStart(2, "0")}`;
+                          };
+                          return (
+                            <button
+                              key={chapter.id}
+                              onClick={() => {
+                                userClickTimeRef.current = Date.now();
+                                window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
+                                const chapterElement = document.getElementById(`chapter-${chapter.id}`);
+                                if (chapterElement) {
+                                  chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
+                                }
+                                setShowChapterDropdown(false);
+                              }}
+                              className={cn(
+                                "w-full px-4 py-2 flex items-center gap-3 transition-colors cursor-pointer text-left",
+                                isCurrentChapter
+                                  ? "bg-blue-50/90 dark:bg-blue-500/16"
+                                  : "hover:bg-white/75 dark:hover:bg-white/6"
+                              )}
+                            >
+                              <span className={cn(
+                                "inline-flex h-6 min-w-6 items-center justify-center rounded-full text-xs font-bold",
+                                isCurrentChapter
+                                  ? "bg-blue-500 text-white"
+                                  : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"
+                              )}>
+                                {index + 1}
+                              </span>
+                              <span className={cn(
+                                "flex-1 min-w-0 truncate text-sm",
+                                isCurrentChapter
+                                  ? "text-blue-600 dark:text-blue-400 font-medium"
+                                  : "text-slate-700 dark:text-slate-300"
+                              )}>
+                                {chapter.title}
+                              </span>
+                              <span className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">{formatTime(chapter.start_time)}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <button className={cn(toolbarActionButtonClass, toolbarButtonClass, autoScroll ? toolbarButtonActiveClass : "")} type="button">
+                <button onClick={() => setAutoScroll(!autoScroll)} className={cn(toolbarActionButtonClass, toolbarButtonClass, autoScroll ? toolbarButtonActiveClass : "")} type="button" title="字幕滚动" aria-label="字幕滚动">
                   <Clock className="w-4 h-4" />
                   字幕滚动
                 </button>
                 {note.subtitle_path && (
                   <>
                     <button
+                      onClick={() => setShowChapterSubtitles(!showChapterSubtitles)}
                       className={cn(toolbarActionButtonClass, toolbarButtonClass, showChapterSubtitles && toolbarButtonActiveClass)}
                       type="button"
+                      title={showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
+                      aria-label={showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
                     >
                       <SubtitlesIcon className="w-4 h-4" />
                       {showChapterSubtitles ? "隐藏字幕" : "显示字幕"}
                     </button>
                     {showChapterSubtitles && detailedReadingData && (
-                      <div className="relative min-w-0 max-w-full">
+                      <div className="relative min-w-0 max-w-full" ref={subtitleModeDropdownRef}>
                         <button
                           type="button"
+                          onClick={() => setShowSubtitleModeDropdown(!showSubtitleModeDropdown)}
                           disabled={subtitleOptimizing}
                           className={cn(
                             toolbarButtonClass,
@@ -2604,10 +2676,42 @@ Video subtitles content:`;
                         >
                           {subtitleOptimizationEnabled ? "智能优化" : "原文"}
                           <ChevronDown className={cn(
-                            "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none",
-                            subtitleOptimizationEnabled ? "text-blue-400" : "text-slate-400"
+                            "absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 pointer-events-none transition-transform",
+                            subtitleOptimizationEnabled ? "text-blue-400" : "text-slate-400",
+                            showSubtitleModeDropdown && "rotate-180"
                           )} />
                         </button>
+                        {showSubtitleModeDropdown && !subtitleOptimizing && (
+                          <div className={cn(dropdownMenuClass, "right-0 left-auto w-28 py-1")}>
+                            {[
+                              { value: "original", label: "原文" },
+                              { value: "optimized", label: "智能优化" },
+                            ].map(mode => (
+                              <button
+                                key={mode.value}
+                                type="button"
+                                onClick={async () => {
+                                  const shouldEnable = mode.value === "optimized";
+                                  if (shouldEnable !== subtitleOptimizationEnabled) {
+                                    await handleSubtitleOptimizationToggle();
+                                  }
+                                  setShowSubtitleModeDropdown(false);
+                                }}
+                                className={cn(
+                                  "w-full px-3 py-2 text-sm text-left transition-colors flex items-center justify-between cursor-pointer",
+                                  (mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled)
+                                    ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20"
+                                    : "text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                                )}
+                              >
+                                {mode.label}
+                                {(mode.value === "optimized" ? subtitleOptimizationEnabled : !subtitleOptimizationEnabled) && (
+                                  <Check className="w-4 h-4" />
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                   </>
@@ -2623,7 +2727,7 @@ Video subtitles content:`;
                 active={isAssistModeActive}
                 compact={true}
                 className={cn(toolbarButtonClass, toolbarCompactButtonClass)}
-                onClick={() => {}}
+                onClick={() => setIsAssistModeActive(!isAssistModeActive)}
               >
                 辅助模式
               </ToolbarIconButton>
@@ -2646,7 +2750,7 @@ Video subtitles content:`;
                 active={isAssistModeActive}
                 compact={false}
                 className={cn(toolbarButtonClass, toolbarActionButtonClass)}
-                onClick={() => {}}
+                onClick={() => setIsAssistModeActive(!isAssistModeActive)}
               >
                 辅助模式
               </ToolbarIconButton>
@@ -2657,7 +2761,53 @@ Video subtitles content:`;
                 spinning={assistModeGenerating}
                 compact={false}
                 className={cn(toolbarButtonClass, toolbarActionButtonClass)}
-                onClick={() => {}}
+                onClick={() => {
+                  setConfirmDialogConfig({
+                    title: "确认重新生成",
+                    message: "重新生成将覆盖当前的章节内容，此操作不可撤销。是否继续？",
+                    onConfirm: async () => {
+                      setShowConfirmDialog(false);
+                      if (isAssistModeActive) {
+                        generateChaptersWithMarkers(assistModeMarkers);
+                      } else {
+                        // 清除字幕优化缓存
+                        setOptimizedSubtitles(new Map());
+                        setSubtitleOptimizationEnabled(false);
+                        setFailedChapterIds(new Set());
+                        try {
+                          await invoke("delete_optimized_subtitles", { noteId: note.id });
+                        } catch (err) {
+                          console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
+                        }
+                        try {
+                          await invoke("clear_chapter_screenshots", { noteId: note.id });
+                        } catch (err) {
+                          console.error("[NoteContentPanel] 清除截图缓存失败:", err);
+                        }
+                        setChapterIsGenerating(true);
+                        setChapterGenerating(note.id, true);
+                        const generationId = crypto.randomUUID();
+                        registerActiveGenerationId(note.id, generationId);
+                        try {
+                          await invoke("generate_note_content", {
+                            generationId,
+                            noteId: note.id,
+                            modelId: currentModelId || defaultAiConfigId,
+                            concurrent: true,
+                            regenerate: true,
+                            tabsToGenerate: ["detailed_reading"],
+                          });
+                        } catch (error) {
+                          setChapterIsGenerating(false);
+                          setChapterGenerating(note.id, false);
+                          unregisterActiveGenerationId(note.id, generationId);
+                          message.error(`重新生成章节失败: ${error}`);
+                        }
+                      }
+                    },
+                  });
+                  setShowConfirmDialog(true);
+                }}
               >
                 {assistModeGenerating ? "生成中..." : "重新生成"}
               </ToolbarIconButton>
@@ -3357,7 +3507,7 @@ Video subtitles content:`;
               <button
                 onClick={async () => {
                   if (note.panoramic_blueprint) {
-                    await navigator.clipboard.writeText(note.panoramic_blueprint);
+                    await copyText(note.panoramic_blueprint);
                     message.success('已复制到剪贴板');
                   }
                 }}
@@ -3709,7 +3859,7 @@ Video subtitles content:`;
       </div>
 
       {/* 自定义总结弹窗 */}
-      {showPromptDialog && (
+      {showPromptDialog && createPortal(
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowPromptDialog(false)}>
           <div className={cn("rounded-2xl shadow-2xl w-[600px] max-w-[90vw]", glassModal)} onClick={e => e.stopPropagation()}>
             {/* 标题和关闭按钮 */}
@@ -4010,7 +4160,8 @@ Video subtitles content:`;
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* 确认对话框 */}

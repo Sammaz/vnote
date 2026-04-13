@@ -205,7 +205,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     );
   }
 
-  return (
+  return createPortal(
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/34 backdrop-blur-md"
       onClick={onCancel}
@@ -248,6 +248,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };

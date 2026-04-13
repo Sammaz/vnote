@@ -51,6 +51,45 @@ const LAYOUT_LABELS: Record<MindMapLayout, string> = {
   fishbone: "鱼骨图",
 };
 
+const CONTEXT_MENU_WIDTH = 220;
+const CONTEXT_MENU_HEIGHT = 420;
+const CONTEXT_MENU_PADDING = 12;
+
+const DEFAULT_NODE_STYLE: NodeStyle = {
+  fillColor: "#3b82f6",
+  color: "#ffffff",
+  borderColor: "#3b82f6",
+  borderWidth: 2,
+  fontSize: 14,
+};
+
+function isMindMapLayout(value: unknown): value is MindMapLayout {
+  return value === "logicalStructure"
+    || value === "mindMap"
+    || value === "organizationStructure"
+    || value === "catalogOrganization"
+    || value === "timeline"
+    || value === "fishbone";
+}
+
+function buildNodeStyleConfig(style: NodeStyle) {
+  const styleConfig: Record<string, string | number> = {};
+  if (style.fillColor) styleConfig.fillColor = style.fillColor;
+  if (style.color) styleConfig.color = style.color;
+  if (style.borderColor) styleConfig.borderColor = style.borderColor;
+  if (style.borderWidth !== undefined) styleConfig.borderWidth = style.borderWidth;
+  if (style.fontSize) styleConfig.fontSize = style.fontSize;
+  return styleConfig;
+}
+
+function getLatestActiveNode(mindMap: MindMap | null) {
+  const activeNodes = (mindMap as any)?.renderer?.activeNodeList;
+  if (!activeNodes || activeNodes.length === 0) {
+    return null;
+  }
+  return activeNodes[activeNodes.length - 1] ?? null;
+}
+
 export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange }: MindMapEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mindMapRef = useRef<MindMap | null>(null);
@@ -60,11 +99,27 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
   const [isDarkMode, setIsDarkMode] = useState(() =>
     document.documentElement.classList.contains("dark")
   );
-  const [currentLayout, setCurrentLayout] = useState<MindMapLayout>("logicalStructure");
+  const [currentLayout, setCurrentLayout] = useState<MindMapLayout>(() => {
+    if (!initialData) {
+      return "logicalStructure";
+    }
+
+    try {
+      const parsed = JSON.parse(initialData);
+      if (parsed && typeof parsed === "object" && isMindMapLayout((parsed as { layout?: unknown }).layout)) {
+        return (parsed as { layout: MindMapLayout }).layout;
+      }
+    } catch {
+      // ignore invalid persisted layout
+    }
+
+    return "logicalStructure";
+  });
   const [showStylePanel, setShowStylePanel] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [defaultNodeStyle, setDefaultNodeStyle] = useState<NodeStyle>(DEFAULT_NODE_STYLE);
   const [isCompactLayoutSelector, setIsCompactLayoutSelector] = useState(false);
   const [isCompactToolbar, setIsCompactToolbar] = useState(false);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,6 +132,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
   const toolbarMeasureRightCompactRef = useRef<HTMLDivElement>(null);
   const toolbarCompactStateRef = useRef({ selector: false, right: false });
   const pendingImageNodeRef = useRef<any>(null);
+  const pendingNewNodeStyleRef = useRef<NodeStyle | null>(null);
 
   // 右键菜单状态
   const [contextMenu, setContextMenu] = useState<{
@@ -90,6 +146,123 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     y: 0,
     node: null,
   });
+
+  const getContextMenuPosition = useCallback((node: any, clientX?: number, clientY?: number) => {
+    // Prefer using mouse event coordinates directly (viewport coords)
+    // These are the most reliable source for menu positioning
+    if (typeof clientX === "number" && typeof clientY === "number") {
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const maxX = Math.max(CONTEXT_MENU_PADDING, viewportWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_PADDING);
+      const maxY = Math.max(CONTEXT_MENU_PADDING, viewportHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_PADDING);
+
+      // Place menu to the right of the click point, with a small offset
+      let menuX = clientX + 4;
+      let menuY = clientY + 4;
+
+      // If menu would go off right edge, place it to the left of the click point
+      if (menuX + CONTEXT_MENU_WIDTH > viewportWidth - CONTEXT_MENU_PADDING) {
+        menuX = clientX - CONTEXT_MENU_WIDTH - 4;
+      }
+      // If menu would go off bottom edge, place it above the click point
+      if (menuY + CONTEXT_MENU_HEIGHT > viewportHeight - CONTEXT_MENU_PADDING) {
+        menuY = clientY - CONTEXT_MENU_HEIGHT - 4;
+      }
+
+      return {
+        x: Math.max(CONTEXT_MENU_PADDING, Math.min(menuX, maxX)),
+        y: Math.max(CONTEXT_MENU_PADDING, Math.min(menuY, maxY)),
+      };
+    }
+
+    // Fallback: use node rect to position menu to the right of the node
+    const nodeRect = node?.getRect?.();
+    if (nodeRect) {
+      const scrollX = window.pageXOffset || 0;
+      const scrollY = window.pageYOffset || 0;
+      // Convert page coords to viewport coords
+      const nodeRightX = nodeRect.x + nodeRect.width - scrollX;
+      const nodeCenterY = nodeRect.y + nodeRect.height / 2 - scrollY;
+
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const maxX = Math.max(CONTEXT_MENU_PADDING, viewportWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_PADDING);
+      const maxY = Math.max(CONTEXT_MENU_PADDING, viewportHeight - CONTEXT_MENU_HEIGHT - CONTEXT_MENU_PADDING);
+
+      // Place menu to the right of the node with a small gap
+      let menuX = nodeRightX + 4;
+      // If not enough space on the right, place it to the left of the node
+      if (menuX + CONTEXT_MENU_WIDTH > viewportWidth - CONTEXT_MENU_PADDING) {
+        menuX = nodeRect.x - scrollX - CONTEXT_MENU_WIDTH - 4;
+      }
+
+      return {
+        x: Math.max(CONTEXT_MENU_PADDING, Math.min(menuX, maxX)),
+        y: Math.max(CONTEXT_MENU_PADDING, Math.min(nodeCenterY, maxY)),
+      };
+    }
+
+    // Ultimate fallback: center of viewport
+    return {
+      x: CONTEXT_MENU_PADDING,
+      y: CONTEXT_MENU_PADDING,
+    };
+  }, []);
+
+  const activateNode = useCallback((node: any) => {
+    if (!mindMapRef.current || !node) {
+      return;
+    }
+
+    try {
+      mindMapRef.current.execCommand("CLEAR_ACTIVE_NODE");
+    } catch {
+      // ignore
+    }
+
+    try {
+      mindMapRef.current.execCommand("SET_NODE_ACTIVE", node);
+    } catch {
+      node.active?.();
+    }
+
+    node.active?.();
+  }, []);
+
+  const applyStyleToNode = useCallback((node: any, style: NodeStyle) => {
+    if (!mindMapRef.current || !node) {
+      return;
+    }
+
+    const styleConfig = buildNodeStyleConfig(style);
+    if (Object.keys(styleConfig).length === 0) {
+      return;
+    }
+
+    mindMapRef.current.execCommand("SET_NODE_STYLES", node, styleConfig);
+  }, []);
+
+  const applyStyleToNewestActiveNode = useCallback((style: NodeStyle) => {
+    const node = getLatestActiveNode(mindMapRef.current);
+    if (!node) {
+      return false;
+    }
+
+    applyStyleToNode(node, style);
+    return true;
+  }, [applyStyleToNode]);
+
+  const queueApplyDefaultStyleToNewNode = useCallback(() => {
+    pendingNewNodeStyleRef.current = defaultNodeStyle;
+    setTimeout(() => {
+      const style = pendingNewNodeStyleRef.current;
+      pendingNewNodeStyleRef.current = null;
+      if (!style) {
+        return;
+      }
+      applyStyleToNewestActiveNode(style);
+    }, 0);
+  }, [applyStyleToNewestActiveNode, defaultNodeStyle]);
 
   // 监听主题变化
   useEffect(() => {
@@ -228,9 +401,22 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
 
     // 解析初始数据或使用默认数据
     let data;
+    let initialLayout: MindMapLayout = currentLayout;
     if (initialData) {
       try {
-        data = JSON.parse(initialData);
+        const parsed = JSON.parse(initialData);
+        if (parsed && typeof parsed === "object") {
+          if ("root" in parsed) {
+            data = parsed.root;
+            if (isMindMapLayout((parsed as { layout?: unknown }).layout)) {
+              initialLayout = (parsed as { layout: MindMapLayout }).layout;
+            }
+          } else {
+            data = parsed;
+          }
+        } else {
+          data = parsed;
+        }
       } catch (e) {
         data = {
           data: {
@@ -252,7 +438,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
       el: containerRef.current,
       data,
       readonly: false,
-      layout: "logicalStructure",
+      layout: initialLayout,
       themeConfig: isDarkMode ? {
         backgroundColor: "transparent",
         lineColor: "#475569",
@@ -320,10 +506,11 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     });
 
     mindMapRef.current = mindMap;
+    setCurrentLayout(initialLayout);
 
     // 监听数据变化
     const handleDataChange = () => {
-      const data = mindMap.getData();
+      const data = mindMap.getData(true);
       handleContentChange(data);
     };
 
@@ -332,10 +519,16 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     // 监听节点右键菜单事件
     const handleNodeContextMenu = (e: any, node: any) => {
       e.preventDefault();
+      // Try to get viewport coordinates from the event
+      // The event may be a native MouseEvent from simple-mind-map or a wrapped event
+      const mouseX = typeof e?.clientX === "number" ? e.clientX : (typeof e?.event?.clientX === "number" ? e.event.clientX : undefined);
+      const mouseY = typeof e?.clientY === "number" ? e.clientY : (typeof e?.event?.clientY === "number" ? e.event.clientY : undefined);
+      const position = getContextMenuPosition(node, mouseX, mouseY);
+      activateNode(node);
       setContextMenu({
         visible: true,
-        x: e.clientX,
-        y: e.clientY,
+        x: position.x,
+        y: position.y,
         node,
       });
     };
@@ -391,7 +584,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         mindMapRef.current = null;
       }
     };
-  }, [isDarkMode, initialData, handleContentChange]);
+  }, [isDarkMode, initialData, handleContentChange, getContextMenuPosition, activateNode]);
 
   // 缩放控制
   const handleZoomIn = useCallback(() => {
@@ -417,34 +610,27 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     if (mindMapRef.current) {
       mindMapRef.current.setLayout(layout);
       setCurrentLayout(layout);
+      const fullData = mindMapRef.current.getData(true);
+      handleContentChange(fullData);
     }
-  }, []);
+  }, [handleContentChange]);
 
   // 修改节点样式
   const handleStyleChange = useCallback((style: NodeStyle) => {
     if (mindMapRef.current) {
-      // 获取当前选中的节点（使用类型断言绕过TypeScript检查）
+      setDefaultNodeStyle(style);
       const activeNodes = (mindMapRef.current as any).renderer?.activeNodeList;
 
       if (activeNodes && activeNodes.length > 0) {
-        // 修改选中节点的样式
         activeNodes.forEach((node: any) => {
-          const styleConfig: any = {};
-          if (style.fillColor) styleConfig.fillColor = style.fillColor;
-          if (style.color) styleConfig.color = style.color;
-          if (style.borderColor) styleConfig.borderColor = style.borderColor;
-          if (style.borderWidth !== undefined) styleConfig.borderWidth = style.borderWidth;
-          if (style.fontSize) styleConfig.fontSize = style.fontSize;
-
-          // 使用 SET_NODE_STYLES 命令修改节点样式（注意是复数形式）
-          mindMapRef.current?.execCommand('SET_NODE_STYLES', node, styleConfig);
+          applyStyleToNode(node, style);
         });
-        message.success('样式已应用到选中节点');
+        message.success('样式已应用到选中节点，后续新节点将继承该样式');
       } else {
-        message.warning('请先选中要修改样式的节点');
+        message.success('已保存为新节点默认样式');
       }
     }
-  }, []);
+  }, [applyStyleToNode]);
 
   // 导出为不同格式
   const handleExport = useCallback(async (format: 'png' | 'svg' | 'pdf') => {
@@ -485,65 +671,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     }
   }, [noteTitle]);
 
-  // 处理右键菜单操作
-  const handleMenuAction = useCallback((action: string) => {
-    if (!mindMapRef.current || !contextMenu.node) return;
 
-    const mindMap = mindMapRef.current;
-
-    switch (action) {
-      case "insertSibling":
-        mindMap.execCommand("INSERT_NODE");
-        break;
-      case "insertChild":
-        mindMap.execCommand("INSERT_CHILD_NODE");
-        break;
-      case "insertParent":
-        mindMap.execCommand("INSERT_PARENT_NODE");
-        break;
-      case "edit":
-        // 激活节点并进入编辑模式
-        contextMenu.node.active();
-        setTimeout(() => {
-          mindMap.execCommand("SET_NODE_TEXT", contextMenu.node, contextMenu.node.getData("text"));
-        }, 50);
-        break;
-      case "copy":
-        mindMap.execCommand("COPY_NODE");
-        break;
-      case "cut":
-        mindMap.execCommand("CUT_NODE");
-        break;
-      case "paste":
-        mindMap.execCommand("PASTE_NODE");
-        break;
-      case "toggleExpand":
-        if (contextMenu.node.nodeData.children && contextMenu.node.nodeData.children.length > 0) {
-          mindMap.execCommand("TOGGLE_NODE_EXPAND", contextMenu.node);
-        }
-        break;
-      case "moveUp":
-        mindMap.execCommand("UP_NODE");
-        break;
-      case "moveDown":
-        mindMap.execCommand("DOWN_NODE");
-        break;
-      case "delete":
-        mindMap.execCommand("REMOVE_NODE");
-        break;
-      case "insertImage":
-        // 保存当前节点引用，触发文件选择
-        pendingImageNodeRef.current = contextMenu.node;
-        fileInputRef.current?.click();
-        break;
-      case "insertCurrentScreenshot":
-        // 插入当前视频截图
-        handleInsertCurrentScreenshot(contextMenu.node);
-        break;
-      default:
-        break;
-    }
-  }, [contextMenu.node]);
 
   // 处理图片选择
   const handleImageSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -646,11 +774,72 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
     }
   }, []);
 
+  // 处理右键菜单操作
+  const handleMenuAction = useCallback((action: string) => {
+    if (!mindMapRef.current || !contextMenu.node) return;
+
+    const mindMap = mindMapRef.current;
+    activateNode(contextMenu.node);
+
+    switch (action) {
+      case "insertSibling":
+        mindMap.execCommand("INSERT_NODE");
+        queueApplyDefaultStyleToNewNode();
+        break;
+      case "insertChild":
+        mindMap.execCommand("INSERT_CHILD_NODE");
+        queueApplyDefaultStyleToNewNode();
+        break;
+      case "insertParent":
+        mindMap.execCommand("INSERT_PARENT_NODE");
+        queueApplyDefaultStyleToNewNode();
+        break;
+      case "edit":
+        setTimeout(() => {
+          mindMap.execCommand("SET_NODE_TEXT", contextMenu.node, contextMenu.node.getData("text"));
+        }, 50);
+        break;
+      case "copy":
+        mindMap.execCommand("COPY_NODE");
+        break;
+      case "cut":
+        mindMap.execCommand("CUT_NODE");
+        break;
+      case "paste":
+        mindMap.execCommand("PASTE_NODE");
+        queueApplyDefaultStyleToNewNode();
+        break;
+      case "toggleExpand":
+        if (contextMenu.node.nodeData.children && contextMenu.node.nodeData.children.length > 0) {
+          mindMap.execCommand("TOGGLE_NODE_EXPAND", contextMenu.node);
+        }
+        break;
+      case "moveUp":
+        mindMap.execCommand("UP_NODE");
+        break;
+      case "moveDown":
+        mindMap.execCommand("DOWN_NODE");
+        break;
+      case "delete":
+        mindMap.execCommand("REMOVE_NODE");
+        break;
+      case "insertImage":
+        pendingImageNodeRef.current = contextMenu.node;
+        fileInputRef.current?.click();
+        break;
+      case "insertCurrentScreenshot":
+        handleInsertCurrentScreenshot(contextMenu.node);
+        break;
+      default:
+        break;
+    }
+  }, [activateNode, contextMenu.node, handleInsertCurrentScreenshot, queueApplyDefaultStyleToNewNode]);
+
   return (
     <div
-      className={`relative overflow-hidden ${
+      className={`relative ${
         isFullscreen
-          ? "fixed inset-0 z-50 flex flex-col"
+          ? "fixed inset-0 z-50 flex flex-col overflow-hidden"
           : "flex flex-col h-full"
       }`}
     >
@@ -715,12 +904,12 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
       <div
         ref={toolbarRef}
         className={cn(
-          "flex items-center justify-between gap-3 overflow-hidden border-b border-slate-200 dark:border-vnote-border flex-nowrap",
+          "flex items-center justify-between gap-3 border-b border-slate-200 dark:border-vnote-border flex-nowrap overflow-visible",
           (isCompactLayoutSelector || isCompactToolbar) ? "px-3 py-2.5" : "px-4 py-3",
           glassPanel
         )}
       >
-        <div ref={toolbarLeftRef} className="flex min-w-0 items-center gap-3 overflow-hidden" data-toolbar-row>
+        <div ref={toolbarLeftRef} className="flex min-w-0 items-center gap-3 overflow-visible" data-toolbar-row>
           <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0">
             <Network className="w-5 h-5 text-white" />
           </div>
@@ -731,7 +920,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
             </p>
           </div>
         </div>
-        <div className={cn("flex items-center gap-2 shrink-0 overflow-hidden flex-nowrap", (isCompactLayoutSelector || isCompactToolbar) && "gap-1.5")}>
+        <div className={cn("flex items-center gap-2 shrink-0 overflow-visible flex-nowrap", (isCompactLayoutSelector || isCompactToolbar) && "gap-1.5")}>
           <LayoutSelector
             value={currentLayout}
             onChange={handleLayoutChange}
@@ -791,7 +980,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
       </div>
 
       {/* 思维导图画布 */}
-      <div className="flex-1 relative">
+      <div className="flex-1 relative overflow-hidden">
         <div
           ref={containerRef}
           className="absolute inset-0"
@@ -882,6 +1071,7 @@ export function MindMapEditor({ noteId, noteTitle, initialData, onContentChange 
         isOpen={showStylePanel}
         onClose={() => setShowStylePanel(false)}
         onStyleChange={handleStyleChange}
+        initialStyle={defaultNodeStyle}
       />
     </div>
   );
