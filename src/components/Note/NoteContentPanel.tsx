@@ -461,6 +461,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           if (data.succeeded === 0 && data.failed > 0) {
             message.error("所有章节字幕优化失败");
             setSubtitleOptimizationEnabled(false);
+          } else {
+            // 清除视觉化总结缓存，使其回退到动态组装（会使用优化后的字幕）
+            invoke("clear_visual_summary", { noteId: note.id }).catch(err => {
+              console.error("[SubtitleOptimization] 清除视觉化总结缓存失败:", err);
+            });
           }
           // 刷新笔记数据以确保视觉化总结能正确显示
           onGenerationComplete?.();
@@ -1573,6 +1578,13 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         console.error("[generateChaptersWithMarkers] 清除截图缓存失败:", err);
       }
 
+      // 清除视觉化总结缓存，使其在章节重新生成后回退到动态组装
+      try {
+        await invoke("clear_visual_summary", { noteId: note.id });
+      } catch (err) {
+        console.error("[generateChaptersWithMarkers] 清除视觉化总结缓存失败:", err);
+      }
+
       // 调用后端生成章节（使用截图标记）
       await invoke("generate_chapters_with_markers", {
         generationId,
@@ -2195,6 +2207,10 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             newSet.delete(chapterId);
             return newSet;
           });
+          // 清除视觉化总结缓存，使其回退到动态组装（会使用优化后的字幕）
+          invoke("clear_visual_summary", { noteId: note.id }).catch(err => {
+            console.error("[ReoptimizeChapter] 清除视觉化总结缓存失败:", err);
+          });
           message.success("字幕优化完成");
           unlisten();
           break;
@@ -2783,6 +2799,12 @@ Video subtitles content:`;
                         } catch (err) {
                           console.error("[NoteContentPanel] 清除截图缓存失败:", err);
                         }
+                        // 清除视觉化总结缓存，使其在章节重新生成后回退到动态组装
+                        try {
+                          await invoke("clear_visual_summary", { noteId: note.id });
+                        } catch (err) {
+                          console.error("[NoteContentPanel] 清除视觉化总结缓存失败:", err);
+                        }
                         setChapterIsGenerating(true);
                         setChapterGenerating(note.id, true);
                         const generationId = crypto.randomUUID();
@@ -3184,6 +3206,12 @@ Video subtitles content:`;
                           await invoke("clear_chapter_screenshots", { noteId: note.id });
                         } catch (err) {
                           console.error("[NoteContentPanel] 清除截图缓存失败:", err);
+                        }
+                        // 清除视觉化总结缓存，使其在章节重新生成后回退到动态组装
+                        try {
+                          await invoke("clear_visual_summary", { noteId: note.id });
+                        } catch (err) {
+                          console.error("[NoteContentPanel] 清除视觉化总结缓存失败:", err);
                         }
                         // 重新生成章节（统一走详细阅读链路）
                         setChapterIsGenerating(true);

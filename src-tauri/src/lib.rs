@@ -869,6 +869,22 @@ async fn get_video_cache_size(app: AppHandle) -> Result<u64, String> {
     .map_err(|e| format!("Task join error: {}", e))?
 }
 
+/// Clear visual_summary for a specific note so it falls back to dynamic assembly
+#[tauri::command]
+async fn clear_visual_summary(note_id: String) -> Result<(), String> {
+    let mut note = get_db()
+        .get_note_by_id(&note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("笔记未找到")?;
+
+    if note.visual_summary.is_some() {
+        note.visual_summary = None;
+        get_db().update_note(&note).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
 /// Clear chapter screenshots for a specific note
 #[tauri::command]
 async fn clear_chapter_screenshots(app: AppHandle, note_id: String) -> Result<(), String> {
@@ -2205,6 +2221,7 @@ pub fn run() {
             preview_data_cleanup,
             execute_data_cleanup,
             clear_chapter_screenshots,
+            clear_visual_summary,
             clear_ai_note_screenshots,
             get_notes,
             get_note,
