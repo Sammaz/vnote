@@ -22,12 +22,18 @@ function Resizer({ onDrag, isDragging }: ResizerProps) {
     e.preventDefault();
     startXRef.current = e.clientX;
 
+    // 拖拽期间全局设置光标样式和禁用文本选择，防止鼠标移出时光标变回箭头
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
     const handleMouseMove = (e: MouseEvent) => {
       const deltaX = e.clientX - startXRef.current;
       onDrag(deltaX);
     };
 
     const handleMouseUp = () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
