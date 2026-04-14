@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
 import { DetailedReadingData, SubtitleEntry } from "../../types";
 import { DetailedReadingChapterCard } from "./DetailedReadingChapterCard";
 
@@ -25,6 +25,31 @@ export function DetailedReadingView({
   failedChapterIds,
   onReoptimizeChapter,
 }: DetailedReadingViewProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [compact, setCompact] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const check = () => {
+      const containerWidth = el.offsetWidth;
+      const viewportWidth = window.innerWidth;
+      // 当容器宽度占视口比例低于 45% 时，使用紧凑布局（图片在上）
+      setCompact(containerWidth / viewportWidth < 0.45);
+    };
+
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    window.addEventListener("resize", check);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", check);
+    };
+  }, []);
+
   const currentChapterId = useMemo(() => {
     const chapter = data.chapters.find(
       c => currentTime >= c.start_time && currentTime < c.end_time
@@ -33,7 +58,7 @@ export function DetailedReadingView({
   }, [data.chapters, currentTime]);
 
   return (
-    <div className="p-1 h-full @container">
+    <div ref={containerRef} className="p-1 h-full">
       <div className="space-y-3">
         {data.chapters.map((chapter, index) => (
           <DetailedReadingChapterCard
@@ -48,6 +73,7 @@ export function DetailedReadingView({
             isOptimizing={optimizingChapterIds?.has(chapter.id)}
             optimizationFailed={failedChapterIds?.has(chapter.id)}
             onReoptimize={onReoptimizeChapter ? () => onReoptimizeChapter(chapter.id) : undefined}
+            compact={compact}
           />
         ))}
       </div>
