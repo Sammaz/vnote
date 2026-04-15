@@ -913,6 +913,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 自定义提示词弹窗状态
   const [showPromptDialog, setShowPromptDialog] = useState(false);
   const [dialogTab, setDialogTab] = useState<"default" | "custom">("default");
+  const [dialogMode, setDialogMode] = useState<"full" | "custom">("full"); // "full" = 全文总结（可切换标签），"custom" = 自定义总结（仅自定义）
   const [selectedModelId, setSelectedModelId] = useState("");
 
   // 获取默认 AI 配置
@@ -1061,6 +1062,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const openPromptDialog = () => {
     setSelectedModelId(getDefaultModelId());
     setDialogTab("default");
+    setDialogMode("full"); // 全文总结模式，可切换标签
     setConfigLanguage("zh");
     setConfigShowEmoji(true);
     setConfigShowTimestamp(false);
@@ -1073,6 +1075,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const openCustomPromptDialog = () => {
     setSelectedModelId(getDefaultModelId());
     setDialogTab("custom");
+    setDialogMode("custom"); // 自定义总结模式，仅显示自定义输入
     setCustomPrompt("");
     setShowPromptDialog(true);
   };
@@ -3893,7 +3896,7 @@ Video subtitles content:`;
             <div className="flex items-center justify-between px-8 pt-6 pb-4">
               <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-blue-500" />
-                重新生成总结
+                {dialogMode === "full" ? "重新生成总结" : "重新生成自定义总结"}
               </h3>
               <button
                 onClick={() => setShowPromptDialog(false)}
@@ -3903,34 +3906,36 @@ Video subtitles content:`;
               </button>
             </div>
 
-            {/* 标签切换 */}
-            <div className="px-8">
-              <div className="flex gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
-                <button
-                  onClick={() => setDialogTab("default")}
-                  className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
-                    dialogTab === "default"
-                      ? cn(glassInput, "text-blue-600 dark:text-blue-400 shadow-sm")
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
-                >
-                  默认配置
-                </button>
-                <button
-                  onClick={() => setDialogTab("custom")}
-                  className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
-                    dialogTab === "custom"
-                      ? cn(glassInput, "text-blue-600 dark:text-blue-400 shadow-sm")
-                      : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
-                  }`}
-                >
-                  自定义总结
-                </button>
+            {/* 标签切换 - 仅全文总结模式显示 */}
+            {dialogMode === "full" && (
+              <div className="px-8">
+                <div className="flex gap-1.5 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                  <button
+                    onClick={() => setDialogTab("default")}
+                    className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
+                      dialogTab === "default"
+                        ? cn(glassInput, "text-blue-600 dark:text-blue-400 shadow-sm")
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                    }`}
+                  >
+                    默认配置
+                  </button>
+                  <button
+                    onClick={() => setDialogTab("custom")}
+                    className={`flex-1 px-4 py-2.5 text-sm font-medium rounded-lg transition-all cursor-pointer ${
+                      dialogTab === "custom"
+                        ? cn(glassInput, "text-blue-600 dark:text-blue-400 shadow-sm")
+                        : "text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                    }`}
+                  >
+                    自定义总结
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* 默认配置标签页内容 */}
-            {dialogTab === "default" && (
+            {/* 默认配置标签页内容 - 仅全文总结模式显示 */}
+            {dialogMode === "full" && dialogTab === "default" && (
               <div className="px-8 py-6">
                 {/* 两列布局 */}
                 <div className="grid grid-cols-2 gap-x-10 gap-y-5">
@@ -4078,7 +4083,7 @@ Video subtitles content:`;
             )}
 
             {/* 自定义总结标签页内容 */}
-            {dialogTab === "custom" && (
+            {(dialogMode === "custom" || dialogTab === "custom") && (
               <div className="px-8 py-6">
                 {/* 大语言模型 */}
                 <div className="flex items-center justify-between mb-5">
@@ -4179,7 +4184,7 @@ Video subtitles content:`;
               </button>
               <button
                 onClick={handleCustomGenerate}
-                disabled={dialogTab === "custom" && !customPrompt}
+                disabled={(dialogMode === "custom" || dialogTab === "custom") && !customPrompt}
                 className="flex-1 px-4 py-2.5 text-sm font-medium bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4" />
