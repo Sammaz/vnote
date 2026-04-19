@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { FileText } from "lucide-react";
 import { cn } from "../../utils/cn";
@@ -11,21 +21,58 @@ export interface EvidenceCitationSource {
   score?: number | null;
 }
 
-interface EvidenceCitationProps {
-  rank: number;
-  source?: EvidenceCitationSource;
-  active?: boolean;
+interface EvidenceCitationContextValue {
+  sources?: EvidenceCitationSource[];
+  activeRank: number | null;
   onClick?: (rank: number) => void;
 }
 
+const EvidenceCitationContext = createContext<EvidenceCitationContextValue>({
+  sources: undefined,
+  activeRank: null,
+  onClick: undefined,
+});
+
+interface EvidenceCitationProviderProps {
+  sources?: EvidenceCitationSource[];
+  activeRank: number | null;
+  onClick?: (rank: number) => void;
+  children: ReactNode;
+}
+
+export function EvidenceCitationProvider({
+  sources,
+  activeRank,
+  onClick,
+  children,
+}: EvidenceCitationProviderProps) {
+  const value = useMemo<EvidenceCitationContextValue>(
+    () => ({ sources, activeRank, onClick }),
+    [sources, activeRank, onClick],
+  );
+  return (
+    <EvidenceCitationContext.Provider value={value}>{children}</EvidenceCitationContext.Provider>
+  );
+}
+
+interface EvidenceCitationProps {
+  rank: number;
+}
+
 const POPOVER_DELAY = 150;
+const POPOVER_CLOSE_DELAY = 120;
 const POPOVER_GAP = 8;
 const POPOVER_WIDTH = 288;
 
-export function EvidenceCitation({ rank, source, active, onClick }: EvidenceCitationProps) {
+export function EvidenceCitation({ rank }: EvidenceCitationProps) {
+  const { sources, activeRank, onClick } = useContext(EvidenceCitationContext);
+  const source = sources?.[rank - 1];
+  const active = activeRank === rank;
+
   const glassCard = useGlassBg("card");
   const anchorRef = useRef<HTMLButtonElement>(null);
   const hoverTimerRef = useRef<number | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
   const [open, setOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
@@ -38,7 +85,15 @@ export function EvidenceCitation({ rank, source, active, onClick }: EvidenceCita
     }
   }, []);
 
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+
   const handleOpen = useCallback(() => {
+    clearCloseTimer();
     clearHoverTimer();
     hoverTimerRef.current = window.setTimeout(() => {
       if (anchorRef.current) {
@@ -46,14 +101,21 @@ export function EvidenceCitation({ rank, source, active, onClick }: EvidenceCita
       }
       setOpen(true);
     }, POPOVER_DELAY);
-  }, [clearHoverTimer]);
+  }, [clearCloseTimer, clearHoverTimer]);
 
-  const handleClose = useCallback(() => {
+  const scheduleClose = useCallback(() => {
     clearHoverTimer();
-    setOpen(false);
-  }, [clearHoverTimer]);
+    clearCloseTimer();
+    closeTimerRef.current = window.setTimeout(() => {
+      setOpen(false);
+      closeTimerRef.current = null;
+    }, POPOVER_CLOSE_DELAY);
+  }, [clearHoverTimer, clearCloseTimer]);
 
-  useEffect(() => () => clearHoverTimer(), [clearHoverTimer]);
+  useEffect(() => () => {
+    if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+  }, []);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -62,6 +124,7 @@ export function EvidenceCitation({ rank, source, active, onClick }: EvidenceCita
         setAnchorRect(anchorRef.current.getBoundingClientRect());
       }
     };
+    updateRect();
     window.addEventListener("scroll", updateRect, true);
     window.addEventListener("resize", updateRect);
     return () => {
@@ -74,23 +137,20 @@ export function EvidenceCitation({ rank, source, active, onClick }: EvidenceCita
     event.stopPropagation();
     if (missing) return;
     onClick?.(rank);
+    clearCloseTimer();
+    if (anchorRef.current) {
+      setAnchorRect(anchorRef.current.getBoundingClientRect());
+    }
+    setOpen(true);
   };
 
-  const popoverStyle = anchorRect
+  const popoverPosition = anchorRect
     ? (() => {
-        const top = anchorRect.top - POPOVER_GAP;
-        const centerX = anchorRect.left + anchorRect.width / 2;
         const margin = 12;
+        const centerX = anchorRect.left + anchorRect.width / 2;
         const maxLeft = window.innerWidth - POPOVER_WIDTH - margin;
         const left = Math.min(Math.max(centerX - POPOVER_WIDTH / 2, margin), Math.max(maxLeft, margin));
-        return {
-          position: "fixed" as const,
-          top,
-          left,
-          width: POPOVER_WIDTH,
-          transform: "translateY(-100%)",
-          zIndex: 9999,
-        };
+        return { top: anchorRect.top, left };
       })()
     : null;
 
@@ -100,9 +160,9 @@ export function EvidenceCitation({ rank, source, active, onClick }: EvidenceCita
         ref={anchorRef}
         type="button"
         onMouseEnter={handleOpen}
-        onMouseLeave={handleClose}
+        onMouseLeave={scheduleClose}
         onFocus={handleOpen}
-        onBlur={handleClose}
+        onBlur={scheduleClose}
         onClick={handleClick}
         disabled={missing}
         aria-label={missing ? `证据${rank}（未找到）` : `证据${rank}`}
@@ -116,45 +176,57 @@ export function EvidenceCitation({ rank, source, active, onClick }: EvidenceCita
       >
         {rank}
       </button>
-      {open && popoverStyle && createPortal(
+      {open && popoverPosition && createPortal(
         <div
-          role="tooltip"
-          onMouseEnter={clearHoverTimer}
-          onMouseLeave={handleClose}
-          style={popoverStyle}
-          className={cn(
-            "rounded-xl overflow-hidden border border-white/50 dark:border-vnote-border/80 ring-1 ring-white/20 dark:ring-white/5 shadow-[0_20px_45px_rgba(15,23,42,0.24)] pointer-events-auto",
-            glassCard
-          )}
+          role="presentation"
+          onMouseEnter={() => { clearHoverTimer(); clearCloseTimer(); }}
+          onMouseLeave={scheduleClose}
+          style={{
+            position: "fixed",
+            top: popoverPosition.top,
+            left: popoverPosition.left,
+            width: POPOVER_WIDTH,
+            transform: "translateY(-100%)",
+            paddingBottom: POPOVER_GAP,
+            zIndex: 9999,
+          }}
         >
-          {missing ? (
-            <div className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 leading-5">
-              未找到对应的证据 {rank}。AI 可能引用了超出检索范围的编号。
-            </div>
-          ) : (
-            <>
-              <div className="px-3 py-2 border-b border-slate-200/70 dark:border-vnote-border/70 flex items-center gap-2">
-                <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-md text-[11px] font-medium leading-none bg-blue-50 text-blue-600 border border-blue-200 dark:border-blue-800/70 dark:bg-blue-900/25 dark:text-blue-200">
-                  {rank}
-                </span>
-                <FileText className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
-                <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
-                  {source.note_title}
-                </span>
-                {typeof source.score === "number" && (
-                  <span className="ml-auto text-[11px] text-slate-400 dark:text-slate-500 flex-shrink-0">
-                    {(source.score * 100).toFixed(1)}%
+          <div
+            role="tooltip"
+            className={cn(
+              "rounded-xl overflow-hidden border border-white/50 dark:border-vnote-border/80 ring-1 ring-white/20 dark:ring-white/5 shadow-[0_20px_45px_rgba(15,23,42,0.24)] pointer-events-auto",
+              glassCard
+            )}
+          >
+            {missing ? (
+              <div className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 leading-5">
+                未找到对应的证据 {rank}。AI 可能引用了超出检索范围的编号。
+              </div>
+            ) : (
+              <>
+                <div className="px-3 py-2 border-b border-slate-200/70 dark:border-vnote-border/70 flex items-center gap-2">
+                  <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-md text-[11px] font-medium leading-none bg-blue-50 text-blue-600 border border-blue-200 dark:border-blue-800/70 dark:bg-blue-900/25 dark:text-blue-200">
+                    {rank}
                   </span>
-                )}
-              </div>
-              <div className="px-3 py-2.5 text-xs leading-6 text-slate-600 dark:text-slate-300 max-h-56 overflow-y-auto whitespace-pre-wrap">
-                {source.content}
-              </div>
-              <div className="px-3 py-2 border-t border-slate-200/70 dark:border-vnote-border/70 text-[11px] text-slate-400 dark:text-slate-500">
-                点击徽标跳转到侧栏对应证据
-              </div>
-            </>
-          )}
+                  <FileText className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                  <span className="text-xs font-medium text-slate-700 dark:text-slate-200 truncate">
+                    {source.note_title}
+                  </span>
+                  {typeof source.score === "number" && (
+                    <span className="ml-auto text-[11px] text-slate-400 dark:text-slate-500 flex-shrink-0">
+                      {(source.score * 100).toFixed(1)}%
+                    </span>
+                  )}
+                </div>
+                <div className="px-3 py-2.5 text-xs leading-6 text-slate-600 dark:text-slate-300 max-h-56 overflow-y-auto whitespace-pre-wrap">
+                  {source.content}
+                </div>
+                <div className="px-3 py-2 border-t border-slate-200/70 dark:border-vnote-border/70 text-[11px] text-slate-400 dark:text-slate-500">
+                  点击徽标跳转到侧栏对应证据
+                </div>
+              </>
+            )}
+          </div>
         </div>,
         document.body
       )}

@@ -12,6 +12,7 @@ import {
   type MarkdownDecorationOptions,
 } from "../../utils/markdownRendererUtils";
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
+import { EvidenceCitationProvider, type EvidenceCitationSource } from "./EvidenceCitation";
 
 interface MarkdownRendererProps extends MarkdownDecorationOptions {
   content: string;
@@ -24,6 +25,9 @@ interface MarkdownRendererProps extends MarkdownDecorationOptions {
   interactiveTaskList?: boolean;
   checkedItems?: Set<number>;
   onToggleCheckbox?: (index: number) => void;
+  citationSources?: EvidenceCitationSource[];
+  onCitationClick?: (rank: number) => void;
+  activeCitationRank?: number | null;
 }
 
 function getLanguage(className?: string): string | undefined {
@@ -67,9 +71,6 @@ export function MarkdownRenderer({
       enableHashtags,
       searchQuery,
       enableEvidenceCitations,
-      citationSources,
-      onCitationClick,
-      activeCitationRank,
     };
 
     const renderDecorated = (children: ReactNode, keyPrefix: string) =>
@@ -170,16 +171,19 @@ export function MarkdownRenderer({
     centerImages,
     variant,
     enableEvidenceCitations,
-    citationSources,
-    onCitationClick,
-    activeCitationRank,
   ]);
 
   return (
-    <div className={cn(baseClassName, className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkCjkFriendly]} components={components}>
-        {content}
-      </ReactMarkdown>
-    </div>
+    <EvidenceCitationProvider
+      sources={citationSources}
+      activeRank={activeCitationRank ?? null}
+      onClick={onCitationClick}
+    >
+      <div className={cn(baseClassName, className)}>
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkCjkFriendly]} components={components}>
+          {content}
+        </ReactMarkdown>
+      </div>
+    </EvidenceCitationProvider>
   );
 }

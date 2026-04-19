@@ -1,6 +1,6 @@
 import React from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { EvidenceCitation, type EvidenceCitationSource } from "../components/Markdown/EvidenceCitation";
+import { EvidenceCitation } from "../components/Markdown/EvidenceCitation";
 
 const BRACKET_TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/;
 const CLOCK_TIMESTAMP_RE = /⏱\s*(\d{1,2}:\d{2}(?::\d{2})?)/;
@@ -13,9 +13,6 @@ export interface MarkdownDecorationOptions {
   enableHashtags?: boolean;
   searchQuery?: string;
   enableEvidenceCitations?: boolean;
-  citationSources?: EvidenceCitationSource[];
-  onCitationClick?: (rank: number) => void;
-  activeCitationRank?: number | null;
 }
 
 export function parseTimestampToSeconds(value: string): number | null {
@@ -221,14 +218,10 @@ function renderDecoratedString(
     } else if (match[7] && options.enableEvidenceCitations) {
       const ranks = parseEvidenceRanks(matchedText);
       ranks.forEach((rank, rankIndex) => {
-        const source = options.citationSources?.[rank - 1];
         result.push(
           <EvidenceCitation
             key={`${keyPrefix}-citation-${partIndex}-${rankIndex}`}
             rank={rank}
-            source={source}
-            active={options.activeCitationRank === rank}
-            onClick={options.onCitationClick}
           />,
         );
       });
