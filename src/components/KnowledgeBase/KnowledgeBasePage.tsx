@@ -73,14 +73,14 @@ export function KnowledgeBasePage() {
       </div>
 
       {/* Content */}
-      <div className={cn("flex-1 overflow-hidden", glassCard)}>
-        <div className={cn("h-full", activeTab === "search" ? "block" : "hidden")}>
+      <div className="flex-1 overflow-hidden">
+        <div className={cn("h-full", glassCard, activeTab === "search" ? "block" : "hidden")}>
           <KnowledgeBaseSearch />
         </div>
         <div className={cn("h-full", activeTab === "chat" ? "block" : "hidden")}>
           <KnowledgeBaseChat />
         </div>
-        <div className={cn("h-full", activeTab === "manage" ? "block" : "hidden")}>
+        <div className={cn("h-full", glassCard, activeTab === "manage" ? "block" : "hidden")}>
           <KnowledgeBaseManage onStatsChange={loadStats} />
         </div>
       </div>

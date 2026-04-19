@@ -219,7 +219,6 @@ export function KnowledgeBaseChat() {
   } = useApp();
   const { expandCollectionPathForNote } = useCollections();
 
-  const glassPanel = useGlassBg("panel");
   const glassCard = useGlassBg("card");
   const glassModal = useGlassBg("modal");
   const glassInput = useGlassBg("input");
@@ -1145,8 +1144,8 @@ export function KnowledgeBaseChat() {
   }, [messages, persistCurrentSessionMeta, selectedSessionId, sessions, streaming]);
 
   return (
-    <div ref={rootRef} className={cn("flex h-full overflow-hidden", glassPanel)}>
-      <aside className={cn("w-[280px] border-r border-slate-200/70 dark:border-vnote-border/70 flex flex-col", glassPanel)}>
+    <div ref={rootRef} className="flex h-full overflow-hidden">
+      <aside className="w-[280px] border-r border-slate-200/70 dark:border-vnote-border/70 bg-white/56 dark:bg-vnote-card/28 backdrop-blur-xl flex flex-col">
         <div className="p-4 border-b border-slate-200/70 dark:border-vnote-border/70">
           <button
             onClick={handleCreateSession}
@@ -1384,7 +1383,7 @@ export function KnowledgeBaseChat() {
         )}
 
         <div className="flex-1 min-w-0 flex flex-col">
-          <div className={cn("flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-200/70 dark:border-vnote-border/70", glassPanel)}>
+          <div className="flex items-center justify-between gap-4 px-5 py-4 border-b border-slate-200/70 dark:border-vnote-border/70 bg-white/48 dark:bg-vnote-card/22 backdrop-blur-xl">
             <div className="min-w-0">
               <div className="flex items-center gap-2 min-w-0">
                 <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
