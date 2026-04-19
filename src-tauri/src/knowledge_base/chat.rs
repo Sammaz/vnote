@@ -693,7 +693,7 @@ fn ensure_session(
         KnowledgeChatMode::Standard => DEFAULT_STANDARD_TITLE,
         KnowledgeChatMode::Agent => DEFAULT_AGENT_TITLE,
     };
-    let title = build_auto_session_title(user_message, mode).unwrap_or_else(|| fallback_title.to_string());
+    let title = build_auto_session_title(user_message).unwrap_or_else(|| fallback_title.to_string());
 
     db.create_knowledge_chat_session(
         &title,
@@ -713,13 +713,7 @@ fn maybe_auto_rename_session(
         return Ok(());
     }
 
-    let session_mode = if session.mode == KnowledgeChatMode::Agent.as_str() {
-        KnowledgeChatMode::Agent
-    } else {
-        KnowledgeChatMode::Standard
-    };
-
-    let Some(title) = build_auto_session_title(user_message, &session_mode) else {
+    let Some(title) = build_auto_session_title(user_message) else {
         return Ok(());
     };
 
@@ -735,7 +729,7 @@ fn is_default_session_title(title: &str) -> bool {
     matches!(title.trim(), DEFAULT_STANDARD_TITLE | DEFAULT_AGENT_TITLE)
 }
 
-fn build_auto_session_title(user_message: &str, mode: &KnowledgeChatMode) -> Option<String> {
+fn build_auto_session_title(user_message: &str) -> Option<String> {
     let trimmed = user_message.trim();
     if trimmed.is_empty() {
         return None;
@@ -761,10 +755,7 @@ fn build_auto_session_title(user_message: &str, mode: &KnowledgeChatMode) -> Opt
         return None;
     }
 
-    Some(match mode {
-        KnowledgeChatMode::Agent => format!("Agent：{}", title),
-        KnowledgeChatMode::Standard => title,
-    })
+    Some(title)
 }
 
 fn resolve_ai_config(

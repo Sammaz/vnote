@@ -172,7 +172,7 @@ function isDefaultSessionTitle(title: string) {
   return title === "新建知识库对话" || title === "新建 Agent 对话";
 }
 
-function buildSessionTitleFromMessage(content: string, mode: KnowledgeChatMode) {
+function buildSessionTitleFromMessage(content: string) {
   const normalized = content
     .trim()
     .split(/\r?\n/)
@@ -182,8 +182,7 @@ function buildSessionTitleFromMessage(content: string, mode: KnowledgeChatMode) 
 
   if (!normalized) return null;
 
-  const base = normalized.length > 26 ? `${normalized.slice(0, 26)}…` : normalized;
-  return mode === "agent" ? `Agent：${base}` : base;
+  return normalized.length > 26 ? `${normalized.slice(0, 26)}…` : normalized;
 }
 
 function parseTraceMetadata(metadataJson: string | null): TraceMetadataSection[] {
@@ -285,6 +284,10 @@ export function KnowledgeBaseChat() {
   const selectedSession = useMemo(
     () => sessions.find((session) => session.id === selectedSessionId) ?? null,
     [sessions, selectedSessionId]
+  );
+  const filteredSessions = useMemo(
+    () => sessions.filter((session) => session.mode === mode),
+    [sessions, mode]
   );
   const selectedInspectorMessage = useMemo(() => {
     if (inspectorMessageId) {
@@ -1085,16 +1088,24 @@ export function KnowledgeBaseChat() {
     void copyText(content);
   }, []);
 
-  const handleModeChange = useCallback(async (nextMode: KnowledgeChatMode) => {
+  const handleModeChange = useCallback((nextMode: KnowledgeChatMode) => {
+    if (mode === nextMode) return;
     setMode(nextMode);
-    if (selectedSessionId) {
-      try {
-        await persistCurrentSessionMeta({ mode: nextMode });
-      } catch (error) {
-        console.error("Failed to update session mode:", error);
-      }
+    const currentSession = sessions.find((item) => item.id === selectedSessionId);
+    if (!currentSession || currentSession.mode !== nextMode) {
+      setSelectedSessionId(null);
+      setMessages([]);
+      setInspectorMessageId(null);
+      setStatusText(null);
+      setStatusQueries([]);
+      setComposerError(null);
+      setEditingMessageId(null);
+      setEditingMessageValue("");
+      setInput("");
+      uploadedImagesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+      setUploadedImages([]);
     }
-  }, [persistCurrentSessionMeta, selectedSessionId]);
+  }, [mode, selectedSessionId, sessions]);
 
   const handleModelChange = useCallback(async (nextModelId: string | null) => {
     setLocalModelId(nextModelId);
@@ -1135,7 +1146,7 @@ export function KnowledgeBaseChat() {
     const session = sessions.find((item) => item.id === selectedSessionId);
     if (!firstUserMessage || !session || !isDefaultSessionTitle(session.title)) return;
 
-    const nextTitle = buildSessionTitleFromMessage(firstUserMessage.content, session.mode);
+    const nextTitle = buildSessionTitleFromMessage(firstUserMessage.content);
     if (!nextTitle || nextTitle === session.title) return;
 
     void persistCurrentSessionMeta({ title: nextTitle }).catch((error) => {
@@ -1191,12 +1202,12 @@ export function KnowledgeBaseChat() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {sessions.length === 0 ? (
+          {filteredSessions.length === 0 ? (
             <div className="px-3 py-10 text-center text-sm text-slate-400 dark:text-slate-500">
-              还没有历史会话
+              {mode === "agent" ? "Agent 模式下还没有历史会话" : "标准模式下还没有历史会话"}
             </div>
           ) : (
-            sessions.map((session) => {
+            filteredSessions.map((session) => {
               const isSelected = session.id === selectedSessionId;
               const isEditing = session.id === editingSessionId;
               return (
