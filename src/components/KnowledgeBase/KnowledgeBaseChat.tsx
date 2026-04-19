@@ -208,6 +208,53 @@ function parseTraceMetadata(metadataJson: string | null): TraceMetadataSection[]
   }
 }
 
+const DRAFT_PREFIX = "__draft__";
+
+function generateDraftId() {
+  return `${DRAFT_PREFIX}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function isDraftKey(key: string | null | undefined) {
+  return Boolean(key && key.startsWith(DRAFT_PREFIX));
+}
+
+interface SessionRuntime {
+  messages: UiMessage[];
+  mode: KnowledgeChatMode;
+  modelId: string | null;
+  promptId: string | null;
+  streaming: boolean;
+  stopping: boolean;
+  pendingAbort: boolean;
+  requestId: string | null;
+  statusText: string | null;
+  statusQueries: string[];
+  accumulatedContent: string;
+  composerError: string | null;
+  inspectorMessageId: string | null;
+}
+
+function createInitialRuntime(overrides?: Partial<SessionRuntime>): SessionRuntime {
+  return {
+    messages: [],
+    mode: DEFAULT_PREFERENCES.default_mode,
+    modelId: null,
+    promptId: null,
+    streaming: false,
+    stopping: false,
+    pendingAbort: false,
+    requestId: null,
+    statusText: null,
+    statusQueries: [],
+    accumulatedContent: "",
+    composerError: null,
+    inspectorMessageId: null,
+    ...overrides,
+  };
+}
+
+const INITIAL_RUNTIME_SNAPSHOT: SessionRuntime = createInitialRuntime();
+
 export function KnowledgeBaseChat() {
   const {
     aiConfigs,
@@ -225,20 +272,12 @@ export function KnowledgeBaseChat() {
 
   const [sessions, setSessions] = useState<KnowledgeChatSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<UiMessage[]>([]);
+  const [draftId, setDraftId] = useState<string>(() => generateDraftId());
+  const [sessionRuntimes, setSessionRuntimes] = useState<Record<string, SessionRuntime>>({});
   const [input, setInput] = useState("");
-  const [streaming, setStreaming] = useState(false);
-  const [stopping, setStopping] = useState(false);
-  const [requestId, setRequestId] = useState<string | null>(null);
-  const [statusText, setStatusText] = useState<string | null>(null);
-  const [statusQueries, setStatusQueries] = useState<string[]>([]);
-  const [mode, setMode] = useState<KnowledgeChatMode>("standard");
-  const [localModelId, setLocalModelId] = useState<string | null>(null);
-  const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showPromptDropdown, setShowPromptDropdown] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
-  const [inspectorMessageId, setInspectorMessageId] = useState<string | null>(null);
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [showAgentTrace, setShowAgentTrace] = useState(DEFAULT_PREFERENCES.show_agent_trace);
   const [showSourcesExpanded, setShowSourcesExpanded] = useState(DEFAULT_PREFERENCES.show_sources_expanded);
@@ -247,7 +286,6 @@ export function KnowledgeBaseChat() {
   const [editingSessionTitle, setEditingSessionTitle] = useState("");
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingMessageValue, setEditingMessageValue] = useState("");
-  const [composerError, setComposerError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [pendingDeleteSessionId, setPendingDeleteSessionId] = useState<string | null>(null);
   const [pendingDeleteSessionTitle, setPendingDeleteSessionTitle] = useState("");
@@ -270,9 +308,47 @@ export function KnowledgeBaseChat() {
   const promptDropdownRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadedImagesRef = useRef<UploadedImage[]>([]);
-  const pendingAbortRef = useRef(false);
+  const sessionRuntimesRef = useRef<Record<string, SessionRuntime>>({});
+  const listenersRef = useRef<Record<string, () => void>>({});
+  const draftIdRef = useRef(draftId);
+  const selectedSessionIdRef = useRef(selectedSessionId);
+
+  useEffect(() => {
+    sessionRuntimesRef.current = sessionRuntimes;
+  }, [sessionRuntimes]);
+
+  useEffect(() => {
+    draftIdRef.current = draftId;
+  }, [draftId]);
+
+  useEffect(() => {
+    selectedSessionIdRef.current = selectedSessionId;
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(listenersRef.current).forEach((unlisten) => {
+        try { unlisten(); } catch { /* noop */ }
+      });
+      listenersRef.current = {};
+    };
+  }, []);
 
   const availablePromptConfigs = useMemo(() => promptConfigs, [promptConfigs]);
+
+  const activeRuntimeKey = selectedSessionId ?? draftId;
+  const currentRuntime = sessionRuntimes[activeRuntimeKey] ?? INITIAL_RUNTIME_SNAPSHOT;
+  const messages = currentRuntime.messages;
+  const streaming = currentRuntime.streaming;
+  const stopping = currentRuntime.stopping;
+  const statusText = currentRuntime.statusText;
+  const statusQueries = currentRuntime.statusQueries;
+  const mode = currentRuntime.mode;
+  const localModelId = currentRuntime.modelId;
+  const selectedPromptId = currentRuntime.promptId;
+  const composerError = currentRuntime.composerError;
+  const inspectorMessageId = currentRuntime.inspectorMessageId;
+
   const activeModel = useMemo(
     () => aiConfigs.find((config) => config.id === localModelId) ?? null,
     [aiConfigs, localModelId]
@@ -303,6 +379,25 @@ export function KnowledgeBaseChat() {
     return reversedIndex === -1 ? -1 : messages.length - 1 - reversedIndex;
   }, [messages]);
 
+  const patchRuntime = useCallback((key: string, updates: Partial<SessionRuntime>) => {
+    setSessionRuntimes((prev) => {
+      const base = prev[key] ?? createInitialRuntime();
+      return { ...prev, [key]: { ...base, ...updates } };
+    });
+  }, []);
+
+  const mergeRuntime = useCallback(
+    (key: string, updater: (prev: SessionRuntime) => SessionRuntime | null) => {
+      setSessionRuntimes((prev) => {
+        const base = prev[key] ?? createInitialRuntime();
+        const next = updater(base);
+        if (!next || next === base) return prev;
+        return { ...prev, [key]: next };
+      });
+    },
+    []
+  );
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -314,43 +409,68 @@ export function KnowledgeBaseChat() {
   }, []);
 
   const loadSessionDetail = useCallback(async (sessionId: string) => {
+    const existing = sessionRuntimesRef.current[sessionId];
+    if (existing?.streaming) {
+      // 会话正处于流式生成中,不覆盖 runtime,只同步选中
+      setSelectedSessionId(sessionId);
+      return null;
+    }
     const detail = await invoke<KnowledgeChatSessionDetail>("knowledge_base_get_chat_session", { sessionId });
     const nextMessages = detail.messages.map(mapRecordToUiMessage);
-    setSelectedSessionId(detail.session.id);
-    setMessages(nextMessages);
-    setMode(detail.session.mode);
-    setLocalModelId(detail.session.model_id);
-    setSelectedPromptId(detail.session.prompt_id);
     const latestAssistant = [...nextMessages].reverse().find((message) => message.role === "assistant") ?? null;
-    setInspectorMessageId(latestAssistant?.id ?? null);
+    setSelectedSessionId(detail.session.id);
+    setSessionRuntimes((prev) => {
+      const base = prev[detail.session.id] ?? createInitialRuntime();
+      return {
+        ...prev,
+        [detail.session.id]: {
+          ...base,
+          messages: nextMessages,
+          mode: detail.session.mode,
+          modelId: detail.session.model_id,
+          promptId: detail.session.prompt_id,
+          streaming: false,
+          stopping: false,
+          pendingAbort: false,
+          requestId: null,
+          statusText: null,
+          statusQueries: [],
+          accumulatedContent: "",
+          composerError: null,
+          inspectorMessageId: latestAssistant?.id ?? null,
+        },
+      };
+    });
     return detail;
   }, []);
 
   const resetDraft = useCallback((preferred?: KnowledgeChatPreferences | null) => {
+    const newDraft = generateDraftId();
+    const prefs = preferred ?? null;
+    setSessionRuntimes((prev) => ({
+      ...prev,
+      [newDraft]: createInitialRuntime({
+        mode: prefs?.default_mode ?? DEFAULT_PREFERENCES.default_mode,
+        modelId: prefs?.default_model_id ?? selectedModelId ?? null,
+        promptId: prefs?.default_prompt_id ?? null,
+      }),
+    }));
+    setDraftId(newDraft);
     setSelectedSessionId(null);
-    setMessages([]);
-    setInspectorMessageId(null);
-    pendingAbortRef.current = false;
-    setStopping(false);
-    setStatusText(null);
-    setStatusQueries([]);
-    setRequestId(null);
     setInput("");
     setEditingMessageId(null);
     setEditingMessageValue("");
-    setComposerError(null);
-    const prefs = preferred ?? null;
-    setMode(prefs?.default_mode ?? DEFAULT_PREFERENCES.default_mode);
-    setLocalModelId(prefs?.default_model_id ?? selectedModelId ?? null);
-    setSelectedPromptId(prefs?.default_prompt_id ?? null);
     requestAnimationFrame(() => inputRef.current?.focus());
   }, [selectedModelId]);
 
   useEffect(() => {
-    if (selectedModelId && !localModelId && !selectedSessionId) {
-      setLocalModelId(selectedModelId);
+    if (selectedModelId || selectedSessionId) return;
+    const currentDraftId = draftIdRef.current;
+    const current = sessionRuntimesRef.current[currentDraftId];
+    if (current && !current.modelId) {
+      patchRuntime(currentDraftId, { modelId: selectedModelId ?? null });
     }
-  }, [selectedModelId, localModelId, selectedSessionId]);
+  }, [selectedModelId, selectedSessionId, patchRuntime]);
 
   useEffect(() => {
     uploadedImagesRef.current = uploadedImages;
@@ -394,9 +514,21 @@ export function KnowledgeBaseChat() {
         setShowAgentTrace(mergedPrefs.show_agent_trace);
         setShowSourcesExpanded(mergedPrefs.show_sources_expanded);
         setCompactMessageDensity(mergedPrefs.compact_message_density);
-        setMode(mergedPrefs.default_mode);
-        setLocalModelId(mergedPrefs.default_model_id ?? selectedModelId ?? null);
-        setSelectedPromptId(mergedPrefs.default_prompt_id ?? null);
+
+        // 用首选项初始化当前 draft
+        const initialDraft = draftIdRef.current;
+        setSessionRuntimes((prev) => {
+          const base = prev[initialDraft] ?? createInitialRuntime();
+          return {
+            ...prev,
+            [initialDraft]: {
+              ...base,
+              mode: mergedPrefs.default_mode,
+              modelId: mergedPrefs.default_model_id ?? selectedModelId ?? null,
+              promptId: mergedPrefs.default_prompt_id ?? null,
+            },
+          };
+        });
         setPreferencesReady(true);
 
         if (!initializedRef.current) {
@@ -443,189 +575,199 @@ export function KnowledgeBaseChat() {
     showSourcesExpanded,
   ]);
 
-  useEffect(() => {
-    if (!requestId) return;
+  const startChatListener = useCallback(
+    (sessionKey: string, targetRequestId: string, chatMode: KnowledgeChatMode) => {
+      const eventName = `knowledge-chat-${targetRequestId}`;
+      let disposed = false;
 
-    const eventName = `knowledge-chat-${requestId}`;
-    let accumulatedContent = "";
-    let unlisten: (() => void) | null = null;
-    let disposed = false;
+      const cleanup = (reason: "completed" | "error" | "aborted") => {
+        const unlisten = listenersRef.current[targetRequestId];
+        if (unlisten) {
+          try { unlisten(); } catch { /* noop */ }
+          delete listenersRef.current[targetRequestId];
+        }
+        void refreshSessions();
+        // 仅对非 draft key(即已落库的 sessionId)才从后端同步最终状态
+        if (!isDraftKey(sessionKey)) {
+          void loadSessionDetail(sessionKey).catch(() => undefined);
+        }
+        void reason;
+      };
 
-    void listen<KnowledgeChatEvent>(eventName, (event) => {
-      const data = event.payload;
+      void listen<KnowledgeChatEvent>(eventName, (event) => {
+        const data = event.payload;
 
-      setMessages((prev) => {
-        const next = [...prev];
-        const assistantIndex = [...next].reverse().findIndex((message) => message.role === "assistant");
-        if (assistantIndex === -1) return prev;
-        const targetIndex = next.length - 1 - assistantIndex;
-        const current = next[targetIndex];
+        mergeRuntime(sessionKey, (runtime) => {
+          const messagesList = [...runtime.messages];
+          const assistantIndex = [...messagesList]
+            .reverse()
+            .findIndex((message) => message.role === "assistant");
+          if (assistantIndex === -1) return runtime;
+          const targetIndex = messagesList.length - 1 - assistantIndex;
+          const current = messagesList[targetIndex];
 
-        if (pendingAbortRef.current && !["Aborted", "Completed", "Error"].includes(data.status)) {
-          return prev;
+          if (
+            runtime.pendingAbort &&
+            data.status !== "Aborted" &&
+            data.status !== "Completed" &&
+            data.status !== "Error"
+          ) {
+            return runtime;
+          }
+
+          switch (data.status) {
+            case "ContextFound":
+              messagesList[targetIndex] = { ...current, sources: data.sources };
+              return { ...runtime, messages: messagesList };
+            case "TraceStep": {
+              const currentRun = current.agentRun ?? buildRunningAgentRun(data.run_id);
+              const existingSteps = currentRun.trace_steps.filter((step) => step.id !== data.step.id);
+              messagesList[targetIndex] = {
+                ...current,
+                agentRun: {
+                  run: { ...currentRun.run, id: data.run_id, status: "running" },
+                  trace_steps: [...existingSteps, data.step].sort((a, b) => a.step_index - b.step_index),
+                },
+              };
+              return { ...runtime, messages: messagesList };
+            }
+            case "Streaming": {
+              const merged = mergeStreamingContent(runtime.accumulatedContent, data.content);
+              if (!merged.appendedDelta && current.content === merged.nextContent) {
+                return runtime;
+              }
+              messagesList[targetIndex] = {
+                ...current,
+                content: merged.nextContent,
+                status: "streaming",
+              };
+              return {
+                ...runtime,
+                messages: messagesList,
+                accumulatedContent: merged.nextContent,
+                statusText: null,
+                statusQueries: [],
+              };
+            }
+            case "Searching":
+            case "Planning":
+              if (runtime.pendingAbort) return runtime;
+              return { ...runtime, statusText: data.message, statusQueries: [] };
+            case "Retrieving":
+              if (runtime.pendingAbort) return runtime;
+              return { ...runtime, statusText: data.message, statusQueries: data.queries };
+            case "Degraded":
+              return { ...runtime, composerError: data.message };
+            case "Completed":
+              messagesList[targetIndex] = {
+                ...current,
+                content: data.full_content,
+                status: "completed",
+                agentRun:
+                  data.run_id && current.agentRun
+                    ? {
+                        ...current.agentRun,
+                        run: {
+                          ...current.agentRun.run,
+                          id: data.run_id,
+                          status: "completed",
+                          final_summary: data.full_content,
+                          completed_at: new Date().toISOString(),
+                        },
+                      }
+                    : current.agentRun,
+              };
+              return {
+                ...runtime,
+                messages: messagesList,
+                streaming: false,
+                stopping: false,
+                pendingAbort: false,
+                requestId: null,
+                statusText: null,
+                statusQueries: [],
+              };
+            case "Error":
+              messagesList[targetIndex] = {
+                ...current,
+                content: current.content || `错误: ${data.error}`,
+                status: "error",
+              };
+              return {
+                ...runtime,
+                messages: messagesList,
+                streaming: false,
+                stopping: false,
+                pendingAbort: false,
+                requestId: null,
+                statusText: null,
+                statusQueries: [],
+                composerError: `本次回答失败：${data.error}`,
+              };
+            case "Aborted":
+              messagesList[targetIndex] = { ...current, status: "aborted" };
+              return {
+                ...runtime,
+                messages: messagesList,
+                streaming: false,
+                stopping: false,
+                pendingAbort: false,
+                requestId: null,
+                statusText: null,
+                statusQueries: [],
+                composerError: "已停止当前回答。你可以直接修改问题后重新发送。",
+              };
+            case "SessionReady":
+            default:
+              return runtime;
+          }
+        });
+
+        // ContextFound 阶段切换到"整理证据"提示
+        if (data.status === "ContextFound") {
+          mergeRuntime(sessionKey, (runtime) => {
+            if (runtime.pendingAbort) return runtime;
+            return {
+              ...runtime,
+              statusText: chatMode === "agent" ? "正在整理证据与组织回答..." : "正在整理证据并生成回答...",
+              statusQueries: [],
+            };
+          });
         }
 
-        switch (data.status) {
-          case "ContextFound":
-            next[targetIndex] = {
-              ...current,
-              sources: data.sources,
-            };
-            return next;
-          case "TraceStep": {
-            const currentRun = current.agentRun ?? buildRunningAgentRun(data.run_id);
-            const existingSteps = currentRun.trace_steps.filter((step) => step.id !== data.step.id);
-            next[targetIndex] = {
-              ...current,
-              agentRun: {
-                run: {
-                  ...currentRun.run,
-                  id: data.run_id,
-                  status: "running",
-                },
-                trace_steps: [...existingSteps, data.step].sort((a, b) => a.step_index - b.step_index),
-              },
-            };
-            return next;
-          }
-          case "Streaming": {
-            const merged = mergeStreamingContent(accumulatedContent, data.content);
-            accumulatedContent = merged.nextContent;
-            if (!merged.appendedDelta && current.content === accumulatedContent) {
-              return prev;
-            }
-            next[targetIndex] = {
-              ...current,
-              content: accumulatedContent,
-              status: "streaming",
-            };
-            return next;
-          }
-          case "Completed":
-            next[targetIndex] = {
-              ...current,
-              content: data.full_content,
-              status: "completed",
-              agentRun:
-                data.run_id && current.agentRun
-                  ? {
-                      ...current.agentRun,
-                      run: {
-                        ...current.agentRun.run,
-                        id: data.run_id,
-                        status: "completed",
-                        final_summary: data.full_content,
-                        completed_at: new Date().toISOString(),
-                      },
-                    }
-                  : current.agentRun,
-            };
-            return next;
-          case "Error":
-            next[targetIndex] = {
-              ...current,
-              content: current.content || `错误: ${data.error}`,
-              status: "error",
-            };
-            return next;
-          case "Aborted":
-            next[targetIndex] = {
-              ...current,
-              status: "aborted",
-            };
-            return next;
-          default:
-            return prev;
+        if (data.status === "Completed") {
+          cleanup("completed");
+        } else if (data.status === "Error") {
+          cleanup("error");
+        } else if (data.status === "Aborted") {
+          cleanup("aborted");
+        }
+      }).then((fn) => {
+        if (disposed) {
+          try { fn(); } catch { /* noop */ }
+          return;
+        }
+        listenersRef.current[targetRequestId] = fn;
+        // 若在 listener 就位前已触发 abort,补发一次 abort 调用
+        const runtime = sessionRuntimesRef.current[sessionKey];
+        if (runtime?.pendingAbort && runtime.requestId === targetRequestId) {
+          void invoke("knowledge_base_abort_chat", { requestId: targetRequestId }).catch((error) => {
+            console.error("Failed to abort knowledge chat:", error);
+          });
         }
       });
 
-      switch (data.status) {
-        case "Searching":
-        case "Planning":
-          if (!pendingAbortRef.current) {
-            setStatusText(data.message);
-            setStatusQueries([]);
-          }
-          break;
-        case "Retrieving":
-          if (!pendingAbortRef.current) {
-            setStatusText(data.message);
-            setStatusQueries(data.queries);
-          }
-          break;
-        case "ContextFound":
-          if (!pendingAbortRef.current) {
-            setStatusText(mode === "agent" ? "正在整理证据与组织回答..." : "正在整理证据并生成回答...");
-            setStatusQueries([]);
-          }
-          break;
-        case "Streaming":
-          if (!pendingAbortRef.current) {
-            setStatusText(null);
-            setStatusQueries([]);
-          }
-          break;
-        case "Completed":
-          pendingAbortRef.current = false;
-          setStopping(false);
-          setStreaming(false);
-          setRequestId(null);
-          setStatusText(null);
-          setStatusQueries([]);
-          void refreshSessions();
-          void loadSessionDetail(data.session_id);
-          break;
-        case "Degraded":
-          setComposerError(data.message);
-          break;
-        case "Error":
-          pendingAbortRef.current = false;
-          setStopping(false);
-          setStreaming(false);
-          setRequestId(null);
-          setStatusText(null);
-          setStatusQueries([]);
-          setComposerError(`本次回答失败：${data.error}`);
-          void refreshSessions();
-          if (selectedSessionId) {
-            void loadSessionDetail(selectedSessionId).catch(() => undefined);
-          }
-          break;
-        case "Aborted":
-          pendingAbortRef.current = false;
-          setStopping(false);
-          setStreaming(false);
-          setRequestId(null);
-          setStatusText(null);
-          setStatusQueries([]);
-          setComposerError("已停止当前回答。你可以直接修改问题后重新发送。");
-          void refreshSessions();
-          if (selectedSessionId) {
-            void loadSessionDetail(selectedSessionId).catch(() => undefined);
-          }
-          break;
-        default:
-          break;
-      }
-    }).then((fn) => {
-      if (disposed) {
-        fn();
-        return;
-      }
-      unlisten = fn;
-      if (pendingAbortRef.current) {
-        pendingAbortRef.current = false;
-        void invoke("knowledge_base_abort_chat", { requestId }).catch((error) => {
-          console.error("Failed to abort knowledge chat:", error);
-        });
-      }
-    });
-
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [loadSessionDetail, mode, refreshSessions, requestId, selectedSessionId]);
+      return () => {
+        disposed = true;
+        const unlisten = listenersRef.current[targetRequestId];
+        if (unlisten) {
+          try { unlisten(); } catch { /* noop */ }
+          delete listenersRef.current[targetRequestId];
+        }
+      };
+    },
+    [loadSessionDetail, mergeRuntime, refreshSessions]
+  );
 
   const handleNavigateToNote = useCallback(async (noteId: string) => {
     await expandCollectionPathForNote(noteId);
@@ -654,27 +796,26 @@ export function KnowledgeBaseChat() {
   }, [localModelId, refreshSessions, selectedPromptId, selectedSessionId, sessions]);
 
   const handleSelectSession = useCallback(async (sessionId: string) => {
-    if (streaming) return;
     try {
       uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       setUploadedImages([]);
       setEditingMessageId(null);
       setEditingMessageValue("");
-      await loadSessionDetail(sessionId);
-      setStatusText(null);
-      setStatusQueries([]);
-      setComposerError(null);
+      if (sessionRuntimesRef.current[sessionId]) {
+        setSelectedSessionId(sessionId);
+      } else {
+        await loadSessionDetail(sessionId);
+      }
     } catch (error) {
       console.error("Failed to load knowledge chat session:", error);
     }
-  }, [loadSessionDetail, streaming, uploadedImages]);
+  }, [loadSessionDetail, uploadedImages]);
 
   const handleCreateSession = useCallback(() => {
-    if (streaming) return;
     uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     setUploadedImages([]);
     resetDraft();
-  }, [resetDraft, streaming, uploadedImages]);
+  }, [resetDraft, uploadedImages]);
 
   const handleRenameSession = useCallback(async (sessionId: string) => {
     const title = editingSessionTitle.trim();
@@ -701,7 +842,8 @@ export function KnowledgeBaseChat() {
     sessionTitle: string,
     triggerRect?: DOMRect | null,
   ) => {
-    if (streaming && !stopping) return;
+    const runtime = sessionRuntimesRef.current[sessionId];
+    if (runtime?.streaming && !runtime.stopping) return;
 
     if (triggerRect && deleteConfirmAnchorRef.current) {
       const anchorRect = deleteConfirmAnchorRef.current.getBoundingClientRect();
@@ -748,7 +890,7 @@ export function KnowledgeBaseChat() {
     setPendingDeleteSessionId(sessionId);
     setPendingDeleteSessionTitle(sessionTitle);
     setDeleteConfirmOpen(true);
-  }, [stopping, streaming]);
+  }, []);
 
   const handleCancelDeleteSession = useCallback(() => {
     setDeleteConfirmOpen(false);
@@ -876,20 +1018,21 @@ export function KnowledgeBaseChat() {
     overrideEditMessageId?: string | null,
     overrideImageUrls?: string[]
   ) => {
+    const sendKey = selectedSessionIdRef.current ?? draftIdRef.current;
+    const runtime = sessionRuntimesRef.current[sendKey] ?? createInitialRuntime();
+
     const normalizedOverride = typeof overrideText === "string" ? overrideText : undefined;
     const text = (normalizedOverride ?? input).trim();
     const effectiveEditMessageId = overrideEditMessageId ?? editingMessageId;
     const usingOverride = typeof normalizedOverride === "string";
     const effectiveImageUrls = overrideImageUrls ?? null;
     const imageCount = effectiveImageUrls ? effectiveImageUrls.length : uploadedImages.length;
-    if ((!text && imageCount === 0) || (streaming && !stopping)) return;
+    if ((!text && imageCount === 0) || (runtime.streaming && !runtime.stopping)) return;
 
-    if (!localModelId && aiConfigs.length === 0) {
-      setComposerError("当前没有可用模型，请先到设置页配置 AI 模型。");
+    if (!runtime.modelId && aiConfigs.length === 0) {
+      patchRuntime(sendKey, { composerError: "当前没有可用模型，请先到设置页配置 AI 模型。" });
       return;
     }
-
-    setComposerError(null);
 
     let imagePayload: KnowledgeChatImageData[] | undefined;
     const userImageUrls: string[] = [];
@@ -925,11 +1068,11 @@ export function KnowledgeBaseChat() {
     };
 
     const editTargetIndex = usingOverride && effectiveEditMessageId
-      ? messages.findIndex((message) => message.id === effectiveEditMessageId)
+      ? runtime.messages.findIndex((message) => message.id === effectiveEditMessageId)
       : -1;
     const baseMessages = usingOverride && editTargetIndex >= 0
-      ? messages.slice(0, editTargetIndex)
-      : messages;
+      ? runtime.messages.slice(0, editTargetIndex)
+      : runtime.messages;
 
     const apiMessages = [...baseMessages, optimisticUserMessage]
       .filter((message) => message.role === "user" || message.role === "assistant")
@@ -938,70 +1081,114 @@ export function KnowledgeBaseChat() {
         content: message.content,
       }));
 
-    setMessages((prev) => {
-      const targetIndex = usingOverride && effectiveEditMessageId
-        ? prev.findIndex((message) => message.id === effectiveEditMessageId)
-        : -1;
-      const nextBase = usingOverride && targetIndex >= 0 ? prev.slice(0, targetIndex) : prev;
-      return [...nextBase, optimisticUserMessage, optimisticAssistantMessage];
+    const chatMode = runtime.mode;
+    const modelId = runtime.modelId;
+    const promptId = runtime.promptId;
+    const existingSessionId = isDraftKey(sendKey) ? null : sendKey;
+
+    // 乐观更新 runtime:注入消息并进入流式态
+    setSessionRuntimes((prev) => {
+      const base = prev[sendKey] ?? createInitialRuntime();
+      const messagesList = [...baseMessages, optimisticUserMessage, optimisticAssistantMessage];
+      return {
+        ...prev,
+        [sendKey]: {
+          ...base,
+          messages: messagesList,
+          streaming: true,
+          stopping: false,
+          pendingAbort: false,
+          accumulatedContent: "",
+          statusText: chatMode === "agent" ? "正在拆解问题与规划检索步骤..." : "正在检索相关知识...",
+          statusQueries: [],
+          composerError: null,
+          inspectorMessageId: tempAssistantId,
+        },
+      };
     });
-    setInspectorMessageId(tempAssistantId);
+
     setInput("");
     uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     setUploadedImages([]);
-    pendingAbortRef.current = false;
-    setStopping(false);
     setEditingMessageId(null);
     setEditingMessageValue("");
-    setStreaming(true);
-    setStatusText(mode === "agent" ? "正在拆解问题与规划检索步骤..." : "正在检索相关知识...");
-    setStatusQueries([]);
 
     try {
       const request: KnowledgeChatRequest = {
-        session_id: selectedSessionId ?? undefined,
+        session_id: existingSessionId ?? undefined,
         messages: apiMessages,
-        model_id: localModelId ?? undefined,
+        model_id: modelId ?? undefined,
         system_prompt: activePrompt?.content ?? undefined,
-        prompt_id: selectedPromptId ?? undefined,
+        prompt_id: promptId ?? undefined,
         images: imagePayload,
-        mode,
-        step_budget: mode === "agent" ? 3 : undefined,
+        mode: chatMode,
+        step_budget: chatMode === "agent" ? 3 : undefined,
       };
 
       const response = await invoke<KnowledgeChatSubmitResponse>("knowledge_base_chat", { request });
-      setRequestId(response.request_id);
-      setSelectedSessionId(response.session_id);
-      setMessages((prev) =>
-        prev.map((message) => {
-          if (message.id === tempUserId) {
-            return { ...message, id: response.user_message_id };
-          }
-          if (message.id === tempAssistantId) {
-            return { ...message, id: response.assistant_message_id };
-          }
-          return message;
-        })
-      );
-      setInspectorMessageId(response.assistant_message_id);
+      const realSessionId = response.session_id;
+
+      // 若 sendKey 是 draft,迁移到真实 sessionId;否则原地更新
+      setSessionRuntimes((prev) => {
+        const source = prev[sendKey];
+        if (!source) return prev;
+        const updatedMessages = source.messages.map((m) => {
+          if (m.id === tempUserId) return { ...m, id: response.user_message_id };
+          if (m.id === tempAssistantId) return { ...m, id: response.assistant_message_id };
+          return m;
+        });
+        const nextRuntime: SessionRuntime = {
+          ...source,
+          messages: updatedMessages,
+          requestId: response.request_id,
+          inspectorMessageId: response.assistant_message_id,
+        };
+        if (sendKey === realSessionId) {
+          return { ...prev, [realSessionId]: nextRuntime };
+        }
+        const { [sendKey]: _removed, ...rest } = prev;
+        void _removed;
+        return { ...rest, [realSessionId]: nextRuntime };
+      });
+
+      // 同步选中态:若用户还在发送时的会话上,跟随迁移到真实 sessionId;否则保持当前选中
+      if (isDraftKey(sendKey)) {
+        if (selectedSessionIdRef.current === null && draftIdRef.current === sendKey) {
+          setSelectedSessionId(realSessionId);
+          // 为下次新建分配一个全新的 draftId(避免与迁移后的 key 冲突)
+          setDraftId(generateDraftId());
+        }
+      } else if (selectedSessionIdRef.current === sendKey) {
+        setSelectedSessionId(realSessionId);
+      }
+
+      startChatListener(realSessionId, response.request_id, chatMode);
       await refreshSessions();
     } catch (error) {
       console.error("Failed to send knowledge chat message:", error);
-      setStreaming(false);
-      setStatusText(null);
-      setStatusQueries([]);
-      setComposerError(`发送失败：${String(error)}`);
-      setMessages((prev) =>
-        prev.map((message) =>
+      setSessionRuntimes((prev) => {
+        const source = prev[sendKey];
+        if (!source) return prev;
+        const updatedMessages = source.messages.map((message) =>
           message.id === tempAssistantId
-            ? {
-                ...message,
-                content: `错误: ${error}`,
-                status: "error",
-              }
+            ? { ...message, content: `错误: ${error}`, status: "error" as const }
             : message
-        )
-      );
+        );
+        return {
+          ...prev,
+          [sendKey]: {
+            ...source,
+            messages: updatedMessages,
+            streaming: false,
+            stopping: false,
+            pendingAbort: false,
+            requestId: null,
+            statusText: null,
+            statusQueries: [],
+            composerError: `发送失败：${String(error)}`,
+          },
+        };
+      });
     }
   }, [
     activePrompt,
@@ -1009,43 +1196,40 @@ export function KnowledgeBaseChat() {
     editingMessageId,
     fileToBase64,
     input,
-    localModelId,
-    messages,
-    mode,
+    patchRuntime,
     refreshSessions,
-    selectedPromptId,
-    selectedSessionId,
-    stopping,
-    streaming,
+    startChatListener,
     uploadedImages,
   ]);
 
   const handleAbort = useCallback(async () => {
-    if (!streaming || stopping) return;
-    pendingAbortRef.current = true;
-    setStopping(true);
-    setStatusText(null);
-    setStatusQueries([]);
-    setMessages((prev) => {
-      const next = [...prev];
-      const assistantIndex = [...next].reverse().findIndex((message) => message.role === "assistant");
-      if (assistantIndex === -1) return prev;
-      const targetIndex = next.length - 1 - assistantIndex;
-      next[targetIndex] = {
-        ...next[targetIndex],
-        status: "aborted",
+    const key = selectedSessionIdRef.current ?? draftIdRef.current;
+    const runtime = sessionRuntimesRef.current[key];
+    if (!runtime?.streaming || runtime.stopping) return;
+    const targetRequestId = runtime.requestId;
+    mergeRuntime(key, (prev) => {
+      const messagesList = [...prev.messages];
+      const assistantIndex = [...messagesList].reverse().findIndex((message) => message.role === "assistant");
+      if (assistantIndex !== -1) {
+        const targetIndex = messagesList.length - 1 - assistantIndex;
+        messagesList[targetIndex] = { ...messagesList[targetIndex], status: "aborted" };
+      }
+      return {
+        ...prev,
+        messages: messagesList,
+        pendingAbort: true,
+        stopping: true,
+        statusText: null,
+        statusQueries: [],
       };
-      return next;
     });
-    if (!requestId) {
-      return;
-    }
+    if (!targetRequestId) return;
     try {
-      await invoke("knowledge_base_abort_chat", { requestId });
+      await invoke("knowledge_base_abort_chat", { requestId: targetRequestId });
     } catch (error) {
       console.error("Failed to abort knowledge chat:", error);
     }
-  }, [requestId, stopping, streaming]);
+  }, [mergeRuntime]);
 
   const handleEditMessage = useCallback((message: UiMessage) => {
     uploadedImagesRef.current.forEach((image) => {
@@ -1062,14 +1246,14 @@ export function KnowledgeBaseChat() {
     setEditingMessageId(message.id);
     setEditingMessageValue(message.content);
     setInput(message.content);
-    setComposerError(null);
+    patchRuntime(selectedSessionIdRef.current ?? draftIdRef.current, { composerError: null });
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [dataUrlToFile]);
+  }, [dataUrlToFile, patchRuntime]);
 
   const handleRetryMessage = useCallback((message: UiMessage) => {
-    setComposerError(null);
+    patchRuntime(selectedSessionIdRef.current ?? draftIdRef.current, { composerError: null });
     void handleSend(message.content, message.id, message.imageUrls);
-  }, [handleSend]);
+  }, [handleSend, patchRuntime]);
 
   const handleCancelEdit = useCallback(() => {
     uploadedImagesRef.current.forEach((image) => {
@@ -1081,55 +1265,67 @@ export function KnowledgeBaseChat() {
     setEditingMessageId(null);
     setEditingMessageValue("");
     setInput("");
-    setComposerError(null);
-  }, []);
+    patchRuntime(selectedSessionIdRef.current ?? draftIdRef.current, { composerError: null });
+  }, [patchRuntime]);
 
   const handleCopyMessage = useCallback((content: string) => {
     void copyText(content);
   }, []);
 
   const handleModeChange = useCallback((nextMode: KnowledgeChatMode) => {
-    if (mode === nextMode) return;
-    setMode(nextMode);
-    const currentSession = sessions.find((item) => item.id === selectedSessionId);
+    const currentKey = selectedSessionIdRef.current ?? draftIdRef.current;
+    const runtime = sessionRuntimesRef.current[currentKey];
+    if (runtime?.mode === nextMode) return;
+
+    const currentSession = sessions.find((item) => item.id === selectedSessionIdRef.current);
     if (!currentSession || currentSession.mode !== nextMode) {
+      // 切到另一模式的新 draft;现有 runtime(含后台流式)保留在 map 中
+      const newDraft = generateDraftId();
+      setSessionRuntimes((prev) => ({
+        ...prev,
+        [newDraft]: createInitialRuntime({
+          mode: nextMode,
+          modelId: runtime?.modelId ?? null,
+          promptId: runtime?.promptId ?? null,
+        }),
+      }));
+      setDraftId(newDraft);
       setSelectedSessionId(null);
-      setMessages([]);
-      setInspectorMessageId(null);
-      setStatusText(null);
-      setStatusQueries([]);
-      setComposerError(null);
+      setInput("");
       setEditingMessageId(null);
       setEditingMessageValue("");
-      setInput("");
       uploadedImagesRef.current.forEach((item) => URL.revokeObjectURL(item.previewUrl));
       setUploadedImages([]);
+    } else {
+      patchRuntime(currentKey, { mode: nextMode });
     }
-  }, [mode, selectedSessionId, sessions]);
+  }, [patchRuntime, sessions]);
 
   const handleModelChange = useCallback(async (nextModelId: string | null) => {
-    setLocalModelId(nextModelId);
+    const currentKey = selectedSessionIdRef.current ?? draftIdRef.current;
+    patchRuntime(currentKey, { modelId: nextModelId });
     setShowModelDropdown(false);
-    if (selectedSessionId) {
+    if (selectedSessionIdRef.current) {
       try {
         await persistCurrentSessionMeta({ model_id: nextModelId });
       } catch (error) {
         console.error("Failed to update session model:", error);
       }
     }
-  }, [persistCurrentSessionMeta, selectedSessionId]);
+  }, [patchRuntime, persistCurrentSessionMeta]);
 
   const handlePromptChange = useCallback(async (nextPromptId: string | null) => {
-    setSelectedPromptId(nextPromptId);
+    const currentKey = selectedSessionIdRef.current ?? draftIdRef.current;
+    patchRuntime(currentKey, { promptId: nextPromptId });
     setShowPromptDropdown(false);
-    if (selectedSessionId) {
+    if (selectedSessionIdRef.current) {
       try {
         await persistCurrentSessionMeta({ prompt_id: nextPromptId });
       } catch (error) {
         console.error("Failed to update session prompt:", error);
       }
     }
-  }, [persistCurrentSessionMeta, selectedSessionId]);
+  }, [patchRuntime, persistCurrentSessionMeta]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -1160,8 +1356,7 @@ export function KnowledgeBaseChat() {
         <div className="p-4 border-b border-slate-200/70 dark:border-vnote-border/70">
           <button
             onClick={handleCreateSession}
-            disabled={streaming}
-            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 dark:disabled:bg-neutral-700 text-white text-sm font-medium transition-colors cursor-pointer disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors cursor-pointer"
           >
             <MessageSquarePlus className="w-4 h-4" />
             新建对话
@@ -1210,6 +1405,8 @@ export function KnowledgeBaseChat() {
             filteredSessions.map((session) => {
               const isSelected = session.id === selectedSessionId;
               const isEditing = session.id === editingSessionId;
+              const sessionRuntime = sessionRuntimes[session.id];
+              const isSessionStreaming = Boolean(sessionRuntime?.streaming);
               return (
                 <div
                   key={session.id}
@@ -1224,8 +1421,7 @@ export function KnowledgeBaseChat() {
                     <div className="flex items-start gap-2">
                       <button
                         onClick={() => void handleSelectSession(session.id)}
-                        disabled={streaming}
-                        className="flex-1 min-w-0 text-left cursor-pointer disabled:cursor-not-allowed"
+                        className="flex-1 min-w-0 text-left cursor-pointer"
                       >
                         <div className="flex items-center gap-2 mb-1">
                           <span
@@ -1239,6 +1435,12 @@ export function KnowledgeBaseChat() {
                             {session.mode === "agent" ? "Agent" : "标准"}
                           </span>
                           {session.is_pinned && <Pin className="w-3 h-3 text-amber-500" />}
+                          {isSessionStreaming && (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+                              <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+                              生成中
+                            </span>
+                          )}
                         </div>
                         {isEditing ? (
                           <input
@@ -1506,7 +1708,7 @@ export function KnowledgeBaseChat() {
                       isSelected={selectedInspectorMessage?.id === message.id}
                       onSelect={() => {
                         if (message.role === "assistant") {
-                          setInspectorMessageId(message.id);
+                          patchRuntime(activeRuntimeKey, { inspectorMessageId: message.id });
                         }
                       }}
                       onCopy={handleCopyMessage}
@@ -1601,7 +1803,7 @@ export function KnowledgeBaseChat() {
                     setEditingMessageValue(event.target.value);
                   }
                   if (composerError) {
-                    setComposerError(null);
+                    patchRuntime(activeRuntimeKey, { composerError: null });
                   }
                 }}
                 onKeyDown={handleKeyDown}
