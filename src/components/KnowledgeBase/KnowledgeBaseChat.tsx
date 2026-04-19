@@ -1948,7 +1948,7 @@ function MessageCard({
             compact ? "py-3" : "py-3.5",
             isUser
               ? "bg-slate-200 dark:bg-neutral-700 text-slate-800 dark:text-slate-100 rounded-tr-sm"
-              : "bg-white/42 dark:bg-vnote-card/56 border border-slate-200/80 dark:border-vnote-border/80 text-slate-700 dark:text-slate-200 rounded-tl-sm shadow-soft cursor-pointer",
+              : "bg-white/42 dark:bg-vnote-card/56 border border-slate-200/80 dark:border-vnote-border/80 text-slate-700 dark:text-slate-200 rounded-tl-sm shadow-soft cursor-default",
             !isUser && isSelected && "border-blue-300 dark:border-blue-700 ring-2 ring-blue-500/10"
           )}
         >
@@ -1991,7 +1991,7 @@ function MessageCard({
           {!isUser && (
             <button
               onClick={handleCopy}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-600 dark:text-slate-400 bg-white/70 dark:bg-transparent hover:text-slate-800 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
             >
               {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
               {copied ? "已复制" : "复制"}
@@ -2000,7 +2000,7 @@ function MessageCard({
           {isUser && canEdit && (
             <button
               onClick={() => onEdit(message)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-400 hover:text-blue-600 dark:hover:text-blue-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-600 dark:text-slate-400 bg-white/70 dark:bg-transparent hover:text-blue-600 dark:hover:text-blue-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
             >
               <Pencil className="w-3.5 h-3.5" />
               编辑后重问
@@ -2009,32 +2009,32 @@ function MessageCard({
           {isUser && canRetry && (
             <button
               onClick={() => onRetry(message)}
-              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-400 hover:text-violet-600 dark:hover:text-violet-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] text-slate-600 dark:text-slate-400 bg-white/70 dark:bg-transparent hover:text-violet-600 dark:hover:text-violet-300 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               重新生成
             </button>
           )}
           {message.agentRun && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-300">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-violet-50 text-violet-600 dark:bg-violet-900/20 dark:text-violet-300 cursor-default">
               <Sparkles className="w-3.5 h-3.5" />
               Agent
             </span>
           )}
           {message.sources.length > 0 && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300 cursor-default">
               <FileText className="w-3.5 h-3.5" />
               {message.sources.length} 条来源
             </span>
           )}
           {message.status === "error" && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-300">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-300 cursor-default">
               <AlertCircle className="w-3.5 h-3.5" />
               生成失败
             </span>
           )}
           {message.status === "aborted" && (
-            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-300">
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-amber-50 text-amber-600 dark:bg-amber-900/20 dark:text-amber-300 cursor-default">
               <Square className="w-3 h-3 fill-current" />
               已中止
             </span>
