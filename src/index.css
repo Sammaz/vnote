@@ -627,6 +627,17 @@ input[type="password"]::-ms-clear {
   border-top-color: #374151;
 }
 
+.chat-markdown,
+.chat-markdown * {
+  cursor: default;
+}
+
+.chat-markdown a,
+.chat-markdown button,
+.chat-markdown input[type="checkbox"] {
+  cursor: pointer;
+}
+
 /* ===== 笔记内容 Markdown 样式 ===== */
 .note-markdown {
   font-size: 0.925rem;
