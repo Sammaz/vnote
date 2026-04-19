@@ -429,8 +429,7 @@ async fn run_standard_chat(
         },
     );
 
-    let compressed_results = maybe_compress_context(&ai_config, &user_message, &search_results, abort_flag).await;
-    let rag_context = Some(build_standard_context(&compressed_results, request.system_prompt.as_deref()));
+    let rag_context = Some(build_standard_context(&search_results, request.system_prompt.as_deref()));
     let history = convert_messages(&request.messages);
     let images = convert_images(request.images);
 
@@ -1029,52 +1028,6 @@ fn dedupe_queries(queries: Vec<String>, limit: usize) -> Vec<String> {
         .filter(|q| seen.insert(q.clone()))
         .take(limit)
         .collect()
-}
-
-const COMPRESS_THRESHOLD_CHARS: usize = 2000;
-
-/// Compress search results context via LLM if total chars exceed threshold.
-/// Falls back to original results if LLM call fails.
-async fn maybe_compress_context(
-    ai_config: &AiConfig,
-    query: &str,
-    results: &[KnowledgeSearchResult],
-    abort_flag: &Arc<AtomicBool>,
-) -> Vec<KnowledgeSearchResult> {
-    let total_chars: usize = results.iter().map(|r| r.content.chars().count()).sum();
-    if total_chars <= COMPRESS_THRESHOLD_CHARS || results.is_empty() {
-        return results.to_vec();
-    }
-
-    let combined = results
-        .iter()
-        .map(|r| format!("【{}】\n{}", r.note_title, r.content))
-        .collect::<Vec<_>>()
-        .join("\n\n---\n\n");
-
-    let prompt = format!(
-        "用户问题：{}\n\n原始参考内容：\n{}\n\n请提取与问题最相关的内容片段，删除冗余，保留关键事实，压缩后不超过800字。直接输出压缩后内容，不要解释。",
-        query, combined
-    );
-
-    match execute_non_streaming_with_abort(
-        NonStreamingRequest { config: ai_config.clone(), prompt },
-        abort_flag,
-    )
-    .await
-    {
-        Ok(resp) => {
-            let first = results.first().unwrap();
-            vec![KnowledgeSearchResult {
-                chunk_id: first.chunk_id.clone(),
-                note_id: first.note_id.clone(),
-                note_title: "（压缩摘要）".to_string(),
-                content: resp.content,
-                score: first.score,
-            }]
-        }
-        Err(_) => results.to_vec(),
-    }
 }
 
 fn build_standard_context(results: &[KnowledgeSearchResult], custom_prompt: Option<&str>) -> String {
