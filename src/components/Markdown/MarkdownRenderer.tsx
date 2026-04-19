@@ -46,6 +46,10 @@ export function MarkdownRenderer({
   checkedItems,
   onToggleCheckbox,
   searchQuery,
+  enableEvidenceCitations = false,
+  citationSources,
+  onCitationClick,
+  activeCitationRank = null,
 }: MarkdownRendererProps) {
   const baseClassName = variant === "chat"
     ? "chat-markdown"
@@ -62,6 +66,10 @@ export function MarkdownRenderer({
       enableTimestampRanges,
       enableHashtags,
       searchQuery,
+      enableEvidenceCitations,
+      citationSources,
+      onCitationClick,
+      activeCitationRank,
     };
 
     const renderDecorated = (children: ReactNode, keyPrefix: string) =>
@@ -161,6 +169,10 @@ export function MarkdownRenderer({
     searchQuery,
     centerImages,
     variant,
+    enableEvidenceCitations,
+    citationSources,
+    onCitationClick,
+    activeCitationRank,
   ]);
 
   return (

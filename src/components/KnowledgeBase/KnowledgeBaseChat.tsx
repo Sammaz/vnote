@@ -297,6 +297,7 @@ export function KnowledgeBaseChat() {
   } | null>(null);
   const [deleteConfirmPanelMinWidth, setDeleteConfirmPanelMinWidth] = useState<number | null>(null);
   const [preferencesReady, setPreferencesReady] = useState(false);
+  const [activeCitation, setActiveCitation] = useState<{ messageId: string; rank: number } | null>(null);
 
   const deleteConfirmPanelRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
@@ -312,6 +313,7 @@ export function KnowledgeBaseChat() {
   const listenersRef = useRef<Record<string, () => void>>({});
   const draftIdRef = useRef(draftId);
   const selectedSessionIdRef = useRef(selectedSessionId);
+  const activeCitationTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     sessionRuntimesRef.current = sessionRuntimes;
@@ -331,6 +333,15 @@ export function KnowledgeBaseChat() {
         try { unlisten(); } catch { /* noop */ }
       });
       listenersRef.current = {};
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (activeCitationTimerRef.current !== null) {
+        window.clearTimeout(activeCitationTimerRef.current);
+        activeCitationTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -774,6 +785,28 @@ export function KnowledgeBaseChat() {
     setSelectedNoteId(noteId);
     setCurrentView("note");
   }, [expandCollectionPathForNote, setCurrentView, setSelectedNoteId]);
+
+  const handleCitationClick = useCallback((messageId: string, rank: number) => {
+    patchRuntime(activeRuntimeKey, { inspectorMessageId: messageId });
+    setShowRightPanel((prev) => (prev ? prev : true));
+    setActiveCitation({ messageId, rank });
+    if (activeCitationTimerRef.current !== null) {
+      window.clearTimeout(activeCitationTimerRef.current);
+    }
+    const scrollToSource = () => {
+      const element = document.getElementById(`kb-source-${messageId}-${rank}`);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    };
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(scrollToSource);
+    });
+    activeCitationTimerRef.current = window.setTimeout(() => {
+      setActiveCitation(null);
+      activeCitationTimerRef.current = null;
+    }, 2400);
+  }, [activeRuntimeKey, patchRuntime]);
 
   const persistCurrentSessionMeta = useCallback(async (
     next: Partial<Pick<KnowledgeChatSession, "mode" | "model_id" | "prompt_id" | "is_pinned" | "title">>
@@ -1716,6 +1749,10 @@ export function KnowledgeBaseChat() {
                       onRetry={handleRetryMessage}
                       canEdit={(!streaming || stopping) && message.role === "user"}
                       canRetry={(!streaming || stopping) && message.role === "user"}
+                      onCitationClick={(rank) => handleCitationClick(message.id, rank)}
+                      activeCitationRank={
+                        activeCitation?.messageId === message.id ? activeCitation.rank : null
+                      }
                     />
                   </Fragment>
                 ))}
@@ -2006,30 +2043,47 @@ export function KnowledgeBaseChat() {
                           : "当前回答暂无可展示来源，可能是检索未命中或结果仍在整理中。"}
                     </div>
                   ) : (
-                    (selectedInspectorMessage?.sources ?? latestAssistantMessage?.sources ?? []).map((source) => (
-                      <button
-                        key={source.chunk_id}
-                        onClick={() => void handleNavigateToNote(source.note_id)}
-                        className="w-full text-left p-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 hover:border-blue-300 dark:hover:border-blue-700 bg-white/36 dark:bg-black/10 transition-colors cursor-pointer"
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
-                              <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                              <span className="truncate">{source.note_title}</span>
-                            </div>
-                            {showSourcesExpanded && (
-                              <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400 line-clamp-5">
-                                {source.content}
+                    (selectedInspectorMessage?.sources ?? latestAssistantMessage?.sources ?? []).map((source, index) => {
+                      const rank = index + 1;
+                      const sourceMessageId = selectedInspectorMessage?.id ?? latestAssistantMessage?.id;
+                      const isActive =
+                        !!sourceMessageId &&
+                        activeCitation?.messageId === sourceMessageId &&
+                        activeCitation?.rank === rank;
+                      return (
+                        <button
+                          key={source.chunk_id}
+                          id={sourceMessageId ? `kb-source-${sourceMessageId}-${rank}` : undefined}
+                          onClick={() => void handleNavigateToNote(source.note_id)}
+                          className={cn(
+                            "w-full text-left p-3 rounded-xl border bg-white/36 dark:bg-black/10 transition-all cursor-pointer",
+                            isActive
+                              ? "border-blue-400 dark:border-blue-500 ring-2 ring-blue-400/40 citation-pulse"
+                              : "border-slate-200/70 dark:border-vnote-border/70 hover:border-blue-300 dark:hover:border-blue-700"
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
+                                <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-md border border-blue-200 bg-blue-50 text-[11px] font-medium text-blue-600 leading-none flex-shrink-0 dark:border-blue-800/70 dark:bg-blue-900/25 dark:text-blue-200">
+                                  {rank}
+                                </span>
+                                <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                <span className="truncate">{source.note_title}</span>
                               </div>
-                            )}
+                              {showSourcesExpanded && (
+                                <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400 line-clamp-5">
+                                  {source.content}
+                                </div>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500 flex-shrink-0">
+                              {(source.score * 100).toFixed(1)}%
+                            </div>
                           </div>
-                          <div className="text-[11px] text-slate-400 dark:text-slate-500 flex-shrink-0">
-                            {(source.score * 100).toFixed(1)}%
-                          </div>
-                        </div>
-                      </button>
-                    ))
+                        </button>
+                      );
+                    })
                   )}
                 </div>
               </section>
@@ -2121,6 +2175,8 @@ function MessageCard({
   onRetry,
   canEdit,
   canRetry,
+  onCitationClick,
+  activeCitationRank,
 }: {
   message: UiMessage;
   compact: boolean;
@@ -2131,6 +2187,8 @@ function MessageCard({
   onRetry: (message: UiMessage) => void;
   canEdit: boolean;
   canRetry: boolean;
+  onCitationClick?: (rank: number) => void;
+  activeCitationRank?: number | null;
 }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
@@ -2186,6 +2244,10 @@ function MessageCard({
               content={message.content}
               variant="chat"
               className="text-sm leading-7"
+              enableEvidenceCitations={!isUser}
+              citationSources={message.sources}
+              onCitationClick={onCitationClick}
+              activeCitationRank={activeCitationRank}
             />
           ) : message.status === "streaming" ? (
             <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 py-1">

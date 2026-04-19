@@ -1,16 +1,21 @@
 import React from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { EvidenceCitation, type EvidenceCitationSource } from "../components/Markdown/EvidenceCitation";
 
 const BRACKET_TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/;
 const CLOCK_TIMESTAMP_RE = /⏱\s*(\d{1,2}:\d{2}(?::\d{2})?)/;
 const CHINESE_TIMESTAMP_RE = /（时间：(\d{1,2}:\d{2}(?::\d{2})?)）/;
-const DECORATION_REGEX = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\))|(#[^\s#]+)|(==[^=]+==)/g;
+const DECORATION_REGEX = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\))|(#[^\s#]+)|(==[^=]+==)|(\[证据\s*\d+(?:\s*[,，、]\s*\d+)*\])/g;
 
 export interface MarkdownDecorationOptions {
   enableSeekTimestamps?: boolean;
   enableTimestampRanges?: boolean;
   enableHashtags?: boolean;
   searchQuery?: string;
+  enableEvidenceCitations?: boolean;
+  citationSources?: EvidenceCitationSource[];
+  onCitationClick?: (rank: number) => void;
+  activeCitationRank?: number | null;
 }
 
 export function parseTimestampToSeconds(value: string): number | null {
@@ -110,6 +115,14 @@ function createSeekHandler(timeText: string) {
   };
 }
 
+export function parseEvidenceRanks(citationToken: string): number[] {
+  const inner = citationToken.replace(/^\[证据\s*/, "").replace(/\]$/, "");
+  return inner
+    .split(/[,，、]/)
+    .map((part) => Number.parseInt(part.trim(), 10))
+    .filter((value) => Number.isFinite(value) && value > 0);
+}
+
 export function highlightText(text: string, query?: string, keyPrefix = "text"): React.ReactNode {
   if (!query?.trim()) {
     return text;
@@ -205,6 +218,21 @@ function renderDecoratedString(
           {highlightText_content}
         </mark>,
       );
+    } else if (match[7] && options.enableEvidenceCitations) {
+      const ranks = parseEvidenceRanks(matchedText);
+      ranks.forEach((rank, rankIndex) => {
+        const source = options.citationSources?.[rank - 1];
+        result.push(
+          <EvidenceCitation
+            key={`${keyPrefix}-citation-${partIndex}-${rankIndex}`}
+            rank={rank}
+            source={source}
+            active={options.activeCitationRank === rank}
+            onClick={options.onCitationClick}
+          />,
+        );
+      });
+      partIndex += 1;
     } else {
       result.push(matchedText);
       partIndex += 1;

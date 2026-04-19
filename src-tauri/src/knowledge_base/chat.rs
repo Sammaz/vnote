@@ -1083,7 +1083,15 @@ fn build_standard_context(results: &[KnowledgeSearchResult], custom_prompt: Opti
     } else {
         results
             .iter()
-            .map(|result| format!("笔记《{}》\n{}", result.note_title, result.content))
+            .enumerate()
+            .map(|(index, result)| {
+                format!(
+                    "[证据 {}] 笔记《{}》\n{}",
+                    index + 1,
+                    result.note_title,
+                    result.content
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n\n---\n\n")
     };
@@ -1095,7 +1103,7 @@ fn build_standard_context(results: &[KnowledgeSearchResult], custom_prompt: Opti
         .unwrap_or_default();
 
     format!(
-        "你是本地知识库问答助手，只能基于 visual_summary 检索结果回答。\n\n【知识库证据】\n{}\n\n【回答要求】\n1. 先直接回答问题\n2. 再给出结构化要点\n3. 明确标注证据不足的部分\n4. 不要编造知识库中不存在的信息\n\n【Markdown 输出要求】\n1. 仅在有助于阅读时使用 Markdown，优先使用普通段落和简单列表\n2. 所有 Markdown 标记必须完整闭合，例如 `**加粗**`、`*斜体*`、代码块围栏\n3. 不要输出孤立或未闭合的 `*`、`**`、`_`、`#`、`>`、`-` 等格式符号\n4. 列表项必须包含完整文本，不能只输出符号或残缺内容\n5. 如果不确定 Markdown 格式是否正确，改用纯文本表达\n6. 输出前自行检查，确保内容可以被标准 Markdown 正常渲染{}",
+        "你是本地知识库问答助手，只能基于 visual_summary 检索结果回答。\n\n【知识库证据】\n{}\n\n【回答要求】\n1. 先直接回答问题\n2. 再给出结构化要点\n3. 明确标注证据不足的部分\n4. 不要编造知识库中不存在的信息\n\n【引用格式】\n1. 每处来自【知识库证据】的结论或事实，都必须紧随其后写 `[证据N]`（N 为上面的证据编号）\n2. 多条证据同时引用写作 `[证据1,2]` 或 `[证据1][证据2]`\n3. 只使用实际出现过的证据编号，严禁虚构\n4. 严格使用方括号形式 `[证据N]`，不要写作 `证据1`、`(证据1)`、`「证据1」` 等变体\n\n【Markdown 输出要求】\n1. 仅在有助于阅读时使用 Markdown，优先使用普通段落和简单列表\n2. 所有 Markdown 标记必须完整闭合，例如 `**加粗**`、`*斜体*`、代码块围栏\n3. 不要输出孤立或未闭合的 `*`、`**`、`_`、`#`、`>`、`-` 等格式符号\n4. 列表项必须包含完整文本，不能只输出符号或残缺内容\n5. 如果不确定 Markdown 格式是否正确，改用纯文本表达\n6. 输出前自行检查，确保内容可以被标准 Markdown 正常渲染{}",
         references, custom
     )
 }
@@ -1130,7 +1138,7 @@ fn build_agent_context(
         .unwrap_or_default();
 
     format!(
-        "你是本地知识库 Agent 助手，只能在 visual_summary 检索结果范围内推理。\n\n【任务计划】\n{}\n\n【证据池】\n{}\n\n【回答结构】\n1. 直接结论\n2. 核心要点\n3. 证据依据\n4. 不确定项 / 缺失项\n5. 建议的后续追问\n\n【约束】\n- 不得编造不存在的事实\n- 如果证据冲突，要明确指出\n- 优先归纳跨笔记共识，再补充差异{}",
+        "你是本地知识库 Agent 助手，只能在 visual_summary 检索结果范围内推理。\n\n【任务计划】\n{}\n\n【证据池】\n{}\n\n【回答结构】\n1. 直接结论\n2. 核心要点\n3. 证据依据\n4. 不确定项 / 缺失项\n5. 建议的后续追问\n\n【引用格式】\n- 每处结论或事实性陈述都必须紧随 `[证据N]` 标注（N 为上面【证据池】的证据编号）\n- 多条证据同时引用写作 `[证据1,2]` 或 `[证据1][证据2]`\n- 只使用实际出现过的证据编号，严禁虚构\n- 严格使用方括号形式 `[证据N]`，不要写作 `证据1`、`(证据1)`、`「证据1」` 等变体\n\n【约束】\n- 不得编造不存在的事实\n- 如果证据冲突，要明确指出\n- 优先归纳跨笔记共识，再补充差异{}",
         plan, evidence, custom
     )
 }

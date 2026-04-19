@@ -369,6 +369,23 @@ input[type="password"]::-ms-clear {
   }
 }
 
+/* 知识库对话 - 证据引用点击后，侧栏对应卡片的高亮闪烁 */
+@keyframes citationPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.45);
+  }
+  60% {
+    box-shadow: 0 0 0 6px rgba(59, 130, 246, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+
+.citation-pulse {
+  animation: citationPulse 1.6s ease-out 1;
+}
+
 /* ===== 聊天窗口 Markdown / 流式文本样式 ===== */
 .chat-markdown,
 .chat-streaming-content {
