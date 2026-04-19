@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkCjkFriendly from "remark-cjk-friendly";
 import type { Components } from "react-markdown";
 import { cn } from "../../utils/cn";
 import {
@@ -164,7 +165,7 @@ export function MarkdownRenderer({
 
   return (
     <div className={cn(baseClassName, className)}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkCjkFriendly]} components={components}>
         {content}
       </ReactMarkdown>
     </div>
