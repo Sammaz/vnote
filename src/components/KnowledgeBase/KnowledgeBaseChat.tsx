@@ -847,8 +847,9 @@ export function KnowledgeBaseChat() {
   const handleCreateSession = useCallback(() => {
     uploadedImages.forEach((item) => URL.revokeObjectURL(item.previewUrl));
     setUploadedImages([]);
-    resetDraft();
-  }, [resetDraft, uploadedImages]);
+    const currentMode = sessionRuntimesRef.current[selectedSessionIdRef.current ?? draftIdRef.current]?.mode ?? mode;
+    resetDraft({ ...DEFAULT_PREFERENCES, default_mode: currentMode });
+  }, [resetDraft, uploadedImages, mode]);
 
   const handleRenameSession = useCallback(async (sessionId: string) => {
     const title = editingSessionTitle.trim();
