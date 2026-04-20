@@ -200,7 +200,7 @@ export function EvidenceCitation({ rank }: EvidenceCitationProps) {
             )}
           >
             {missing ? (
-              <div className="px-3 py-2.5 text-xs text-slate-500 dark:text-slate-400 leading-5">
+              <div className="px-3 py-2.5 text-xs text-slate-600 dark:text-slate-400 leading-5">
                 未找到对应的证据 {rank}。AI 可能引用了超出检索范围的编号。
               </div>
             ) : (
@@ -214,7 +214,7 @@ export function EvidenceCitation({ rank }: EvidenceCitationProps) {
                     {source.note_title}
                   </span>
                   {typeof source.score === "number" && (
-                    <span className="ml-auto px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400 text-[11px] leading-none tabular-nums flex-shrink-0">
+                    <span className="ml-auto px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400 text-[11px] leading-none tabular-nums flex-shrink-0">
                       {(source.score * 100).toFixed(1)}%
                     </span>
                   )}

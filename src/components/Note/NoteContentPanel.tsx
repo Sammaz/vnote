@@ -188,7 +188,7 @@ function SharedEmptyState({
         </div>
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">{title}</h3>
         {description ? (
-          <p className="mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">{description}</p>
+          <p className="mt-2 max-w-md text-sm leading-6 text-slate-600 dark:text-slate-400">{description}</p>
         ) : null}
         {action ? <div className="mt-6 flex w-full justify-center">{action}</div> : null}
         {hint ? <div className="mt-3 text-xs text-slate-400 dark:text-slate-500">{hint}</div> : null}
@@ -4148,7 +4148,7 @@ Video subtitles content:`;
                               >
                                 <div className="font-medium truncate">{prompt.title}</div>
                                 {prompt.description && (
-                                  <div className="text-xs text-slate-500 dark:text-slate-400 truncate mt-0.5">{prompt.description}</div>
+                                  <div className="text-xs text-slate-600 dark:text-slate-400 truncate mt-0.5">{prompt.description}</div>
                                 )}
                               </button>
                             ))}

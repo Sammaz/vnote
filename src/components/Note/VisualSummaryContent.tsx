@@ -42,7 +42,7 @@ export function VisualSummaryContent({
 
   if (!markdownContent) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-8 text-slate-400">
+      <div className="flex flex-col items-center justify-center h-full p-8 text-slate-500">
         <BarChart3 className="w-16 h-16 mb-4 opacity-50" />
         <p className="text-lg mb-2">暂无视觉总结内容</p>
         <p className="text-sm text-center max-w-md">

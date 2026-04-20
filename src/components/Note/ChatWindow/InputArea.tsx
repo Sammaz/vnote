@@ -95,7 +95,7 @@ export function InputArea({
           onKeyDown={handleKeyDown}
           onPaste={onPaste}
           placeholder="你的问题..."
-          className="w-full px-4 py-3 bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border rounded-xl text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-500 dark:placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+          className="w-full px-4 py-3 bg-slate-50 dark:bg-vnote-surface border border-slate-200 dark:border-vnote-border rounded-xl text-sm text-slate-700 dark:text-slate-200 placeholder:text-slate-600 dark:placeholder:text-slate-500 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
           rows={2}
         />
       </div>
@@ -158,7 +158,7 @@ export function InputArea({
               "w-10 h-10 flex items-center justify-center rounded-full transition-colors cursor-pointer",
               input.trim() || uploadedImages.length > 0
                 ? "bg-slate-700 dark:bg-slate-600 text-white hover:bg-slate-600 dark:hover:bg-slate-500"
-                : "bg-slate-200 dark:bg-vnote-surface text-slate-500 dark:text-slate-400 cursor-not-allowed"
+                : "bg-slate-200 dark:bg-vnote-surface text-slate-600 dark:text-slate-400 cursor-not-allowed"
             )}
           >
             <Send className="w-5 h-5" />

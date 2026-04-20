@@ -149,7 +149,7 @@ export function NotePage() {
       <div className="flex-1 flex items-center justify-center text-slate-500">
         <div className="text-center">
           <p className="text-lg mb-2">未找到笔记</p>
-          <p className="text-sm text-slate-400">请从侧边栏选择一个笔记</p>
+          <p className="text-sm text-slate-500">请从侧边栏选择一个笔记</p>
         </div>
       </div>
     );

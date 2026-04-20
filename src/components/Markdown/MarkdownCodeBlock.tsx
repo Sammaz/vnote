@@ -48,7 +48,7 @@ export function MarkdownCodeBlock({
         <button
           type="button"
           onClick={handleCopy}
-          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-400 hover:text-white hover:bg-white/8 transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-slate-400 dark:text-slate-400 hover:text-slate-100 dark:hover:text-white hover:bg-slate-700/70 dark:hover:bg-white/8 transition-colors cursor-pointer"
         >
           {copied ? <Check className="w-3.5 h-3.5 text-green-400" /> : <Copy className="w-3.5 h-3.5" />}
           {copied ? "已复制" : "复制"}

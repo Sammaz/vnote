@@ -46,7 +46,7 @@ export function KnowledgeBasePage() {
             知识库
           </h2>
           {stats && (
-            <span className="text-xs text-slate-400 dark:text-slate-500">
+            <span className="text-xs text-slate-500 dark:text-slate-500">
               {stats.indexed_notes}/{stats.notes_with_summary} 已索引 · {stats.total_chunks} 分块
             </span>
           )}
@@ -63,7 +63,7 @@ export function KnowledgeBasePage() {
               "flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-t-lg transition-colors cursor-pointer",
               activeTab === tab.key
                 ? "bg-slate-100 dark:bg-neutral-800 text-blue-600 dark:text-blue-400"
-                : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-800/50"
+                : "text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-neutral-800/50"
             )}
           >
             {tab.icon}

@@ -135,7 +135,7 @@ export function AddNotesToCollectionModal({
           {filteredNotes.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Video className="w-12 h-12 text-slate-400 dark:text-neutral-500 mb-4" />
-              <p className="text-slate-500 dark:text-neutral-400">
+              <p className="text-slate-600 dark:text-neutral-400">
                 {availableNotes.length === 0
                   ? "没有可添加的笔记"
                   : "没有找到匹配的笔记"}
@@ -179,7 +179,7 @@ export function AddNotesToCollectionModal({
                     <h4 className="text-sm font-medium text-slate-800 dark:text-slate-200 truncate">
                       {note.title}
                     </h4>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
                       创建于 {new Date(note.created_at).toLocaleDateString("zh-CN")}
                     </p>
                   </div>

@@ -43,6 +43,59 @@
   --color-vnote-glass-light: rgba(255, 255, 255, 0.85);
   --color-vnote-glass-border-light: rgba(0, 0, 0, 0.08);
   --color-vnote-glass-hover-light: rgba(255, 255, 255, 0.95);
+  --color-vnote-text-subtle-light: #64748b;
+  --color-vnote-text-muted-light-strong: #475569;
+}
+
+/* ===== 亮色主题下的文字对比度增强 ===== */
+/* 使用 :where() 保持零特异性，避免干扰 hover:/focus: 等交互变体 */
+
+/* 浅色灰调文字在白色/毛玻璃背景上对比度不足，统一加深至 slate-500 */
+:where(:root:not(.dark)) .text-slate-400,
+:where(:root:not(.dark)) .text-slate-300,
+:where(:root:not(.dark)) .text-neutral-400,
+:where(:root:not(.dark)) .text-neutral-300 {
+  color: var(--color-vnote-text-subtle-light);
+}
+
+/* 中等灰调文字在亮色下同步加深至 slate-600 以提升正文可读性 */
+:where(:root:not(.dark)) .text-slate-500,
+:where(:root:not(.dark)) .text-neutral-500 {
+  color: var(--color-vnote-text-muted-light-strong);
+}
+
+/* 占位符文字同步提升对比度 */
+:where(:root:not(.dark)) .placeholder-slate-400::placeholder,
+:where(:root:not(.dark)) .placeholder\:text-slate-400::placeholder,
+:where(:root:not(.dark)) .placeholder\:text-neutral-400::placeholder {
+  color: var(--color-vnote-text-subtle-light);
+  opacity: 1;
+}
+
+:where(:root:not(.dark)) .placeholder\:text-slate-500::placeholder,
+:where(:root:not(.dark)) .placeholder\:text-neutral-500::placeholder {
+  color: var(--color-vnote-text-muted-light-strong);
+  opacity: 1;
+}
+
+/* 保留始终为深色背景容器内的原浅色文字（不应用上面的加深规则） */
+/* MarkdownCodeBlock 代码块头部 */
+:where(:root:not(.dark)) .markdown-code-block-header .text-slate-300 {
+  color: #cbd5e1;
+}
+:where(:root:not(.dark)) .markdown-code-block-header .text-slate-400 {
+  color: #94a3b8;
+}
+
+/* 视频播放器覆盖层等明确使用 bg-slate-900 的容器 */
+:where(:root:not(.dark)) .bg-slate-900 .text-slate-300 {
+  color: #cbd5e1;
+}
+:where(:root:not(.dark)) .bg-slate-900 .text-slate-400 {
+  color: #94a3b8;
+}
+:where(:root:not(.dark)) .bg-slate-900 .text-slate-500 {
+  color: #64748b;
 }
 
 /* 滚动条样式 - 现代化优化 */

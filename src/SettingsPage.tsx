@@ -464,7 +464,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             "flex items-center justify-center h-9 w-11 rounded-lg border text-sm transition-all",
             theme === currentTheme
                 ? "bg-blue-600 text-white border-blue-600 shadow-sm"
-                : "bg-white/50 dark:bg-slate-700/50 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600",
+                : "bg-white/50 dark:bg-slate-700/50 text-slate-600 dark:text-slate-400 border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600",
         ].join(" ");
 
     // Get current editing config values
@@ -586,7 +586,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                     </div>
                     <div className="flex-1 min-w-0">
                         <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">确认删除</h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                             确定要删除配置「{title}」吗？此操作无法撤销。
                         </p>
                     </div>
@@ -690,7 +690,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                             ? "数据管理"
                                             : "初始化管理"}
                         </h2>
-                        <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                             {activeTab === "general"
                                 ? "界面显示与桌面行为"
                                 : activeTab === "model"
@@ -722,7 +722,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     </div>
                                     <div className="flex-1">
                                         <div className="text-sm font-medium text-slate-900 dark:text-slate-100">主题</div>
-                                        <div className="text-sm text-slate-500 dark:text-slate-400">选择应用的外观主题</div>
+                                        <div className="text-sm text-slate-600 dark:text-slate-400">选择应用的外观主题</div>
                                     </div>
                                     <div className="flex items-center gap-1.5 p-1 bg-slate-100 dark:bg-slate-700/50 rounded-lg">
                                         <button onClick={() => handleThemeChange("light")} className={themeButtonClass("light") + " cursor-pointer"}><Sun size={16} /></button>
@@ -735,7 +735,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     </div>
                                     <div className="flex-1">
                                         <div className="text-sm font-medium text-slate-900 dark:text-slate-100">系统托盘</div>
-                                        <div className="text-sm text-slate-500 dark:text-slate-400">关闭窗口时保持后台运行</div>
+                                        <div className="text-sm text-slate-600 dark:text-slate-400">关闭窗口时保持后台运行</div>
                                     </div>
                                     <button onClick={handleTrayToggle} className={["relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer", trayEnabled ? "bg-blue-600" : "bg-slate-300 dark:bg-slate-600"].join(" ")}>
                                         <span className={["inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform", trayEnabled ? "translate-x-6" : "translate-x-1"].join(" ")} />
@@ -749,7 +749,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         </div>
                                         <div className="flex-1">
                                             <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">背景图片</div>
-                                            <div className="text-sm text-slate-500 dark:text-slate-400">左侧预览实际视觉效果，右侧实时调整背景强度与布局参数</div>
+                                            <div className="text-sm text-slate-600 dark:text-slate-400">左侧预览实际视觉效果，右侧实时调整背景强度与布局参数</div>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             <button
@@ -792,7 +792,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                             <div className="rounded-2xl border border-white/45 dark:border-white/10 px-4 py-3 shadow-soft ring-1 ring-white/20 dark:ring-white/5" style={previewPanelStyle}>
                                                                 <div className="flex items-center justify-between gap-3">
                                                                     <div>
-                                                                        <div className="text-xs uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">VNote Preview</div>
+                                                                        <div className="text-xs uppercase tracking-[0.18em] text-slate-600 dark:text-slate-400">VNote Preview</div>
                                                                         <div className="mt-1 text-sm font-semibold text-slate-900 dark:text-slate-100">全局背景效果</div>
                                                                     </div>
                                                                     <div className="h-8 w-8 rounded-xl bg-blue-500/15 text-blue-500 dark:text-blue-400 flex items-center justify-center">
@@ -803,7 +803,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                             <div className="grid grid-cols-2 gap-3">
                                                                 <div className="rounded-2xl border border-white/35 dark:border-white/10 p-3 shadow-soft ring-1 ring-white/15 dark:ring-white/5" style={previewPanelStyle}>
                                                                     <div className="flex items-center justify-between gap-2">
-                                                                        <div className="text-[11px] text-slate-500 dark:text-slate-400">阅读卡片</div>
+                                                                        <div className="text-[11px] text-slate-600 dark:text-slate-400">阅读卡片</div>
                                                                         <div className="h-1.5 w-1.5 rounded-full bg-emerald-400/80" />
                                                                     </div>
                                                                     <div className="mt-2 h-2 rounded-full bg-slate-900/10 dark:bg-white/10" />
@@ -811,10 +811,10 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                                     <div className="mt-2 h-2 w-1/2 rounded-full bg-slate-900/10 dark:bg-white/10" />
                                                                 </div>
                                                                 <div className="rounded-2xl border border-white/35 dark:border-white/10 p-3 shadow-soft ring-1 ring-white/15 dark:ring-white/5" style={previewPanelStyle}>
-                                                                    <div className="text-[11px] text-slate-500 dark:text-slate-400">氛围强度</div>
+                                                                    <div className="text-[11px] text-slate-600 dark:text-slate-400">氛围强度</div>
                                                                     <div className="mt-3 flex items-end justify-between gap-3">
                                                                         <div className="text-lg font-semibold text-slate-900 dark:text-slate-100">{backgroundSettings.overlayOpacity}%</div>
-                                                                        <div className="text-[11px] px-2 py-1 rounded-full bg-white/45 dark:bg-white/10 text-slate-500 dark:text-slate-400">Blur {backgroundSettings.blur}px</div>
+                                                                        <div className="text-[11px] px-2 py-1 rounded-full bg-white/45 dark:bg-white/10 text-slate-600 dark:text-slate-400">Blur {backgroundSettings.blur}px</div>
                                                                     </div>
                                                                     <div className="mt-3 h-1.5 rounded-full bg-white/40 dark:bg-white/10 overflow-hidden">
                                                                         <div className="h-full rounded-full bg-gradient-to-r from-blue-400 via-cyan-400 to-violet-400" style={{ width: `${backgroundSettings.overlayOpacity}%` }} />
@@ -833,9 +833,9 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                         <div className="flex items-center justify-between gap-3">
                                                             <div className="min-w-0">
                                                                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400 dark:text-slate-500">Current file</div>
-                                                                <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">{backgroundImage}</div>
+                                                                <div className="mt-1 text-xs text-slate-600 dark:text-slate-400 truncate">{backgroundImage}</div>
                                                             </div>
-                                                            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/5 dark:bg-white/5 text-[11px] text-slate-500 dark:text-slate-400">
+                                                            <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/5 dark:bg-white/5 text-[11px] text-slate-600 dark:text-slate-400">
                                                                 <SlidersHorizontal size={11} />
                                                                 实时预览
                                                             </div>
@@ -864,7 +864,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                 <div className="flex items-center justify-between gap-3">
                                                     <div>
                                                         <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">图片来源</div>
-                                                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">更换后会立即应用到所有支持背景透出的页面</div>
+                                                        <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">更换后会立即应用到所有支持背景透出的页面</div>
                                                     </div>
                                                     <button
                                                         onClick={handlePickBackgroundImage}
@@ -885,7 +885,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                             <input type="range" min="20" max="90" value={backgroundSettings.overlayOpacity} onChange={(e) => updateBackgroundSettings({ overlayOpacity: parseInt(e.target.value, 10) })} className="flex-1 h-2 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-blue-500" />
                                                             <span className="w-10 text-right text-sm font-semibold text-slate-700 dark:text-slate-200">{backgroundSettings.overlayOpacity}%</span>
                                                         </div>
-                                                        <div className="text-xs text-slate-500 dark:text-slate-400">数值越高，背景越柔和，阅读更稳定</div>
+                                                        <div className="text-xs text-slate-600 dark:text-slate-400">数值越高，背景越柔和，阅读更稳定</div>
                                                     </div>
 
                                                     <div className="space-y-2 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-slate-50/80 dark:bg-vnote-surface/45 p-3">
@@ -897,7 +897,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                             <input type="range" min="10" max="85" value={backgroundSettings.contentOpacity} onChange={(e) => updateBackgroundSettings({ contentOpacity: parseInt(e.target.value, 10) })} className="flex-1 h-2 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-emerald-500" />
                                                             <span className="w-10 text-right text-sm font-semibold text-slate-700 dark:text-slate-200">{backgroundSettings.contentOpacity}%</span>
                                                         </div>
-                                                        <div className="text-xs text-slate-500 dark:text-slate-400">调高后正文面板更稳重，调低后背景更有氛围</div>
+                                                        <div className="text-xs text-slate-600 dark:text-slate-400">调高后正文面板更稳重，调低后背景更有氛围</div>
                                                     </div>
 
                                                     <div className="space-y-2 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-slate-50/80 dark:bg-vnote-surface/45 p-3">
@@ -909,13 +909,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                             <input type="range" min="0" max="24" value={backgroundSettings.blur} onChange={(e) => updateBackgroundSettings({ blur: parseInt(e.target.value, 10) })} className="flex-1 h-2 bg-slate-200 dark:bg-slate-600 rounded-full appearance-none cursor-pointer accent-violet-500" />
                                                             <span className="w-10 text-right text-sm font-semibold text-slate-700 dark:text-slate-200">{backgroundSettings.blur}px</span>
                                                         </div>
-                                                        <div className="text-xs text-slate-500 dark:text-slate-400">轻微模糊能保留氛围感，同时减少背景干扰</div>
+                                                        <div className="text-xs text-slate-600 dark:text-slate-400">轻微模糊能保留氛围感，同时减少背景干扰</div>
                                                     </div>
 
                                                     <div className="space-y-3 rounded-xl border border-slate-200/70 dark:border-vnote-border/70 bg-slate-50/80 dark:bg-vnote-surface/45 p-3">
                                                         <div className="text-sm font-medium text-slate-700 dark:text-slate-300">布局方式</div>
                                                         <div className="space-y-2">
-                                                            <div className="text-xs text-slate-500 dark:text-slate-400">填充</div>
+                                                            <div className="text-xs text-slate-600 dark:text-slate-400">填充</div>
                                                             <div className="grid grid-cols-2 gap-2">
                                                                 {([
                                                                     { label: "铺满", value: "cover" },
@@ -937,7 +937,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                             </div>
                                                         </div>
                                                         <div className="space-y-2">
-                                                            <div className="text-xs text-slate-500 dark:text-slate-400">定位</div>
+                                                            <div className="text-xs text-slate-600 dark:text-slate-400">定位</div>
                                                             <div className="grid grid-cols-3 gap-2">
                                                                 {([
                                                                     { label: "顶部", value: "top" },
@@ -960,7 +960,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                             </div>
                                                         </div>
                                                         <div className="space-y-2">
-                                                            <div className="text-xs text-slate-500 dark:text-slate-400">附着</div>
+                                                            <div className="text-xs text-slate-600 dark:text-slate-400">附着</div>
                                                             <div className="grid grid-cols-2 gap-2">
                                                                 {([
                                                                     { label: "固定", value: "fixed" },
@@ -1107,7 +1107,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                                 <h3 className="text-slate-900 dark:text-slate-100 font-medium line-clamp-1">
                                                     {prompt.title}
                                                 </h3>
-                                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2 line-clamp-2 flex-1">
+                                                <p className="text-sm text-slate-600 dark:text-slate-400 mt-2 line-clamp-2 flex-1">
                                                     {prompt.description || prompt.content}
                                                 </p>
                                                 <div className="flex gap-2 mt-4">
@@ -1131,7 +1131,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                             ) : (
                                 <div className="col-span-3 text-center py-16 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
                                     <MessageSquareText size={48} className="mx-auto text-slate-600 mb-4" />
-                                    <h3 className="text-lg font-medium text-slate-500 dark:text-slate-400 mb-2">暂无提示词</h3>
+                                    <h3 className="text-lg font-medium text-slate-600 dark:text-slate-400 mb-2">暂无提示词</h3>
                                     <p className="text-sm text-slate-500 mb-4">
                                         {promptSearchQuery
                                             ? "没有找到匹配的提示词"
@@ -1341,7 +1341,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     <Plus size={14} /> 新增配置
                                 </button>
                             </div>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">
                                 用于将字幕文本转换为向量，实现"基于视频"的语义搜索
                             </p>
                             <div className="space-y-3">
@@ -1377,7 +1377,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     <Plus size={14} /> 新增配置
                                 </button>
                             </div>
-                            <p className="text-xs text-slate-500 dark:text-slate-400 mb-3">
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">
                                 对初步检索结果进行重新排序，提高相关性（可选）
                             </p>
                             <div className="space-y-3">

@@ -161,7 +161,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-8 text-slate-500 dark:text-slate-400">
+      <div className="flex items-center justify-center py-8 text-slate-600 dark:text-slate-400">
         <Loader2 size={18} className="animate-spin mr-2" />
         加载数据管理中...
       </div>
@@ -172,7 +172,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
     <div className="space-y-6">
       <div className={`rounded-2xl border border-slate-200 dark:border-vnote-border p-4 md:p-5 space-y-4 ${glassCard}`}>
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
             <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-vnote-surface px-2.5 py-1">
               <Database size={12} />
               当前范围：{selectedNoteLabel}
@@ -250,7 +250,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
             value={String(overview?.total_file_count ?? 0)}
           />
           <div className="rounded-xl border border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface px-4 py-3">
-            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm mb-1.5">
+            <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-1.5">
               <Database size={14} />
               数据目录
             </div>
@@ -270,12 +270,12 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
             <div key={category.key} className="px-4 py-4 flex items-center gap-4">
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{category.label}</div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                   {category.file_count} 项 · {formatBytes(category.size_bytes)}
                   {category.note_count !== null ? ` · ${category.note_count} 条笔记` : ""}
                 </div>
               </div>
-              <div className="text-sm text-slate-500 dark:text-slate-400 mr-2">
+              <div className="text-sm text-slate-600 dark:text-slate-400 mr-2">
                 {formatBytes(category.reclaimable_bytes)}
               </div>
               <button
@@ -378,7 +378,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{group.label}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">
                       {group.items_count} 项 · {formatBytes(group.reclaimable_bytes)}
                     </div>
                   </div>
@@ -389,7 +389,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
                 {group.sample_paths.length > 0 && (
                   <div className="mt-3 space-y-1">
                     {group.sample_paths.slice(0, 3).map((path) => (
-                      <div key={path} className="text-xs text-slate-500 dark:text-slate-400 truncate">{path}</div>
+                      <div key={path} className="text-xs text-slate-600 dark:text-slate-400 truncate">{path}</div>
                     ))}
                   </div>
                 )}
@@ -415,7 +415,7 @@ function SummaryMetric({
 }) {
   return (
     <div className="rounded-xl border border-slate-200 dark:border-vnote-border bg-slate-50 dark:bg-vnote-surface px-4 py-3">
-      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400 text-sm mb-1.5">
+      <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400 text-sm mb-1.5">
         <Icon size={14} />
         {label}
       </div>

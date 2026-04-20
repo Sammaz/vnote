@@ -112,7 +112,7 @@ function ModelSelector({ models, currentModelId, onModelChange }: ModelSelectorP
             </button>
           ))}
           {models.length === 0 && (
-            <div className="px-3 py-1.5 text-xs text-slate-400 dark:text-neutral-500">
+            <div className="px-3 py-1.5 text-xs text-slate-500 dark:text-neutral-500">
               暂无可用模型
             </div>
           )}

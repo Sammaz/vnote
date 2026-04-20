@@ -1405,7 +1405,7 @@ export function KnowledgeBaseChat() {
                 "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer",
                 mode === "standard"
                   ? cn(glassMenu, "text-blue-600 dark:text-blue-400 shadow-sm")
-                  : "text-slate-500 dark:text-slate-400"
+                  : "text-slate-600 dark:text-slate-400"
               )}
             >
               标准模式
@@ -1416,14 +1416,14 @@ export function KnowledgeBaseChat() {
                 "flex-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer",
                 mode === "agent"
                   ? cn(glassMenu, "text-violet-600 dark:text-violet-400 shadow-sm")
-                  : "text-slate-500 dark:text-slate-400"
+                  : "text-slate-600 dark:text-slate-400"
               )}
             >
               Agent 模式
             </button>
           </div>
 
-          <div className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+          <div className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
             {mode === "agent"
               ? "适合复杂问题：自动规划、多轮检索、证据汇总与轨迹展示。"
               : "适合快速问答：单次检索、直接回答、重点展示引用来源。"}
@@ -1432,7 +1432,7 @@ export function KnowledgeBaseChat() {
 
         <div className="flex-1 overflow-y-auto p-3 space-y-2">
           {filteredSessions.length === 0 ? (
-            <div className="px-3 py-10 text-center text-sm text-slate-400 dark:text-slate-500">
+            <div className="px-3 py-10 text-center text-sm text-slate-500 dark:text-slate-500">
               {mode === "agent" ? "Agent 模式下还没有历史会话" : "标准模式下还没有历史会话"}
             </div>
           ) : (
@@ -1500,7 +1500,7 @@ export function KnowledgeBaseChat() {
                             {session.title}
                           </div>
                         )}
-                        <div className="mt-1 text-[11px] text-slate-400 dark:text-slate-500 truncate">
+                        <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-500 truncate">
                           {session.last_message_at ?? session.updated_at}
                         </div>
                       </button>
@@ -1591,7 +1591,7 @@ export function KnowledgeBaseChat() {
                       <div className="text-sm font-medium text-slate-800 dark:text-slate-100">
                         删除后将无法恢复
                       </div>
-                      <div className="mt-1 break-all text-sm leading-6 text-slate-500 dark:text-slate-400">
+                      <div className="mt-1 break-all text-sm leading-6 text-slate-600 dark:text-slate-400">
                         {pendingDeleteSessionTitle ? (
                           <>
                             你将删除对话
@@ -1647,7 +1647,7 @@ export function KnowledgeBaseChat() {
                   {mode === "agent" ? "多步检索" : "快速问答"}
                 </span>
               </div>
-              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 truncate">
+              <div className="mt-1 text-xs text-slate-600 dark:text-slate-400 truncate">
                 回答严格基于当前知识库内容
               </div>
             </div>
@@ -1659,14 +1659,14 @@ export function KnowledgeBaseChat() {
                   "px-2.5 py-1.5 rounded-lg text-xs border transition-colors cursor-pointer",
                   compactMessageDensity
                     ? "border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
-                    : "border-slate-200/80 dark:border-vnote-border/80 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5"
+                    : "border-slate-200/80 dark:border-vnote-border/80 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5"
                 )}
               >
                 紧凑显示
               </button>
               <button
                 onClick={() => setShowRightPanel((prev) => !prev)}
-                className="p-2 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                className="p-2 rounded-xl border border-slate-200/80 dark:border-vnote-border/80 text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors cursor-pointer"
                 title={showRightPanel ? "隐藏侧栏" : "显示侧栏"}
               >
                 {showRightPanel ? <PanelRightClose className="w-4 h-4" /> : <PanelRightOpen className="w-4 h-4" />}
@@ -1684,7 +1684,7 @@ export function KnowledgeBaseChat() {
                   <div className="text-base font-semibold text-slate-800 dark:text-slate-100 mb-2">
                     {mode === "agent" ? "让 Agent 在本地知识库中多步检索与分析" : "基于本地知识库快速问答"}
                   </div>
-                  <div className="text-sm text-slate-500 dark:text-slate-400 leading-7">
+                  <div className="text-sm text-slate-600 dark:text-slate-400 leading-7">
                     {mode === "agent"
                       ? "适合比较、归纳、找差异、查证据缺口等复杂问题。右侧会展示检索轨迹与证据汇总。"
                       : "适合快速追问某个主题。系统会先检索知识片段，再基于证据生成回答。"}
@@ -1692,7 +1692,7 @@ export function KnowledgeBaseChat() {
                   <div className="mt-5 grid gap-3 text-left sm:grid-cols-2">
                     <div className={cn("rounded-2xl border border-white/60 dark:border-white/8 p-4", glassCard)}>
                       <div className="text-xs font-medium text-slate-700 dark:text-slate-200">推荐提问方式</div>
-                      <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">
+                      <div className="mt-2 text-xs leading-6 text-slate-600 dark:text-slate-400">
                         {mode === "agent"
                           ? "例如：比较几篇笔记对同一主题的共识与差异，指出证据缺口。"
                           : "例如：这组笔记里如何定义某个概念？有哪些关键结论？"}
@@ -1700,7 +1700,7 @@ export function KnowledgeBaseChat() {
                     </div>
                     <div className={cn("rounded-2xl border border-white/60 dark:border-white/8 p-4", glassCard)}>
                       <div className="text-xs font-medium text-slate-700 dark:text-slate-200">当前回答范围</div>
-                      <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400">
+                      <div className="mt-2 text-xs leading-6 text-slate-600 dark:text-slate-400">
                         只基于当前知识库检索结果回答；如果证据不足，会明确说明缺少哪些依据。
                       </div>
                     </div>
@@ -1726,7 +1726,7 @@ export function KnowledgeBaseChat() {
                               {statusQueries.map((query) => (
                                 <span
                                   key={query}
-                                  className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-500 dark:text-slate-400"
+                                  className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-600 dark:text-slate-400"
                                 >
                                   {query}
                                 </span>
@@ -1772,7 +1772,7 @@ export function KnowledgeBaseChat() {
                           {statusQueries.map((query) => (
                             <span
                               key={query}
-                              className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-500 dark:text-slate-400"
+                              className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-600 dark:text-slate-400"
                             >
                               {query}
                             </span>
@@ -1864,7 +1864,7 @@ export function KnowledgeBaseChat() {
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => fileInputRef.current?.click()}
-                    className="p-2 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
+                    className="p-2 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-white/5 transition-colors cursor-pointer"
                     title="上传图片"
                   >
                     <Paperclip className="w-4 h-4" />
@@ -1885,7 +1885,7 @@ export function KnowledgeBaseChat() {
                     {showModelDropdown && (
                       <div className="absolute bottom-full left-0 mb-2 w-60 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/45 dark:bg-vnote-card/68 backdrop-blur-2xl shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 p-1 max-h-64 overflow-y-auto">
                         {aiConfigs.length === 0 ? (
-                          <div className="px-3 py-2 text-xs text-slate-400">未配置 AI 模型</div>
+                          <div className="px-3 py-2 text-xs text-slate-500">未配置 AI 模型</div>
                         ) : (
                           aiConfigs.map((config) => (
                             <button
@@ -1994,7 +1994,7 @@ export function KnowledgeBaseChat() {
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">证据与轨迹</div>
-                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">
                     {selectedInspectorMessage ? "查看当前回答的引用与执行过程" : "选择一条 AI 回答查看详情"}
                   </div>
                 </div>
@@ -2006,7 +2006,7 @@ export function KnowledgeBaseChat() {
                     "px-2.5 py-1.5 rounded-lg text-xs border cursor-pointer transition-colors",
                     showSourcesExpanded
                       ? "border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
-                      : "border-slate-200/80 dark:border-vnote-border/80 text-slate-500 dark:text-slate-400"
+                      : "border-slate-200/80 dark:border-vnote-border/80 text-slate-600 dark:text-slate-400"
                   )}
                 >
                   来源展开
@@ -2017,7 +2017,7 @@ export function KnowledgeBaseChat() {
                     "px-2.5 py-1.5 rounded-lg text-xs border cursor-pointer transition-colors",
                     showAgentTrace
                       ? "border-violet-200 bg-violet-50 text-violet-600 dark:border-violet-800 dark:bg-violet-900/20 dark:text-violet-300"
-                      : "border-slate-200/80 dark:border-vnote-border/80 text-slate-500 dark:text-slate-400"
+                      : "border-slate-200/80 dark:border-vnote-border/80 text-slate-600 dark:text-slate-400"
                   )}
                 >
                   轨迹展示
@@ -2036,7 +2036,7 @@ export function KnowledgeBaseChat() {
                 </div>
                 <div className="p-3 space-y-2">
                   {(selectedInspectorMessage?.sources ?? latestAssistantMessage?.sources ?? []).length === 0 ? (
-                    <div className="px-2 py-6 text-center text-xs text-slate-400 dark:text-slate-500 leading-6">
+                    <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
                       {selectedInspectorMessage?.status === "error"
                         ? "这次回答在生成阶段报错，还没有成功落库来源。"
                         : selectedInspectorMessage?.status === "aborted"
@@ -2073,12 +2073,12 @@ export function KnowledgeBaseChat() {
                                 <span className="truncate">{source.note_title}</span>
                               </div>
                               {showSourcesExpanded && (
-                                <div className="mt-2 text-xs leading-6 text-slate-500 dark:text-slate-400 line-clamp-5">
+                                <div className="mt-2 text-xs leading-6 text-slate-600 dark:text-slate-400 line-clamp-5">
                                   {source.content}
                                 </div>
                               )}
                             </div>
-                            <div className="text-[11px] text-slate-400 dark:text-slate-500 flex-shrink-0">
+                            <div className="text-[11px] text-slate-500 dark:text-slate-500 flex-shrink-0">
                               {(source.score * 100).toFixed(1)}%
                             </div>
                           </div>
@@ -2094,13 +2094,13 @@ export function KnowledgeBaseChat() {
                   <div className="px-4 py-3 border-b border-slate-200/60 dark:border-vnote-border/60 flex items-center gap-2">
                     <Sparkles className="w-4 h-4 text-violet-500" />
                     <div className="text-sm font-medium text-slate-700 dark:text-slate-200">Agent 轨迹</div>
-                    <div className="ml-auto text-xs text-slate-400 dark:text-slate-500">
+                    <div className="ml-auto text-xs text-slate-500 dark:text-slate-500">
                       {selectedInspectorMessage?.agentRun?.trace_steps.length ?? 0} 步
                     </div>
                   </div>
                   <div className="p-3 space-y-2">
                     {!selectedInspectorMessage?.agentRun ? (
-                      <div className="px-2 py-6 text-center text-xs text-slate-400 dark:text-slate-500 leading-6">
+                      <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
                         {selectedInspectorMessage?.status === "error"
                           ? "这次 Agent 执行在完成前出错，轨迹可能只有部分步骤。"
                           : "当前回答不是 Agent 结果，或轨迹尚未生成。"}
@@ -2122,11 +2122,11 @@ export function KnowledgeBaseChat() {
                                   {step.step_index + 1}
                                 </span>
                                 <div className="text-xs font-medium text-slate-700 dark:text-slate-200">{step.title}</div>
-                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-slate-100 dark:bg-white/5 text-slate-500 dark:text-slate-400">
+                                <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-slate-400">
                                   {step.step_type}
                                 </span>
                               </div>
-                              <div className="text-xs leading-6 text-slate-500 dark:text-slate-400 whitespace-pre-wrap">
+                              <div className="text-xs leading-6 text-slate-600 dark:text-slate-400 whitespace-pre-wrap">
                                 {step.content}
                               </div>
                               {metadataSections.length > 0 && (
@@ -2140,7 +2140,7 @@ export function KnowledgeBaseChat() {
                                         {section.value.map((item, index) => (
                                           <span
                                             key={`${step.id}-${section.label}-${index}`}
-                                            className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-500 dark:text-slate-400 max-w-full break-all"
+                                            className="inline-flex items-center rounded-full px-2 py-1 text-[11px] bg-slate-100 dark:bg-black/20 text-slate-600 dark:text-slate-400 max-w-full break-all"
                                           >
                                             {item}
                                           </span>
@@ -2251,13 +2251,13 @@ function MessageCard({
               activeCitationRank={activeCitationRank}
             />
           ) : message.status === "streaming" ? (
-            <div className="flex items-center gap-2 text-slate-400 dark:text-slate-500 py-1">
+            <div className="flex items-center gap-2 text-slate-500 dark:text-slate-500 py-1">
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.25s]" />
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce [animation-delay:-0.12s]" />
               <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" />
             </div>
           ) : (
-            <div className="text-sm leading-7 text-slate-400 dark:text-slate-500">
+            <div className="text-sm leading-7 text-slate-500 dark:text-slate-500">
               已中止
             </div>
           )}

@@ -177,7 +177,7 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
       {/* Stats & Actions */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <Database className="w-4 h-4 text-slate-400" />
+          <Database className="w-4 h-4 text-slate-500" />
           <span className="text-sm text-slate-600 dark:text-slate-300">
             {indexedCount}/{notesWithSummary.length} 笔记已索引
           </span>
@@ -205,7 +205,7 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
                 "px-3 py-1.5 text-xs font-medium rounded-lg transition-colors cursor-pointer",
                 notesWithSummary.length > 0
                   ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30"
-                  : "bg-slate-100 dark:bg-neutral-700 text-slate-400 cursor-not-allowed"
+                  : "bg-slate-100 dark:bg-neutral-700 text-slate-500 cursor-not-allowed"
               )}
             >
               全部索引
@@ -222,14 +222,14 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
       {/* Note list */}
       <div className="flex-1 overflow-y-auto space-y-1">
         {loading && (
-          <div className="flex items-center justify-center py-12 text-slate-400 text-sm">
+          <div className="flex items-center justify-center py-12 text-slate-500 text-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
             加载中...
           </div>
         )}
 
         {!loading && notesWithSummary.length === 0 && (
-          <div className="text-center py-12 text-slate-400 text-sm">
+          <div className="text-center py-12 text-slate-500 text-sm">
             暂无包含视觉化总结的笔记
           </div>
         )}
@@ -263,7 +263,7 @@ function IndexProgressBar({
           索引中... {progress.completed + progress.failed}/{progress.total}
         </span>
         {progress.noteTitle && (
-          <span className="text-xs text-slate-400 truncate max-w-[200px]">
+          <span className="text-xs text-slate-500 truncate max-w-[200px]">
             {progress.noteTitle}
           </span>
         )}
@@ -306,7 +306,7 @@ function NoteIndexRow({
       case "failed":
         return <XCircle className="w-4 h-4 text-red-500" />;
       default:
-        return <AlertCircle className="w-4 h-4 text-slate-300 dark:text-slate-600" />;
+        return <AlertCircle className="w-4 h-4 text-slate-500 dark:text-slate-600" />;
     }
   };
 

@@ -359,7 +359,7 @@ function UploadPlaceholder({ onSelectVideo }: { onSelectVideo: () => void }) {
       <h3 className="text-lg font-medium text-slate-700 dark:text-slate-200 mb-2">
         拖拽视频文件到这里
       </h3>
-      <p className="text-sm text-slate-700 dark:text-slate-400 mb-4">
+      <p className="text-sm text-slate-600 dark:text-slate-400 mb-4">
         支持多个视频同时上传 · MP4, MKV, AVI, TS 等格式 · 自动匹配同名字幕
       </p>
       <button

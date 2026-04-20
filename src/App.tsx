@@ -254,7 +254,7 @@ function AppContent() {
           </button>
           <button
             onClick={handleClose}
-            className="h-9 w-12 flex items-center justify-center text-slate-500 hover:text-white hover:bg-red-500/90 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-red-500/30"
+            className="h-9 w-12 flex items-center justify-center text-slate-500 hover:text-white dark:hover:text-white hover:bg-red-500/90 transition-all duration-200 cursor-pointer hover:shadow-lg hover:shadow-red-500/30"
           >
             <X size={14} />
           </button>

@@ -116,7 +116,7 @@ function SortableMixedCard({
             <h3 className="font-medium text-slate-700 dark:text-slate-100 truncate group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
               {item.data.name}
             </h3>
-            <p className="text-xs text-slate-500 mt-2">
+            <p className="text-xs text-slate-600 mt-2">
               {item.data.item_count} 项内容
             </p>
           </div>
@@ -469,7 +469,7 @@ export function CollectionPage() {
 
   if (!collection) {
     return (
-      <div className="flex-1 flex items-center justify-center text-slate-400 dark:text-slate-500">
+      <div className="flex-1 flex items-center justify-center text-slate-500 dark:text-slate-500">
         请选择一个合集
       </div>
     );
@@ -504,7 +504,7 @@ export function CollectionPage() {
               {parentCollection && (
                 <button
                   onClick={handleBackToParent}
-                  className="flex-shrink-0 p-1.5 rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
+                  className="flex-shrink-0 p-1.5 rounded-lg text-slate-600 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-vnote-hover transition-colors cursor-pointer"
                   title={`返回到 ${parentCollection.name}`}
                 >
                   <ArrowLeft className="w-5 h-5" />
@@ -532,7 +532,7 @@ export function CollectionPage() {
                 onClick={handleMenuClick}
                 className={cn(
                   "flex-shrink-0 p-2 rounded-lg transition-colors cursor-pointer",
-                  "text-slate-500 dark:text-slate-400",
+                  "text-slate-600 dark:text-slate-400",
                   "hover:bg-slate-200 dark:hover:bg-neutral-700"
                 )}
                 title="更多操作"
@@ -541,7 +541,7 @@ export function CollectionPage() {
               </button>
             </div>
             {collection.description && (
-              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400 line-clamp-2">
+              <p className="mt-2 text-sm text-slate-600 dark:text-slate-400 line-clamp-2">
                 {collection.description}
               </p>
             )}
@@ -560,8 +560,8 @@ export function CollectionPage() {
           </div>
         ) : !hasContent ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <BookOpen className="w-12 h-12 text-slate-500 dark:text-slate-600 mb-4" />
-            <p className="text-slate-500 dark:text-slate-400 mb-4">
+            <BookOpen className="w-12 h-12 text-slate-400 dark:text-slate-500 mb-4" />
+            <p className="text-slate-600 dark:text-slate-400 mb-4">
               这个合集还没有内容。
             </p>
             <button

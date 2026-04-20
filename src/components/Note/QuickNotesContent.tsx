@@ -1034,14 +1034,14 @@ export function QuickNotesContent({
               </div>
               <div className="p-4 space-y-3">
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">链接地址</label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">链接地址</label>
                   <input
                     type="url"
                     value={linkUrl}
                     onChange={(e) => setLinkUrl(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleApplyLink()}
                     placeholder="https://example.com"
-                    className={cn("w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all", glassInput)}
+                    className={cn("w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all", glassInput)}
                     autoFocus
                   />
                 </div>
@@ -1114,20 +1114,20 @@ export function QuickNotesContent({
 
                 <div className="flex items-center gap-3">
                   <div className="flex-1 h-px bg-slate-200 dark:bg-slate-600" />
-                  <span className="text-xs text-slate-400">或</span>
+                  <span className="text-xs text-slate-500">或</span>
                   <div className="flex-1 h-px bg-slate-200 dark:bg-slate-600" />
                 </div>
 
                 {/* URL input */}
                 <div>
-                  <label className="block text-xs font-medium text-slate-500 dark:text-slate-400 mb-1.5">图片地址</label>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1.5">图片地址</label>
                   <input
                     type="url"
                     value={imageUrl}
                     onChange={(e) => setImageUrl(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleApplyImage()}
                     placeholder="https://example.com/image.jpg"
-                    className={cn("w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-200 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all", glassInput)}
+                    className={cn("w-full px-3 py-2 text-sm border border-slate-200 dark:border-slate-600 rounded-lg text-slate-800 dark:text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all", glassInput)}
                   />
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-1">

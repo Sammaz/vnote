@@ -503,7 +503,7 @@ export function Sidebar() {
 
           {/* 笔记记录 */}
           <div className="flex items-center justify-between px-2 mb-2">
-            <span className="text-xs font-medium text-slate-500 uppercase tracking-wider">
+            <span className="text-xs font-medium text-slate-600 uppercase tracking-wider">
               笔记记录
             </span>
           </div>
@@ -542,7 +542,7 @@ export function Sidebar() {
       {/* 底部空间 */}
       <div className="p-2 mt-auto">
         {!collapsed && (
-          <div className="text-xs text-slate-500 dark:text-slate-600 text-center animate-fade-in">
+          <div className="text-xs text-slate-600 dark:text-slate-500 text-center animate-fade-in">
             {notes.length} 条笔记
           </div>
         )}
