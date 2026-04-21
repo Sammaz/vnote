@@ -9,7 +9,7 @@
 //!
 //! 以及辅助模式章节生成功能
 
-use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
+use crate::ai_pool::{execute_streaming_and_collect, get_ai_pool_manager};
 use crate::chapter::{
     analyze_subtitle_for_chapters, capture_video_screenshot, sanitize_filename,
     split_subtitle_into_chunks, format_timestamp_for_filename, Chapter, ChapterData, ChapterGenerationEvent,
@@ -734,7 +734,7 @@ fn extract_ai_note_screenshots(
     Ok(screenshot_regex.replace_all(&replaced, "").trim().to_string())
 }
 
-/// 调用AI API（非流式，通过ai_pool统一管理并发）
+/// 调用AI API（流式收集，通过ai_pool统一管理并发）
 async fn call_ai_api(
     ai_config: &AiConfig,
     prompt: &str,
@@ -746,19 +746,14 @@ async fn call_ai_api(
     }
 
     // 通过ai_pool执行请求
-    let req = NonStreamingRequest {
-        config: ai_config.clone(),
-        prompt: prompt.to_string(),
-    };
-
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
+    let response = execute_streaming_and_collect(ai_config.clone(), prompt.to_string(), abort_flag).await?;
 
     // 再次检查中止
     if abort_flag.load(Ordering::Relaxed) {
         return Err("已中止".to_string());
     }
 
-    Ok(response.content)
+    Ok(response)
 }
 
 // ============================================================================
@@ -1144,15 +1139,10 @@ async fn optimize_chapter_titles(
     let prompt = build_title_optimization_prompt(chapters);
 
     // 调用 AI
-    let req = NonStreamingRequest {
-        config: ai_config.clone(),
-        prompt,
-    };
-
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
+    let response = execute_streaming_and_collect(ai_config.clone(), prompt, abort_flag).await?;
 
     // 解析响应
-    match parse_title_optimization_response(&response.content) {
+    match parse_title_optimization_response(&response) {
         Ok(optimized) => {
             // 创建 ID 映射（index -> chapter id）
             let id_map: Vec<String> = chapters.iter().map(|ch| ch.id.clone()).collect();
@@ -1366,13 +1356,9 @@ pub async fn generate_detailed_reading_chapters(
                     .unwrap_or(total_duration);
 
                 let prompt = build_detailed_reading_chapter_prompt(&subtitle_text);
-                let req = NonStreamingRequest {
-                    config: ai_config,
-                    prompt,
-                };
 
-                match execute_non_streaming_with_abort(req, &abort_flag).await {
-                    Ok(response) => match parse_detailed_reading_chapter_response(&response.content) {
+                match execute_streaming_and_collect(ai_config, prompt, &abort_flag).await {
+                    Ok(ref response) => match parse_detailed_reading_chapter_response(response) {
                         Ok((title, content)) => Ok((chunk_idx, title, content, start_time, end_time)),
                         Err(e) => {
                             child_abort_flag.store(true, Ordering::Relaxed);
@@ -2537,14 +2523,10 @@ pub async fn generate_chapters_with_markers(
 
             // 调用 AI 生成章节标题和内容
             let prompt = build_chapter_content_prompt(&subtitle_text);
-            let req = NonStreamingRequest {
-                config: ai_config,
-                prompt,
-            };
 
-            let (title, content) = match execute_non_streaming_with_abort(req, &abort_flag).await {
-                Ok(response) => {
-                    match parse_chapter_content_response(&response.content) {
+            let (title, content) = match execute_streaming_and_collect(ai_config, prompt, &abort_flag).await {
+                Ok(ref response) => {
+                    match parse_chapter_content_response(response) {
                         Ok((t, c)) => (t, c),
                         Err(e) => {
                             tracing::error!("[辅助模式章节生成] 第 {} 段解析失败: {}", segment_idx + 1, e);

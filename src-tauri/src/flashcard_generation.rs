@@ -2,7 +2,7 @@
 //!
 //! 基于视频字幕内容生成问答闪记卡，帮助用户巩固知识点
 
-use crate::ai_pool::{execute_non_streaming_with_abort, NonStreamingRequest};
+use crate::ai_pool::execute_streaming_and_collect;
 use crate::chapter::split_subtitle_into_chunks;
 use crate::db::AiConfig;
 use crate::subtitle::parse_subtitle_file;
@@ -147,18 +147,13 @@ async fn call_ai_api(
         return Err("已中止".to_string());
     }
 
-    let req = NonStreamingRequest {
-        config: ai_config.clone(),
-        prompt: prompt.to_string(),
-    };
-
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
+    let response = execute_streaming_and_collect(ai_config.clone(), prompt.to_string(), abort_flag).await?;
 
     if abort_flag.load(Ordering::Relaxed) {
         return Err("已中止".to_string());
     }
 
-    Ok(response.content)
+    Ok(response)
 }
 
 // ============================================================================

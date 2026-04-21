@@ -1,4 +1,4 @@
-use crate::ai_pool::{execute_non_streaming_with_abort, execute_streaming_chat, get_ai_pool_manager, ChatSystemPromptKind, NonStreamingRequest, StreamingChatRequest, StreamEvent};
+use crate::ai_pool::{execute_streaming_and_collect, execute_streaming_chat, get_ai_pool_manager, ChatSystemPromptKind, StreamingChatRequest, StreamEvent};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use crate::db::{Database};
@@ -184,14 +184,7 @@ pub async fn generate_suggested_questions(
 
     let prompt = format!("{}\n\n{}", system_prompt, truncated_text);
 
-    // 4. Call AI API via ai_pool (non-streaming)
-    let req = NonStreamingRequest {
-        config: ai_config,
-        prompt,
-    };
-
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
-    let content = response.content;
+    let content = execute_streaming_and_collect(ai_config, prompt, abort_flag).await?;
 
     // 5. Parse questions (split by lines, take up to 10 non-empty lines)
     let questions: Vec<String> = content

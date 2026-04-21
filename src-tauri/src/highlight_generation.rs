@@ -5,7 +5,7 @@
 //! - 情绪高点 (emotional): 抓取情绪爆点、语义冲突、破防片段
 //! - 爆款片段 (viral): 挑选最有传播潜力的切片
 
-use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
+use crate::ai_pool::{execute_streaming_and_collect, get_ai_pool_manager};
 use crate::db::{AiConfig, Database};
 use crate::subtitle::parse_subtitle_file;
 use crate::settings::{SettingsManager, keys, defaults};
@@ -340,18 +340,13 @@ async fn call_ai_api(
         return Err("已中止".to_string());
     }
 
-    let req = NonStreamingRequest {
-        config: ai_config.clone(),
-        prompt: prompt.to_string(),
-    };
-
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
+    let response = execute_streaming_and_collect(ai_config.clone(), prompt.to_string(), abort_flag).await?;
 
     if abort_flag.load(Ordering::Relaxed) {
         return Err("已中止".to_string());
     }
 
-    Ok(response.content)
+    Ok(response)
 }
 
 // ============================================================================

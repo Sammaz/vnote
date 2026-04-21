@@ -5,7 +5,7 @@
 //! - ffmpeg 截图捕获
 //! - 章节数据结构管理
 
-use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
+use crate::ai_pool::{execute_streaming_and_collect, get_ai_pool_manager};
 use crate::db::AiConfig;
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
 use crate::settings::{SettingsManager, keys, defaults};
@@ -288,12 +288,8 @@ pub async fn analyze_subtitle_for_chapters(
     if total_chunks == 1 {
         let chunk_size = chunks[0].end_index - chunks[0].start_index;
         let prompt = build_chapter_prompt(&chunks[0].text, false, chunk_size, None);
-        let req = NonStreamingRequest {
-            config: ai_config.clone(),
-            prompt,
-        };
-        let response = execute_non_streaming_with_abort(req, abort_flag).await?;
-        return parse_chapter_ai_response(&response.content, subtitle_entries.len());
+        let response = execute_streaming_and_collect(ai_config.clone(), prompt, abort_flag).await?;
+        return parse_chapter_ai_response(&response, subtitle_entries.len());
     }
 
     // 多段并发处理：使用 tokio::spawn 并发生成章节（并发控制由 AI 线程池统一管理）
@@ -325,14 +321,9 @@ pub async fn analyze_subtitle_for_chapters(
             );
 
             let prompt = build_chapter_prompt(&chunk.text, true, chunk_size, Some(&chunk_info));
-            let req = NonStreamingRequest {
-                config: ai_config,
-                prompt,
-            };
-
-            let result = match execute_non_streaming_with_abort(req, &abort_flag).await {
-                Ok(response) => {
-                    match parse_chapter_ai_response(&response.content, chunk.end_index - chunk.start_index) {
+            let result = match execute_streaming_and_collect(ai_config, prompt, &abort_flag).await {
+                Ok(ref response) => {
+                    match parse_chapter_ai_response(response, chunk.end_index - chunk.start_index) {
                         Ok(chapters) => {
                             tracing::info!("[章节生成] 第 {} 段生成了 {} 个章节", chunk_idx + 1, chapters.len());
                             Ok((chunk_idx, chunk.start_index, chunk.end_index, chapters))

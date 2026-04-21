@@ -3,7 +3,7 @@
 //! 功能：
 //! - 为每个 AiConfig 独立管理并发槽位
 //! - 统一的请求中止机制
-//! - 流式/非流式请求支持
+//! - 流式请求支持（含后台收集模式）
 
 use crate::db::AiConfig;
 use crate::prompts;
@@ -941,53 +941,98 @@ async fn execute_streaming_chat_single_attempt(
 }
 
 // ============================================================================
-// 非流式请求实现
+// 流式收集（无事件发射，适用于后台生成任务）
 // ============================================================================
 
-/// 非流式AI请求
-pub struct NonStreamingRequest {
-    pub config: AiConfig,
-    pub prompt: String,
+pub async fn execute_streaming_and_collect(
+    config: AiConfig,
+    prompt: String,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    let pool = get_ai_pool_manager();
+    let controller = pool
+        .ensure_controller(&config.id, config.concurrent_limit, config.rate_limit)
+        .await;
+    let _permit = controller.acquire_with_abort(abort_flag).await?;
+    if abort_flag.load(Ordering::Relaxed) {
+        return Err("请求已取消".to_string());
+    }
+    streaming_collect_with_retry(pool, &config, &prompt, abort_flag).await
 }
 
-/// 非流式响应
-pub struct NonStreamingResponse {
-    pub content: String,
-}
-
-/// 单次非流式API调用尝试
-async fn execute_non_streaming_single_attempt(
+async fn streaming_collect_with_retry(
     pool: &AiPoolManager,
-    req: &NonStreamingRequest,
-) -> Result<NonStreamingResponse, String> {
-    let client = pool.get_or_create_http_client(&req.config.id, req.config.request_timeout).await;
+    config: &AiConfig,
+    prompt: &str,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    let mut last_error = String::new();
+    let max_attempts = effective_max_attempts();
+    let config_id = config.id.clone();
+    let model_id = config.model.clone();
 
-    let base_url = req.config.base_url.trim_end_matches('/');
-    let api_url = format!("{}/chat/completions", base_url);
+    for attempt in 1..=max_attempts {
+        if abort_flag.load(Ordering::Relaxed) {
+            return Err("请求已取消".to_string());
+        }
+        tracing::info!(
+            config_id = %config_id, model_id = %model_id, attempt, max_attempts,
+            "[AI池] 开始流式收集请求尝试"
+        );
+        match streaming_collect_single(pool, config, prompt, abort_flag).await {
+            Ok(content) => return Ok(content),
+            Err(e) => {
+                last_error = e.clone();
+                if e.contains("请求已取消") { return Err(e); }
+                if !is_retryable_error(&e) { return Err(e); }
+                tracing::warn!(
+                    config_id = %config_id, model_id = %model_id, attempt, error = %e,
+                    "[AI池] 流式收集请求尝试失败"
+                );
+                if attempt < max_attempts && !abort_flag.load(Ordering::Relaxed) {
+                    tokio::time::sleep(calculate_retry_delay(attempt)).await;
+                }
+            }
+        }
+    }
+
+    tracing::error!(
+        config_id = %config_id, model_id = %model_id, error = %last_error,
+        "[AI池] 流式收集请求已耗尽重试次数"
+    );
+    Err(format!("请求失败，已重试 {} 次: {}", max_attempts, last_error))
+}
+
+async fn streaming_collect_single(
+    pool: &AiPoolManager,
+    config: &AiConfig,
+    prompt: &str,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    let client = pool.get_or_create_http_client(&config.id, config.request_timeout).await;
+    let api_url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
 
     let body = json!({
-        "model": req.config.model,
+        "model": config.model,
         "messages": [
-            {
-                "role": "system",
-                "content": "你是一个专业的视频内容分析师，擅长提取和总结信息。"
-            },
-            {
-                "role": "user",
-                "content": req.prompt
-            }
+            { "role": "system", "content": "你是一个专业的视频内容分析师，擅长提取和总结信息。" },
+            { "role": "user", "content": prompt }
         ],
-        "temperature": 0.7
+        "stream": true
     });
 
     let response = client
         .post(&api_url)
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {}", req.config.api_key))
+        .header("Authorization", format!("Bearer {}", config.api_key))
         .json(&body)
         .send()
         .await
         .map_err(|e| format!("请求失败: {}", e))?;
+
+    if abort_flag.load(Ordering::Relaxed) {
+        return Err("请求已取消".to_string());
+    }
 
     if !response.status().is_success() {
         let status = response.status();
@@ -995,138 +1040,35 @@ async fn execute_non_streaming_single_attempt(
         return Err(format!("API错误 {}: {}", status, error_text));
     }
 
-    let json_value: Value = response
-        .json()
-        .await
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+    let mut content = String::new();
 
-    let content = json_value["choices"][0]["message"]["content"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| "响应格式错误".to_string())?;
-
-    Ok(NonStreamingResponse { content })
-}
-
-/// 执行非流式请求（带中止支持，用于生成任务）
-pub async fn execute_non_streaming_with_abort(
-    req: NonStreamingRequest,
-    abort_flag: &Arc<AtomicBool>,
-) -> Result<NonStreamingResponse, String> {
-    let pool = get_ai_pool_manager();
-
-    // 获取并发控制器
-    let controller = pool
-        .ensure_controller(&req.config.id, req.config.concurrent_limit, req.config.rate_limit)
-        .await;
-
-    // 获取许可
-    // permit 会在 Drop 时自动释放
-    let permit = controller.acquire_with_abort(abort_flag).await?;
-
-    // 检查中止
-    if abort_flag.load(Ordering::Relaxed) {
-        drop(permit); // 提前释放许可
-        return Err("请求已取消".to_string());
-    }
-
-    // 执行实际的API调用（带重试）
-    let result = execute_non_streaming_impl_with_abort(pool, &req, abort_flag).await;
-
-    // 再次检查中止（处理请求过程中被取消的情况）
-    if abort_flag.load(Ordering::Relaxed) {
-        drop(permit); // 提前释放许可
-        return Err("请求已取消".to_string());
-    }
-
-    // permit 在这里 drop，自动释放许可
-    result
-}
-
-/// 实际的非流式API调用实现（带中止支持和重试）
-async fn execute_non_streaming_impl_with_abort(
-    pool: &AiPoolManager,
-    req: &NonStreamingRequest,
-    abort_flag: &Arc<AtomicBool>,
-) -> Result<NonStreamingResponse, String> {
-    let mut last_error = String::new();
-    let max_attempts = effective_max_attempts();
-    let model_id = req.config.model.clone();
-    let config_id = req.config.id.clone();
-
-    for attempt in 1..=max_attempts {
-        tracing::info!(
-            config_id = %config_id,
-            model_id = %model_id,
-            attempt,
-            max_attempts,
-            "[AI池] 开始非流式请求尝试"
-        );
-
-        // 检查中止
+    while let Some(chunk_result) = stream.next().await {
         if abort_flag.load(Ordering::Relaxed) {
             return Err("请求已取消".to_string());
         }
+        let chunk = chunk_result.map_err(|e| format!("流错误: {}", e))?;
+        buffer.push_str(&String::from_utf8_lossy(&chunk));
 
-        match execute_non_streaming_single_attempt(pool, req).await {
-            Ok(response) => return Ok(response),
-            Err(e) => {
-                last_error = e.clone();
-
-                // 如果是取消请求，不重试
-                if e.contains("请求已取消") {
-                    return Err(e);
-                }
-
-                let retryable = is_retryable_error(&e);
-                tracing::warn!(
-                    config_id = %config_id,
-                    model_id = %model_id,
-                    attempt,
-                    max_attempts,
-                    retryable,
-                    error = %e,
-                    "[AI池] 非流式请求尝试失败"
-                );
-
-                // 如果错误不可重试，直接返回
-                if !retryable {
-                    return Err(e);
-                }
-
-                // 如果还有重试机会，等待后重试
-                if attempt < max_attempts {
-                    if abort_flag.load(Ordering::Relaxed) {
-                        return Err("请求已取消".to_string());
+        while let Some(line_end) = buffer.find('\n') {
+            let line = buffer[..line_end].trim().to_string();
+            buffer = buffer[line_end + 1..].to_string();
+            if line.is_empty() || line == "data: [DONE]" { continue; }
+            if let Some(data) = line.strip_prefix("data: ") {
+                if let Ok(json) = serde_json::from_str::<Value>(data) {
+                    if let Some(delta) = json["choices"][0]["delta"]["content"].as_str() {
+                        content.push_str(delta);
                     }
-
-                    let delay = calculate_retry_delay(attempt);
-                    tracing::warn!(
-                        config_id = %config_id,
-                        model_id = %model_id,
-                        attempt,
-                        max_attempts,
-                        delay_ms = delay.as_millis(),
-                        "[AI池] 准备重试非流式请求"
-                    );
-                    tokio::time::sleep(delay).await;
                 }
             }
         }
     }
 
-    tracing::error!(
-        config_id = %config_id,
-        model_id = %model_id,
-        max_attempts,
-        error = %last_error,
-        "[AI池] 非流式请求已耗尽重试次数"
-    );
-
-    Err(format!(
-        "请求失败，已重试 {} 次: {}",
-        max_attempts, last_error
-    ))
+    if content.trim().is_empty() {
+        return Err("响应内容为空".to_string());
+    }
+    Ok(content)
 }
 
 // ============================================================================

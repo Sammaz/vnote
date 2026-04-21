@@ -1,6 +1,6 @@
 use crate::ai_pool::{
-    execute_non_streaming_with_abort, execute_streaming_chat, get_ai_pool_manager, ChatMessage as AiChatMessage,
-    ChatSystemPromptKind, ImageData, NonStreamingRequest, StreamingChatRequest,
+    execute_streaming_and_collect, execute_streaming_chat, get_ai_pool_manager, ChatMessage as AiChatMessage,
+    ChatSystemPromptKind, ImageData, StreamingChatRequest,
 };
 use crate::db::{AiConfig, Database, KnowledgeAgentTraceStep, KnowledgeChatMessage, KnowledgeChatSession};
 use crate::DATABASE;
@@ -917,17 +917,8 @@ async fn expand_queries(
         user_message
     );
 
-    match execute_non_streaming_with_abort(
-        NonStreamingRequest {
-            config: ai_config.clone(),
-            prompt,
-        },
-        abort_flag,
-    )
-    .await
-    {
-        Ok(response) => response
-            .content
+    match execute_streaming_and_collect(ai_config.clone(), prompt, abort_flag).await {
+        Ok(content) => content
             .lines()
             .map(str::trim)
             .filter(|line| !line.is_empty())
@@ -949,15 +940,9 @@ async fn generate_agent_plan(
         step_budget, user_message
     );
 
-    execute_non_streaming_with_abort(
-        NonStreamingRequest {
-            config: ai_config.clone(),
-            prompt,
-        },
-        abort_flag,
-    )
+    execute_streaming_and_collect(ai_config.clone(), prompt, abort_flag)
     .await
-    .map(|response| response.content.trim().to_string())
+    .map(|content| content.trim().to_string())
     .unwrap_or_else(|_| {
         format!(
             "- 明确用户问题的核心目标\n- 按主题检索相关 visual_summary 片段\n- 汇总跨笔记证据并标出缺口\n- 基于检索结果给出结构化回答\n- 若依据不足，明确说明不确定项\n\n原始问题：{}",
@@ -994,18 +979,9 @@ async fn generate_agent_queries(
         if evidence_titles.is_empty() { "- 暂无命中" } else { &evidence_titles }
     );
 
-    match execute_non_streaming_with_abort(
-        NonStreamingRequest {
-            config: ai_config.clone(),
-            prompt,
-        },
-        abort_flag,
-    )
-    .await
-    {
-        Ok(response) => {
-            let lines = response
-                .content
+    match execute_streaming_and_collect(ai_config.clone(), prompt, abort_flag).await {
+        Ok(content) => {
+            let lines = content
                 .lines()
                 .map(str::trim)
                 .filter(|line| !line.is_empty())

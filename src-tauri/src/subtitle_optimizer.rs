@@ -5,7 +5,7 @@
 //! - 去除语气词、添加标点、重组句子、合理分段
 //! - 双语字幕统一输出为中文
 
-use crate::ai_pool::{execute_non_streaming_with_abort, get_ai_pool_manager, NonStreamingRequest};
+use crate::ai_pool::{execute_streaming_and_collect, get_ai_pool_manager};
 use crate::db::AiConfig;
 use crate::get_db;
 use serde::{Deserialize, Serialize};
@@ -188,13 +188,8 @@ async fn optimize_single_chapter(
 ) -> Result<String, String> {
     let prompt = build_subtitle_optimization_prompt(&chapter.subtitle_text, chapter.has_bilingual);
 
-    let request = NonStreamingRequest {
-        config: config.clone(),
-        prompt,
-    };
-
-    let response = execute_non_streaming_with_abort(request, abort_flag).await?;
-    Ok(response.content)
+    let response = execute_streaming_and_collect(config.clone(), prompt, abort_flag).await?;
+    Ok(response)
 }
 
 async fn optimize_chapters_internal(

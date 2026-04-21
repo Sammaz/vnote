@@ -5,7 +5,7 @@
 //! 2. 逐章生成内容 (GENERATOR阶段)
 //! 3. 拼接完整markdown
 
-use crate::ai_pool::{execute_non_streaming_with_abort, NonStreamingRequest};
+use crate::ai_pool::execute_streaming_and_collect;
 use crate::db::{AiConfig, Note};
 use crate::subtitle::{parse_subtitle_file, format_timestamp};
 use crate::DATABASE;
@@ -313,17 +313,11 @@ async fn generate_outline(
 ) -> Result<BlueprintOutline, String> {
     let prompt = build_outline_prompt(subtitle_content, video_title);
 
-    let req = NonStreamingRequest {
-        config: ai_config.clone(),
-        prompt,
-    };
+    let response = execute_streaming_and_collect(ai_config.clone(), prompt, abort_flag).await?;
 
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
-
-    // 清洗并解析JSON响应
-    let cleaned_content = clean_json_str(&response.content);
+    let cleaned_content = clean_json_str(&response);
     let outline: BlueprintOutline = serde_json::from_str(&cleaned_content)
-        .map_err(|e| format!("解析大纲JSON失败: {}. 原始响应: {}", e, response.content))?;
+        .map_err(|e| format!("解析大纲JSON失败: {}. 原始响应: {}", e, response))?;
 
     Ok(outline)
 }
@@ -338,14 +332,9 @@ async fn generate_chapter_content(
 ) -> Result<String, String> {
     let prompt = build_chapter_prompt(chapter, subtitle_content, total_chapters);
 
-    let req = NonStreamingRequest {
-        config: ai_config.clone(),
-        prompt,
-    };
+    let response = execute_streaming_and_collect(ai_config.clone(), prompt, abort_flag).await?;
 
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
-
-    Ok(clean_markdown_str(&response.content))
+    Ok(clean_markdown_str(&response))
 }
 
 /// 阶段3: 生成综合内容
@@ -364,13 +353,8 @@ async fn generate_synthesizer_content(
 
     let prompt = build_synthesizer_prompt(video_title, &summaries, subtitle_content);
 
-    let req = NonStreamingRequest {
-        config: ai_config.clone(),
-        prompt,
-    };
-
-    let response = execute_non_streaming_with_abort(req, abort_flag).await?;
-    Ok(clean_markdown_str(&response.content))
+    let response = execute_streaming_and_collect(ai_config.clone(), prompt, abort_flag).await?;
+    Ok(clean_markdown_str(&response))
 }
 
 /// 主生成流程
