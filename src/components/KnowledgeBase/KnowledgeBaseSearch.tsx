@@ -65,20 +65,20 @@ export function KnowledgeBaseSearch() {
       {/* Results */}
       <div className="flex-1 overflow-y-auto space-y-3">
         {searching && (
-          <div className="flex items-center justify-center py-12 text-slate-600 text-sm">
+          <div className="flex items-center justify-center py-12 text-slate-600 dark:text-slate-400 text-sm">
             <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mr-2" />
             搜索中...
           </div>
         )}
 
         {!searching && searched && results.length === 0 && (
-          <div className="text-center py-12 text-slate-600 text-sm">
+          <div className="text-center py-12 text-slate-600 dark:text-slate-400 text-sm">
             未找到相关内容，请尝试其他关键词
           </div>
         )}
 
         {!searching && !searched && (
-          <div className="text-center py-12 text-slate-600 text-sm">
+          <div className="text-center py-12 text-slate-600 dark:text-slate-400 text-sm">
             输入关键词搜索知识库中的笔记内容
           </div>
         )}

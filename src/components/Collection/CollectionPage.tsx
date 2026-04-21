@@ -116,7 +116,7 @@ function SortableMixedCard({
             <h3 className="font-medium text-slate-700 dark:text-slate-100 truncate group-hover:text-blue-500 dark:group-hover:text-blue-400 transition-colors">
               {item.data.name}
             </h3>
-            <p className="text-xs text-slate-600 mt-2">
+            <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
               {item.data.item_count} 项内容
             </p>
           </div>

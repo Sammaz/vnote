@@ -177,7 +177,7 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
       {/* Stats & Actions */}
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <Database className="w-4 h-4 text-slate-500" />
+          <Database className="w-4 h-4 text-slate-500 dark:text-slate-400" />
           <span className="text-sm text-slate-600 dark:text-slate-300">
             {indexedCount}/{notesWithSummary.length} 笔记已索引
           </span>
@@ -222,14 +222,14 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
       {/* Note list */}
       <div className="flex-1 overflow-y-auto space-y-1">
         {loading && (
-          <div className="flex items-center justify-center py-12 text-slate-500 text-sm">
+          <div className="flex items-center justify-center py-12 text-slate-500 dark:text-slate-400 text-sm">
             <Loader2 className="w-4 h-4 animate-spin mr-2" />
             加载中...
           </div>
         )}
 
         {!loading && notesWithSummary.length === 0 && (
-          <div className="text-center py-12 text-slate-500 text-sm">
+          <div className="text-center py-12 text-slate-500 dark:text-slate-400 text-sm">
             暂无包含视觉化总结的笔记
           </div>
         )}
@@ -263,7 +263,7 @@ function IndexProgressBar({
           索引中... {progress.completed + progress.failed}/{progress.total}
         </span>
         {progress.noteTitle && (
-          <span className="text-xs text-slate-500 truncate max-w-[200px]">
+          <span className="text-xs text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
             {progress.noteTitle}
           </span>
         )}

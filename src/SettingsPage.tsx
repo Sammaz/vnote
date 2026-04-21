@@ -542,7 +542,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         <span className="px-1.5 py-0.5 text-xs rounded bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">默认</span>
                     )}
                 </div>
-                <div className="text-xs text-slate-500 truncate">{config.model || config.base_url || "未配置"}</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400 truncate">{config.model || config.base_url || "未配置"}</div>
             </div>
             <button
                 onClick={onToggleDefault}
@@ -1000,13 +1000,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     onClick={() => setEditingPromptConfig(null)}
                                     className="p-2 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
                                 >
-                                    <ArrowLeft size={20} className="text-slate-500" />
+                                    <ArrowLeft size={20} className="text-slate-500 dark:text-slate-400" />
                                 </button>
                                 <div>
                                     <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
                                         {editingPromptConfig.id === "" ? "新增提示词" : "编辑提示词"}
                                     </h3>
-                                    <p className="text-sm text-slate-500">创建自定义提示词模板</p>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400">创建自定义提示词模板</p>
                                 </div>
                             </div>
                             <div className="space-y-6">
@@ -1019,7 +1019,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         placeholder="例如：视频内容总结助手"
                                         className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput}`}
                                     />
-                                    <p className="text-sm text-slate-500 mt-2">为提示词设置一个易于识别的名称</p>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">为提示词设置一个易于识别的名称</p>
                                 </div>
 
                                 <div className="flex flex-col w-full">
@@ -1031,7 +1031,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         placeholder="简要说明提示词的用途和使用场景"
                                         className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput}`}
                                     />
-                                    <p className="text-sm text-slate-500 mt-2">可选，帮助你快速了解这个提示词的作用</p>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">可选，帮助你快速了解这个提示词的作用</p>
                                 </div>
 
                                 <div className="flex flex-col w-full">
@@ -1043,7 +1043,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         rows={8}
                                         className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm resize-y min-h-[200px] ${glassInput}`}
                                     />
-                                    <p className="text-sm text-slate-500 mt-2">编写清晰、详细的 Prompt 指令，让 AI 能够准确理解你的需求</p>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">编写清晰、详细的 Prompt 指令，让 AI 能够准确理解你的需求</p>
                                 </div>
 
                             </div>
@@ -1130,9 +1130,9 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 </div>
                             ) : (
                                 <div className="col-span-3 text-center py-16 border border-dashed border-slate-300 dark:border-slate-700 rounded-xl">
-                                    <MessageSquareText size={48} className="mx-auto text-slate-600 mb-4" />
+                                    <MessageSquareText size={48} className="mx-auto text-slate-600 dark:text-slate-400 mb-4" />
                                     <h3 className="text-lg font-medium text-slate-600 dark:text-slate-400 mb-2">暂无提示词</h3>
-                                    <p className="text-sm text-slate-500 mb-4">
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
                                         {promptSearchQuery
                                             ? "没有找到匹配的提示词"
                                             : "创建您的第一个提示词模板，提升笔记生成效率"}
@@ -1160,13 +1160,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 onClick={closeEditor}
                                 className="p-2 hover:bg-slate-100 dark:hover:bg-vnote-hover rounded-lg transition-colors cursor-pointer"
                             >
-                                <ArrowLeft size={20} className="text-slate-500" />
+                                <ArrowLeft size={20} className="text-slate-500 dark:text-slate-400" />
                             </button>
                             <div>
                                 <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
                                     {getEditorTitle()}
                                 </h3>
-                                <p className="text-sm text-slate-500">{getEditorDescription()}</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400">{getEditorDescription()}</p>
                             </div>
                         </div>
                         <div className="space-y-6">
@@ -1179,7 +1179,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     placeholder={editingType === "ai" ? "例如：OpenAI、DeepSeek" : editingType === "embedding" ? "例如：OpenAI Embedding" : "例如：Cohere Reranker"}
                                     className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput}`}
                                 />
-                                <p className="text-sm text-slate-500 mt-2">为此配置设置一个易于识别的名称</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">为此配置设置一个易于识别的名称</p>
                             </div>
 
                             <div className="flex flex-col w-full">
@@ -1191,7 +1191,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     placeholder="例如：https://api.openai.com/v1"
                                     className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm font-mono ${glassInput}`}
                                 />
-                                <p className="text-sm text-slate-500 mt-2">API 服务的基础地址</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">API 服务的基础地址</p>
                             </div>
 
                             <div className="flex flex-col w-full">
@@ -1223,7 +1223,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     placeholder={editingType === "ai" ? "例如：gpt-4o、deepseek-chat" : editingType === "embedding" ? "例如：text-embedding-3-small" : "例如：rerank-multilingual-v3.0"}
                                     className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm font-mono ${glassInput}`}
                                 />
-                                <p className="text-sm text-slate-500 mt-2">要使用的模型 ID</p>
+                                <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">要使用的模型 ID</p>
                             </div>
 
                             {editingType === "ai" && (
@@ -1242,7 +1242,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                             {(currentConfig as AiConfig | null)?.concurrent_limit ?? 5}
                                         </span>
                                     </div>
-                                    <p className="text-sm text-slate-500 mt-3">同时生成的标签页数量，范围1-10，默认5</p>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-3">同时生成的标签页数量，范围1-10，默认5</p>
                                 </div>
                             )}
 
@@ -1263,7 +1263,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                             {(currentConfig as AiConfig | null)?.request_timeout === 0 ? "无限" : `${(currentConfig as AiConfig | null)?.request_timeout ?? 180}s`}
                                         </span>
                                     </div>
-                                    <p className="text-sm text-slate-500 mt-3">API 请求超时时间，范围0-600秒，0表示不设置超时，默认180秒</p>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-3">API 请求超时时间，范围0-600秒，0表示不设置超时，默认180秒</p>
                                 </div>
                             )}
 

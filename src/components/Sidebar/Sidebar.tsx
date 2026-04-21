@@ -95,9 +95,9 @@ const CollectionTreeMenuItem = memo(function CollectionTreeMenuItem({
         >
           {hasChildren && (
             expanded ? (
-              <ChevronDown className="w-3 h-3 text-slate-500" />
+              <ChevronDown className="w-3 h-3 text-slate-500 dark:text-slate-400" />
             ) : (
-              <ChevronRight className="w-3 h-3 text-slate-500" />
+              <ChevronRight className="w-3 h-3 text-slate-500 dark:text-slate-400" />
             )
           )}
         </span>
@@ -503,7 +503,7 @@ export function Sidebar() {
 
           {/* 笔记记录 */}
           <div className="flex items-center justify-between px-2 mb-2">
-            <span className="text-xs font-medium text-slate-600 uppercase tracking-wider">
+            <span className="text-xs font-medium text-slate-600 dark:text-slate-400 uppercase tracking-wider">
               笔记记录
             </span>
           </div>

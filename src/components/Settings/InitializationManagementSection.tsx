@@ -2053,7 +2053,7 @@ export function InitializationManagementSection({
                     </div>
                     <ChevronDown
                       size={18}
-                      className={`text-slate-500 transition-transform ${
+                      className={`text-slate-500 dark:text-slate-400 transition-transform ${
                         dashboardExpanded ? "rotate-180" : ""
                       }`}
                     />

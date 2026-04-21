@@ -1885,7 +1885,7 @@ export function KnowledgeBaseChat() {
                     {showModelDropdown && (
                       <div className="absolute bottom-full left-0 mb-2 w-60 rounded-2xl border border-white/45 dark:border-vnote-border/80 bg-white/45 dark:bg-vnote-card/68 backdrop-blur-2xl shadow-[0_20px_55px_rgba(15,23,42,0.22)] z-50 p-1 max-h-64 overflow-y-auto">
                         {aiConfigs.length === 0 ? (
-                          <div className="px-3 py-2 text-xs text-slate-500">未配置 AI 模型</div>
+                          <div className="px-3 py-2 text-xs text-slate-500 dark:text-slate-400">未配置 AI 模型</div>
                         ) : (
                           aiConfigs.map((config) => (
                             <button

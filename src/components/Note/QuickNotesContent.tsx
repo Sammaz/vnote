@@ -1065,7 +1065,7 @@ export function QuickNotesContent({
                     <button
                       onClick={handleApplyLink}
                       disabled={!linkUrl}
-                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:text-slate-500 dark:disabled:text-slate-400 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       应用
@@ -1114,7 +1114,7 @@ export function QuickNotesContent({
 
                 <div className="flex items-center gap-3">
                   <div className="flex-1 h-px bg-slate-200 dark:bg-slate-600" />
-                  <span className="text-xs text-slate-500">或</span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">或</span>
                   <div className="flex-1 h-px bg-slate-200 dark:bg-slate-600" />
                 </div>
 
@@ -1140,7 +1140,7 @@ export function QuickNotesContent({
                   <button
                     onClick={handleApplyImage}
                     disabled={!imageUrl}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-blue-500 hover:bg-blue-600 disabled:bg-slate-300 dark:disabled:bg-slate-700 disabled:text-slate-500 dark:disabled:text-slate-400 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5" />
                     插入图片

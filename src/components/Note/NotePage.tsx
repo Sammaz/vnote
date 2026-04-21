@@ -146,10 +146,10 @@ export function NotePage() {
   // 条件返回：在所有 hooks 之后
   if (!currentNote) {
     return (
-      <div className="flex-1 flex items-center justify-center text-slate-500">
+      <div className="flex-1 flex items-center justify-center text-slate-500 dark:text-slate-400">
         <div className="text-center">
           <p className="text-lg mb-2">未找到笔记</p>
-          <p className="text-sm text-slate-500">请从侧边栏选择一个笔记</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">请从侧边栏选择一个笔记</p>
         </div>
       </div>
     );

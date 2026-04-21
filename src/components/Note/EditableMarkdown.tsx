@@ -101,7 +101,7 @@ export function EditableMarkdown({
       <div className="flex items-center justify-center h-full">
         <div className="text-center">
           <Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-500">正在生成...</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">正在生成...</p>
         </div>
       </div>
     );

@@ -251,7 +251,7 @@ export function FlashcardContent({
           <button
             onClick={handleGenerate}
             disabled={!subtitlePath || !modelId}
-            className="inline-flex items-center gap-2 px-6 py-2.5 bg-yellow-500 hover:bg-yellow-600 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white text-sm font-medium rounded-xl transition-colors cursor-pointer disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-2 px-6 py-2.5 bg-yellow-500 hover:bg-yellow-600 disabled:bg-slate-300 dark:disabled:bg-slate-700 text-white disabled:text-slate-500 dark:disabled:text-slate-400 text-sm font-medium rounded-xl transition-colors cursor-pointer disabled:cursor-not-allowed"
           >
             <Zap className="w-4 h-4" />
             生成闪记卡
