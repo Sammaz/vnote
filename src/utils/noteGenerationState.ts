@@ -26,6 +26,48 @@ const noteGenerationStates = new Map<string, NoteGenerationState>();
 // 全局事件监听器管理（避免重复监听同一个generationId）
 export const activeListeners = new Map<string, () => void>();
 
+// 订阅者：noteId -> Set<callback>，使外部组件能在状态变更时被动接收通知，
+// 替代 setInterval 轮询，避免每秒 5 次无谓的整面板重渲染。
+type NoteStateListener = (state: NoteGenerationState) => void;
+const noteStateListeners = new Map<string, Set<NoteStateListener>>();
+
+function notifyNoteStateListeners(noteId: string) {
+  const set = noteStateListeners.get(noteId);
+  if (!set || set.size === 0) return;
+  const state = getNoteGenerationState(noteId);
+  for (const listener of set) {
+    try {
+      listener(state);
+    } catch (err) {
+      console.error("[noteGenerationState] listener error:", err);
+    }
+  }
+}
+
+/**
+ * 订阅指定笔记生成状态变化。
+ * 返回取消订阅函数。回调会在 setNoteGenerationState 被调用后同步触发。
+ */
+export function subscribeNoteGenerationState(
+  noteId: string,
+  listener: NoteStateListener
+): () => void {
+  let set = noteStateListeners.get(noteId);
+  if (!set) {
+    set = new Set();
+    noteStateListeners.set(noteId, set);
+  }
+  set.add(listener);
+  return () => {
+    const current = noteStateListeners.get(noteId);
+    if (!current) return;
+    current.delete(listener);
+    if (current.size === 0) {
+      noteStateListeners.delete(noteId);
+    }
+  };
+}
+
 // 获取或初始化笔记的生成状态
 export function getNoteGenerationState(noteId: string): NoteGenerationState {
   if (!noteGenerationStates.has(noteId)) {
@@ -53,6 +95,7 @@ export function getNoteGenerationState(noteId: string): NoteGenerationState {
 export function setNoteGenerationState(noteId: string, updates: Partial<NoteGenerationState>) {
   const state = getNoteGenerationState(noteId);
   Object.assign(state, updates);
+  notifyNoteStateListeners(noteId);
 }
 
 // 清理笔记的生成状态
@@ -78,6 +121,8 @@ export function clearNoteGenerationState(noteId: string) {
   }
   // 清理生成状态
   noteGenerationStates.delete(noteId);
+  // 清理订阅者，避免外部仍持有过期回调
+  noteStateListeners.delete(noteId);
   // 清理自动生成尝试记录（允许重新触发）
   attemptedAutoGenerateNoteIds.delete(noteId);
 }

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, memo, useCallback } from "react";
+import { useState, useRef, useEffect, useMemo, memo, useCallback } from "react";
 import { createPortal } from "react-dom";
 import {
   Sparkles,
@@ -386,8 +386,11 @@ export function Sidebar() {
   const [isHovered, setIsHovered] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
 
-  // 过滤掉已添加到合集的笔记
-  const filteredNotes = notes.filter((note) => !notesInCollections.has(note.id));
+  // 过滤掉已添加到合集的笔记（缓存结果，避免每次渲染都重新分配数组）
+  const filteredNotes = useMemo(
+    () => notes.filter((note) => !notesInCollections.has(note.id)),
+    [notes, notesInCollections]
+  );
 
   // 点击折叠
   const handleCollapse = () => {

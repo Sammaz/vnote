@@ -19,6 +19,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Captions, AlertCircle } from "lucide-react";
 import { SubtitleRowWithMarker } from "./SubtitleRowWithMarker";
+import { subscribeVideoTime } from "../../hooks/useVideoTime";
 import type { SubtitleEntry, ScreenshotMarker } from "../../types";
 
 /**
@@ -158,6 +159,12 @@ export function AssistModeView({
   }, [state.subtitles]);
 
   // 监听视频时间更新，高亮当前字幕行并自动滚动
+  // 使用 ref 读取最新 activeSubtitleIndex，避免每次激活字幕变化都重绑监听器
+  const activeSubtitleIndexRef = useRef(state.activeSubtitleIndex);
+  useEffect(() => {
+    activeSubtitleIndexRef.current = state.activeSubtitleIndex;
+  }, [state.activeSubtitleIndex]);
+
   useEffect(() => {
     if (state.subtitles.length === 0) return;
 
@@ -172,7 +179,7 @@ export function AssistModeView({
         timestamp: Date.now(),
       };
       // 立即更新高亮到目标字幕行，不等待 video-time-update 事件
-      if (targetIndex !== null && targetIndex !== state.activeSubtitleIndex) {
+      if (targetIndex !== null && targetIndex !== activeSubtitleIndexRef.current) {
         setState(prev => ({ ...prev, activeSubtitleIndex: targetIndex }));
         lastScrolledIndexRef.current = targetIndex;
         const element = document.getElementById(`subtitle-row-${state.subtitles[targetIndex].index}`);
@@ -182,10 +189,7 @@ export function AssistModeView({
       }
     };
 
-    const handleVideoTimeUpdate = (e: Event) => {
-      const event = e as CustomEvent<{ time: number }>;
-      const currentTime = event.detail.time;
-
+    const unsubscribeVideoTime = subscribeVideoTime((currentTime) => {
       // 检查是否在用户主动 seek 后的短时间内
       const userSeek = userSeekRef.current;
       if (userSeek) {
@@ -201,7 +205,7 @@ export function AssistModeView({
 
       const index = findCurrentEntryIndex(currentTime);
 
-      if (index !== state.activeSubtitleIndex) {
+      if (index !== activeSubtitleIndexRef.current) {
         setState(prev => ({ ...prev, activeSubtitleIndex: index }));
 
         // 自动滚动到当前字幕行（避免频繁滚动）
@@ -213,15 +217,14 @@ export function AssistModeView({
           }
         }
       }
-    };
+    });
 
     window.addEventListener("seek-video", handleSeekVideo);
-    window.addEventListener("video-time-update", handleVideoTimeUpdate);
     return () => {
       window.removeEventListener("seek-video", handleSeekVideo);
-      window.removeEventListener("video-time-update", handleVideoTimeUpdate);
+      unsubscribeVideoTime();
     };
-  }, [state.subtitles, state.activeSubtitleIndex, findCurrentEntryIndex, findEntryIndexByTargetTime]);
+  }, [state.subtitles, findCurrentEntryIndex, findEntryIndexByTargetTime]);
 
   // 获取指定字幕索引的截图标记
   const getMarkerForIndex = useCallback((index: number): ScreenshotMarker | null => {

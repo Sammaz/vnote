@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { DetailedReadingData, SubtitleEntry } from "../../types";
 import { DetailedReadingChapterCard } from "./DetailedReadingChapterCard";
 
 interface DetailedReadingViewProps {
   data: DetailedReadingData;
-  currentTime: number;
+  currentChapterId: string | null;
   subtitleEntries?: SubtitleEntry[];
   showSubtitles?: boolean;
   subtitleOptimizationEnabled?: boolean;
@@ -16,7 +16,7 @@ interface DetailedReadingViewProps {
 
 export function DetailedReadingView({
   data,
-  currentTime,
+  currentChapterId,
   subtitleEntries = [],
   showSubtitles = false,
   subtitleOptimizationEnabled = false,
@@ -49,13 +49,6 @@ export function DetailedReadingView({
       window.removeEventListener("resize", check);
     };
   }, []);
-
-  const currentChapterId = useMemo(() => {
-    const chapter = data.chapters.find(
-      c => currentTime >= c.start_time && currentTime < c.end_time
-    );
-    return chapter?.id || null;
-  }, [data.chapters, currentTime]);
 
   return (
     <div ref={containerRef} className="p-1 h-full">

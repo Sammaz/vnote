@@ -61,6 +61,38 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
   const fileInputRef = useRef<HTMLInputElement>(null);
   const unlistenRef = useRef<UnlistenFn | null>(null);
   const isStreamingRef = useRef(false);
+  // 流式 token 缓冲：避免每个 chunk 都触发数组拷贝 + setState 重渲染
+  const streamBufferRef = useRef<{ messageId: string; pending: string } | null>(null);
+  const streamFrameRef = useRef<number | null>(null);
+
+  const flushStreamBuffer = useCallback(() => {
+    streamFrameRef.current = null;
+    const buffer = streamBufferRef.current;
+    if (!buffer || !buffer.pending) return;
+    const { messageId, pending } = buffer;
+    buffer.pending = "";
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === messageId ? { ...msg, content: msg.content + pending } : msg
+      )
+    );
+  }, []);
+
+  const scheduleStreamFlush = useCallback(() => {
+    if (streamFrameRef.current !== null) return;
+    streamFrameRef.current = window.requestAnimationFrame(flushStreamBuffer);
+  }, [flushStreamBuffer]);
+
+  // 卸载时取消未完成的 rAF，避免回调在卸载后执行
+  useEffect(() => {
+    return () => {
+      if (streamFrameRef.current !== null) {
+        cancelAnimationFrame(streamFrameRef.current);
+        streamFrameRef.current = null;
+      }
+      streamBufferRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     isStreamingRef.current = isStreaming;
@@ -376,19 +408,22 @@ export function ChatWindow({ noteId, modelId, suggestedQuestions = [] }: ChatWin
           const data = event.payload;
 
           if (data.type === "Delta" && data.content) {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === assistantId
-                  ? { ...msg, content: msg.content + data.content }
-                  : msg
-              )
-            );
+            const buffer = streamBufferRef.current;
+            if (buffer && buffer.messageId === assistantId) {
+              buffer.pending += data.content;
+            } else {
+              streamBufferRef.current = { messageId: assistantId, pending: data.content };
+            }
+            scheduleStreamFlush();
           } else if (data.type === "Done") {
+            // 在结束前 flush 残余 buffer，确保最后几个 token 被写入
+            flushStreamBuffer();
             unlisten();
             unlistenRef.current = null;
             setIsStreaming(false);
             setCurrentRequestId(null);
             setCurrentStreamingMessageId(null);
+            streamBufferRef.current = null;
 
             if (!data.success && data.error) {
               setMessages((prev) =>

@@ -8,6 +8,7 @@ import { deriveOptions } from "markmap-view";
 import { cleanMarkdownText, extractFirstTimestamp } from "../../utils/markdownRendererUtils";
 import { cn } from "../../utils/cn";
 import { useGlassBg } from "../../hooks/useGlassBg";
+import { subscribeVideoTime } from "../../hooks/useVideoTime";
 
 interface AiNoteMindMapProps {
   markdown: string;
@@ -511,12 +512,7 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
       void focusNodeByUid(activeItem.uid);
     };
 
-    const handleVideoTimeUpdate = (event: Event) => {
-      const currentTime = (event as CustomEvent<{ time: number }>).detail?.time;
-      if (typeof currentTime !== "number") {
-        return;
-      }
-
+    const unsubscribeVideoTime = subscribeVideoTime((currentTime) => {
       const userSeek = userSeekRef.current;
       if (userSeek) {
         const timeSinceSeek = Date.now() - userSeek.timestamp;
@@ -540,13 +536,12 @@ export function AiNoteMindMap({ markdown, noteTitle, depthControlContainer, onSv
       }
 
       void focusNodeByUid(activeItem.uid);
-    };
+    });
 
     window.addEventListener("seek-video", handleSeekVideo);
-    window.addEventListener("video-time-update", handleVideoTimeUpdate);
     return () => {
       window.removeEventListener("seek-video", handleSeekVideo);
-      window.removeEventListener("video-time-update", handleVideoTimeUpdate);
+      unsubscribeVideoTime();
     };
   }, [syncItems, focusNodeByUid]);
 

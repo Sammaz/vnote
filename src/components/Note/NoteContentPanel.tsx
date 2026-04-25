@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
+import { subscribeVideoTime } from "../../hooks/useVideoTime";
 import {
   FileText,
   BookOpen,
@@ -63,6 +64,7 @@ import { ConfirmDialog } from "../common/ConfirmDialog";
 import {
   getNoteGenerationState,
   setNoteGenerationState,
+  subscribeNoteGenerationState,
   activeListeners,
   registerActiveGenerationId,
   unregisterActiveGenerationId,
@@ -287,9 +289,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 字幕滚动状态
   const [autoScroll, setAutoScroll] = useState(true);
-  // 当前视频播放时间（秒）
-  const [currentTime, setCurrentTime] = useState(0);
-  // 当前播放的章节ID
+  // 当前播放章节 ID（仅在章节切换时更新，避免每帧重渲染）
+  const [currentChapterId, setCurrentChapterId] = useState<string | null>(null);
   // 用户点击章节的时间戳（用于忽略视频时间更新）
   const userClickTimeRef = useRef<number>(0);
   // 自动滚动控制
@@ -611,15 +612,14 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   }, [note.id]);
 
   // 生成状态（从全局状态同步）
-  const [isGenerating, setIsGenerating] = useState(() => syncStateFromGlobal().isGenerating);
+  // 注意：isGenerating / progress / generationId 仅用于触发组件重渲染，
+  // 实际读取通过 getNoteGenerationState 即时获取，所以不绑定状态值。
+  const [, setIsGenerating] = useState(() => syncStateFromGlobal().isGenerating);
   const [, setRegeneratingTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().regeneratingTabs) as Set<TabType>);
-  const [progress, setProgress] = useState<{ current: number; total: number; message: string }>(() => ({ ...syncStateFromGlobal().progress }));
+  const [, setProgress] = useState<{ current: number; total: number; message: string }>(() => ({ ...syncStateFromGlobal().progress }));
   const [, setCompletedTabs] = useState<Set<TabType>>(() => new Set(syncStateFromGlobal().completedTabs) as Set<TabType>);
   const [failedTabs, setFailedTabs] = useState<Map<TabType, string>>(() => new Map(syncStateFromGlobal().failedTabs) as Map<TabType, string>);
-  const [generationId, setGenerationId] = useState<string | null>(() => syncStateFromGlobal().generationId);
-
-  // 用于触发重新渲染的计数器
-  const [, forceUpdate] = useState({});
+  const [, setGenerationId] = useState<string | null>(() => syncStateFromGlobal().generationId);
 
   // 切换笔记时从全局状态恢复，而不是盲目重置
   useEffect(() => {
@@ -653,9 +653,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       setBlueprintProgress(null);
     }
 
-    // 触发重新渲染以更新UI
-    forceUpdate({});
-
     // 如果该笔记正在生成中，确保事件监听器已设置
     if (globalState.generationId && globalState.isGenerating) {
       setupGenerationListener(note.id, globalState.generationId);
@@ -675,11 +672,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       .replace(/^_/, '') as TabType;
   }, []);
 
-  // 监听笔记内容变化，确保生成完成后更新显示
-  useEffect(() => {
-    // 当笔记内容更新时，触发重新渲染
-    forceUpdate({});
-  }, [note.custom_summary, note.detailed_reading, note.highlights, note.visual_summary, note.full_summary, note.ai_note_markdown, note.ai_note_meta]);
+  // 笔记内容变化时 React 会因 props 变化自动重渲染，
+  // 此处之前用 forceUpdate 强制双重渲染纯属冗余（已移除）。
 
   // 设置深度蓝图生成监听器
   const setupBlueprintListener = useCallback(async (noteId: string, genId: string) => {
@@ -878,7 +872,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         setCompletedTabs(new Set(updatedState.completedTabs) as Set<TabType>);
         setFailedTabs(new Map(updatedState.failedTabs) as Map<TabType, string>);
         setRegeneratingTabs(new Set(updatedState.regeneratingTabs) as Set<TabType>);
-        forceUpdate({});
       }
     });
 
@@ -887,28 +880,24 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     });
   }, [note.id, convertTabType]);
 
-  // 定期同步全局状态到组件state（用于跨组件更新）
+  // 订阅全局生成状态变更（替代 200ms 轮询，避免长时间运行时持续重渲染）
   useEffect(() => {
-    const interval = setInterval(() => {
+    const sync = () => {
       const globalState = getNoteGenerationState(note.id);
+      setIsGenerating(globalState.isGenerating);
+      setGenerationId(globalState.generationId);
+      setProgress({ ...globalState.progress });
+      setCompletedTabs(new Set(globalState.completedTabs) as Set<TabType>);
+      setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
+      setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
+      setChapterIsGenerating(globalState.isGeneratingChapters);
+    };
 
-      // 只有当状态真正变化时才更新
-      if (globalState.isGenerating !== isGenerating ||
-          globalState.generationId !== generationId ||
-          globalState.progress.message !== progress.message ||
-          globalState.isGeneratingChapters !== chapterIsGenerating) {
-        setIsGenerating(globalState.isGenerating);
-        setGenerationId(globalState.generationId);
-        setProgress({ ...globalState.progress });
-        setCompletedTabs(new Set(globalState.completedTabs) as Set<TabType>);
-        setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
-        setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
-        setChapterIsGenerating(globalState.isGeneratingChapters);
-      }
-    }, 200); // 每200ms同步一次
+    // 挂载时同步一次当前快照
+    sync();
 
-    return () => clearInterval(interval);
-  }, [note.id, isGenerating, generationId, progress.message, chapterIsGenerating]);
+    return subscribeNoteGenerationState(note.id, sync);
+  }, [note.id]);
 
   // 自定义提示词弹窗状态
   const [showPromptDialog, setShowPromptDialog] = useState(false);
@@ -974,31 +963,26 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 监听视频播放时间变化（用于原文细读当前时间同步）
+  // 监听视频播放时间变化（仅在章节切换时更新 state，避免每帧重渲染）
   useEffect(() => {
     if (activeTab !== "original") return;
 
-    const handleCurrentTimeUpdate = (e: Event) => {
-      const event = e as CustomEvent<{ time: number }>;
-      setCurrentTime(event.detail.time);
-    };
-
-    window.addEventListener("video-time-update", handleCurrentTimeUpdate);
-    return () => window.removeEventListener("video-time-update", handleCurrentTimeUpdate);
-  }, [activeTab]);
+    return subscribeVideoTime((time) => {
+      const chapter = getCurrentChapter(time);
+      const nextId = chapter?.id ?? null;
+      setCurrentChapterId((prev) => (prev === nextId ? prev : nextId));
+    });
+  }, [activeTab, getCurrentChapter]);
 
   // 字幕滚动自动跳转卡片
   useEffect(() => {
     if (!autoScroll || activeTab !== "original" || !detailedReadingData) return;
 
-    const handleVideoTimeUpdate = (e: Event) => {
+    return subscribeVideoTime((currentTime) => {
       // 如果用户刚刚点击过章节（500ms内），忽略视频时间更新带来的滚动
       if (Date.now() - userClickTimeRef.current < 500) {
         return;
       }
-
-      const event = e as CustomEvent<{ time: number }>;
-      const currentTime = event.detail.time;
 
       // 找到当前时间对应的章节
       const currentChapter = getCurrentChapter(currentTime);
@@ -1017,10 +1001,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
         }
         lastChapterIdRef.current = currentChapter.id;
       }
-    };
-
-    window.addEventListener("video-time-update", handleVideoTimeUpdate);
-    return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
+    });
   }, [autoScroll, activeTab, detailedReadingData, shouldAutoScroll, isAutoScrollingRef, getCurrentChapter]);
 
 
@@ -2607,7 +2588,7 @@ Video subtitles content:`;
                       </div>
                       <div className="py-1">
                         {detailedReadingData.chapters.map((chapter, index) => {
-                          const isCurrentChapter = chapter.id === getCurrentChapter(currentTime)?.id;
+                          const isCurrentChapter = chapter.id === currentChapterId;
                           const formatTime = (seconds: number): string => {
                             const hours = Math.floor(seconds / 3600);
                             const minutes = Math.floor((seconds % 3600) / 60);
@@ -3022,7 +3003,7 @@ Video subtitles content:`;
                       </div>
                       <div className="py-1">
                         {detailedReadingData.chapters.map((chapter, index) => {
-                          const isCurrentChapter = chapter.id === getCurrentChapter(currentTime)?.id;
+                          const isCurrentChapter = chapter.id === currentChapterId;
                           const formatTime = (seconds: number): string => {
                             const hours = Math.floor(seconds / 3600);
                             const minutes = Math.floor((seconds % 3600) / 60);
@@ -3697,7 +3678,7 @@ Video subtitles content:`;
             return (
               <DetailedReadingView
                 data={detailedReadingData}
-                currentTime={currentTime}
+                currentChapterId={currentChapterId}
                 subtitleEntries={subtitleEntries}
                 showSubtitles={showChapterSubtitles}
                 subtitleOptimizationEnabled={subtitleOptimizationEnabled}
@@ -4275,19 +4256,11 @@ function ScriptContent({ subtitlePath, autoScroll }: ScriptContentProps) {
   useEffect(() => {
     if (!autoScroll || subtitleEntries.length === 0) return;
 
-    const handleVideoTimeUpdate = (e: Event) => {
-      const event = e as CustomEvent<{ time: number }>;
-      const currentTime = event.detail.time;
+    return subscribeVideoTime((currentTime) => {
       const index = findCurrentEntryIndexBinary(subtitleEntries, currentTime);
-
-      if (index !== currentEntryIndex) {
-        setCurrentEntryIndex(index);
-      }
-    };
-
-    window.addEventListener("video-time-update", handleVideoTimeUpdate);
-    return () => window.removeEventListener("video-time-update", handleVideoTimeUpdate);
-  }, [autoScroll, subtitleEntries, currentEntryIndex]);
+      setCurrentEntryIndex((prev) => (prev === index ? prev : index));
+    });
+  }, [autoScroll, subtitleEntries]);
 
   // 当 autoScroll 关闭时，清除高亮
   useEffect(() => {

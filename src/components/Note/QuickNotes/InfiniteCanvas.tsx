@@ -820,9 +820,16 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
     setSelectedNodes(params.nodes.map(n => n.id));
   }, []);
 
-  // 键盘删除功能
+  // 键盘删除/复制/粘贴/撤销/重做
+  // 用 ref 读取最新状态，避免每次 nodes/edges 变化都解绑重绑监听器
+  const stateForKeysRef = useRef({ nodes, edges, selectedNodes, clipboard, history, historyIndex });
+  useEffect(() => {
+    stateForKeysRef.current = { nodes, edges, selectedNodes, clipboard, history, historyIndex };
+  }, [nodes, edges, selectedNodes, clipboard, history, historyIndex]);
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const snapshot = stateForKeysRef.current;
       // 删除选中的节点和边
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
@@ -830,15 +837,15 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
         setEdges((eds) => eds.filter((e) => !e.selected));
       }
       // 复制
-      if (e.ctrlKey && e.key === 'c' && selectedNodes.length > 0) {
+      if (e.ctrlKey && e.key === 'c' && snapshot.selectedNodes.length > 0) {
         e.preventDefault();
-        const nodesToCopy = nodes.filter((n) => selectedNodes.includes(n.id));
+        const nodesToCopy = snapshot.nodes.filter((n) => snapshot.selectedNodes.includes(n.id));
         setClipboard(nodesToCopy);
       }
       // 粘贴
-      if (e.ctrlKey && e.key === 'v' && clipboard.length > 0) {
+      if (e.ctrlKey && e.key === 'v' && snapshot.clipboard.length > 0) {
         e.preventDefault();
-        const newNodes = clipboard.map((n) => ({
+        const newNodes = snapshot.clipboard.map((n) => ({
           ...n,
           id: `${n.type}-${Date.now()}-${Math.random()}`,
           position: { x: n.position.x + 50, y: n.position.y + 50 },
@@ -847,26 +854,26 @@ export function InfiniteCanvas({ noteId, initialData, onContentChange }: Infinit
         setNodes((nds) => [...nds, ...newNodes]);
       }
       // 撤销
-      if (e.ctrlKey && e.key === 'z' && historyIndex > 0) {
+      if (e.ctrlKey && e.key === 'z' && snapshot.historyIndex > 0) {
         e.preventDefault();
-        const prevState = history[historyIndex - 1];
+        const prevState = snapshot.history[snapshot.historyIndex - 1];
         setNodes(prevState.nodes);
         setEdges(prevState.edges);
-        setHistoryIndex(historyIndex - 1);
+        setHistoryIndex(snapshot.historyIndex - 1);
       }
       // 重做
-      if (e.ctrlKey && e.key === 'y' && historyIndex < history.length - 1) {
+      if (e.ctrlKey && e.key === 'y' && snapshot.historyIndex < snapshot.history.length - 1) {
         e.preventDefault();
-        const nextState = history[historyIndex + 1];
+        const nextState = snapshot.history[snapshot.historyIndex + 1];
         setNodes(nextState.nodes);
         setEdges(nextState.edges);
-        setHistoryIndex(historyIndex + 1);
+        setHistoryIndex(snapshot.historyIndex + 1);
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nodes, edges, selectedNodes, clipboard, history, historyIndex, setNodes, setEdges]);
+  }, [setNodes, setEdges]);
 
   // 保存历史记录
   useEffect(() => {

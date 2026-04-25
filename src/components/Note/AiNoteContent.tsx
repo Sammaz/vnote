@@ -332,6 +332,7 @@ export function AiNoteContent({
     }
   }, [note.ai_note_markdown]);
 
+  const hasAiNote = Boolean(note.ai_note_markdown);
   useEffect(() => {
     const toolbarElement = toolbarRef.current;
     const measureLeftExpandedElement = toolbarMeasureLeftExpandedRef.current;
@@ -385,7 +386,10 @@ export function AiNoteContent({
     observer.observe(measureRightCompactElement);
 
     return () => observer.disconnect();
-  }, [note.ai_note_markdown, viewMode, isEditMode, hasCustomPrompt, aiNoteStyle, aiNoteScreenshotLabel]);
+    // 依赖只关心是否渲染了工具栏（hasAiNote）以及布局影响宽度的开关，
+    // 不依赖 note.ai_note_markdown 字符串本身——流式期间字符串变化会
+    // 导致 observer 反复重建，造成卡顿。
+  }, [hasAiNote, viewMode, isEditMode, hasCustomPrompt, aiNoteStyle, aiNoteScreenshotLabel]);
 
   return (
     <div className="h-full flex flex-col">

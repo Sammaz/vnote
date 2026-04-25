@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -35,7 +35,7 @@ function getLanguage(className?: string): string | undefined {
   return match?.[1];
 }
 
-export function MarkdownRenderer({
+function MarkdownRendererImpl({
   content,
   variant = "note",
   className,
@@ -187,3 +187,10 @@ export function MarkdownRenderer({
     </EvidenceCitationProvider>
   );
 }
+
+/**
+ * MarkdownRenderer 包了 React.memo：
+ * 父组件高频重渲染（如视频时间更新、流式 token）时，只要 props 浅相等就跳过 react-markdown 全量解析。
+ * 注意：调用方应保持 checkedItems / citationSources / onToggleCheckbox 等引用稳定。
+ */
+export const MarkdownRenderer = memo(MarkdownRendererImpl);
