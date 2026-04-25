@@ -16,6 +16,7 @@ use crate::db::{
     UpsertNoteInitializationRunInput,
 };
 use crate::note_generation;
+use crate::storage_paths;
 use crate::subtitle_optimizer::ChapterSubtitleInput;
 use crate::DATABASE;
 use serde::{Deserialize, Serialize};
@@ -1148,6 +1149,18 @@ async fn execute_note_tab_generation(
         }
     }
 
+    // 重新生成时清理对应的旧截图，避免章节边界变化或截图标记调整后残留孤儿文件
+    if config_regenerate(config) {
+        if let Err(err) = clear_tab_screenshots(app, &context.note_id, tab_type).await {
+            tracing::warn!(
+                "[初始化] 清理旧截图失败 (note_id={}, tab={:?}): {}",
+                context.note_id,
+                tab_type,
+                err
+            );
+        }
+    }
+
     let request = note_generation::GenerateNoteRequest {
         note_id: context.note_id.clone(),
         model_id: context.model_id.clone(),
@@ -1168,6 +1181,31 @@ async fn execute_note_tab_generation(
         Ok(_) => ItemExecutionResult::Completed,
         Err(err) => ItemExecutionResult::Failed(err),
     }
+}
+
+async fn clear_tab_screenshots(
+    app: &AppHandle,
+    note_id: &str,
+    tab_type: note_generation::TabType,
+) -> Result<(), String> {
+    let dir = match tab_type {
+        note_generation::TabType::DetailedReading => {
+            storage_paths::chapter_screenshots_dir(app, note_id)?
+        }
+        note_generation::TabType::AiNote => {
+            storage_paths::ai_note_screenshots_dir(app, note_id)?
+        }
+        _ => return Ok(()),
+    };
+
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    tokio::task::spawn_blocking(move || std::fs::remove_dir_all(&dir))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+        .map_err(|e| format!("删除截图目录失败: {}", e))
 }
 
 async fn execute_subtitle_optimization(
