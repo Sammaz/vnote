@@ -36,6 +36,68 @@ pub fn get_ai_pool_manager() -> &'static AiPoolManager {
 
 use crate::settings::{SettingsManager, keys, defaults};
 
+const MAX_ERROR_RESPONSE_PREVIEW_BYTES: usize = 4 * 1024;
+const MAX_STREAM_BUFFER_BYTES: usize = 64 * 1024;
+
+async fn read_error_response_preview(mut response: reqwest::Response) -> String {
+    let mut preview = Vec::with_capacity(MAX_ERROR_RESPONSE_PREVIEW_BYTES.min(1024));
+    let mut truncated = false;
+    let mut read_error = None;
+
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let remaining = MAX_ERROR_RESPONSE_PREVIEW_BYTES.saturating_sub(preview.len());
+                if remaining == 0 {
+                    truncated = true;
+                    break;
+                }
+
+                if chunk.len() > remaining {
+                    preview.extend_from_slice(&chunk[..remaining]);
+                    truncated = true;
+                    break;
+                }
+
+                preview.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(error) => {
+                read_error = Some(error.to_string());
+                break;
+            }
+        }
+    }
+
+    let mut text = String::from_utf8_lossy(&preview).trim().to_string();
+
+    if text.is_empty() {
+        text = match read_error {
+            Some(error) => format!("读取错误响应失败: {}", error),
+            None => "响应体为空".to_string(),
+        };
+    } else if let Some(error) = read_error {
+        text.push_str(&format!(" [读取剩余响应失败: {}]", error));
+    }
+
+    if truncated {
+        text.push_str(" …(truncated)");
+    }
+
+    text
+}
+
+fn ensure_stream_buffer_limit(buffer: &str) -> Result<(), String> {
+    if buffer.len() > MAX_STREAM_BUFFER_BYTES {
+        Err(format!(
+            "流响应异常，缓冲区超过 {}KB",
+            MAX_STREAM_BUFFER_BYTES / 1024
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 // ============================================================================
 // 公共类型定义（复用chat.rs的结构以保持兼容）
 // ============================================================================
@@ -871,7 +933,7 @@ async fn execute_streaming_chat_single_attempt(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await.unwrap_or_default();
+        let error_text = read_error_response_preview(response).await;
         return Err(StreamingAttemptError {
             message: format!("API错误 {}: {}", status, error_text),
             emitted_content: false,
@@ -908,6 +970,10 @@ async fn execute_streaming_chat_single_attempt(
         })?;
         let chunk_str = String::from_utf8_lossy(&chunk);
         buffer.push_str(&chunk_str);
+        ensure_stream_buffer_limit(&buffer).map_err(|message| StreamingAttemptError {
+            message,
+            emitted_content,
+        })?;
 
         // 处理完整的行
         while let Some(line_end) = buffer.find('\n') {
@@ -1036,7 +1102,7 @@ async fn streaming_collect_single(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await.unwrap_or_default();
+        let error_text = read_error_response_preview(response).await;
         return Err(format!("API错误 {}: {}", status, error_text));
     }
 
@@ -1050,6 +1116,7 @@ async fn streaming_collect_single(
         }
         let chunk = chunk_result.map_err(|e| format!("流错误: {}", e))?;
         buffer.push_str(&String::from_utf8_lossy(&chunk));
+        ensure_stream_buffer_limit(&buffer)?;
 
         while let Some(line_end) = buffer.find('\n') {
             let line = buffer[..line_end].trim().to_string();
@@ -1078,6 +1145,20 @@ async fn streaming_collect_single(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_stream_buffer_limit_allows_small_buffer() {
+        let buffer = "a".repeat(MAX_STREAM_BUFFER_BYTES);
+        assert!(ensure_stream_buffer_limit(&buffer).is_ok());
+    }
+
+    #[test]
+    fn test_stream_buffer_limit_rejects_large_buffer() {
+        let buffer = "a".repeat(MAX_STREAM_BUFFER_BYTES + 1);
+        let result = ensure_stream_buffer_limit(&buffer);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("缓冲区超过"));
+    }
 
     #[test]
     fn test_token_bucket_creation() {
