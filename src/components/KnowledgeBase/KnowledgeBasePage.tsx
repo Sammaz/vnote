@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Search, MessageSquare, Settings2, BookOpen } from "lucide-react";
+import { Search, MessageSquare, Settings2, BookOpen, RefreshCw } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { cn } from "../../utils/cn";
 import { useGlassBg } from "../../hooks/useGlassBg";
@@ -13,21 +13,31 @@ type TabType = "search" | "chat" | "manage";
 export function KnowledgeBasePage() {
   const [activeTab, setActiveTab] = useState<TabType>("search");
   const [stats, setStats] = useState<KnowledgeBaseStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [manageRefreshKey, setManageRefreshKey] = useState(0);
   const glassPanel = useGlassBg("panel");
   const glassMenu = useGlassBg("menu");
   const glassCard = useGlassBg("card");
 
   const loadStats = useCallback(async () => {
     try {
+      setStatsLoading(true);
       const s = await invoke<KnowledgeBaseStats>("knowledge_base_get_stats");
       setStats(s);
     } catch (e) {
       console.error("Failed to load knowledge base stats:", e);
+    } finally {
+      setStatsLoading(false);
     }
   }, []);
 
   useEffect(() => {
     loadStats();
+  }, [loadStats]);
+
+  const handleRefresh = useCallback(() => {
+    loadStats();
+    setManageRefreshKey((k) => k + 1);
   }, [loadStats]);
 
   const tabs: { key: TabType; label: string; icon: React.ReactNode }[] = [
@@ -50,6 +60,19 @@ export function KnowledgeBasePage() {
               {stats.indexed_notes}/{stats.notes_with_summary} 已索引 · {stats.total_chunks} 分块
             </span>
           )}
+          <button
+            onClick={handleRefresh}
+            disabled={statsLoading}
+            className={cn(
+              "p-1 rounded-md transition-colors cursor-pointer",
+              statsLoading
+                ? "text-slate-300 dark:text-slate-600 cursor-not-allowed"
+                : "text-slate-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+            )}
+            title="刷新知识库"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", statsLoading && "animate-spin")} />
+          </button>
         </div>
       </div>
 
@@ -81,7 +104,7 @@ export function KnowledgeBasePage() {
           <KnowledgeBaseChat />
         </div>
         <div className={cn("h-full", glassCard, activeTab === "manage" ? "block" : "hidden")}>
-          <KnowledgeBaseManage onStatsChange={loadStats} />
+          <KnowledgeBaseManage onStatsChange={loadStats} refreshKey={manageRefreshKey} />
         </div>
       </div>
     </div>

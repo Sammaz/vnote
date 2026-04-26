@@ -16,9 +16,10 @@ import type { KnowledgeIndexStatus, KnowledgeIndexEvent } from "./types";
 
 interface Props {
   onStatsChange: () => void;
+  refreshKey?: number;
 }
 
-export function KnowledgeBaseManage({ onStatsChange }: Props) {
+export function KnowledgeBaseManage({ onStatsChange, refreshKey }: Props) {
   const [statuses, setStatuses] = useState<KnowledgeIndexStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [indexingTaskId, setIndexingTaskId] = useState<string | null>(null);
@@ -47,7 +48,7 @@ export function KnowledgeBaseManage({ onStatsChange }: Props) {
 
   useEffect(() => {
     loadStatuses();
-  }, [loadStatuses]);
+  }, [loadStatuses, refreshKey]);
 
   // Listen to indexing events
   useEffect(() => {
