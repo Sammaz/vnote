@@ -312,78 +312,48 @@ async fn generate_flashcards_internal(
         return Err("已中止".to_string());
     }
 
-    // 并发生成每个分段的闪记卡
-    let mut tasks = Vec::new();
-
-    for (chunk_idx, chunk) in chunks.iter().enumerate() {
-        let ai_config = ai_config.clone();
-        let abort_flag = abort_flag.clone();
-        let app = app.clone();
-        let event_name = event_name.to_string();
-        let chunk_text = chunk.text.clone();
-
-        let task = tokio::spawn(async move {
-            // 检查中止
-            if abort_flag.load(Ordering::Relaxed) {
-                return Err::<(Vec<FlashcardItem>, usize), String>("已中止".to_string());
-            }
-
-            tracing::info!("[闪记卡] 段 {}/{}: 开始生成...", chunk_idx + 1, total_chunks);
-
-            // 发送进度事件
-            let _ = app.emit(
-                &event_name,
-                FlashcardGenerationEvent::Progress {
-                    current: chunk_idx + 1,
-                    total: total_chunks + 1,
-                    message: format!("正在生成第 {}/{} 段闪记卡...", chunk_idx + 1, total_chunks),
-                },
-            );
-
-            // 生成闪记卡
-            let prompt = flashcard_generation_prompt(&chunk_text, chunk_idx, total_chunks);
-            let response = call_ai_api(&ai_config, &prompt, &abort_flag).await?;
-
-            // 检查中止
-            if abort_flag.load(Ordering::Relaxed) {
-                return Err("已中止".to_string());
-            }
-
-            // 解析响应
-            match parse_flashcards_response(&response) {
-                Ok(cards) => {
-                    tracing::info!("[闪记卡] 段 {}/{}: 完成，生成 {} 张卡片", chunk_idx + 1, total_chunks, cards.len());
-                    Ok((cards, chunk_idx))
-                }
-                Err(e) => {
-                    tracing::warn!("[闪记卡] 段 {}/{}: 解析失败 - {}", chunk_idx + 1, total_chunks, e);
-                    // 解析失败时返回空数组，不中断整个流程
-                    Ok((Vec::new(), chunk_idx))
-                }
-            }
-        });
-
-        tasks.push(task);
-    }
-
-    // 等待所有任务完成并收集结果
-    let mut all_cards: Vec<(Vec<FlashcardItem>, usize)> = Vec::new();
+    // 串行生成每个分段的闪记卡，避免长视频时同时持有过多 prompt/response
+    let mut all_cards: Vec<FlashcardItem> = Vec::new();
     let mut has_error = false;
 
-    for task in tasks {
-        match task.await {
-            Ok(Ok(result)) => {
-                all_cards.push(result);
+    for (chunk_idx, chunk) in chunks.iter().enumerate() {
+        if abort_flag.load(Ordering::Relaxed) {
+            return Err("已中止".to_string());
+        }
+
+        tracing::info!("[闪记卡] 段 {}/{}: 开始生成...", chunk_idx + 1, total_chunks);
+
+        let _ = app.emit(
+            event_name,
+            FlashcardGenerationEvent::Progress {
+                current: chunk_idx + 1,
+                total: total_chunks + 1,
+                message: format!("正在生成第 {}/{} 段闪记卡...", chunk_idx + 1, total_chunks),
+            },
+        );
+
+        let prompt = flashcard_generation_prompt(&chunk.text, chunk_idx, total_chunks);
+        match call_ai_api(&ai_config, &prompt, abort_flag).await {
+            Ok(response) => {
+                if abort_flag.load(Ordering::Relaxed) {
+                    return Err("已中止".to_string());
+                }
+
+                match parse_flashcards_response(&response) {
+                    Ok(cards) => {
+                        tracing::info!("[闪记卡] 段 {}/{}: 完成，生成 {} 张卡片", chunk_idx + 1, total_chunks, cards.len());
+                        all_cards.extend(cards);
+                    }
+                    Err(e) => {
+                        tracing::warn!("[闪记卡] 段 {}/{}: 解析失败 - {}", chunk_idx + 1, total_chunks, e);
+                    }
+                }
             }
-            Ok(Err(e)) => {
+            Err(e) => {
                 if e == "已中止" {
                     return Err("已中止".to_string());
                 }
-                tracing::error!("[闪记卡] 任务失败: {}", e);
-                has_error = true;
-            }
-            Err(e) => {
-                tracing::error!("[闪记卡] 任务执行错误: {}", e);
+                tracing::error!("[闪记卡] 段 {}/{}: 任务失败: {}", chunk_idx + 1, total_chunks, e);
                 has_error = true;
             }
         }
@@ -399,12 +369,7 @@ async fn generate_flashcards_internal(
         return Err("所有分段生成失败".to_string());
     }
 
-    // 按段落顺序排序并合并卡片
-    all_cards.sort_by_key(|(_, idx)| *idx);
-    let cards: Vec<FlashcardItem> = all_cards
-        .into_iter()
-        .flat_map(|(cards, _)| cards)
-        .collect();
+    let cards = all_cards;
 
     tracing::info!("[闪记卡] ========================================");
     tracing::info!("[闪记卡] 生成完成，共 {} 张卡片", cards.len());

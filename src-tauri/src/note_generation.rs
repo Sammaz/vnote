@@ -1479,7 +1479,7 @@ pub async fn generate_detailed_reading_chapters(
         tracing::error!("[原文细读] 标题优化失败: {}", e);
     }
 
-    // 第五步：构建 DetailedReadingChapter（包含字幕条目和截图）
+    // 第五步：构建 DetailedReadingChapter（仅保留时间范围、内容和截图，字幕按前端按需切片）
     let mut detailed_chapters: Vec<DetailedReadingChapter> = Vec::new();
 
     for (idx, chapter) in temp_chapters.iter().enumerate() {
@@ -1499,29 +1499,19 @@ pub async fn generate_detailed_reading_chapters(
             }
         };
 
-        // 提取该章节时间范围内的字幕条目
-        let chapter_subtitles: Vec<SubtitleEntry> = subtitle_entries
-            .iter()
-            .filter(|e| e.start_time >= chapter.start_time && e.start_time < chapter.end_time)
-            .cloned()
-            .collect();
-
         detailed_chapters.push(DetailedReadingChapter {
             id: chapter.id.clone(),
             title: chapter.title.clone(),
             start_time: chapter.start_time,
             end_time: chapter.end_time,
             content: Some(chapter.content.clone()),
-            subtitle_entries: chapter_subtitles,
+            subtitle_entries: Vec::new(),
             screenshot_path: screenshot_path_str,
         });
     }
 
     tracing::info!("[原文细读] ========================================");
     tracing::info!("[原文细读] 生成的章节数: {}", detailed_chapters.len());
-    if !detailed_chapters.is_empty() {
-        tracing::info!("[原文细读] 第一个章节包含 {} 条字幕", detailed_chapters[0].subtitle_entries.len());
-    }
 
     Ok(DetailedReadingData {
         chapters: detailed_chapters,

@@ -263,12 +263,12 @@ function NotesProviderWithStats({ children }: { children: ReactNode }) {
 }
 
 function InitializationRuntimeProviderWithNotes({ children }: { children: ReactNode }) {
-  const { refreshNotes } = useNotes();
+  const { refreshNoteById } = useNotes();
 
   const handleTaskCompleted = useCallback(async (noteId: string) => {
     if (!noteId) return;
-    await refreshNotes();
-  }, [refreshNotes]);
+    await refreshNoteById(noteId);
+  }, [refreshNoteById]);
 
   return (
     <InitializationRuntimeProvider onTaskCompleted={handleTaskCompleted}>

@@ -1349,7 +1349,6 @@ async fn generate_chapters(
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let return_id = generation_id.clone();
     let note_id_for_save = note_id.clone();
-    let subtitle_path_for_save = subtitle_path.clone();
 
     tracing::info!("[原文细读] 开始执行, note_id={}, generation_id={}", note_id, return_id);
 
@@ -1365,15 +1364,7 @@ async fn generate_chapters(
     tokio::spawn(async move {
         match chapter::generate_chapters(app, get_db(), generation_id, request).await {
             Ok(chapter_data) => {
-                let subtitle_entries = match subtitle::parse_subtitle_file(&subtitle_path_for_save) {
-                    Ok(entries) => entries,
-                    Err(e) => {
-                        tracing::error!("[generate_chapters] 解析字幕失败，无法转换 detailed_reading: {}", e);
-                        return;
-                    }
-                };
-
-                let detailed_reading = chapter_data_to_detailed_reading_data(&chapter_data, &subtitle_entries);
+                let detailed_reading = chapter_data_to_detailed_reading_data(&chapter_data);
                 let detailed_reading_json = match serde_json::to_string(&detailed_reading) {
                     Ok(json) => json,
                     Err(e) => {
@@ -1427,18 +1418,12 @@ async fn save_chapters_to_note(
 
     // 兼容旧 ChapterData 写入：统一转换为 DetailedReadingData 再存储
     let detailed_reading = if let Ok(data) = serde_json::from_value::<chapter::DetailedReadingData>(chapter_data.clone()) {
-        data
+        compact_detailed_reading_data(data)
     } else {
         let legacy = serde_json::from_value::<chapter::ChapterData>(chapter_data)
             .map_err(|e| format!("解析章节数据失败: {}", e))?;
 
-        let subtitle_entries = note
-            .subtitle_path
-            .as_ref()
-            .and_then(|path| subtitle::parse_subtitle_file(path).ok())
-            .unwrap_or_default();
-
-        chapter_data_to_detailed_reading_data(&legacy, &subtitle_entries)
+        chapter_data_to_detailed_reading_data(&legacy)
     };
 
     let chapter_json = serde_json::to_string(&detailed_reading).map_err(|e| e.to_string())?;
@@ -1673,7 +1658,6 @@ async fn generate_chapters_with_markers(
     let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let return_id = generation_id.clone();
     let note_id_for_save = note_id.clone();
-    let subtitle_path_for_save = subtitle_path.clone();
 
     // 在后台任务中执行
     tokio::spawn(async move {
@@ -1688,14 +1672,7 @@ async fn generate_chapters_with_markers(
             markers,
         ).await {
             Ok(chapter_data) => {
-                let subtitle_entries = match subtitle::parse_subtitle_file(&subtitle_path_for_save) {
-                    Ok(entries) => entries,
-                    Err(e) => {
-                        tracing::error!("[generate_chapters_with_markers] 解析字幕失败，无法转换 detailed_reading: {}", e);
-                        return;
-                    }
-                };
-                let detailed_reading = chapter_data_to_detailed_reading_data(&chapter_data, &subtitle_entries);
+                let detailed_reading = chapter_data_to_detailed_reading_data(&chapter_data);
 
                 // 保存章节数据到笔记
                 if let Err(e) = save_chapters_to_note_internal(&note_id_for_save, &detailed_reading) {
@@ -1716,27 +1693,27 @@ async fn generate_chapters_with_markers(
     Ok(return_id)
 }
 
+fn compact_detailed_reading_data(mut data: chapter::DetailedReadingData) -> chapter::DetailedReadingData {
+    for chapter in &mut data.chapters {
+        chapter.subtitle_entries.clear();
+    }
+    data
+}
+
 fn chapter_data_to_detailed_reading_data(
     chapter_data: &chapter::ChapterData,
-    subtitle_entries: &[subtitle::SubtitleEntry],
 ) -> chapter::DetailedReadingData {
     let chapters = chapter_data
         .chapters
         .iter()
         .map(|ch| {
-            let chapter_subtitles = subtitle_entries
-                .iter()
-                .filter(|sub| sub.start_time >= ch.start_time && sub.start_time < ch.end_time)
-                .cloned()
-                .collect::<Vec<_>>();
-
             chapter::DetailedReadingChapter {
                 id: ch.id.clone(),
                 title: ch.title.clone(),
                 start_time: ch.start_time,
                 end_time: ch.end_time,
                 content: Some(ch.content.clone()),
-                subtitle_entries: chapter_subtitles,
+                subtitle_entries: Vec::new(),
                 screenshot_path: ch.screenshot_path.clone(),
             }
         })
@@ -1756,7 +1733,7 @@ fn save_chapters_to_note_internal(note_id: &str, chapter_data: &chapter::Detaile
         .map_err(|e| e.to_string())?
         .ok_or("笔记未找到")?;
 
-    let chapter_json = serde_json::to_string(chapter_data).map_err(|e| e.to_string())?;
+    let chapter_json = serde_json::to_string(&compact_detailed_reading_data(chapter_data.clone())).map_err(|e| e.to_string())?;
     note.detailed_reading = Some(chapter_json);
 
     get_db().update_note(&note).map_err(|e| e.to_string())

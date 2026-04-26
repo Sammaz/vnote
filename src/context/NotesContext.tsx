@@ -10,6 +10,7 @@ import { getNoteGenerationState, getActiveGenerationIds, clearNoteGenerationStat
 interface NotesContextType {
   notes: Note[];
   refreshNotes: () => Promise<void>;
+  refreshNoteById: (noteId: string) => Promise<void>;
   createNote: (req: CreateNoteRequest) => Promise<Note>;
   updateNote: (req: UpdateNoteMetadataRequest) => Promise<void>;
   deleteNote: (id: string) => Promise<void>;
@@ -98,7 +99,43 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
     }
   }, [updateStats]);
 
-  // 创建笔记
+  const refreshNoteById = useCallback(async (noteId: string) => {
+    if (!noteId) return;
+
+    try {
+      const latestNote = await invoke<Note | null>("get_note", { id: noteId });
+      setNotes(prev => {
+        if (!latestNote) {
+          const nextNotes = prev.filter(note => note.id !== noteId);
+          updateStats(nextNotes);
+          return nextNotes;
+        }
+
+        const existingIndex = prev.findIndex(note => note.id === noteId);
+        let nextNotes: Note[];
+
+        if (existingIndex >= 0) {
+          nextNotes = [...prev];
+          nextNotes[existingIndex] = latestNote;
+        } else {
+          nextNotes = [latestNote, ...prev];
+        }
+
+        nextNotes.sort((a, b) => {
+          const createdAtDiff = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+          if (createdAtDiff !== 0) {
+            return createdAtDiff;
+          }
+          return b.id.localeCompare(a.id);
+        });
+
+        updateStats(nextNotes);
+        return nextNotes;
+      });
+    } catch (error) {
+      console.error(`Failed to refresh note ${noteId}:`, error);
+    }
+  }, [updateStats]);
   const createNote = useCallback(async (req: CreateNoteRequest): Promise<Note> => {
     const newNote = await invoke<Note>("create_note", { req });
     await refreshNotes();
@@ -175,6 +212,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
   const value = useMemo(() => ({
     notes,
     refreshNotes,
+    refreshNoteById,
     createNote,
     updateNote,
     deleteNote,
@@ -191,6 +229,7 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
   }), [
     notes,
     refreshNotes,
+    refreshNoteById,
     createNote,
     updateNote,
     deleteNote,
