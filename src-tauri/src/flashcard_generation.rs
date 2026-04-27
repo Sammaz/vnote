@@ -346,6 +346,7 @@ async fn generate_flashcards_internal(
                     }
                     Err(e) => {
                         tracing::warn!("[闪记卡] 段 {}/{}: 解析失败 - {}", chunk_idx + 1, total_chunks, e);
+                        has_error = true;
                     }
                 }
             }
@@ -364,9 +365,12 @@ async fn generate_flashcards_internal(
         return Err("已中止".to_string());
     }
 
-    // 如果所有任务都失败了
-    if all_cards.is_empty() && has_error {
-        return Err("所有分段生成失败".to_string());
+    if all_cards.is_empty() {
+        return Err(if has_error {
+            "所有分段生成失败".to_string()
+        } else {
+            "未生成任何闪记卡".to_string()
+        });
     }
 
     let cards = all_cards;

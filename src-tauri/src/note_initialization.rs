@@ -231,7 +231,17 @@ pub fn detect_output_presence(note: &crate::db::Note, item_key: &str, db: &crate
             .map(|items| !items.is_empty())
             .unwrap_or(false),
         "highlights" => note.highlights.as_ref().is_some_and(|s| !s.trim().is_empty()),
-        "flashcards" => note.flashcards.as_ref().is_some_and(|s| !s.trim().is_empty()),
+        "flashcards" => note.flashcards.as_ref().is_some_and(|s| {
+            serde_json::from_str::<Value>(s)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("cards")
+                        .and_then(|cards| cards.as_array())
+                        .map(|cards| !cards.is_empty())
+                })
+                .unwrap_or(false)
+        }),
         "visual_summary" => note.visual_summary.as_ref().is_some_and(|s| !s.trim().is_empty()),
         "custom_summary" => note.custom_summary.as_ref().is_some_and(|s| !s.trim().is_empty()),
         "ai_note" => note.ai_note_markdown.as_ref().is_some_and(|s| !s.trim().is_empty()),
