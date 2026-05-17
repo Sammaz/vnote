@@ -997,7 +997,8 @@ export function InitializationManagementSection({
           return (
             item.run_status === "failed" ||
             item.run_status === "partial_failed" ||
-            item.run_status === "canceled"
+            item.run_status === "canceled" ||
+            item.failed_count > 0
           );
         case "completed":
           return item.run_status === "completed";

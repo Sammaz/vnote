@@ -1090,7 +1090,7 @@ impl Database {
                 COALESCE(r.status, 'idle') AS run_status,
                 COALESCE(SUM(CASE WHEN i.status = 'completed' THEN 1 ELSE 0 END), 0) AS completed_count,
                 COALESCE(SUM(CASE WHEN i.status = 'skipped' THEN 1 ELSE 0 END), 0) AS skipped_count,
-                COALESCE(SUM(CASE WHEN i.status = 'failed' THEN 1 ELSE 0 END), 0) AS failed_count,
+                COALESCE(SUM(CASE WHEN i.status IN ('failed', 'blocked') THEN 1 ELSE 0 END), 0) AS failed_count,
                 COALESCE(SUM(CASE WHEN i.status = 'running' THEN 1 ELSE 0 END), 0) AS running_count,
                 COALESCE(SUM(CASE WHEN i.output_present = 1 THEN 1 ELSE 0 END), 0) AS output_count,
                 COALESCE(r.updated_at, n.updated_at) AS updated_at
