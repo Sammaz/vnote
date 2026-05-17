@@ -592,12 +592,22 @@ fn find_semantic_boundary_near(text: &str, around: usize, max_distance: usize) -
 // ============================================================================
 
 static AI_NOTE_SCREENSHOT_REGEX: OnceLock<Regex> = OnceLock::new();
+static AI_NOTE_SCREENSHOT_LOOSE_REGEX: OnceLock<Regex> = OnceLock::new();
 static AI_NOTE_MAIN_HEADING_REGEX: OnceLock<Regex> = OnceLock::new();
 static AI_NOTE_MAIN_HEADING_TIMESTAMP_REGEX: OnceLock<Regex> = OnceLock::new();
 
 fn get_ai_note_screenshot_regex() -> &'static Regex {
     AI_NOTE_SCREENSHOT_REGEX.get_or_init(|| {
         Regex::new(r"\[\[SCREENSHOT:(\d{2}:\d{2}:\d{2})\]\]").unwrap()
+    })
+}
+
+fn get_ai_note_screenshot_loose_regex() -> &'static Regex {
+    AI_NOTE_SCREENSHOT_LOOSE_REGEX.get_or_init(|| {
+        Regex::new(
+            r"(?i)[\[【]{1,2}\s*(?:SCREENSHOT|截图)\s*[:：]\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{1,2})(?:\.\d+)?\s*[\]】]{1,2}",
+        )
+        .unwrap()
     })
 }
 
@@ -688,22 +698,23 @@ fn extract_ai_note_screenshots(
     note: &crate::db::Note,
     content: &str,
 ) -> Result<String, String> {
+    let loose_re = get_ai_note_screenshot_loose_regex();
+
     if note.video_path.trim().is_empty() {
-        return Ok(content.trim().to_string());
+        let cleaned = loose_re.replace_all(content, "").to_string();
+        return Ok(cleaned.trim().to_string());
     }
 
-    let screenshot_regex = get_ai_note_screenshot_regex();
-    let markers: Vec<String> = screenshot_regex
-        .captures_iter(content)
-        .filter_map(|capture| capture.get(1).map(|matched| matched.as_str().to_string()))
-        .collect();
-
-    if markers.is_empty() {
+    let strict_re = get_ai_note_screenshot_regex();
+    let has_any_placeholder =
+        strict_re.is_match(content) || loose_re.is_match(content);
+    if !has_any_placeholder {
         return Ok(content.trim().to_string());
     }
 
     let screenshots_dir = storage_paths::ai_note_screenshots_dir(app, &note.id)?;
-    std::fs::create_dir_all(&screenshots_dir).map_err(|e| format!("创建截图目录失败: {}", e))?;
+    std::fs::create_dir_all(&screenshots_dir)
+        .map_err(|e| format!("创建截图目录失败: {}", e))?;
 
     let video_name = Path::new(&note.video_path)
         .file_stem()
@@ -712,10 +723,16 @@ fn extract_ai_note_screenshots(
     let safe_video_name = sanitize_filename(video_name);
 
     let mut replaced = content.to_string();
-    let mut processed = HashSet::new();
+    let mut processed: HashSet<String> = HashSet::new();
 
-    for marker in markers {
-        if !processed.insert(marker.clone()) {
+    // 阶段 1: 严格正则优先处理（保留原行为）
+    let strict_markers: Vec<String> = strict_re
+        .captures_iter(&replaced.clone())
+        .filter_map(|capture| capture.get(1).map(|matched| matched.as_str().to_string()))
+        .collect();
+
+    for marker in strict_markers {
+        if !processed.insert(format!("strict:{}", marker)) {
             continue;
         }
 
@@ -725,27 +742,83 @@ fn extract_ai_note_screenshots(
             continue;
         };
 
-        let filename = format!(
-            "{}_ai_note_{}.jpg",
-            safe_video_name,
-            format_timestamp_for_filename(seconds)
+        replaced = try_replace_ai_note_placeholder(
+            &replaced,
+            &placeholder,
+            seconds,
+            &marker,
+            &screenshots_dir,
+            &safe_video_name,
+            &note.video_path,
         );
-        let screenshot_path = screenshots_dir.join(filename);
-        let screenshot_path_str = screenshot_path.to_string_lossy().to_string();
-
-        if !screenshot_path.exists() {
-            if let Err(error) = capture_video_screenshot(&note.video_path, seconds, &screenshot_path_str) {
-                tracing::warn!("[AiNote] 关键帧截图失败 {}: {}", marker, error);
-                replaced = replaced.replace(&placeholder, "");
-                continue;
-            }
-        }
-
-        let markdown = build_ai_note_screenshot_markdown(&screenshot_path_str, &marker);
-        replaced = replaced.replace(&placeholder, &markdown);
     }
 
-    Ok(screenshot_regex.replace_all(&replaced, "").trim().to_string())
+    // 阶段 2: 宽松正则兜底处理（捕获 LLM 输出的格式变体）
+    let loose_hits: Vec<(String, u64, u64, u64)> = loose_re
+        .captures_iter(&replaced.clone())
+        .filter_map(|capture| {
+            let full = capture.get(0)?.as_str().to_string();
+            let g_h = capture.get(1).and_then(|m| m.as_str().parse::<u64>().ok());
+            let g_m = capture.get(2)?.as_str().parse::<u64>().ok()?;
+            let g_s = capture.get(3)?.as_str().parse::<u64>().ok()?;
+            Some((full, g_h.unwrap_or(0), g_m, g_s))
+        })
+        .collect();
+
+    for (full, h, m, s) in loose_hits {
+        if !processed.insert(format!("loose:{}", full)) {
+            continue;
+        }
+        let normalized = format!("{:02}:{:02}:{:02}", h, m, s);
+        let seconds = (h * 3600 + m * 60 + s) as f64;
+        tracing::warn!(
+            "[AiNote] 检测到非标准截图占位符 '{}'，按容错规则归一化为 {} 并截图",
+            full,
+            normalized
+        );
+        replaced = try_replace_ai_note_placeholder(
+            &replaced,
+            &full,
+            seconds,
+            &normalized,
+            &screenshots_dir,
+            &safe_video_name,
+            &note.video_path,
+        );
+    }
+
+    // 阶段 3: 最终扫尾，清掉所有残留的占位符样式文本
+    let final_cleaned = loose_re.replace_all(&replaced, "").to_string();
+    Ok(final_cleaned.trim().to_string())
+}
+
+/// 截图替换辅助：成功则替换占位符为 Markdown 图片语法，失败则删除占位符避免污染笔记。
+fn try_replace_ai_note_placeholder(
+    content: &str,
+    placeholder: &str,
+    seconds: f64,
+    timestamp_label: &str,
+    screenshots_dir: &Path,
+    safe_video_name: &str,
+    video_path: &str,
+) -> String {
+    let filename = format!(
+        "{}_ai_note_{}.jpg",
+        safe_video_name,
+        format_timestamp_for_filename(seconds)
+    );
+    let screenshot_path = screenshots_dir.join(filename);
+    let screenshot_path_str = screenshot_path.to_string_lossy().to_string();
+
+    if !screenshot_path.exists() {
+        if let Err(error) = capture_video_screenshot(video_path, seconds, &screenshot_path_str) {
+            tracing::warn!("[AiNote] 关键帧截图失败 {}: {}", timestamp_label, error);
+            return content.replace(placeholder, "");
+        }
+    }
+
+    let markdown = build_ai_note_screenshot_markdown(&screenshot_path_str, timestamp_label);
+    content.replace(placeholder, &markdown)
 }
 
 /// 调用AI API（流式收集，通过ai_pool统一管理并发）
@@ -2650,3 +2723,110 @@ pub async fn generate_chapters_with_markers(
     Ok(chapter_data)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loose_regex_matches_standard_format() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("[[SCREENSHOT:01:23:45]]"));
+        assert!(re.is_match("[[SCREENSHOT:00:00:00]]"));
+    }
+
+    #[test]
+    fn loose_regex_matches_single_bracket_variant() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("[SCREENSHOT:01:23:45]"));
+    }
+
+    #[test]
+    fn loose_regex_matches_full_width_brackets() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("【SCREENSHOT:01:23:45】"));
+        assert!(re.is_match("【截图:01:23:45】"));
+    }
+
+    #[test]
+    fn loose_regex_matches_case_variants() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("[[Screenshot:01:23:45]]"));
+        assert!(re.is_match("[[screenshot:01:23:45]]"));
+    }
+
+    #[test]
+    fn loose_regex_matches_chinese_keyword() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("[[截图:01:23:45]]"));
+        assert!(re.is_match("[截图:01:23:45]"));
+    }
+
+    #[test]
+    fn loose_regex_matches_unpadded_digits() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("[[SCREENSHOT:1:5:9]]"));
+        assert!(re.is_match("[[SCREENSHOT:1:23:45]]"));
+    }
+
+    #[test]
+    fn loose_regex_matches_full_width_colon() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("[[SCREENSHOT:01:23:45]]"));
+    }
+
+    #[test]
+    fn loose_regex_matches_two_segment_format() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("[[SCREENSHOT:23:45]]"));
+    }
+
+    #[test]
+    fn loose_regex_matches_decimal_seconds() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(re.is_match("[[SCREENSHOT:01:23:45.5]]"));
+    }
+
+    #[test]
+    fn loose_regex_does_not_match_unrelated_brackets() {
+        let re = get_ai_note_screenshot_loose_regex();
+        assert!(!re.is_match("[[NOTE:01:23:45]]"));
+        assert!(!re.is_match("[图片:01:23:45]"));
+        assert!(!re.is_match("01:23:45"));
+        assert!(!re.is_match("[CHAPTER:01:23:45]"));
+    }
+
+    #[test]
+    fn loose_regex_does_not_match_replaced_markdown() {
+        let re = get_ai_note_screenshot_loose_regex();
+        // 替换后的 Markdown 不应被再次匹配
+        assert!(!re.is_match("![⏱ 01:23:45](http://asset.localhost/foo)"));
+    }
+
+    #[test]
+    fn loose_regex_extracts_three_segment_time() {
+        let re = get_ai_note_screenshot_loose_regex();
+        let cap = re.captures("[[SCREENSHOT:01:23:45]]").unwrap();
+        assert_eq!(cap.get(1).unwrap().as_str(), "01");
+        assert_eq!(cap.get(2).unwrap().as_str(), "23");
+        assert_eq!(cap.get(3).unwrap().as_str(), "45");
+    }
+
+    #[test]
+    fn loose_regex_extracts_two_segment_time() {
+        let re = get_ai_note_screenshot_loose_regex();
+        let cap = re.captures("[[SCREENSHOT:23:45]]").unwrap();
+        // 两段格式：小时组缺省，分秒组应被填充
+        assert!(cap.get(1).is_none());
+        assert_eq!(cap.get(2).unwrap().as_str(), "23");
+        assert_eq!(cap.get(3).unwrap().as_str(), "45");
+    }
+
+    #[test]
+    fn strict_regex_still_matches_only_canonical_form() {
+        let re = get_ai_note_screenshot_regex();
+        assert!(re.is_match("[[SCREENSHOT:01:23:45]]"));
+        assert!(!re.is_match("[[SCREENSHOT:1:23:45]]"));
+        assert!(!re.is_match("[SCREENSHOT:01:23:45]"));
+        assert!(!re.is_match("[[screenshot:01:23:45]]"));
+    }
+}
