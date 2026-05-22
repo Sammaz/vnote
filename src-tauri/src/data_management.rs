@@ -62,6 +62,13 @@ impl DataCategoryKey {
     pub fn from_key(key: &str) -> Option<Self> {
         Self::all().iter().copied().find(|item| item.as_str() == key)
     }
+
+    fn is_protected_note_asset(&self) -> bool {
+        matches!(
+            self,
+            Self::ChapterScreenshots | Self::AiNoteScreenshots | Self::AssistScreenshots
+        )
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -400,7 +407,7 @@ fn scan_internal(app: &AppHandle, db: &Database, note_ids: Option<&[String]>) ->
             size_bytes: acc.size_bytes,
             file_count: acc.file_count,
             note_count: Some(acc.note_ids.len() as u64),
-            reclaimable_bytes: acc.size_bytes,
+            reclaimable_bytes: if category.is_protected_note_asset() { 0 } else { acc.size_bytes },
             status: if acc.file_count > 0 { "ready".to_string() } else { "empty".to_string() },
         });
     }
@@ -490,7 +497,7 @@ fn collect_cleanup_operations(
     if !category_keys.is_empty() {
         let all_entries = collect_file_entries(app, &notes)?;
         operations.extend(all_entries.into_iter().filter_map(|entry| {
-            if category_keys.contains(&entry.category) {
+            if category_keys.contains(&entry.category) && !entry.category.is_protected_note_asset() {
                 Some(CleanupOperation::DeletePath {
                     target_key: entry.category.as_str().to_string(),
                     note_id: entry.note_id,

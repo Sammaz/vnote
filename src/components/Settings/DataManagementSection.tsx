@@ -35,6 +35,12 @@ const integrityActionLabelMap: Record<string, string> = {
   broken_assets: "修复",
 };
 
+const protectedCleanupCategoryKeys = new Set([
+  "chapter_screenshots",
+  "ai_note_screenshots",
+  "assist_screenshots",
+]);
+
 export function DataManagementSection({ notes }: DataManagementSectionProps) {
   const glassCard = useGlassBg("card");
   const glassInput = useGlassBg("input");
@@ -266,28 +272,37 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
           分类清理
         </div>
         <div className="divide-y divide-slate-200 dark:divide-vnote-border">
-          {(overview?.categories ?? []).map((category) => (
-            <div key={category.key} className="px-4 py-4 flex items-center gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{category.label}</div>
-                <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">
-                  {category.file_count} 项 · {formatBytes(category.size_bytes)}
-                  {category.note_count !== null ? ` · ${category.note_count} 条笔记` : ""}
+          {(overview?.categories ?? []).map((category) => {
+            const isProtectedCleanupCategory = protectedCleanupCategoryKeys.has(category.key);
+
+            return (
+              <div key={category.key} className="px-4 py-4 flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{category.label}</div>
+                  <div className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+                    {category.file_count} 项 · {formatBytes(category.size_bytes)}
+                    {category.note_count !== null ? ` · ${category.note_count} 条笔记` : ""}
+                  </div>
                 </div>
+                <div className="text-sm text-slate-600 dark:text-slate-400 mr-2">
+                  {formatBytes(category.reclaimable_bytes)}
+                </div>
+                <button
+                  onClick={() => {
+                    if (!isProtectedCleanupCategory) {
+                      handlePreviewCleanup(category.key);
+                    }
+                  }}
+                  disabled={isProtectedCleanupCategory || previewingCategory === category.key || executing || category.file_count === 0}
+                  title={isProtectedCleanupCategory ? "该分类与真实笔记相关，已禁止清理" : undefined}
+                  className="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
+                >
+                  {previewingCategory === category.key ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  {isProtectedCleanupCategory ? "已保护" : "清理"}
+                </button>
               </div>
-              <div className="text-sm text-slate-600 dark:text-slate-400 mr-2">
-                {formatBytes(category.reclaimable_bytes)}
-              </div>
-              <button
-                onClick={() => handlePreviewCleanup(category.key)}
-                disabled={previewingCategory === category.key || executing || category.file_count === 0}
-                className="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5 cursor-pointer"
-              >
-                {previewingCategory === category.key ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                清理
-              </button>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
