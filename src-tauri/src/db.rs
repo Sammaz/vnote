@@ -2704,35 +2704,6 @@ impl Database {
         Ok(result)
     }
 
-    pub fn delete_knowledge_chat_messages_from(
-        &self,
-        session_id: &str,
-        message_id: &str,
-    ) -> SqliteResult<usize> {
-        let conn = self.connection();
-        let deleted = conn.execute(
-            "DELETE FROM knowledge_chat_messages
-             WHERE session_id = ?1
-               AND EXISTS (
-                   SELECT 1 FROM knowledge_chat_messages target
-                   WHERE target.id = ?2
-                     AND target.session_id = ?1
-                     AND (
-                         knowledge_chat_messages.created_at > target.created_at
-                         OR (
-                             knowledge_chat_messages.created_at = target.created_at
-                             AND knowledge_chat_messages.rowid >= target.rowid
-                         )
-                     )
-               )",
-            rusqlite::params![session_id, message_id],
-        )?;
-        if deleted > 0 {
-            self.touch_knowledge_chat_session(session_id)?;
-        }
-        Ok(deleted)
-    }
-
     pub fn create_knowledge_chat_message(
         &self,
         session_id: &str,

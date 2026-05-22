@@ -1157,7 +1157,6 @@ export function KnowledgeBaseChat() {
         images: imagePayload,
         mode: chatMode,
         step_budget: chatMode === "agent" ? 3 : undefined,
-        rewrite_from_message_id: usingOverride && effectiveEditMessageId ? effectiveEditMessageId : undefined,
       };
 
       const response = await invoke<KnowledgeChatSubmitResponse>("knowledge_base_chat", { request });

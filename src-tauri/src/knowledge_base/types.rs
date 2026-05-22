@@ -60,7 +60,6 @@ pub struct KnowledgeChatRequest {
     pub images: Option<Vec<KnowledgeChatImageData>>,
     pub mode: Option<KnowledgeChatMode>,
     pub step_budget: Option<i32>,
-    pub rewrite_from_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
