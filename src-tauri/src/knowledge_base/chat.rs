@@ -295,6 +295,11 @@ fn prepare_chat(
     let ai_config = resolve_ai_config(db, request.model_id.as_deref(), Some(&session))?;
     let prompt_id = request.prompt_id.clone().or_else(|| session.prompt_id.clone());
 
+    if let Some(message_id) = request.rewrite_from_message_id.as_deref() {
+        db.delete_knowledge_chat_messages_from(&session.id, message_id)
+            .map_err(|e| e.to_string())?;
+    }
+
     maybe_auto_rename_session(db, &session, &user_message)?;
 
     let user_images_json = request.images.as_ref()
