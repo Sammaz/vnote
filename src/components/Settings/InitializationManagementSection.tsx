@@ -807,6 +807,8 @@ export function InitializationManagementSection({
   const [editingExplicitKeys, setEditingExplicitKeys] = useState<Set<string>>(new Set());
   const [editingModelOverrideId, setEditingModelOverrideId] = useState<string | null>(null);
   const [loadingOverview, setLoadingOverview] = useState(false);
+  // 追踪组件挂载状态，避免页面切换卸载后仍调用 setState 导致卡顿
+  const overviewMountedRef = useRef(true);
   const [dashboardExpanded, setDashboardExpanded] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [activeStep, setActiveStep] = useState<StepKey>("notes");
@@ -871,29 +873,29 @@ export function InitializationManagementSection({
     }
   }, [currentTask?.status, initState.isInitializing]);
 
-  const loadOverview = useCallback(async (signal?: { cancelled: boolean }) => {
+  const loadOverview = useCallback(async () => {
     setLoadingOverview(true);
     try {
       const [registryData, overviewData] = await Promise.all([
         invoke<InitializationItemDefinition[]>("get_initialization_registry"),
         invoke<NoteInitializationOverview[]>("get_initialization_overview"),
       ]);
-      if (signal?.cancelled) return;
+      if (!overviewMountedRef.current) return;
       setRegistry(registryData);
       setOverview(overviewData);
     } catch (error) {
-      if (signal?.cancelled) return;
+      if (!overviewMountedRef.current) return;
       console.error("Failed to load initialization overview:", error);
       message.error(`初始化管理加载失败：${String(error)}`);
     } finally {
-      if (!signal?.cancelled) setLoadingOverview(false);
+      if (overviewMountedRef.current) setLoadingOverview(false);
     }
   }, []);
 
   useEffect(() => {
-    const signal = { cancelled: false };
-    loadOverview(signal);
-    return () => { signal.cancelled = true; };
+    overviewMountedRef.current = true;
+    loadOverview();
+    return () => { overviewMountedRef.current = false; };
   }, [loadOverview]);
 
   const lastOverviewRefreshTaskRef = useRef<string | null>(null);

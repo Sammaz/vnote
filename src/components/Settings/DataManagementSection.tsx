@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { AlertTriangle, Check, ChevronDown, Database, FolderOpen, HardDrive, Loader2, RefreshCw, ShieldAlert, Trash2, Video } from "lucide-react";
 
@@ -17,6 +17,21 @@ import type {
 interface DataManagementSectionProps {
   notes: Note[];
 }
+
+/**
+ * 数据管理扫描结果的模块级缓存。
+ * 软件运行期间复用：首次进入页面才扫描，之后切换页面直接命中缓存，
+ * 仅在用户点击「重新扫描」或执行清理后强制刷新。重启软件后缓存自动清空。
+ * key 为笔记范围标识："all" 表示全部笔记，否则为具体笔记 id。
+ */
+interface DataManagementCacheEntry {
+  overview: DataManagementOverview;
+  scanResult: DataManagementScanResult;
+}
+const dataManagementCache = new Map<string, DataManagementCacheEntry>();
+
+const cacheKeyForNoteIds = (noteIds: string[] | undefined): string =>
+  noteIds && noteIds.length > 0 ? noteIds.join(",") : "all";
 
 const riskToneMap: Record<string, string> = {
   low: "text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20",
@@ -49,7 +64,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
   const [overview, setOverview] = useState<DataManagementOverview | null>(null);
   const [scanResult, setScanResult] = useState<DataManagementScanResult | null>(null);
   const [preview, setPreview] = useState<CleanupPreview | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !dataManagementCache.has(cacheKeyForNoteIds(undefined)));
   const [scanning, setScanning] = useState(false);
   const [previewingCategory, setPreviewingCategory] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
@@ -80,30 +95,55 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
   };
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+  // 执行一次扫描并写入模块级缓存。force=false 时优先命中缓存，避免重复扫描。
+  const runScan = useCallback(
+    async (options?: { force?: boolean; signal?: { cancelled: boolean } }): Promise<boolean> => {
+      const { force = false, signal } = options ?? {};
+      const cacheKey = cacheKeyForNoteIds(noteIds);
 
-    Promise.all([
-      invoke<DataManagementOverview>("get_data_management_overview", { noteIds }),
-      invoke<DataManagementScanResult>("scan_data_management", { noteIds }),
-    ])
-      .then(([overviewData, scanData]) => {
-        if (cancelled) return;
-        setOverview(overviewData);
-        setScanResult(scanData);
-      })
+      if (!force) {
+        const cached = dataManagementCache.get(cacheKey);
+        if (cached) {
+          if (signal?.cancelled) return true;
+          setOverview(cached.overview);
+          setScanResult(cached.scanResult);
+          return true;
+        }
+      }
+
+      const [overviewData, scanData] = await Promise.all([
+        invoke<DataManagementOverview>("get_data_management_overview", { noteIds }),
+        invoke<DataManagementScanResult>("scan_data_management", { noteIds }),
+      ]);
+      dataManagementCache.set(cacheKey, { overview: overviewData, scanResult: scanData });
+      if (signal?.cancelled) return true;
+      setOverview(overviewData);
+      setScanResult(scanData);
+      return false;
+    },
+    [noteIds],
+  );
+
+  useEffect(() => {
+    const signal = { cancelled: false };
+    const cacheKey = cacheKeyForNoteIds(noteIds);
+    const hasCache = dataManagementCache.has(cacheKey);
+
+    // 命中缓存时无需 loading 态，避免闪烁
+    if (!hasCache) setLoading(true);
+
+    runScan({ signal })
       .catch((error) => {
-        if (cancelled) return;
+        if (signal.cancelled) return;
         console.error("Failed to load data management overview:", error);
         message.error(`数据管理加载失败：${String(error)}`);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
+        if (!signal.cancelled) setLoading(false);
       });
 
-    return () => { cancelled = true; };
-  }, [selectedNoteId]);
+    return () => { signal.cancelled = true; };
+  }, [noteIds, runScan]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -119,9 +159,7 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
   const handleRefreshScan = async () => {
     setScanning(true);
     try {
-      const scanData = await invoke<DataManagementScanResult>("scan_data_management", { noteIds });
-      setScanResult(scanData);
-      setOverview(scanData.overview);
+      await runScan({ force: true });
       message.success("数据扫描已刷新");
     } catch (error) {
       console.error("Failed to scan data management:", error);
@@ -160,7 +198,9 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
       message.success(`处理完成，共处理 ${result.processed_items} 项，释放 ${formatBytes(result.cleared_bytes)}`);
       setPreview(null);
       setPendingRequest(null);
-      await loadOverview();
+      // 清理会改变磁盘数据，使所有范围的缓存失效，清空后强制重扫当前范围
+      dataManagementCache.clear();
+      await runScan({ force: true });
     } catch (error) {
       console.error("Failed to execute cleanup:", error);
       message.error(`清理失败：${String(error)}`);

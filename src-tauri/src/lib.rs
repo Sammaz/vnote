@@ -934,19 +934,29 @@ async fn clear_video_cache(app: AppHandle) -> Result<u64, String> {
 }
 
 #[tauri::command]
-fn get_data_management_overview(
+async fn get_data_management_overview(
     app: AppHandle,
     note_ids: Option<Vec<String>>,
 ) -> Result<DataManagementOverview, String> {
-    data_management::get_overview(&app, get_db(), note_ids.as_deref())
+    // 文件系统扫描耗时较长，放到阻塞线程池执行，避免阻塞主线程导致 UI 卡顿
+    tauri::async_runtime::spawn_blocking(move || {
+        data_management::get_overview(&app, get_db(), note_ids.as_deref())
+    })
+    .await
+    .map_err(|e| format!("数据管理加载任务执行失败: {}", e))?
 }
 
 #[tauri::command]
-fn scan_data_management(
+async fn scan_data_management(
     app: AppHandle,
     note_ids: Option<Vec<String>>,
 ) -> Result<DataManagementScanResult, String> {
-    data_management::scan(&app, get_db(), note_ids.as_deref())
+    // 文件系统扫描耗时较长，放到阻塞线程池执行，避免阻塞主线程导致 UI 卡顿
+    tauri::async_runtime::spawn_blocking(move || {
+        data_management::scan(&app, get_db(), note_ids.as_deref())
+    })
+    .await
+    .map_err(|e| format!("数据扫描任务执行失败: {}", e))?
 }
 
 #[tauri::command]
@@ -1898,20 +1908,25 @@ fn get_initialization_registry() -> Vec<note_initialization::InitializationItemD
 }
 
 #[tauri::command]
-fn get_initialization_overview() -> Result<Vec<NoteInitializationOverview>, String> {
-    let db = get_db();
-    let note_ids: Vec<String> = db
-        .get_all_notes()
-        .map_err(|e| e.to_string())?
-        .into_iter()
-        .map(|note| note.id)
-        .collect();
+async fn get_initialization_overview() -> Result<Vec<NoteInitializationOverview>, String> {
+    // 遍历所有笔记并确保初始化状态，涉及文件 IO，放到阻塞线程池执行避免阻塞主线程
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = get_db();
+        let note_ids: Vec<String> = db
+            .get_all_notes()
+            .map_err(|e| e.to_string())?
+            .into_iter()
+            .map(|note| note.id)
+            .collect();
 
-    for note_id in note_ids {
-        note_initialization::ensure_note_initialization_state(&note_id)?;
-    }
+        for note_id in note_ids {
+            note_initialization::ensure_note_initialization_state(&note_id)?;
+        }
 
-    db.get_note_initialization_overview().map_err(|e| e.to_string())
+        db.get_note_initialization_overview().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("初始化管理加载任务执行失败: {}", e))?
 }
 
 #[tauri::command]
