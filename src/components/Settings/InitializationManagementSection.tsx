@@ -871,26 +871,29 @@ export function InitializationManagementSection({
     }
   }, [currentTask?.status, initState.isInitializing]);
 
-  const loadOverview = useCallback(async () => {
+  const loadOverview = useCallback(async (signal?: { cancelled: boolean }) => {
     setLoadingOverview(true);
     try {
       const [registryData, overviewData] = await Promise.all([
         invoke<InitializationItemDefinition[]>("get_initialization_registry"),
         invoke<NoteInitializationOverview[]>("get_initialization_overview"),
       ]);
+      if (signal?.cancelled) return;
       setRegistry(registryData);
       setOverview(overviewData);
-
     } catch (error) {
+      if (signal?.cancelled) return;
       console.error("Failed to load initialization overview:", error);
       message.error(`初始化管理加载失败：${String(error)}`);
     } finally {
-      setLoadingOverview(false);
+      if (!signal?.cancelled) setLoadingOverview(false);
     }
   }, []);
 
   useEffect(() => {
-    loadOverview();
+    const signal = { cancelled: false };
+    loadOverview(signal);
+    return () => { signal.cancelled = true; };
   }, [loadOverview]);
 
   const lastOverviewRefreshTaskRef = useRef<string | null>(null);

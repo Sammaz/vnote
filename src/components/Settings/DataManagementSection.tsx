@@ -80,25 +80,29 @@ export function DataManagementSection({ notes }: DataManagementSectionProps) {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
   };
 
-  const loadOverview = async () => {
-    setLoading(true);
-    try {
-      const [overviewData, scanData] = await Promise.all([
-        invoke<DataManagementOverview>("get_data_management_overview", { noteIds }),
-        invoke<DataManagementScanResult>("scan_data_management", { noteIds }),
-      ]);
-      setOverview(overviewData);
-      setScanResult(scanData);
-    } catch (error) {
-      console.error("Failed to load data management overview:", error);
-      message.error(`数据管理加载失败：${String(error)}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadOverview();
+    let cancelled = false;
+    setLoading(true);
+
+    Promise.all([
+      invoke<DataManagementOverview>("get_data_management_overview", { noteIds }),
+      invoke<DataManagementScanResult>("scan_data_management", { noteIds }),
+    ])
+      .then(([overviewData, scanData]) => {
+        if (cancelled) return;
+        setOverview(overviewData);
+        setScanResult(scanData);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        console.error("Failed to load data management overview:", error);
+        message.error(`数据管理加载失败：${String(error)}`);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => { cancelled = true; };
   }, [selectedNoteId]);
 
   useEffect(() => {
