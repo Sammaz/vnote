@@ -138,9 +138,13 @@ export function NotesProvider({ children, onStatsUpdate, onBeforeNoteDelete }: N
   }, [updateStats]);
   const createNote = useCallback(async (req: CreateNoteRequest): Promise<Note> => {
     const newNote = await invoke<Note>("create_note", { req });
-    await refreshNotes();
+    setNotes(prev => {
+      const nextNotes = [newNote, ...prev];
+      updateStats(nextNotes);
+      return nextNotes;
+    });
     return newNote;
-  }, [refreshNotes]);
+  }, [updateStats]);
 
   // 更新笔记元数据
   const updateNote = useCallback(async (req: UpdateNoteMetadataRequest): Promise<void> => {
