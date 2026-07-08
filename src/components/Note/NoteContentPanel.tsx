@@ -60,6 +60,7 @@ import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { copyText } from "../../utils/clipboard";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
+import { findCurrentDetailedReadingChapter } from "../../utils/detailedReadingChapters";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import {
   getNoteGenerationState,
@@ -128,6 +129,8 @@ const TAB_TYPE_MAPPING: Record<string, TabType> = {
   ai_note: "ai_note",
   flashcard: "flashcards",
 };
+
+const USER_CHAPTER_SEEK_SUPPRESSION_MS = 800;
 
 // ============================================================================
 // 全局生成状态管理器（跨组件实例持久化）
@@ -282,9 +285,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   const getCurrentChapter = useCallback((time: number): DetailedReadingChapter | null => {
     if (!detailedReadingData) return null;
-    return detailedReadingData.chapters.find(
-      chapter => time >= chapter.start_time && time <= chapter.end_time
-    ) || null;
+    return findCurrentDetailedReadingChapter(detailedReadingData.chapters, time);
   }, [detailedReadingData]);
 
   // 字幕滚动状态
@@ -304,6 +305,24 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [isCompactVisualToolbarLeft, setIsCompactVisualToolbarLeft] = useState(false);
   const [isCompactVisualToolbarRight, setIsCompactVisualToolbarRight] = useState(true);
   const visualToolbarCompactStateRef = useRef<{ left: boolean; right: boolean }>({ left: false, right: true });
+
+  const handleOriginalChapterJump = useCallback((chapter: DetailedReadingChapter) => {
+    userClickTimeRef.current = Date.now();
+    setCurrentChapterId(chapter.id);
+    lastChapterIdRef.current = chapter.id;
+    window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
+
+    const chapterElement = document.getElementById(`chapter-${chapter.id}`);
+    if (chapterElement) {
+      isAutoScrollingRef.current = true;
+      chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => {
+        isAutoScrollingRef.current = false;
+      }, USER_CHAPTER_SEEK_SUPPRESSION_MS);
+    }
+
+    setShowChapterDropdown(false);
+  }, [isAutoScrollingRef]);
 
   // 辅助模式状态
   const [isAssistModeActive, setIsAssistModeActive] = useState(false);
@@ -963,11 +982,35 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  useEffect(() => {
+    if (activeTab !== "original" || !detailedReadingData) return;
+
+    const handleSeekVideo = (event: Event) => {
+      const customEvent = event as CustomEvent<{ time: number }>;
+      const targetTime = customEvent.detail?.time;
+      if (typeof targetTime !== "number") return;
+
+      const chapter = getCurrentChapter(targetTime);
+      if (!chapter) return;
+
+      userClickTimeRef.current = Date.now();
+      setCurrentChapterId(chapter.id);
+      lastChapterIdRef.current = chapter.id;
+    };
+
+    window.addEventListener("seek-video", handleSeekVideo);
+    return () => window.removeEventListener("seek-video", handleSeekVideo);
+  }, [activeTab, detailedReadingData, getCurrentChapter]);
+
   // 监听视频播放时间变化（仅在章节切换时更新 state，避免每帧重渲染）
   useEffect(() => {
     if (activeTab !== "original") return;
 
     return subscribeVideoTime((time) => {
+      if (Date.now() - userClickTimeRef.current < USER_CHAPTER_SEEK_SUPPRESSION_MS) {
+        return;
+      }
+
       const chapter = getCurrentChapter(time);
       const nextId = chapter?.id ?? null;
       setCurrentChapterId((prev) => (prev === nextId ? prev : nextId));
@@ -979,8 +1022,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     if (!autoScroll || activeTab !== "original" || !detailedReadingData) return;
 
     return subscribeVideoTime((currentTime) => {
-      // 如果用户刚刚点击过章节（500ms内），忽略视频时间更新带来的滚动
-      if (Date.now() - userClickTimeRef.current < 500) {
+      // 如果用户刚刚点击过章节，忽略 seek 期间旧时间带来的滚动
+      if (Date.now() - userClickTimeRef.current < USER_CHAPTER_SEEK_SUPPRESSION_MS) {
         return;
       }
 
@@ -996,7 +1039,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
             setTimeout(() => {
               isAutoScrollingRef.current = false;
-            }, 500); // 增加保护时间到 500ms
+            }, USER_CHAPTER_SEEK_SUPPRESSION_MS);
           }
         }
         lastChapterIdRef.current = currentChapter.id;
@@ -2601,15 +2644,7 @@ Video subtitles content:`;
                           return (
                             <button
                               key={chapter.id}
-                              onClick={() => {
-                                userClickTimeRef.current = Date.now();
-                                window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
-                                const chapterElement = document.getElementById(`chapter-${chapter.id}`);
-                                if (chapterElement) {
-                                  chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
-                                }
-                                setShowChapterDropdown(false);
-                              }}
+                              onClick={() => handleOriginalChapterJump(chapter)}
                               className={cn(
                                 "w-full px-4 py-2 flex items-center gap-3 transition-colors cursor-pointer text-left",
                                 isCurrentChapter
@@ -3016,15 +3051,7 @@ Video subtitles content:`;
                           return (
                             <button
                               key={chapter.id}
-                              onClick={() => {
-                                userClickTimeRef.current = Date.now();
-                                window.dispatchEvent(new CustomEvent("seek-video", { detail: { time: chapter.start_time } }));
-                                const chapterElement = document.getElementById(`chapter-${chapter.id}`);
-                                if (chapterElement) {
-                                  chapterElement.scrollIntoView({ behavior: "smooth", block: "center" });
-                                }
-                                setShowChapterDropdown(false);
-                              }}
+                              onClick={() => handleOriginalChapterJump(chapter)}
                               className={cn(
                                 "w-full px-4 py-2 flex items-center gap-3 transition-colors cursor-pointer text-left",
                                 isCurrentChapter
