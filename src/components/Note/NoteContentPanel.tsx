@@ -60,6 +60,7 @@ import { AssistModeView } from "./AssistModeView";
 import { message } from "../../utils/message";
 import { copyText } from "../../utils/clipboard";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
+import { stripHeadingTimestamps } from "../../utils/markdownUtils";
 import { findCurrentDetailedReadingChapter } from "../../utils/detailedReadingChapters";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import {
@@ -617,7 +618,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const [isEditMode, setIsEditMode] = useState(false);
   const [isVisualEditMode, setIsVisualEditMode] = useState(false);
   const [visualEditContent, setVisualEditContent] = useState<string>("");
-  const [showVisualTimestamp, setShowVisualTimestamp] = useState(true);
   const [showVisualChapterDropdown, setShowVisualChapterDropdown] = useState(false);
   const [activeVisualChapterIndex, setActiveVisualChapterIndex] = useState(-1);
   const visualChapterDropdownRef = useRef<HTMLDivElement>(null);
@@ -1205,9 +1205,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       chapters: chapterDataForMarkdown.chapters,
       optimizedSubtitles,
       originalSubtitles: subtitleEntries,
-      showTimestamp: showVisualTimestamp,
+      showTimestamp: true,
     });
-  }, [visualChaptersForMarkdown, optimizedSubtitles, subtitleEntries, showVisualTimestamp]);
+  }, [visualChaptersForMarkdown, optimizedSubtitles, subtitleEntries]);
 
   const getSavedVisualMarkdown = useCallback((): string | null => {
     return note.visual_summary || null;
@@ -1220,6 +1220,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   const visualSummaryDisplayMarkdown = useMemo(() => {
     return getVisualSummaryDisplayMarkdown();
   }, [getVisualSummaryDisplayMarkdown]);
+
+  const getVisualExportContent = useCallback((): string => {
+    const content = isVisualEditMode ? visualEditContent : getVisualSummaryDisplayMarkdown();
+    return stripHeadingTimestamps(content);
+  }, [getVisualSummaryDisplayMarkdown, isVisualEditMode, visualEditContent]);
 
   const visualChapterItems = useMemo<TOCItem[]>(() => {
     return extractMarkdownHeadings(visualSummaryDisplayMarkdown);
@@ -1315,7 +1320,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     observer.observe(measureRightExpandedElement);
 
     return () => observer.disconnect();
-  }, [activeTab, isVisualEditMode, visualChapterItems.length, showVisualTimestamp]);
+  }, [activeTab, isVisualEditMode, visualChapterItems.length]);
 
   const handleVisualChapterJump = useCallback((index: number) => {
     const didScroll = scrollToMarkdownHeading(index);
@@ -1433,7 +1438,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 视觉化总结下载
   const handleVisualDownload = async () => {
-    const content = isVisualEditMode ? visualEditContent : getVisualSummaryDisplayMarkdown();
+    const content = getVisualExportContent();
     if (!content) {
       message.warning("暂无内容可下载");
       return;
@@ -1454,7 +1459,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 视觉化总结导出（打包 Markdown 和图片为 zip）
   const handleVisualExport = async () => {
-    const content = isVisualEditMode ? visualEditContent : getVisualSummaryDisplayMarkdown();
+    const content = getVisualExportContent();
     if (!content) {
       message.warning("暂无内容可导出");
       return;
@@ -2857,22 +2862,13 @@ Video subtitles content:`;
         <div className={cn(toolbarBarNoWrapClass, "select-none")}>
           <div ref={visualToolbarMeasureLeftExpandedRef} className={toolbarSectionResponsiveNoWrapClass}>
             {!isVisualEditMode && visualChapterItems.length > 0 && (
-              <>
-                <div className="relative min-w-0 max-w-full">
-                  <button className={cn(toolbarButtonClass, toolbarActionButtonClass, "max-w-full")} type="button">
-                    <List className="w-4 h-4" />
-                    <span className="truncate">共 {visualChapterItems.length} 个章节</span>
-                    <ChevronDown className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  className={cn(toolbarButtonClass, toolbarActionButtonClass, showVisualTimestamp && toolbarButtonActiveClass)}
-                >
-                  <Clock className="w-4 h-4" />
-                  时间戳
+              <div className="relative min-w-0 max-w-full">
+                <button className={cn(toolbarButtonClass, toolbarActionButtonClass, "max-w-full")} type="button">
+                  <List className="w-4 h-4" />
+                  <span className="truncate">共 {visualChapterItems.length} 个章节</span>
+                  <ChevronDown className="w-3.5 h-3.5" />
                 </button>
-              </>
+              </div>
             )}
           </div>
           <div className={toolbarSectionEndNoWrapClass}>
@@ -3373,19 +3369,6 @@ Video subtitles content:`;
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={() => setShowVisualTimestamp(!showVisualTimestamp)}
-                  className={cn(
-                    toolbarButtonClass,
-                    isCompactVisualToolbarLeft ? toolbarCompactButtonClass : toolbarActionButtonClass,
-                    showVisualTimestamp && toolbarButtonActiveClass
-                  )}
-                  title="时间戳"
-                  aria-label="时间戳"
-                >
-                  <Clock className="w-4 h-4" />
-                  {!isCompactVisualToolbarLeft && "时间戳"}
-                </button>
               </>
             )}
           </div>
@@ -3749,7 +3732,6 @@ Video subtitles content:`;
             isEditMode={isVisualEditMode}
             editContent={visualEditContent}
             onEditContentChange={setVisualEditContent}
-            showTimestamp={showVisualTimestamp}
             savedMarkdownContent={visualSummaryDisplayMarkdown}
           />
         )}

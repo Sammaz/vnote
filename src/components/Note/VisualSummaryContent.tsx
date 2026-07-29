@@ -14,7 +14,6 @@ interface VisualSummaryContentProps {
   isEditMode?: boolean;
   editContent?: string;
   onEditContentChange?: (content: string) => void;
-  showTimestamp?: boolean;
   /** 已保存的 Markdown 编辑内容（用户编辑后保存的内容） */
   savedMarkdownContent?: string | null;
 }
@@ -23,7 +22,6 @@ export function VisualSummaryContent({
   isEditMode = false,
   editContent = "",
   onEditContentChange,
-  showTimestamp = true,
   savedMarkdownContent,
 }: VisualSummaryContentProps) {
   const glassPanel = useGlassBg("panel");
@@ -72,9 +70,9 @@ export function VisualSummaryContent({
         <MarkdownRenderer
           content={markdownContent}
           variant="note"
-          className={showTimestamp ? undefined : "hide-timestamps"}
           headingIdPrefix="viz"
           enableHeadingAnchors
+          enableSeekTimestamps
           enableTimestampRanges
           enableHashtags
           centerImages

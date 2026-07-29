@@ -53,3 +53,14 @@ export function convertJsonToMarkdown(content: string): string {
     return content;
   }
 }
+
+/**
+ * Remove chapter time ranges from Markdown heading lines for visual-summary exports.
+ * Other timestamp forms and non-heading text are intentionally preserved.
+ */
+export function stripHeadingTimestamps(markdown: string): string {
+  return markdown.replace(
+    /^([ \t]*#{1,6}[ \t]+.*?)[ \t]+\(\d{1,2}:\d{2}(?::\d{2})?[ \t]*-[ \t]*\d{1,2}:\d{2}(?::\d{2})?\)([ \t]*)(\r?)$/gm,
+    "$1$2$3",
+  );
+}

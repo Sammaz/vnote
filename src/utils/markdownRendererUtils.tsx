@@ -5,6 +5,7 @@ import { EvidenceCitation } from "../components/Markdown/EvidenceCitation";
 const BRACKET_TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/;
 const CLOCK_TIMESTAMP_RE = /⏱\s*(\d{1,2}:\d{2}(?::\d{2})?)/;
 const CHINESE_TIMESTAMP_RE = /（时间：(\d{1,2}:\d{2}(?::\d{2})?)）/;
+const TIMESTAMP_RANGE_RE = /^\((\d{1,2}:\d{2}(?::\d{2})?)\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\)$/;
 const DECORATION_REGEX = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\))|(#[^\s#]+)|(==[^=]+==)|(\[证据\s*\d+(?:\s*[,，、]\s*\d+)*\])/g;
 
 export interface MarkdownDecorationOptions {
@@ -112,6 +113,11 @@ function createSeekHandler(timeText: string) {
   };
 }
 
+function createRangeSeekHandler(rangeText: string) {
+  const startTimeText = rangeText.match(TIMESTAMP_RANGE_RE)?.[1] ?? "";
+  return createSeekHandler(startTimeText);
+}
+
 export function parseEvidenceRanks(citationToken: string): number[] {
   const inner = citationToken.replace(/^\[证据\s*/, "").replace(/\]$/, "");
   return inner
@@ -178,7 +184,7 @@ function renderDecoratedString(
           <button
             key={`${keyPrefix}-timestamp-${partIndex++}`}
             type="button"
-            className="timestamp cursor-pointer hover:opacity-80"
+            className="timestamp cursor-pointer transition-opacity duration-200 hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
             onClick={createSeekHandler(timeText)}
           >
             {timeText}
@@ -191,9 +197,20 @@ function renderDecoratedString(
       );
     } else if (match[4] && options.enableTimestampRanges !== false) {
       result.push(
-        <span key={`${keyPrefix}-range-${partIndex++}`} className="timestamp-range">
-          {matchedText}
-        </span>,
+        options.enableSeekTimestamps ? (
+          <button
+            key={`${keyPrefix}-range-${partIndex++}`}
+            type="button"
+            className="timestamp-range cursor-pointer transition-opacity duration-200 hover:opacity-80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500"
+            onClick={createRangeSeekHandler(matchedText)}
+          >
+            {matchedText}
+          </button>
+        ) : (
+          <span key={`${keyPrefix}-range-${partIndex++}`} className="timestamp-range">
+            {matchedText}
+          </span>
+        ),
       );
     } else if (match[5] && options.enableHashtags !== false) {
       result.push(
