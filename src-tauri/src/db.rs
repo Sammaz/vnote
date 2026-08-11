@@ -20,6 +20,7 @@ pub struct AiConfig {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub reasoning_effort: String,
     pub sort_order: i32,
     pub is_default: bool,
     pub concurrent_limit: i32,
@@ -491,7 +492,7 @@ impl Database {
     pub fn get_all_ai_configs(&self) -> SqliteResult<Vec<AiConfig>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit FROM ai_configs ORDER BY is_default DESC, sort_order"
+            "SELECT id, title, base_url, api_key, model, reasoning_effort, sort_order, is_default, concurrent_limit, request_timeout, rate_limit FROM ai_configs ORDER BY is_default DESC, sort_order"
         )?;
 
         let configs = stmt.query_map([], |row| {
@@ -521,11 +522,12 @@ impl Database {
                 base_url: row.get(2)?,
                 api_key,
                 model: row.get(4)?,
-                sort_order: row.get(5)?,
-                is_default: row.get::<_, i64>(6)? != 0,
-                concurrent_limit: row.get(7)?,
-                request_timeout: row.get(8)?,
-                rate_limit: row.get(9)?,
+                reasoning_effort: row.get(5)?,
+                sort_order: row.get(6)?,
+                is_default: row.get::<_, i64>(7)? != 0,
+                concurrent_limit: row.get(8)?,
+                request_timeout: row.get(9)?,
+                rate_limit: row.get(10)?,
             })
         })?;
 
@@ -552,8 +554,8 @@ impl Database {
         };
 
         conn.execute(
-            "INSERT INTO ai_configs (id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            (&new_id, &config.title, &config.base_url, db_api_key, &config.model, config.sort_order, is_default, config.concurrent_limit, config.request_timeout, config.rate_limit),
+            "INSERT INTO ai_configs (id, title, base_url, api_key, model, reasoning_effort, sort_order, is_default, concurrent_limit, request_timeout, rate_limit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            (&new_id, &config.title, &config.base_url, db_api_key, &config.model, &config.reasoning_effort, config.sort_order, is_default, config.concurrent_limit, config.request_timeout, config.rate_limit),
         )?;
 
         // Store API key to keyring
@@ -579,8 +581,8 @@ impl Database {
         };
 
         conn.execute(
-            "UPDATE ai_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, sort_order = ?5, is_default = ?6, concurrent_limit = ?7, request_timeout = ?8, rate_limit = ?9 WHERE id = ?10",
-            (&config.title, &config.base_url, db_api_key, &config.model, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout, config.rate_limit, &config.id),
+            "UPDATE ai_configs SET title = ?1, base_url = ?2, api_key = ?3, model = ?4, reasoning_effort = ?5, sort_order = ?6, is_default = ?7, concurrent_limit = ?8, request_timeout = ?9, rate_limit = ?10 WHERE id = ?11",
+            (&config.title, &config.base_url, db_api_key, &config.model, &config.reasoning_effort, config.sort_order, config.is_default as i32, config.concurrent_limit, config.request_timeout, config.rate_limit, &config.id),
         )?;
 
         // Update API key in keyring
@@ -613,7 +615,7 @@ impl Database {
     pub fn get_default_ai_config(&self) -> SqliteResult<Option<AiConfig>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit
+            "SELECT id, title, base_url, api_key, model, reasoning_effort, sort_order, is_default, concurrent_limit, request_timeout, rate_limit
              FROM ai_configs WHERE is_default = 1 LIMIT 1"
         )?;
         let result = stmt.query_row([], |row| {
@@ -629,11 +631,12 @@ impl Database {
                 base_url: row.get(2)?,
                 api_key,
                 model: row.get(4)?,
-                sort_order: row.get(5)?,
-                is_default: row.get::<_, i64>(6)? != 0,
-                concurrent_limit: row.get(7)?,
-                request_timeout: row.get(8)?,
-                rate_limit: row.get(9)?,
+                reasoning_effort: row.get(5)?,
+                sort_order: row.get(6)?,
+                is_default: row.get::<_, i64>(7)? != 0,
+                concurrent_limit: row.get(8)?,
+                request_timeout: row.get(9)?,
+                rate_limit: row.get(10)?,
             })
         }).optional()?;
         Ok(result)
@@ -1125,7 +1128,7 @@ impl Database {
     pub fn get_ai_config_by_id(&self, id: &str) -> SqliteResult<Option<AiConfig>> {
         let conn = self.connection();
         let mut stmt = conn.prepare(
-            "SELECT id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit FROM ai_configs WHERE id = ?1"
+            "SELECT id, title, base_url, api_key, model, reasoning_effort, sort_order, is_default, concurrent_limit, request_timeout, rate_limit FROM ai_configs WHERE id = ?1"
         )?;
 
         let result = stmt.query_row([id], |row| {
@@ -1155,11 +1158,12 @@ impl Database {
                 base_url: row.get(2)?,
                 api_key,
                 model: row.get(4)?,
-                sort_order: row.get(5)?,
-                is_default: row.get::<_, i64>(6)? != 0,
-                concurrent_limit: row.get(7)?,
-                request_timeout: row.get(8)?,
-                rate_limit: row.get(9)?,
+                reasoning_effort: row.get(5)?,
+                sort_order: row.get(6)?,
+                is_default: row.get::<_, i64>(7)? != 0,
+                concurrent_limit: row.get(8)?,
+                request_timeout: row.get(9)?,
+                rate_limit: row.get(10)?,
             })
         });
 
@@ -3055,6 +3059,67 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temp dir");
         let db = Database::new(temp_dir.path().to_path_buf()).expect("Failed to create database");
         (db, temp_dir)
+    }
+
+    #[test]
+    fn test_ai_config_reasoning_effort_round_trip() {
+        let (db, _temp_dir) = create_test_db();
+        let id = "reasoning-round-trip-test";
+        {
+            let conn = db.connection();
+            conn.execute(
+                "INSERT INTO ai_configs (id, title, base_url, api_key, model, reasoning_effort, sort_order, is_default, concurrent_limit, request_timeout, rate_limit) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, 1, 1, 0, 0)",
+                rusqlite::params![id, "Reasoning test", "https://example.com/v1", "test-key", "test-model", "off"],
+            )
+            .expect("insert AI config");
+        }
+
+        let created = db
+            .get_ai_config_by_id(id)
+            .expect("query AI config")
+            .expect("created config should exist");
+        assert_eq!(created.reasoning_effort, "off");
+
+        let conn = db.connection();
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+            conn.execute(
+                "UPDATE ai_configs SET reasoning_effort = ?1 WHERE id = ?2",
+                rusqlite::params![effort, id],
+            )
+            .expect("update AI config");
+            let round_trip = db
+                .get_ai_config_by_id(id)
+                .expect("query updated AI config")
+                .expect("updated config should exist");
+            assert_eq!(round_trip.reasoning_effort, effort);
+        }
+    }
+
+    #[test]
+    fn test_ai_config_reasoning_effort_default_and_check_constraint() {
+        let (db, _temp_dir) = create_test_db();
+        let id = "reasoning-default-test";
+        {
+            let conn = db.connection();
+            conn.execute(
+                "INSERT INTO ai_configs (id, title, base_url, api_key, model, sort_order, is_default, concurrent_limit, request_timeout, rate_limit) VALUES (?1, ?2, ?3, ?4, ?5, 0, 1, 1, 0, 0)",
+                rusqlite::params![id, "Default test", "https://example.com/v1", "test-key", "test-model"],
+            )
+            .expect("insert config without reasoning effort");
+        }
+
+        let config = db
+            .get_ai_config_by_id(id)
+            .expect("query default config")
+            .expect("default config should exist");
+        assert_eq!(config.reasoning_effort, "off");
+
+        let conn = db.connection();
+        let result = conn.execute(
+            "UPDATE ai_configs SET reasoning_effort = 'invalid' WHERE id = ?1",
+            [id],
+        );
+        assert!(result.is_err(), "invalid reasoning effort should be rejected");
     }
 
     /// Helper function to create a test note and return its ID

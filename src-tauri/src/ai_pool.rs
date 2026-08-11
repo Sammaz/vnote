@@ -98,6 +98,24 @@ fn ensure_stream_buffer_limit(buffer: &str) -> Result<(), String> {
     }
 }
 
+fn build_chat_completions_body(
+    model: &str,
+    messages: Vec<Value>,
+    reasoning_effort: &str,
+) -> Value {
+    let mut body = json!({
+        "model": model,
+        "messages": messages,
+        "stream": true
+    });
+
+    if reasoning_effort != "off" {
+        body["reasoning_effort"] = Value::String(reasoning_effort.to_string());
+    }
+
+    body
+}
+
 // ============================================================================
 // 公共类型定义（复用chat.rs的结构以保持兼容）
 // ============================================================================
@@ -904,11 +922,11 @@ async fn execute_streaming_chat_single_attempt(
     let api_url = format!("{}/chat/completions", base_url);
 
     // 构建请求体
-    let body = json!({
-        "model": req.config.model,
-        "messages": api_messages,
-        "stream": true
-    });
+    let body = build_chat_completions_body(
+        &req.config.model,
+        api_messages,
+        &req.config.reasoning_effort,
+    );
 
     // 发送请求
     let response = client
@@ -1078,14 +1096,14 @@ async fn streaming_collect_single(
     let client = pool.get_or_create_http_client(&config.id, config.request_timeout).await;
     let api_url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
 
-    let body = json!({
-        "model": config.model,
-        "messages": [
-            { "role": "system", "content": "你是一个专业的视频内容分析师，擅长提取和总结信息。" },
-            { "role": "user", "content": prompt }
+    let body = build_chat_completions_body(
+        &config.model,
+        vec![
+            json!({ "role": "system", "content": "你是一个专业的视频内容分析师，擅长提取和总结信息。" }),
+            json!({ "role": "user", "content": prompt })
         ],
-        "stream": true
-    });
+        &config.reasoning_effort,
+    );
 
     let response = client
         .post(&api_url)
@@ -1145,6 +1163,32 @@ async fn streaming_collect_single(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_chat_request_body_omits_reasoning_effort_when_off() {
+        let body = build_chat_completions_body(
+            "test-model",
+            vec![json!({ "role": "user", "content": "hello" })],
+            "off",
+        );
+
+        assert_eq!(body["model"], "test-model");
+        assert_eq!(body["stream"], true);
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn test_chat_request_body_serializes_enabled_reasoning_efforts() {
+        for effort in ["low", "medium", "high", "xhigh", "max", "ultra"] {
+            let body = build_chat_completions_body(
+                "test-model",
+                vec![json!({ "role": "user", "content": "hello" })],
+                effort,
+            );
+
+            assert_eq!(body["reasoning_effort"], effort);
+        }
+    }
 
     #[test]
     fn test_stream_buffer_limit_allows_small_buffer() {

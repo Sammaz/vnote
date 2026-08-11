@@ -10,7 +10,7 @@ import { useSettings } from "./context/SettingsContext";
 import { DataManagementSection } from "./components/Settings/DataManagementSection";
 import { InitializationManagementSection } from "./components/Settings/InitializationManagementSection";
 import { message } from "./utils/message";
-import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptConfig } from "./types";
+import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptConfig, ReasoningEffort } from "./types";
 
 interface SettingsPageProps {
     currentTheme: "light" | "dark";
@@ -142,6 +142,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         base_url: "",
         api_key: "",
         model: "",
+        reasoning_effort: "off",
         sort_order: aiConfigs.length,
         is_default: false,
         concurrent_limit: 5,
@@ -1225,6 +1226,27 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 />
                                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">要使用的模型 ID</p>
                             </div>
+
+                            {editingType === "ai" && (
+                                <div className="flex flex-col w-full">
+                                    <label htmlFor="ai-reasoning-effort" className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">推理强度</label>
+                                    <select
+                                        id="ai-reasoning-effort"
+                                        value={(currentConfig as AiConfig | null)?.reasoning_effort ?? "off"}
+                                        onChange={e => setCurrentEditingConfig({ reasoning_effort: e.target.value as ReasoningEffort })}
+                                        className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput}`}
+                                    >
+                                        <option value="off">关闭（off）</option>
+                                        <option value="low">低（low）</option>
+                                        <option value="medium">中（medium）</option>
+                                        <option value="high">高（high）</option>
+                                        <option value="xhigh">极高（xhigh）</option>
+                                        <option value="max">最大（max）</option>
+                                        <option value="ultra">极致（ultra）</option>
+                                    </select>
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">控制模型生成回答时使用的推理强度，默认关闭</p>
+                                </div>
+                            )}
 
                             {editingType === "ai" && (
                                 <div className="flex flex-col w-full">

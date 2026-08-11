@@ -250,6 +250,18 @@ pub fn validate_model_name(model: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 验证 AI 配置的推理强度
+///
+/// # 规则
+/// - 必须是支持的固定小写值
+/// - `off` 表示不启用推理
+pub fn validate_reasoning_effort(reasoning_effort: &str) -> Result<(), String> {
+    match reasoning_effort {
+        "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" => Ok(()),
+        _ => Err("推理强度必须是 off、low、medium、high、xhigh、max 或 ultra".to_string()),
+    }
+}
+
 /// 验证并发限制数值
 ///
 /// # 规则
@@ -382,5 +394,16 @@ mod tests {
         // 无效值
         assert!(validate_request_timeout(-1).is_err());
         assert!(validate_request_timeout(601).is_err());
+    }
+
+    #[test]
+    fn test_validate_reasoning_effort() {
+        for value in ["off", "low", "medium", "high", "xhigh", "max", "ultra"] {
+            assert!(validate_reasoning_effort(value).is_ok());
+        }
+
+        for value in ["", "OFF", "Low", " low", "low ", "unknown"] {
+            assert!(validate_reasoning_effort(value).is_err());
+        }
     }
 }

@@ -59,12 +59,15 @@ export interface AppStats {
 }
 
 // AI 配置（与 SettingsPage 共享）
+export type ReasoningEffort = "off" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
+
 export interface AiConfig {
   id: string;
   title: string;
   base_url: string;
   api_key: string;
   model: string;
+  reasoning_effort: ReasoningEffort;
   sort_order: number;
   is_default: boolean;
   concurrent_limit: number; // 并发生成数，范围1-10，默认5

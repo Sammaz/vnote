@@ -6,6 +6,8 @@ CREATE TABLE IF NOT EXISTS ai_configs (
     base_url TEXT NOT NULL,
     api_key TEXT NOT NULL,
     model TEXT NOT NULL,
+    reasoning_effort TEXT NOT NULL DEFAULT 'off'
+        CHECK (reasoning_effort IN ('off', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')),
     sort_order INTEGER NOT NULL DEFAULT 0,
     is_default INTEGER NOT NULL DEFAULT 0,
     concurrent_limit INTEGER NOT NULL DEFAULT 5,

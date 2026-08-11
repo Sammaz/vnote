@@ -445,6 +445,7 @@ fn create_ai_config(config: AiConfig) -> Result<String, String> {
     validation::validate_url(&config.base_url)?;
     validation::validate_api_key(&config.api_key)?;
     validation::validate_model_name(&config.model)?;
+    validation::validate_reasoning_effort(&config.reasoning_effort)?;
     validation::validate_concurrent_limit(config.concurrent_limit)?;
     validation::validate_request_timeout(config.request_timeout)?;
 
@@ -458,6 +459,7 @@ async fn update_ai_config(config: AiConfig) -> Result<(), String> {
     validation::validate_url(&config.base_url)?;
     validation::validate_api_key(&config.api_key)?;
     validation::validate_model_name(&config.model)?;
+    validation::validate_reasoning_effort(&config.reasoning_effort)?;
     validation::validate_concurrent_limit(config.concurrent_limit)?;
     validation::validate_request_timeout(config.request_timeout)?;
 
