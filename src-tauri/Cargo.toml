@@ -23,7 +23,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 directories = "5.0"
 
 # HTTP client with streaming support
-reqwest = { version = "0.12", features = ["json", "stream"] }
+reqwest = { version = "0.12", features = ["json", "stream", "cookies"] }
 
 # Async runtime
 tokio = { version = "1.0", features = ["full"] }
