@@ -30,6 +30,32 @@ vi.mock("@tauri-apps/api/core", () => ({
 // Mock scrollIntoView for jsdom
 Element.prototype.scrollIntoView = vi.fn();
 
+// Mock canvas API for jsdom（截图捕获依赖 canvas.getContext / toBlob，
+// jsdom 的 getContext 存在但返回 null，toBlob 未实现，必须覆盖）
+HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
+  drawImage: vi.fn(),
+})) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+HTMLCanvasElement.prototype.toBlob = vi.fn((callback: BlobCallback) => {
+  callback(new Blob([new Uint8Array([1, 2, 3])], { type: "image/png" }));
+}) as typeof HTMLCanvasElement.prototype.toBlob;
+
+// jsdom 的 Blob 没有 arrayBuffer 方法（截图数据需要转为 Uint8Array）
+if (!Blob.prototype.arrayBuffer) {
+  Blob.prototype.arrayBuffer = function () {
+    return Promise.resolve(new Uint8Array([1, 2, 3]).buffer);
+  };
+}
+
+// 截图捕获会通过 document.querySelector("video") 查找播放器，
+// jsdom 没有真实视频播放器，这里注入一个带尺寸信息的假 video 元素
+const fakeVideo = document.createElement("video") as HTMLVideoElement;
+Object.defineProperty(fakeVideo, "videoWidth", { value: 1280 });
+Object.defineProperty(fakeVideo, "videoHeight", { value: 720 });
+vi.spyOn(document, "querySelector").mockImplementation(((selector: string) => {
+  if (selector === "video") return fakeVideo;
+  return null;
+}) as typeof document.querySelector);
+
 // ============================================================================
 // 测试数据生成器 (Arbitraries)
 // ============================================================================

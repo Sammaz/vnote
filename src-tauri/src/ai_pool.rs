@@ -102,6 +102,7 @@ fn build_chat_completions_body(
     model: &str,
     messages: Vec<Value>,
     reasoning_effort: &str,
+    max_tokens: Option<u32>,
 ) -> Value {
     let mut body = json!({
         "model": model,
@@ -111,6 +112,10 @@ fn build_chat_completions_body(
 
     if reasoning_effort != "off" {
         body["reasoning_effort"] = Value::String(reasoning_effort.to_string());
+    }
+
+    if let Some(max_tokens) = max_tokens {
+        body["max_tokens"] = Value::Number(max_tokens.into());
     }
 
     body
@@ -697,13 +702,20 @@ pub async fn execute_streaming_chat(
 
 /// 判断错误是否可重试
 fn is_retryable_error(error: &str) -> bool {
-    // 网络错误、超时、服务端错误（5xx）可重试
+    // 网络错误、超时、服务端错误（5xx）、空响应可重试
+    let normalized = error.to_ascii_lowercase();
+
     error.contains("请求失败")
         || error.contains("流错误")
-        || error.contains("timeout")
-        || error.contains("connection")
+        || error.contains("超时")
+        || error.contains("连接")
         || error.contains("API错误 5")  // 5xx 错误
         || error.contains("API错误 429") // 限流错误
+        || error.contains("响应内容为空") // 模型拒答/内容过滤等瞬时空响应
+        || normalized.contains("timeout")
+        || normalized.contains("timed out")
+        || normalized.contains("connection")
+        || normalized.contains("temporarily unavailable")
 }
 
 /// 计算重试延迟（指数退避）
@@ -926,6 +938,7 @@ async fn execute_streaming_chat_single_attempt(
         &req.config.model,
         api_messages,
         &req.config.reasoning_effort,
+        None,
     );
 
     // 发送请求
@@ -973,7 +986,28 @@ async fn execute_streaming_chat_single_attempt(
     let mut normalized_content = String::new();
     let mut emitted_content = false;
 
-    while let Some(chunk_result) = stream.next().await {
+    let stream_idle_timeout = std::time::Duration::from_secs(
+        SettingsManager::get_int(
+            keys::AI_TIMEOUT_STREAM_IDLE,
+            defaults::AI_TIMEOUT_STREAM_IDLE,
+        )
+        .max(1),
+    );
+
+    loop {
+        let chunk_result = match tokio::time::timeout(stream_idle_timeout, stream.next()).await {
+            Ok(Some(chunk_result)) => chunk_result,
+            Ok(None) => break,
+            Err(_) => {
+                return Err(StreamingAttemptError {
+                    message: format!(
+                        "流式响应空闲超时（{}秒内未收到数据）",
+                        stream_idle_timeout.as_secs()
+                    ),
+                    emitted_content,
+                });
+            }
+        };
         // 检查中止
         if abort_flag.load(Ordering::Relaxed) {
             return Err(StreamingAttemptError {
@@ -1033,6 +1067,15 @@ pub async fn execute_streaming_and_collect(
     prompt: String,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<String, String> {
+    execute_streaming_and_collect_with_max_tokens(config, prompt, abort_flag, None).await
+}
+
+pub async fn execute_streaming_and_collect_with_max_tokens(
+    config: AiConfig,
+    prompt: String,
+    abort_flag: &Arc<AtomicBool>,
+    max_tokens: Option<u32>,
+) -> Result<String, String> {
     let pool = get_ai_pool_manager();
     let controller = pool
         .ensure_controller(&config.id, config.concurrent_limit, config.rate_limit)
@@ -1041,7 +1084,7 @@ pub async fn execute_streaming_and_collect(
     if abort_flag.load(Ordering::Relaxed) {
         return Err("请求已取消".to_string());
     }
-    streaming_collect_with_retry(pool, &config, &prompt, abort_flag).await
+    streaming_collect_with_retry(pool, &config, &prompt, abort_flag, max_tokens).await
 }
 
 async fn streaming_collect_with_retry(
@@ -1049,6 +1092,7 @@ async fn streaming_collect_with_retry(
     config: &AiConfig,
     prompt: &str,
     abort_flag: &Arc<AtomicBool>,
+    max_tokens: Option<u32>,
 ) -> Result<String, String> {
     let mut last_error = String::new();
     let max_attempts = effective_max_attempts();
@@ -1063,7 +1107,7 @@ async fn streaming_collect_with_retry(
             config_id = %config_id, model_id = %model_id, attempt, max_attempts,
             "[AI池] 开始流式收集请求尝试"
         );
-        match streaming_collect_single(pool, config, prompt, abort_flag).await {
+        match streaming_collect_single(pool, config, prompt, abort_flag, max_tokens).await {
             Ok(content) => return Ok(content),
             Err(e) => {
                 last_error = e.clone();
@@ -1092,10 +1136,8 @@ async fn streaming_collect_single(
     config: &AiConfig,
     prompt: &str,
     abort_flag: &Arc<AtomicBool>,
+    max_tokens: Option<u32>,
 ) -> Result<String, String> {
-    let client = pool.get_or_create_http_client(&config.id, config.request_timeout).await;
-    let api_url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
-
     let body = build_chat_completions_body(
         &config.model,
         vec![
@@ -1103,7 +1145,41 @@ async fn streaming_collect_single(
             json!({ "role": "user", "content": prompt })
         ],
         &config.reasoning_effort,
+        max_tokens,
     );
+    streaming_collect_with_body(pool, config, body, abort_flag).await
+}
+
+/// 参数兼容重试：400 且错误提示 max_tokens / reasoning_effort 不被支持时，
+/// 去掉对应参数重试一次（部分 API 要求 max_completion_tokens 或不支持这些参数）
+fn strip_unsupported_param(error: &str, body: &mut Value) -> bool {
+    let normalized = error.to_ascii_lowercase();
+    if !error.contains("API错误 400") && !normalized.contains("400") {
+        return false;
+    }
+    if normalized.contains("max_tokens") || normalized.contains("max_completion_tokens") {
+        if body.get("max_tokens").is_some() {
+            body.as_object_mut().map(|o| o.remove("max_tokens"));
+            return true;
+        }
+    }
+    if normalized.contains("reasoning_effort") {
+        if body.get("reasoning_effort").is_some() {
+            body.as_object_mut().map(|o| o.remove("reasoning_effort"));
+            return true;
+        }
+    }
+    false
+}
+
+async fn streaming_collect_with_body(
+    pool: &AiPoolManager,
+    config: &AiConfig,
+    mut body: Value,
+    abort_flag: &Arc<AtomicBool>,
+) -> Result<String, String> {
+    let client = pool.get_or_create_http_client(&config.id, config.request_timeout).await;
+    let api_url = format!("{}/chat/completions", config.base_url.trim_end_matches('/'));
 
     let response = client
         .post(&api_url)
@@ -1121,14 +1197,38 @@ async fn streaming_collect_single(
     if !response.status().is_success() {
         let status = response.status();
         let error_text = read_error_response_preview(response).await;
-        return Err(format!("API错误 {}: {}", status, error_text));
+        let error = format!("API错误 {}: {}", status, error_text);
+        // 参数兼容处理：去掉不支持的参数后重试一次
+        if status.as_u16() == 400 && strip_unsupported_param(&error, &mut body) {
+            tracing::warn!("[AI池] 收到 400，去掉不支持的参数后重试: {}", error_text);
+            return Box::pin(streaming_collect_with_body(pool, config, body, abort_flag)).await;
+        }
+        return Err(error);
     }
 
     let mut stream = response.bytes_stream();
     let mut buffer = String::new();
     let mut content = String::new();
 
-    while let Some(chunk_result) = stream.next().await {
+    let stream_idle_timeout = std::time::Duration::from_secs(
+        SettingsManager::get_int(
+            keys::AI_TIMEOUT_STREAM_IDLE,
+            defaults::AI_TIMEOUT_STREAM_IDLE,
+        )
+        .max(1),
+    );
+
+    loop {
+        let chunk_result = match tokio::time::timeout(stream_idle_timeout, stream.next()).await {
+            Ok(Some(chunk_result)) => chunk_result,
+            Ok(None) => break,
+            Err(_) => {
+                return Err(format!(
+                    "流式响应空闲超时（{}秒内未收到数据）",
+                    stream_idle_timeout.as_secs()
+                ));
+            }
+        };
         if abort_flag.load(Ordering::Relaxed) {
             return Err("请求已取消".to_string());
         }
@@ -1165,11 +1265,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_retryable_error_recognizes_chinese_stream_idle_timeout() {
+        assert!(is_retryable_error("流式响应空闲超时（90秒内未收到数据）"));
+    }
+
+    #[test]
+    fn test_retryable_error_recognizes_common_network_failures_case_insensitively() {
+        assert!(is_retryable_error("Connection reset by peer"));
+        assert!(is_retryable_error("request TIMED OUT"));
+        assert!(is_retryable_error("service temporarily unavailable"));
+    }
+
+    #[test]
+    fn test_retryable_error_rejects_non_transient_api_error() {
+        assert!(!is_retryable_error("API错误 400: invalid request"));
+    }
+
+    #[test]
+    fn test_retryable_error_recognizes_empty_response() {
+        assert!(is_retryable_error("响应内容为空"));
+    }
+
+    #[test]
+    fn test_strip_unsupported_param_removes_max_tokens_on_400() {
+        let mut body = serde_json::json!({
+            "model": "test-model",
+            "max_tokens": 768,
+            "reasoning_effort": "high"
+        });
+        assert!(strip_unsupported_param(
+            "API错误 400: max_tokens is not supported, use max_completion_tokens",
+            &mut body
+        ));
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["reasoning_effort"], "high");
+    }
+
+    #[test]
+    fn test_strip_unsupported_param_removes_reasoning_effort_on_400() {
+        let mut body = serde_json::json!({
+            "model": "test-model",
+            "reasoning_effort": "high"
+        });
+        assert!(strip_unsupported_param(
+            "API错误 400: reasoning_effort is not supported by this model",
+            &mut body
+        ));
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn test_strip_unsupported_param_ignores_non_400_errors() {
+        let mut body = serde_json::json!({ "model": "test-model", "max_tokens": 768 });
+        assert!(!strip_unsupported_param("API错误 500: internal error", &mut body));
+        assert_eq!(body["max_tokens"], 768);
+    }
+
+    #[test]
     fn test_chat_request_body_omits_reasoning_effort_when_off() {
         let body = build_chat_completions_body(
             "test-model",
             vec![json!({ "role": "user", "content": "hello" })],
             "off",
+            None,
         );
 
         assert_eq!(body["model"], "test-model");
@@ -1184,10 +1342,35 @@ mod tests {
                 "test-model",
                 vec![json!({ "role": "user", "content": "hello" })],
                 effort,
+                None,
             );
 
             assert_eq!(body["reasoning_effort"], effort);
         }
+    }
+
+    #[test]
+    fn test_chat_request_body_serializes_max_tokens_when_present() {
+        let body = build_chat_completions_body(
+            "test-model",
+            vec![json!({ "role": "user", "content": "hello" })],
+            "off",
+            Some(768),
+        );
+
+        assert_eq!(body["max_tokens"], 768);
+    }
+
+    #[test]
+    fn test_chat_request_body_omits_max_tokens_when_absent() {
+        let body = build_chat_completions_body(
+            "test-model",
+            vec![json!({ "role": "user", "content": "hello" })],
+            "off",
+            None,
+        );
+
+        assert!(body.get("max_tokens").is_none());
     }
 
     #[test]

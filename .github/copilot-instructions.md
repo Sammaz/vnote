@@ -36,3 +36,26 @@ VNote is a Tauri desktop application with a React/TypeScript frontend and Rust b
 - Rust entry: `src-tauri/src/main.rs` calls `vnote_lib::run()`
 - Configs: `package.json` scripts, `tauri.conf.json` for app settings</content>
 <parameter name="filePath">d:\workspace\rust\vnote\.github\copilot-instructions.md
+  第一阶段：现在就做，收益最高
+
+  修改 src-tauri/src/note_generation.rs:923-927：
+
+    - 分块始终使用短摘要提示词；
+    - 最终阶段才使用 custom_prompt；
+    - 添加分块输出 token 上限；
+    - 分块并发默认设为 2；
+    - 暂时把超时提高到 300 秒。
+
+  这是当前最优性价比方案。
+
+  第二阶段：长期稳定
+
+  增加：
+
+    - 分块检查点；
+    - 失败块续传；
+    - 任务状态和错误持久化；
+    - 流式空闲超时；
+    - 大型任务调度队列。
+
+  这是完整的长期最优方案。

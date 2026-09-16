@@ -95,6 +95,10 @@ export function getNoteGenerationState(noteId: string): NoteGenerationState {
 export function setNoteGenerationState(noteId: string, updates: Partial<NoteGenerationState>) {
   const state = getNoteGenerationState(noteId);
   Object.assign(state, updates);
+  // 记录活动时间，供看门狗判断是否卡死
+  if (updates.isGenerating || (updates.regeneratingTabs && updates.regeneratingTabs.size > 0)) {
+    lastActivityAt.set(noteId, Date.now());
+  }
   notifyNoteStateListeners(noteId);
 }
 
@@ -121,6 +125,8 @@ export function clearNoteGenerationState(noteId: string) {
   }
   // 清理生成状态
   noteGenerationStates.delete(noteId);
+  // 清理活动时间记录
+  lastActivityAt.delete(noteId);
   // 清理订阅者，避免外部仍持有过期回调
   noteStateListeners.delete(noteId);
   // 清理自动生成尝试记录（允许重新触发）
@@ -180,4 +186,71 @@ export function unregisterActiveGenerationId(noteId: string, generationId: strin
 // 获取笔记所有活动的 generation_id
 export function getActiveGenerationIds(noteId: string): string[] {
   return Array.from(getNoteGenerationState(noteId).activeGenerationIds);
+}
+
+// ============================================================================
+// 生成状态看门狗
+// ============================================================================
+
+// 每个笔记的上次活动时间戳（任何状态更新都视为活动）
+const lastActivityAt = new Map<string, number>();
+
+// 看门狗轮询间隔与超时阈值
+const WATCHDOG_INTERVAL_MS = 30_000;
+const WATCHDOG_TIMEOUT_MS = 10 * 60_000; // 10 分钟无任何事件则判定为卡死
+
+let watchdogTimer: ReturnType<typeof setInterval> | null = null;
+
+// 看门狗触发时的回调（由 UI 层注入，用于弹出提示）
+type WatchdogHandler = (noteId: string, stalledTabs: string[]) => void;
+let watchdogHandler: WatchdogHandler | null = null;
+
+function ensureWatchdog() {
+  if (watchdogTimer !== null) return;
+  watchdogTimer = setInterval(() => {
+    const now = Date.now();
+    for (const [noteId, state] of noteGenerationStates) {
+      const stalledTabs = Array.from(state.regeneratingTabs);
+      if (stalledTabs.length === 0) continue;
+
+      const lastActive = lastActivityAt.get(noteId) ?? 0;
+      if (now - lastActive < WATCHDOG_TIMEOUT_MS) continue;
+
+      // 判定卡死：复位 regeneratingTabs / isGenerating，记录失败信息
+      console.warn(`[noteGenerationState] 看门狗: ${noteId} 的 ${stalledTabs.join(", ")} 超过 10 分钟无事件，自动复位状态`);
+      setNoteGenerationState(noteId, {
+        isGenerating: false,
+        generationId: null,
+        regeneratingTabs: new Set(),
+        progress: { current: 0, total: 0, message: "生成超时，已自动复位" },
+      });
+      const failed = new Map(state.failedTabs);
+      for (const tab of stalledTabs) {
+        failed.set(tab, "生成超时（超过 10 分钟无响应），已自动复位，请重试");
+      }
+      setNoteGenerationState(noteId, { failedTabs: failed });
+      lastActivityAt.set(noteId, now); // 避免下次循环立即重复触发
+      if (watchdogHandler) {
+        try {
+          watchdogHandler(noteId, stalledTabs);
+        } catch (err) {
+          console.error("[noteGenerationState] watchdog handler error:", err);
+        }
+      }
+    }
+  }, WATCHDOG_INTERVAL_MS);
+}
+
+/**
+ * 注册看门狗触发回调（UI 层调用一次即可，用于弹出提示）。
+ * 返回取消注册函数。
+ */
+export function registerWatchdogHandler(handler: WatchdogHandler): () => void {
+  watchdogHandler = handler;
+  ensureWatchdog();
+  return () => {
+    if (watchdogHandler === handler) {
+      watchdogHandler = null;
+    }
+  };
 }

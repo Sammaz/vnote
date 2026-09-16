@@ -403,12 +403,63 @@ pub async fn analyze_subtitle_for_chapters(
     Ok(all_chapters)
 }
 
+/// 从文本中提取所有平衡的顶层 JSON 对象（跳过字符串内的花括号）
+/// 返回每个对象的 (start, end) 闭区间位置列表
+fn find_balanced_json_objects(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut objects = Vec::new();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if bytes[i] != b'{' {
+            i += 1;
+            continue;
+        }
+
+        let start = i;
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut end = None;
+
+        for (j, &b) in bytes.iter().enumerate().skip(start) {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match b {
+                b'\\' if in_string => escaped = true,
+                b'"' => in_string = !in_string,
+                b'{' if !in_string => depth += 1,
+                b'}' if !in_string => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        end = Some(j);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        match end {
+            Some(pos) => {
+                objects.push((start, pos));
+                i = pos + 1;
+            }
+            None => break,
+        }
+    }
+
+    objects
+}
+
 /// 解析 AI 响应
 pub fn parse_chapter_ai_response(
     response: &str,
     _total_entries: usize,
 ) -> Result<Vec<AIChapter>, String> {
-    // 尝试提取 JSON（可能有代码块标记）
+    // 提取 JSON（可能有代码块标记）
     let json_str = if let Some(start) = response.find("```json") {
         let start = start + 7;
         if let Some(end) = response[start..].find("```") {
@@ -427,24 +478,30 @@ pub fn parse_chapter_ai_response(
         response
     };
 
-    // 尝试找到第一个 { 和最后一个 }
-    let json_start = json_str.find('{').unwrap_or(0);
-    let json_end = json_str.rfind('}').unwrap_or(json_str.len());
-
-    if json_start >= json_end {
+    // AI 有时一次输出多个 JSON 对象；容错提取每个平衡的顶层对象，
+    // 解析成功的 chapters 全部合并（旧逻辑取首尾花括号会因 trailing characters 失败）
+    let objects = find_balanced_json_objects(json_str);
+    if objects.is_empty() {
         return Err("未找到有效的JSON响应".to_string());
     }
 
-    let clean_json = &json_str[json_start..=json_end];
+    let mut chapters: Vec<AIChapter> = Vec::new();
+    let mut last_error: Option<String> = None;
 
-    let ai_response: AIChapterResponse = serde_json::from_str(clean_json)
-        .map_err(|e| format!("JSON解析失败: {}, JSON内容: {}", e, clean_json))?;
-
-    if ai_response.chapters.is_empty() {
-        return Err("AI未生成任何章节".to_string());
+    for (start, end) in objects {
+        match serde_json::from_str::<AIChapterResponse>(&json_str[start..=end]) {
+            Ok(ai_response) => chapters.extend(ai_response.chapters),
+            Err(e) => {
+                last_error = Some(format!("JSON解析失败: {}, JSON内容: {}", e, &json_str[start..=end]));
+            }
+        }
     }
 
-    Ok(ai_response.chapters)
+    if chapters.is_empty() {
+        return Err(last_error.unwrap_or_else(|| "AI未生成任何章节".to_string()));
+    }
+
+    Ok(chapters)
 }
 
 // ============================================================================

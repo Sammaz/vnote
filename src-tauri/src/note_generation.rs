@@ -9,7 +9,10 @@
 //!
 //! 以及辅助模式章节生成功能
 
-use crate::ai_pool::{execute_streaming_and_collect, get_ai_pool_manager};
+use crate::ai_pool::{
+    execute_streaming_and_collect, execute_streaming_and_collect_with_max_tokens,
+    get_ai_pool_manager,
+};
 use crate::chapter::{
     analyze_subtitle_for_chapters, capture_video_screenshot, sanitize_filename,
     split_subtitle_into_chunks, format_timestamp_for_filename, Chapter, ChapterData, ChapterGenerationEvent,
@@ -76,7 +79,7 @@ fn default_concurrent_limit() -> usize {
     if crate::DATABASE.get().is_some() {
         SettingsManager::get_int(keys::PROCESS_DEFAULT_CONCURRENT, defaults::PROCESS_DEFAULT_CONCURRENT)
     } else {
-        3
+        2
     }
 }
 
@@ -858,6 +861,13 @@ async fn generate_full_summary_layered(
     custom_prompt: Option<&str>,
     concurrent_limit: usize,
 ) -> Result<String, String> {
+    const CHUNK_MAX_TOKENS: u32 = 768;
+    // 分层生成的最终扩写输出较长且可能包含推理时间，放宽总超时；
+    // 流式请求本身有 90 秒空闲超时兜底，这里只防极端卡死
+    const LAYERED_REQUEST_TIMEOUT: u64 = 600;
+
+    let mut layered_ai_config = ai_config.clone();
+    layered_ai_config.request_timeout = LAYERED_REQUEST_TIMEOUT as i32;
     // 将 event_name 转换为 String 以便在异步任务中使用
     let event_name = event_name.to_string();
 
@@ -877,15 +887,60 @@ async fn generate_full_summary_layered(
     }
     tracing::info!("[笔记生成] ========================================");
 
-    // 受控并发生成各段摘要，首个失败后尽快停止后续子任务
+    // 执行单个分段摘要请求（供并发批次和失败重试共用）
+    let generate_chunk = |chunk_index: usize, chunk: &str| {
+        let app = app.clone();
+        let event_name_for_task = event_name.clone();
+        let ai_config = layered_ai_config.clone();
+        let chunk = chunk.to_string();
+        let abort_flag = abort_flag.clone();
+        async move {
+            tracing::info!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
+
+            if abort_flag.load(Ordering::Relaxed) {
+                tracing::info!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
+                return Err::<String, String>("已中止".to_string());
+            }
+
+            let _ = app.emit(
+                &event_name_for_task,
+                GenerationEvent::TabProgress {
+                    tab_type: "full_summary".to_string(),
+                    current: chunk_index + 1,
+                    total: total_chunks + 2,
+                    message: format!("生成第 {}/{} 段摘要...", chunk_index + 1, total_chunks),
+                },
+            );
+
+            let prompt = PromptTemplates::chunk_summary(&chunk);
+
+            match execute_streaming_and_collect_with_max_tokens(
+                ai_config,
+                prompt,
+                &abort_flag,
+                Some(CHUNK_MAX_TOKENS),
+            )
+            .await
+            {
+                Ok(summary) => {
+                    tracing::info!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
+                    Ok(summary)
+                }
+                Err(e) => {
+                    tracing::warn!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
+                    Err(e)
+                }
+            }
+        }
+    };
+
+    // 受控并发生成各段摘要；单个分段失败不中止整体，只记录待重试
     let task_concurrency = concurrent_limit.max(1).min(total_chunks.max(1));
-    let child_abort_flag = Arc::new(AtomicBool::new(false));
-    let mut results = Vec::new();
-    let mut success_count = 0;
-    let mut first_error: Option<String> = None;
+    let mut chunk_summaries: Vec<Option<String>> = vec![None; total_chunks];
+    let mut pending_indices: Vec<usize> = Vec::new();
 
     for (batch_index, chunk_batch) in chunks.chunks(task_concurrency).enumerate() {
-        if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
+        if abort_flag.load(Ordering::Relaxed) {
             break;
         }
 
@@ -893,92 +948,74 @@ async fn generate_full_summary_layered(
         let mut tasks = Vec::with_capacity(chunk_batch.len());
 
         for (offset, chunk) in chunk_batch.iter().enumerate() {
-            let app = app.clone();
-            let event_name_for_task = event_name.clone();
-            let ai_config = ai_config.clone();
-            let chunk = chunk.clone();
-            let abort_flag = abort_flag.clone();
-            let child_abort_flag = child_abort_flag.clone();
             let chunk_index = batch_start + offset;
-            let custom_prompt_for_task = custom_prompt.map(|p| p.to_string());
-
-            let task = tokio::spawn(async move {
-                tracing::info!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
-
-                if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
-                    tracing::info!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
-                    return Err::<(String, usize), String>("已中止".to_string());
-                }
-
-                let _ = app.emit(
-                    &event_name_for_task,
-                    GenerationEvent::TabProgress {
-                        tab_type: "full_summary".to_string(),
-                        current: chunk_index + 1,
-                        total: total_chunks + 2,
-                        message: format!("生成第 {}/{} 段摘要...", chunk_index + 1, total_chunks),
-                    },
-                );
-
-                let prompt = if let Some(custom) = &custom_prompt_for_task {
-                    format!("{}\n\n视频字幕片段：\n{}", custom, chunk)
-                } else {
-                    PromptTemplates::chunk_summary(&chunk)
-                };
-
-                match call_ai_api(&ai_config, &prompt, &abort_flag).await {
-                    Ok(summary) => {
-                        if child_abort_flag.load(Ordering::Relaxed) {
-                            return Err("已中止".to_string());
-                        }
-                        tracing::info!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
-                        Ok((summary, chunk_index))
-                    }
-                    Err(e) => {
-                        child_abort_flag.store(true, Ordering::Relaxed);
-                        tracing::warn!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
-                        Err(e)
-                    }
-                }
-            });
-
-            tasks.push(task);
+            let task = tokio::spawn(generate_chunk(chunk_index, chunk));
+            tasks.push((chunk_index, task));
         }
 
-        for task in tasks {
+        for (chunk_index, task) in tasks {
             match task.await {
-                Ok(Ok((summary, index))) => {
-                    if first_error.is_none() {
-                        results.push((index, summary));
-                        success_count += 1;
-                    }
+                Ok(Ok(summary)) => {
+                    chunk_summaries[chunk_index] = Some(summary);
                 }
                 Ok(Err(e)) => {
-                    if e != "已中止" && first_error.is_none() {
-                        child_abort_flag.store(true, Ordering::Relaxed);
-                        first_error = Some(format!("分段生成失败: {}", e));
+                    if e != "已中止" {
+                        pending_indices.push(chunk_index);
                     }
                 }
                 Err(e) => {
-                    if first_error.is_none() {
-                        child_abort_flag.store(true, Ordering::Relaxed);
-                        first_error = Some(format!("任务执行出错: {}", e));
-                    }
+                    pending_indices.push(chunk_index);
+                    tracing::warn!("[笔记生成] 段 {}: 任务执行出错 - {}", chunk_index + 1, e);
                 }
             }
         }
     }
 
-    if let Some(error) = first_error {
-        return Err(error);
+    // 对失败的分段串行重试一轮（避开并发批次内的资源竞争，提高成功率）
+    if !pending_indices.is_empty() && !abort_flag.load(Ordering::Relaxed) {
+        let retry_indices = pending_indices.clone();
+        tracing::info!("[笔记生成] 对 {} 个失败分段串行重试: {:?}", retry_indices.len(), retry_indices);
+        for chunk_index in retry_indices {
+            if abort_flag.load(Ordering::Relaxed) {
+                break;
+            }
+            match generate_chunk(chunk_index, &chunks[chunk_index]).await {
+                Ok(summary) => {
+                    chunk_summaries[chunk_index] = Some(summary);
+                }
+                Err(e) => {
+                    if e == "已中止" {
+                        break;
+                    }
+                    tracing::warn!("[笔记生成] 段 {}: 重试仍失败，跳过该段继续 - {}", chunk_index + 1, e);
+                }
+            }
+        }
     }
 
+    if abort_flag.load(Ordering::Relaxed) {
+        return Err("已中止".to_string());
+    }
+
+    let success_count = chunk_summaries.iter().filter(|s| s.is_some()).count();
     let failed_count = total_chunks - success_count;
     tracing::info!("[笔记生成] 分段生成完成: 成功 {}, 失败 {}", success_count, failed_count);
 
-    // 按原始顺序排序
-    results.sort_by_key(|(index, _)| *index);
-    let chunk_summaries: Vec<String> = results.into_iter().map(|(_, summary)| summary).collect();
+    // 至少要有一个分段成功，否则无法整合框架
+    if success_count == 0 {
+        return Err("所有分段摘要均生成失败，请检查模型配置和网络后重试".to_string());
+    }
+
+    if failed_count > 0 {
+        tracing::warn!("[笔记生成] {} 个分段跳过，将基于剩余分段继续生成", failed_count);
+    }
+
+    // 按原始顺序拼接成功的分段摘要（失败的段以占位提示替代，保持分段顺序完整）
+    let chunk_summaries: Vec<String> = chunk_summaries
+        .into_iter()
+        .enumerate()
+        .map(|(i, s)| s.unwrap_or_else(|| format!("（第 {} 段内容生成失败，已跳过）", i + 1)))
+        .collect();
 
     // 合并得到框架摘要
     let framework_prompt = format!(
@@ -998,7 +1035,7 @@ async fn generate_full_summary_layered(
         },
     );
 
-    let framework = call_ai_api(ai_config, &framework_prompt, abort_flag).await?;
+    let framework = call_ai_api(&layered_ai_config, &framework_prompt, abort_flag).await?;
     tracing::info!("[笔记生成] 框架整合完成 (生成 {} 字符)", framework.len());
 
     // 第二层：基于框架生成完整的结构化全文总结
@@ -1021,7 +1058,7 @@ async fn generate_full_summary_layered(
         },
     );
 
-    let final_content = call_ai_api(ai_config, &final_prompt, abort_flag).await?;
+    let final_content = call_ai_api(&layered_ai_config, &final_prompt, abort_flag).await?;
     tracing::info!("[笔记生成] 最终总结完成 (生成 {} 字符)", final_content.len());
     tracing::info!("[笔记生成] ========================================");
 
@@ -1057,7 +1094,7 @@ fn build_detailed_reading_chapter_prompt(subtitle_text: &str) -> String {
 
 /// 解析章节内容 AI 响应（用于原文细读）
 fn parse_detailed_reading_chapter_response(response: &str) -> Result<(String, String), String> {
-    // 尝试提取 JSON（可能有代码块标记）
+    // 提取 JSON（可能有代码块标记）
     let json_str = if let Some(start) = response.find("```json") {
         let start = start + 7;
         if let Some(end) = response[start..].find("```") {
@@ -1076,26 +1113,62 @@ fn parse_detailed_reading_chapter_response(response: &str) -> Result<(String, St
         response
     };
 
-    // 尝试找到第一个 { 和最后一个 }
-    let json_start = json_str.find('{').unwrap_or(0);
-    let json_end = json_str.rfind('}').unwrap_or(json_str.len());
-
-    if json_start >= json_end {
-        return Err("未找到有效的JSON响应".to_string());
-    }
-
-    let clean_json = &json_str[json_start..=json_end];
-
     #[derive(Deserialize)]
     struct ChapterContentResponse {
         title: String,
         content: String,
     }
 
-    let parsed: ChapterContentResponse = serde_json::from_str(clean_json)
-        .map_err(|e| format!("JSON解析失败: {}, JSON内容: {}", e, clean_json))?;
+    // AI 有时会一次输出多个 JSON 对象（标题重复生成），逐个尝试解析取第一个有效对象
+    let mut start = match json_str.find('{') {
+        Some(pos) => pos,
+        None => return Err("未找到有效的JSON响应".to_string()),
+    };
+    while start < json_str.len() {
+        // 逐层匹配与 start 对应的闭合 }（跳过字符串内的花括号）
+        let bytes = json_str.as_bytes();
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut end = None;
+        for (i, &b) in bytes.iter().enumerate().skip(start) {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match b {
+                b'\\' if in_string => escaped = true,
+                b'"' => in_string = !in_string,
+                b'{' if !in_string => depth += 1,
+                b'}' if !in_string => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
 
-    Ok((parsed.title, parsed.content))
+        let end = match end {
+            Some(pos) => pos,
+            None => break,
+        };
+
+        if let Ok(parsed) = serde_json::from_str::<ChapterContentResponse>(&json_str[start..=end]) {
+            return Ok((parsed.title, parsed.content));
+        }
+
+        // 该对象解析失败，尝试下一个 { 开始的对象
+        start += 1;
+        match json_str[start..].find('{') {
+            Some(offset) => start += offset,
+            None => break,
+        }
+    }
+
+    Err("未找到有效的JSON响应".to_string())
 }
 
 // ============================================================================
@@ -1597,6 +1670,27 @@ pub async fn generate_detailed_reading_chapters(
 // 主生成函数
 // ============================================================================
 
+/// 早期失败通知：生成尚未进入标签页阶段就失败时，补发 TabError + AllCompleted，
+/// 让前端能复位 regeneratingTabs，避免 UI 永久卡在"生成中"
+fn emit_early_failure(app: &AppHandle, event_name: &str, first_tab: &str, error: &str) {
+    tracing::error!("[笔记生成] 生成启动失败: {}", error);
+    let _ = app.emit(
+        event_name,
+        GenerationEvent::TabError {
+            tab_type: first_tab.to_string(),
+            error: error.to_string(),
+        },
+    );
+    let _ = app.emit(
+        event_name,
+        GenerationEvent::AllCompleted {
+            generated: 0,
+            failed: 1,
+            total: 1,
+        },
+    );
+}
+
 async fn generate_note_internal(
     app: AppHandle,
     db: &Database,
@@ -1607,28 +1701,42 @@ async fn generate_note_internal(
 ) -> Result<(), String> {
     let event_name = format!("note-generation-{}", generation_id);
 
+    // 早期失败统一补发事件，让前端能复位状态
+    macro_rules! early_fail {
+        ($err:expr) => {{
+            let err: String = ($err).to_string();
+            emit_early_failure(&app, &event_name, "full_summary", &err);
+            return Err(err);
+        }};
+    }
+
     // 获取AI配置
-    let ai_config = db
-        .get_ai_config_by_id(&request.model_id)
-        .map_err(|e| e.to_string())?
-        .ok_or("AI模型未找到")?;
+    let ai_config = match db.get_ai_config_by_id(&request.model_id) {
+        Ok(Some(config)) => config,
+        Ok(None) => early_fail!("AI模型未找到"),
+        Err(e) => early_fail!(e.to_string()),
+    };
 
     // 获取笔记
-    let note = db
-        .get_note_by_id(&request.note_id)
-        .map_err(|e| e.to_string())?
-        .ok_or("笔记未找到")?;
+    let note = match db.get_note_by_id(&request.note_id) {
+        Ok(Some(note)) => note,
+        Ok(None) => early_fail!("笔记未找到"),
+        Err(e) => early_fail!(e.to_string()),
+    };
 
     // 检查字幕
-    let subtitle_path = note
-        .subtitle_path
-        .clone()
-        .ok_or("未上传字幕文件，无法生成笔记")?;
+    let subtitle_path = match note.subtitle_path.clone() {
+        Some(path) => path,
+        None => early_fail!("未上传字幕文件，无法生成笔记"),
+    };
 
     // 解析字幕
-    let entries = parse_subtitle_file(&subtitle_path)?;
+    let entries = match parse_subtitle_file(&subtitle_path) {
+        Ok(entries) => entries,
+        Err(e) => early_fail!(format!("字幕解析失败: {}", e)),
+    };
     if entries.is_empty() {
-        return Err("字幕内容为空".to_string());
+        early_fail!("字幕内容为空");
     }
 
     // 合并字幕文本
@@ -1759,9 +1867,26 @@ async fn generate_note_internal(
                 ).await {
                     Ok(chapter_data) => {
                         tracing::info!("[笔记生成] {:?} 生成完成", tab_type);
-                        let content = serde_json::to_string(&chapter_data)
-                            .map_err(|e| format!("序列化章节数据失败: {}", e))?;
-                        update_note_tab(
+                        let content = match serde_json::to_string(&chapter_data) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                let err = format!("序列化章节数据失败: {}", e);
+                                tracing::error!("[笔记生成] {}", err);
+                                let _ = app.emit(
+                                    &event_name,
+                                    GenerationEvent::TabError {
+                                        tab_type: format!("{:?}", tab_type),
+                                        error: err.clone(),
+                                    },
+                                );
+                                if first_error.is_none() {
+                                    first_error = Some(err.clone());
+                                }
+                                failed_count += 1;
+                                continue;
+                            }
+                        };
+                        if let Err(e) = update_note_tab(
                             db,
                             &request.note_id,
                             tab_type,
@@ -1770,7 +1895,22 @@ async fn generate_note_internal(
                             request.options.style.as_deref(),
                             request.options.custom_prompt.as_deref(),
                             request.options.screenshot_density.as_deref(),
-                        )?;
+                        ) {
+                            tracing::error!("[笔记生成] 更新数据库失败: {}", e);
+                            let err = format!("更新数据库失败: {}", e);
+                            let _ = app.emit(
+                                &event_name,
+                                GenerationEvent::TabError {
+                                    tab_type: format!("{:?}", tab_type),
+                                    error: err.clone(),
+                                },
+                            );
+                            if first_error.is_none() {
+                                first_error = Some(err);
+                            }
+                            failed_count += 1;
+                            continue;
+                        }
                         let _ = app.emit(
                             &event_name,
                             GenerationEvent::TabCompleted {
@@ -1878,10 +2018,24 @@ async fn generate_note_internal(
         ).await {
             Ok(chapter_data) => {
                 // 序列化为 JSON 存储
-                let content = serde_json::to_string(&chapter_data)
-                    .map_err(|e| format!("序列化章节数据失败: {}", e))?;
+                // 失败路径：记录错误并补发 TabError 后直接返回（并发分支里 DetailedReading 是独占阶段）
+                let content = match serde_json::to_string(&chapter_data) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        let err = format!("序列化章节数据失败: {}", e);
+                        tracing::error!("[笔记生成] {}", err);
+                        let _ = app.emit(
+                            &event_name,
+                            GenerationEvent::TabError {
+                                tab_type: "DetailedReading".to_string(),
+                                error: err,
+                            },
+                        );
+                        return Ok(());
+                    }
+                };
 
-                update_note_tab(
+                if let Err(e) = update_note_tab(
                     db,
                     &request.note_id,
                     &TabType::DetailedReading,
@@ -1890,7 +2044,18 @@ async fn generate_note_internal(
                     request.options.style.as_deref(),
                     request.options.custom_prompt.as_deref(),
                     request.options.screenshot_density.as_deref(),
-                )?;
+                ) {
+                    tracing::error!("[笔记生成] 更新数据库失败: {}", e);
+                    let err = format!("更新数据库失败: {}", e);
+                    let _ = app.emit(
+                        &event_name,
+                        GenerationEvent::TabError {
+                            tab_type: "DetailedReading".to_string(),
+                            error: err,
+                        },
+                    );
+                    return Ok(());
+                }
 
                 let _ = app.emit(
                     &event_name,
@@ -2444,7 +2609,7 @@ fn build_chapter_content_prompt(subtitle_text: &str) -> String {
 
 /// 解析章节内容 AI 响应
 fn parse_chapter_content_response(response: &str) -> Result<(String, String), String> {
-    // 尝试提取 JSON（可能有代码块标记）
+    // 提取 JSON（可能有代码块标记）
     let json_str = if let Some(start) = response.find("```json") {
         let start = start + 7;
         if let Some(end) = response[start..].find("```") {
@@ -2463,26 +2628,62 @@ fn parse_chapter_content_response(response: &str) -> Result<(String, String), St
         response
     };
 
-    // 尝试找到第一个 { 和最后一个 }
-    let json_start = json_str.find('{').unwrap_or(0);
-    let json_end = json_str.rfind('}').unwrap_or(json_str.len());
-
-    if json_start >= json_end {
-        return Err("未找到有效的JSON响应".to_string());
-    }
-
-    let clean_json = &json_str[json_start..=json_end];
-
     #[derive(Deserialize)]
     struct ChapterContentResponse {
         title: String,
         content: String,
     }
 
-    let parsed: ChapterContentResponse = serde_json::from_str(clean_json)
-        .map_err(|e| format!("JSON解析失败: {}, JSON内容: {}", e, clean_json))?;
+    // AI 有时会一次输出多个 JSON 对象（标题重复生成），逐个尝试解析取第一个有效对象
+    let mut start = match json_str.find('{') {
+        Some(pos) => pos,
+        None => return Err("未找到有效的JSON响应".to_string()),
+    };
+    while start < json_str.len() {
+        // 逐层匹配与 start 对应的闭合 }（跳过字符串内的花括号）
+        let bytes = json_str.as_bytes();
+        let mut depth = 0usize;
+        let mut in_string = false;
+        let mut escaped = false;
+        let mut end = None;
+        for (i, &b) in bytes.iter().enumerate().skip(start) {
+            if escaped {
+                escaped = false;
+                continue;
+            }
+            match b {
+                b'\\' if in_string => escaped = true,
+                b'"' => in_string = !in_string,
+                b'{' if !in_string => depth += 1,
+                b'}' if !in_string => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
 
-    Ok((parsed.title, parsed.content))
+        let end = match end {
+            Some(pos) => pos,
+            None => break,
+        };
+
+        if let Ok(parsed) = serde_json::from_str::<ChapterContentResponse>(&json_str[start..=end]) {
+            return Ok((parsed.title, parsed.content));
+        }
+
+        // 该对象解析失败，尝试下一个 { 开始的对象
+        start += 1;
+        match json_str[start..].find('{') {
+            Some(offset) => start += offset,
+            None => break,
+        }
+    }
+
+    Err("未找到有效的JSON响应".to_string())
 }
 
 /// 使用辅助模式标记生成章节
@@ -2793,6 +2994,48 @@ mod tests {
         assert!(!re.is_match("[图片:01:23:45]"));
         assert!(!re.is_match("01:23:45"));
         assert!(!re.is_match("[CHAPTER:01:23:45]"));
+    }
+
+    #[test]
+    fn parse_detailed_reading_accepts_single_json_object() {
+        let response = "{\n \"title\": \"章节标题\",\n \"content\": \"章节内容\"\n}";
+        let (title, content) = parse_detailed_reading_chapter_response(response).unwrap();
+        assert_eq!(title, "章节标题");
+        assert_eq!(content, "章节内容");
+    }
+
+    #[test]
+    fn parse_detailed_reading_takes_first_of_multiple_json_objects() {
+        // AI 有时一次输出多个 JSON 对象，旧解析逻辑会因 trailing characters 失败
+        let response = concat!(
+            "{\n \"title\": \"第一个标题\",\n \"content\": \"第一个内容\"\n}\n\n",
+            "{\n \"title\": \"第二个标题\",\n \"content\": \"第二个内容\"\n}"
+        );
+        let (title, content) = parse_detailed_reading_chapter_response(response).unwrap();
+        assert_eq!(title, "第一个标题");
+        assert_eq!(content, "第一个内容");
+    }
+
+    #[test]
+    fn parse_detailed_reading_handles_braces_inside_strings() {
+        let response = "{\n \"title\": \"标题\",\n \"content\": \"内容包含花括号 { 和 } 以及嵌套 {x}\"\n}";
+        let (title, content) = parse_detailed_reading_chapter_response(response).unwrap();
+        assert_eq!(title, "标题");
+        assert_eq!(content, "内容包含花括号 { 和 } 以及嵌套 {x}");
+    }
+
+    #[test]
+    fn parse_detailed_reading_extracts_from_code_block() {
+        let response = "```json\n{\"title\": \"标题\", \"content\": \"内容\"}\n```";
+        let (title, content) = parse_detailed_reading_chapter_response(response).unwrap();
+        assert_eq!(title, "标题");
+        assert_eq!(content, "内容");
+    }
+
+    #[test]
+    fn parse_detailed_reading_rejects_invalid_json() {
+        let response = "{ invalid json }";
+        assert!(parse_detailed_reading_chapter_response(response).is_err());
     }
 
     #[test]

@@ -52,6 +52,7 @@ pub mod keys {
     pub const AI_RETRY_DELAY_MS: &str = "ai_pool.retry_delay_ms";
     pub const AI_TIMEOUT_CONNECT: &str = "ai_pool.timeout.connect";
     pub const AI_TIMEOUT_ACQUIRE: &str = "ai_pool.timeout.acquire";
+    pub const AI_TIMEOUT_STREAM_IDLE: &str = "ai_pool.timeout.stream_idle";
 
     // RAG Settings
     pub const RAG_CHUNK_SIZE: &str = "rag.chunk.size";
@@ -78,6 +79,7 @@ pub mod defaults {
     pub const AI_RETRY_DELAY_MS: u64 = 1000;
     pub const AI_TIMEOUT_CONNECT: u64 = 30;
     pub const AI_TIMEOUT_ACQUIRE: u64 = 300;
+    pub const AI_TIMEOUT_STREAM_IDLE: u64 = 90;
 
     // RAG
     pub const RAG_CHUNK_SIZE: usize = 800;
@@ -92,6 +94,6 @@ pub mod defaults {
     // Processing
     pub const PROCESS_SEGMENT_SIZE: usize = 10000;
     pub const PROCESS_TRUNCATION_LIMIT: usize = 3000;
-    pub const PROCESS_DEFAULT_CONCURRENT: usize = 3;
+    pub const PROCESS_DEFAULT_CONCURRENT: usize = 2;
 }
 

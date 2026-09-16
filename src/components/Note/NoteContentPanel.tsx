@@ -70,6 +70,7 @@ import {
   activeListeners,
   registerActiveGenerationId,
   unregisterActiveGenerationId,
+  registerWatchdogHandler,
   setHighlightGenerating,
   setFlashcardGenerating,
   setChapterGenerating,
@@ -775,7 +776,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       activeListeners.delete(genId);
     }
 
-    const unlistenPromise = listen<GenerationEvent>(`note-generation-${genId}`, (event) => {
+    // 返回 promise，调用方应在 invoke 前 await，确保事件不丢失
+    const listenPromise = listen<GenerationEvent>(`note-generation-${genId}`, (event) => {
       const data = event.payload;
       const state = getNoteGenerationState(noteId);
 
@@ -809,6 +811,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             completedTabs: newCompleted,
             regeneratingTabs: newRegenerating,
           });
+          // 原文细读完成后停止闪烁小点（isGeneratingChapters 驱动该 tab 的动画）
+          if (completedTab === "detailed_reading") {
+            setChapterIsGenerating(false);
+            setChapterGenerating(noteId, false);
+          }
 
           // 刷新笔记数据以显示新生成的内容
           setTimeout(() => {
@@ -850,6 +857,9 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             progress: { current: data.total, total: data.total, message: "生成完成!" },
             completedTabs: newCompletedTabs,
           });
+          // 全部生成结束，停止原文细读标签页的闪烁小点
+          setChapterIsGenerating(false);
+          setChapterGenerating(noteId, false);
           // 清理事件监听器
           const unlisten = activeListeners.get(genId);
           if (unlisten) {
@@ -894,9 +904,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
       }
     });
 
-    unlistenPromise.then((unlisten) => {
+    listenPromise.then((unlisten) => {
       activeListeners.set(genId, unlisten);
     });
+
+    return listenPromise;
   }, [note.id, convertTabType]);
 
   // 订阅全局生成状态变更（替代 200ms 轮询，避免长时间运行时持续重渲染）
@@ -916,6 +928,20 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
     sync();
 
     return subscribeNoteGenerationState(note.id, sync);
+  }, [note.id]);
+
+  // 看门狗：注册全局回调，卡死复位时弹出提示
+  useEffect(() => {
+    return registerWatchdogHandler((stalledNoteId, stalledTabs) => {
+      if (stalledNoteId !== note.id) return;
+      const tabName = stalledTabs.includes("full_summary") ? "全文总结" :
+        stalledTabs.includes("detailed_reading") ? "原文细读" :
+        stalledTabs.includes("highlights") ? "高光笔记" :
+        stalledTabs.includes("visual_summary") ? "视觉化总结" :
+        stalledTabs.includes("ai_note") ? "大纲笔记" :
+        "自定义总结";
+      message.warning(`${tabName}生成超时（超过 10 分钟无响应），已自动复位，请重试`);
+    });
   }, [note.id]);
 
   // 自定义提示词弹窗状态
@@ -2397,11 +2423,8 @@ Video subtitles content:`;
       // 更新组件state
       setRegeneratingTabs(currentTabs as Set<TabType>);
 
-      // 设置事件监听器
-      setupGenerationListener(note.id, id);
-
-      // 等待状态更新和事件监听器设置完成
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // 设置事件监听器（await 确保 invoke 前监听已就绪，事件不丢失）
+      await setupGenerationListener(note.id, id);
 
       // 后端会立即返回 generation_id，实际生成在后台进行
       await invoke("generate_note_content", {
@@ -2470,11 +2493,8 @@ Video subtitles content:`;
       // 更新组件state
       setRegeneratingTabs(currentTabs as Set<TabType>);
 
-      // 设置事件监听器
-      setupGenerationListener(note.id, id);
-
-      // 等待状态更新和事件监听器设置完成
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // 设置事件监听器（await 确保 invoke 前监听已就绪，事件不丢失）
+      await setupGenerationListener(note.id, id);
 
       // 后端会立即返回 generation_id，实际生成在后台进行
       await invoke("generate_note_content", {

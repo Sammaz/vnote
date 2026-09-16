@@ -25,6 +25,7 @@ INSERT OR IGNORE INTO app_settings (key, value) VALUES ('tray_enabled', 'false')
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('initialization_template_selected_keys', '');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('initialization_template_regenerate', 'false');
 INSERT OR IGNORE INTO app_settings (key, value) VALUES ('initialization_template_model_id', '');
+INSERT OR IGNORE INTO app_settings (key, value) VALUES ('ai_pool.timeout.stream_idle', '90');
 
 CREATE TABLE IF NOT EXISTS notes (
     id TEXT PRIMARY KEY,
