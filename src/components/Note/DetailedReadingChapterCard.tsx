@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronUp, Clock, Loader2, AlertCircle, RefreshCw } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { DetailedReadingChapter, SubtitleEntry } from "../../types";
@@ -15,7 +15,7 @@ interface DetailedReadingChapterCardProps {
   optimizedSubtitle?: string;
   isOptimizing?: boolean;
   optimizationFailed?: boolean;
-  onReoptimize?: () => void;
+  onReoptimizeChapter?: (chapterId: string) => void;
   compact?: boolean;
 }
 
@@ -377,7 +377,7 @@ const alignOriginalEntriesByOptimizedParagraphs = (
   return alignedParagraphs;
 };
 
-export function DetailedReadingChapterCard({
+function DetailedReadingChapterCardInner({
   chapter,
   index,
   isCurrent,
@@ -387,7 +387,7 @@ export function DetailedReadingChapterCard({
   optimizedSubtitle,
   isOptimizing = false,
   optimizationFailed = false,
-  onReoptimize,
+  onReoptimizeChapter,
   compact = false,
 }: DetailedReadingChapterCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -533,12 +533,12 @@ export function DetailedReadingChapterCard({
             </div>
           )}
 
-          {!isOptimizing && subtitleOptimizationEnabled && onReoptimize && (
+          {!isOptimizing && subtitleOptimizationEnabled && onReoptimizeChapter && (
             <div className="flex justify-end">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  onReoptimize();
+                  onReoptimizeChapter(chapter.id);
                 }}
                 className={cn(
                   "flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-colors cursor-pointer",
@@ -557,3 +557,5 @@ export function DetailedReadingChapterCard({
     </div>
   );
 }
+
+export const DetailedReadingChapterCard = memo(DetailedReadingChapterCardInner);

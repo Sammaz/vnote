@@ -1,3 +1,6 @@
+import { parseDetailedReadingData, type DetailedReadingChapter, type DetailedReadingData } from "../types";
+import { mergeDetailedReadingChapter } from "./detailedReadingChapters";
+
 // 笔记生成状态管理工具函数
 // 将这些函数从组件文件中分离出来，以避免 React Fast Refresh 警告
 
@@ -25,6 +28,76 @@ const noteGenerationStates = new Map<string, NoteGenerationState>();
 
 // 全局事件监听器管理（避免重复监听同一个generationId）
 export const activeListeners = new Map<string, () => void>();
+
+// 隐藏笔记页时暂存原文细读快照，回页后再灌入，避免后台全量重绘。
+const pendingDetailedReadingData = new Map<string, DetailedReadingData>();
+const pendingDetailedReadingRaw = new Map<string, string>();
+const pendingNoteRefresh = new Set<string>();
+
+export function stashDetailedReadingPartial(noteId: string, content: string) {
+  if (!content) return;
+  if (pendingDetailedReadingData.has(noteId)) return;
+  pendingDetailedReadingRaw.set(noteId, content);
+}
+
+export function stashDetailedReadingData(noteId: string, data: DetailedReadingData) {
+  pendingDetailedReadingData.set(noteId, data);
+  pendingDetailedReadingRaw.delete(noteId);
+}
+
+export function seedDetailedReadingStash(noteId: string, current: DetailedReadingData | null) {
+  if (pendingDetailedReadingData.has(noteId)) return;
+  if (current) {
+    pendingDetailedReadingData.set(noteId, current);
+  }
+}
+
+export function stashDetailedReadingChapter(
+  noteId: string,
+  chapter: DetailedReadingChapter,
+  totalDuration: number,
+) {
+  const prev = pendingDetailedReadingData.get(noteId) ?? null;
+  pendingDetailedReadingData.set(
+    noteId,
+    mergeDetailedReadingChapter(prev, chapter, totalDuration),
+  );
+}
+
+export function takeDetailedReadingData(noteId: string): DetailedReadingData | null {
+  const data = pendingDetailedReadingData.get(noteId) ?? null;
+  pendingDetailedReadingData.delete(noteId);
+  const raw = pendingDetailedReadingRaw.get(noteId) ?? null;
+  pendingDetailedReadingRaw.delete(noteId);
+  if (data) return data;
+  if (!raw) return null;
+  return parseDetailedReadingData(raw);
+}
+
+export function takeDetailedReadingPartial(noteId: string): string | null {
+  const data = takeDetailedReadingData(noteId);
+  if (!data) return null;
+  try {
+    return JSON.stringify(data);
+  } catch {
+    return null;
+  }
+}
+
+export function clearDetailedReadingPartial(noteId: string) {
+  pendingDetailedReadingData.delete(noteId);
+  pendingDetailedReadingRaw.delete(noteId);
+}
+
+export function markPendingNoteRefresh(noteId: string) {
+  pendingNoteRefresh.add(noteId);
+}
+
+export function takePendingNoteRefresh(noteId: string): boolean {
+  const had = pendingNoteRefresh.has(noteId);
+  pendingNoteRefresh.delete(noteId);
+  return had;
+}
 
 // 订阅者：noteId -> Set<callback>，使外部组件能在状态变更时被动接收通知，
 // 替代 setInterval 轮询，避免每秒 5 次无谓的整面板重渲染。
@@ -131,6 +204,9 @@ export function clearNoteGenerationState(noteId: string) {
   noteStateListeners.delete(noteId);
   // 清理自动生成尝试记录（允许重新触发）
   attemptedAutoGenerateNoteIds.delete(noteId);
+  pendingDetailedReadingData.delete(noteId);
+  pendingDetailedReadingRaw.delete(noteId);
+  pendingNoteRefresh.delete(noteId);
 }
 
 // 判断笔记是否正在生成中

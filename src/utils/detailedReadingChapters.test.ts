@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DetailedReadingChapter } from "../types";
-import { findCurrentDetailedReadingChapter } from "./detailedReadingChapters";
+import { findCurrentDetailedReadingChapter, mergeDetailedReadingChapter } from "./detailedReadingChapters";
 
 const chapter = (
   id: string,
@@ -63,5 +63,37 @@ describe("findCurrentDetailedReadingChapter", () => {
     expect(findCurrentDetailedReadingChapter(chapters, 5)).toBeNull();
     expect(findCurrentDetailedReadingChapter(chapters, 25)).toBeNull();
     expect(findCurrentDetailedReadingChapter(chapters, 45)).toBeNull();
+  });
+});
+
+describe("mergeDetailedReadingChapter", () => {
+  it("inserts chapters in start_time order and preserves unchanged identities", () => {
+    const first = chapter("first", 0, 60);
+    const third = chapter("third", 120, 180);
+    const merged = mergeDetailedReadingChapter(
+      mergeDetailedReadingChapter(null, third, 180),
+      first,
+      180
+    );
+
+    expect(merged.chapters.map((item) => item.id)).toEqual(["first", "third"]);
+    expect(merged.chapters[1]).toBe(third);
+
+    const sameAgain = mergeDetailedReadingChapter(merged, first, 180);
+    expect(sameAgain).toBe(merged);
+  });
+
+  it("replaces an existing chapter by id when screenshot arrives", () => {
+    const first = chapter("first", 0, 60);
+    const withShot = { ...first, screenshot_path: "shot.jpg" };
+    const merged = mergeDetailedReadingChapter(
+      { chapters: [first], total_duration: 60, generated_at: "t" },
+      withShot,
+      60
+    );
+
+    expect(merged.chapters).toHaveLength(1);
+    expect(merged.chapters[0]).toBe(withShot);
+    expect(merged.chapters[0].screenshot_path).toBe("shot.jpg");
   });
 });

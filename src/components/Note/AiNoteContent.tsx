@@ -300,6 +300,7 @@ export function AiNoteContent({
         style: selectedStyle,
         customPrompt: trimmedPrompt || null,
         screenshotDensity: selectedScreenshotDensity,
+        concurrentLimit: aiConfigs.find((config) => config.id === selectedModelId)?.concurrent_limit,
       });
     } catch (error) {
       const currentTabs = new Set(getNoteGenerationState(note.id).regeneratingTabs);
@@ -309,7 +310,7 @@ export function AiNoteContent({
       });
       message.error(`生成失败: ${error}`);
     }
-  }, [customPrompt, note.id, selectedModelId, selectedScreenshotDensity, selectedStyle, setupGenerationListener]);
+  }, [aiConfigs, customPrompt, note.id, selectedModelId, selectedScreenshotDensity, selectedStyle, setupGenerationListener]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

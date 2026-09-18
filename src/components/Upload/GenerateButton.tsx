@@ -2,8 +2,8 @@ import { Sparkles, Loader2 } from "lucide-react";
 import { cn } from "../../utils/cn";
 import { useApp } from "../../context/AppContext";
 import { useUpload } from "../../context/UploadContext";
+import { useInitializationRuntime, type InitializationTaskParams } from "../../context/InitializationRuntimeContext";
 
-// 获取文件名（不含扩展名）
 function getBaseName(filename: string): string {
   const lastDotIndex = filename.lastIndexOf(".");
   return lastDotIndex > 0 ? filename.substring(0, lastDotIndex) : filename;
@@ -16,12 +16,15 @@ export function GenerateButton() {
     createNote,
     setCurrentView,
     setSelectedNoteId,
+    defaultAiConfigId,
+    initializationTemplateSettings,
   } = useApp();
 
   const { uploadedItems, clearUploads } = useUpload();
+  const { addBatchToRuntime, hasActiveTasks } = useInitializationRuntime();
 
   const itemCount = uploadedItems.length;
-  const canGenerate = itemCount > 0 && !isGenerating;
+  const canGenerate = itemCount > 0 && !isGenerating && !hasActiveTasks;
 
   const handleGenerate = async () => {
     if (!canGenerate) return;
@@ -30,6 +33,7 @@ export function GenerateButton() {
 
     try {
       let firstNoteId: string | null = null;
+      const subtitleTasks: InitializationTaskParams[] = [];
 
       for (const item of uploadedItems) {
         const noteTitle = getBaseName(item.video.name);
@@ -43,12 +47,24 @@ export function GenerateButton() {
         if (!firstNoteId) {
           firstNoteId = newNote.id;
         }
+
+        subtitleTasks.push({
+          noteId: newNote.id,
+          noteTitle: newNote.title,
+          modelId: initializationTemplateSettings.modelId || defaultAiConfigId || "",
+          videoPath: newNote.video_path,
+          subtitlePath: newNote.subtitle_path,
+          selectedKeys: ["subtitle_generation"],
+          itemConfigs: {
+            subtitle_generation: JSON.stringify({ regenerate: false }),
+          },
+        });
       }
 
-      // 清空上传状态
+      addBatchToRuntime(subtitleTasks);
+
       clearUploads();
 
-      // 跳转到第一个笔记
       if (firstNoteId) {
         setSelectedNoteId(firstNoteId);
         setCurrentView("note");
@@ -75,7 +91,7 @@ export function GenerateButton() {
       {isGenerating ? (
         <>
           <Loader2 className="w-5 h-5 animate-spin" />
-          <span>生成中...</span>
+          <span>正在生成...</span>
         </>
       ) : (
         <>

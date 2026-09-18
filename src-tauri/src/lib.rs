@@ -1263,7 +1263,7 @@ async fn generate_note_content(
         } else {
             5 // 默认5个
         }
-    });
+    }).max(1).min(10);
 
     let options = GenerationOptions {
         concurrent,
@@ -1321,7 +1321,7 @@ async fn generate_ai_note_content(
         } else {
             5
         }
-    });
+    }).max(1).min(10);
 
     let request = GenerateNoteRequest {
         note_id,

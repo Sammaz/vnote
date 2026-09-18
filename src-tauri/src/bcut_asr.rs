@@ -1,10 +1,10 @@
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use crate::storage_paths;
 use tokio::process::Command as TokioCommand;
@@ -28,6 +28,36 @@ const WAF_RETRY_MAX_ATTEMPTS: usize = 3;
 const WAF_RETRY_BASE_DELAY_SECS: u64 = 30;
 // WAF 惩罚期内请求全部失败，等待一段时间后再恢复。
 const WAF_COOLDOWN_SECS: u64 = 60;
+const SUBTITLE_PROGRESS_EVENT: &str = "subtitle-generation-progress";
+
+#[derive(Clone, Serialize)]
+pub struct SubtitleGenerationProgressPayload {
+    pub note_id: String,
+    pub percent: u8,
+    pub message: String,
+}
+
+pub fn emit_subtitle_progress(app: &AppHandle, note_id: &str, percent: u8, message: &str) {
+    let _ = app.emit(
+        SUBTITLE_PROGRESS_EVENT,
+        SubtitleGenerationProgressPayload {
+            note_id: note_id.to_string(),
+            percent: percent.min(100),
+            message: message.to_string(),
+        },
+    );
+}
+
+fn mix_progress(start: u8, end: u8, t: f32) -> u8 {
+    let t = t.clamp(0.0, 1.0);
+    (start as f32 + (end as f32 - start as f32) * t)
+        .round()
+        .clamp(0.0, 100.0) as u8
+}
+
+fn estimate_transcription_secs(duration_ms: i64) -> f32 {
+    (duration_ms as f32 / 1000.0 / 8.0).clamp(20.0, 180.0)
+}
 
 /// B 站接口返回的业务错误（HTTP 200 但 code != 0）。
 #[derive(Debug, Deserialize)]
@@ -589,26 +619,57 @@ fn merge_srt_segments(segments: &[String]) -> Result<String, String> {
 }
 
 async fn transcribe_audio_file_to_srt_content(
+    app: &AppHandle,
+    note_id: &str,
     client: &Client,
     audio_path: &Path,
     abort_flag: &Arc<AtomicBool>,
+    progress_start: u8,
+    progress_end: u8,
+    estimated_secs: f32,
 ) -> Result<String, String> {
     if is_aborted(abort_flag) {
         return Err("已中止".to_string());
     }
+
+    emit_subtitle_progress(
+        app,
+        note_id,
+        mix_progress(progress_start, progress_end, 0.0),
+        "正在上传音频...",
+    );
 
     let audio_bytes = tokio::fs::read(audio_path)
         .await
         .map_err(|e| format!("读取音频失败: {}", e))?;
 
     let (upload_data, etags) = upload_audio(client, &audio_bytes).await?;
+    emit_subtitle_progress(
+        app,
+        note_id,
+        mix_progress(progress_start, progress_end, 0.18),
+        "正在提交音频...",
+    );
     let download_url = commit_upload(client, &upload_data, &etags).await?;
+    emit_subtitle_progress(
+        app,
+        note_id,
+        mix_progress(progress_start, progress_end, 0.28),
+        "正在创建识别任务...",
+    );
     let task_id = create_task(client, &download_url).await?;
+    emit_subtitle_progress(
+        app,
+        note_id,
+        mix_progress(progress_start, progress_end, 0.35),
+        "正在识别语音...",
+    );
 
     // 渐进轮询：2s 起步、每次 +1s、封顶 10s。长音频转录需要几十秒到几分钟，
     // 前期高频轮询不会更快拿到结果，只会触发 WAF（412）导致整个任务失败。
     let mut interval_secs = 2u64;
     let mut consecutive_waf_rejects = 0u32;
+    let started_at = std::time::Instant::now();
 
     for _ in 0..POLL_MAX_ATTEMPTS {
         if is_aborted(abort_flag) {
@@ -616,6 +677,18 @@ async fn transcribe_audio_file_to_srt_content(
         }
 
         tokio::time::sleep(tokio::time::Duration::from_secs(interval_secs)).await;
+
+        let elapsed_ratio = if estimated_secs > 0.0 {
+            started_at.elapsed().as_secs_f32() / estimated_secs
+        } else {
+            1.0
+        };
+        emit_subtitle_progress(
+            app,
+            note_id,
+            mix_progress(progress_start, progress_end, 0.35 + 0.60 * elapsed_ratio.min(1.0)),
+            "正在识别语音...",
+        );
 
         let result = query_result(client, &task_id).await?;
         match result {
@@ -642,6 +715,12 @@ async fn transcribe_audio_file_to_srt_content(
                 interval_secs = std::cmp::min(interval_secs + 1, POLL_MAX_INTERVAL_SECS);
 
                 if data.state == 4 {
+                    emit_subtitle_progress(
+                        app,
+                        note_id,
+                        mix_progress(progress_start, progress_end, 1.0),
+                        "语音识别完成",
+                    );
                     let result_str = data
                         .result
                         .ok_or_else(|| "转录结果缺少 result".to_string())?;
@@ -691,6 +770,8 @@ pub async fn transcribe_video_to_srt(
     video_path: &str,
     abort_flag: &Arc<AtomicBool>,
 ) -> Result<String, String> {
+    emit_subtitle_progress(app, note_id, 1, "正在准备生成字幕...");
+
     let subtitle_dir = build_subtitle_dir(app, note_id)?;
     tokio::fs::create_dir_all(&subtitle_dir)
         .await
@@ -699,13 +780,16 @@ pub async fn transcribe_video_to_srt(
     let base_name = base_name_from_path(video_path);
     let srt_path = subtitle_dir.join(format!("{}.srt", base_name));
     if srt_path.exists() {
+        emit_subtitle_progress(app, note_id, 100, "字幕已就绪");
         return Ok(srt_path.to_string_lossy().to_string());
     }
 
     let audio_path = subtitle_dir.join(format!("{}.mp3", base_name));
     if !audio_path.exists() {
+        emit_subtitle_progress(app, note_id, 5, "正在提取音频...");
         extract_audio_to_mp3(video_path, &audio_path).await?;
     }
+    emit_subtitle_progress(app, note_id, 15, "音频准备完成");
 
     if is_aborted(abort_flag) {
         return Err("已中止".to_string());
@@ -716,14 +800,26 @@ pub async fn transcribe_video_to_srt(
     if segment_plan.is_empty() {
         return Err("音频分段计划为空".to_string());
     }
+    emit_subtitle_progress(app, note_id, 18, "正在分析音频...");
 
     let client = build_bcut_client().await?;
 
     let srt_content = if segment_plan.len() == 1 {
-        transcribe_audio_file_to_srt_content(&client, &audio_path, abort_flag).await?
+        transcribe_audio_file_to_srt_content(
+            app,
+            note_id,
+            &client,
+            &audio_path,
+            abort_flag,
+            20,
+            95,
+            estimate_transcription_secs(total_duration_ms),
+        )
+        .await?
     } else {
         let mut merged_segments = Vec::with_capacity(segment_plan.len());
         let mut next_index = 1;
+        let segment_count = segment_plan.len();
 
         for (segment_index, (start_ms, end_ms)) in segment_plan.iter().copied().enumerate() {
             if is_aborted(abort_flag) {
@@ -731,6 +827,15 @@ pub async fn transcribe_video_to_srt(
             }
 
             let duration_ms = end_ms - start_ms;
+            let progress_start = mix_progress(20, 95, segment_index as f32 / segment_count as f32);
+            let progress_end =
+                mix_progress(20, 95, (segment_index + 1) as f32 / segment_count as f32);
+            emit_subtitle_progress(
+                app,
+                note_id,
+                progress_start,
+                &format!("正在识别第 {}/{} 段...", segment_index + 1, segment_count),
+            );
             let segment_audio_path =
                 subtitle_dir.join(format!("{}.part{}.mp3", base_name, segment_index + 1));
 
@@ -744,9 +849,17 @@ pub async fn transcribe_video_to_srt(
                 .await?;
             }
 
-            let segment_srt =
-                transcribe_audio_file_to_srt_content(&client, &segment_audio_path, abort_flag)
-                    .await?;
+            let segment_srt = transcribe_audio_file_to_srt_content(
+                app,
+                note_id,
+                &client,
+                &segment_audio_path,
+                abort_flag,
+                progress_start,
+                progress_end,
+                estimate_transcription_secs(duration_ms),
+            )
+            .await?;
             let (offset_segment_srt, updated_index) =
                 offset_srt_content(&segment_srt, start_ms, next_index)?;
             merged_segments.push(offset_segment_srt);
@@ -760,18 +873,36 @@ pub async fn transcribe_video_to_srt(
         return Err("已中止".to_string());
     }
 
+    emit_subtitle_progress(app, note_id, 98, "正在保存字幕...");
     tokio::fs::write(&srt_path, srt_content)
         .await
         .map_err(|e| format!("保存字幕失败: {}", e))?;
+    emit_subtitle_progress(app, note_id, 100, "字幕生成完成");
     Ok(srt_path.to_string_lossy().to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_segment_plan, merge_srt_segments, offset_srt_content, parse_srt_timestamp_to_ms,
-        MAX_SEGMENT_DURATION_MS,
+        build_segment_plan, estimate_transcription_secs, merge_srt_segments, mix_progress,
+        offset_srt_content, parse_srt_timestamp_to_ms, MAX_SEGMENT_DURATION_MS,
     };
+
+    #[test]
+    fn mix_progress_interpolates_and_clamps() {
+        assert_eq!(mix_progress(20, 80, 0.0), 20);
+        assert_eq!(mix_progress(20, 80, 1.0), 80);
+        assert_eq!(mix_progress(20, 80, 0.5), 50);
+        assert_eq!(mix_progress(20, 80, -1.0), 20);
+        assert_eq!(mix_progress(20, 80, 2.0), 80);
+    }
+
+    #[test]
+    fn estimate_transcription_secs_clamps_to_expected_range() {
+        assert_eq!(estimate_transcription_secs(1_000), 20.0);
+        assert_eq!(estimate_transcription_secs(8 * 60 * 1000), 60.0);
+        assert_eq!(estimate_transcription_secs(10 * 60 * 60 * 1000), 180.0);
+    }
 
     #[test]
     fn build_segment_plan_keeps_short_audio_as_single_segment() {

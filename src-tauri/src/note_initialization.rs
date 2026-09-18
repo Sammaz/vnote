@@ -1060,6 +1060,7 @@ async fn execute_subtitle_generation(
 
     if let Some(subtitle_path) = resolve_subtitle_path(context, db) {
         if !subtitle_path.trim().is_empty() {
+            bcut_asr::emit_subtitle_progress(app, &context.note_id, 100, "已存在字幕");
             return ItemExecutionResult::Skipped("已存在字幕".to_string());
         }
     }

@@ -22,6 +22,13 @@ import {
   InitializationItemRuntimeStatus,
   createInitialState,
 } from "../types/noteInitialization";
+import {
+  SUBTITLE_GENERATION_ITEM_KEY,
+  SUBTITLE_GENERATION_PROGRESS_EVENT,
+  normalizeSubtitleProgress,
+  type SubtitleGenerationProgress,
+  type SubtitleGenerationProgressEvent,
+} from "../utils/subtitleGeneration";
 
 /** 初始化任务参数 */
 export interface InitializationTaskParams {
@@ -60,6 +67,7 @@ interface InitializationRuntimeContextType {
   initState: InitializationState;
   initProgress: number;
   runtimeSummary: RuntimeSummary;
+  subtitleProgress: SubtitleGenerationProgress | null;
   addBatchToRuntime: (paramsList: InitializationTaskParams[]) => number;
   removeFromRuntime: (taskId: string) => void;
   removeNoteFromRuntime: (noteId: string) => Promise<void>;
@@ -103,7 +111,9 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
   const [currentTask, setCurrentTask] = useState<RuntimeTask | null>(null);
   const [initState, setInitState] = useState<InitializationState>(createInitialState());
   const [runtimeSummary, setRuntimeSummary] = useState<RuntimeSummary>(createEmptyRuntimeSummary());
+  const [subtitleProgress, setSubtitleProgress] = useState<SubtitleGenerationProgress | null>(null);
   const unlistenRef = useRef<UnlistenFn | null>(null);
+  const subtitleUnlistenRef = useRef<UnlistenFn | null>(null);
   const isProcessingRef = useRef(false);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingAbortRef = useRef(false);
@@ -184,6 +194,13 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       currentTaskRef.current = { ...task, status: "running" };
       clearResetTimer();
       setCurrentTask({ ...task, status: "running" });
+      if (task.params.selectedKeys.includes(SUBTITLE_GENERATION_ITEM_KEY)) {
+        setSubtitleProgress({
+          noteId: task.params.noteId,
+          percent: 0,
+          message: "正在准备生成字幕...",
+        });
+      }
       setInitState({
         ...createInitialState(),
         isInitializing: true,
@@ -280,6 +297,12 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                 if (previousStatus !== "completed") {
                   newState.completed = prev.completed + 1;
                 }
+                if (payload.step === SUBTITLE_GENERATION_ITEM_KEY) {
+                  const noteId = currentTaskRef.current?.params.noteId;
+                  if (noteId && onTaskCompleted) {
+                    queueMicrotask(() => onTaskCompleted(noteId));
+                  }
+                }
                 break;
               }
 
@@ -297,6 +320,12 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
                 };
                 if (previousStatus !== "skipped") {
                   newState.skipped = prev.skipped + 1;
+                }
+                if (payload.step === SUBTITLE_GENERATION_ITEM_KEY) {
+                  const noteId = currentTaskRef.current?.params.noteId;
+                  if (noteId && onTaskCompleted) {
+                    queueMicrotask(() => onTaskCompleted(noteId));
+                  }
                 }
                 break;
               }
@@ -625,6 +654,45 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
   );
 
   useEffect(() => {
+    const isTauri = Boolean((window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+    if (!isTauri) {
+      return;
+    }
+
+    let disposed = false;
+
+    void listen<SubtitleGenerationProgressEvent>(SUBTITLE_GENERATION_PROGRESS_EVENT, (event) => {
+      const next = normalizeSubtitleProgress(event.payload);
+      setSubtitleProgress((prev) => {
+        if (
+          prev &&
+          prev.noteId === next.noteId &&
+          prev.percent === next.percent &&
+          prev.message === next.message
+        ) {
+          return prev;
+        }
+        return next;
+      });
+    }).then((unlisten) => {
+      if (disposed) {
+        void unlisten();
+        return;
+      }
+      subtitleUnlistenRef.current = unlisten;
+    });
+
+    return () => {
+      disposed = true;
+      const unlisten = subtitleUnlistenRef.current;
+      subtitleUnlistenRef.current = null;
+      if (unlisten) {
+        void unlisten();
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       clearResetTimer();
       void cleanup();
@@ -638,6 +706,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       initState,
       initProgress,
       runtimeSummary,
+      subtitleProgress,
       addBatchToRuntime,
       removeFromRuntime,
       removeNoteFromRuntime,
@@ -652,6 +721,7 @@ export function InitializationRuntimeProvider({ children, onTaskCompleted }: Ini
       initState,
       initProgress,
       runtimeSummary,
+      subtitleProgress,
       addBatchToRuntime,
       removeFromRuntime,
       removeNoteFromRuntime,

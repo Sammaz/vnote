@@ -568,7 +568,9 @@ pub fn format_timestamp_for_filename(seconds: f64) -> String {
     format!("{:02}{:02}{:02}", hours, minutes, secs)
 }
 
-/// 为所有章节生成截图
+const SCREENSHOT_CONCURRENCY: usize = 4;
+
+/// 为所有章节生成截图（并发执行，ffmpeg 是 I/O 型操作）
 async fn capture_chapter_screenshots(
     video_path: &str,
     chapters: &mut [Chapter],
@@ -576,11 +578,9 @@ async fn capture_chapter_screenshots(
     abort_flag: &Arc<AtomicBool>,
     note_id: &str,
 ) -> Result<(), String> {
-    // 按笔记 ID 组织章节截图目录：data/notes/{note_id}/chapter_screenshots/
     let screenshots_dir = storage_paths::chapter_screenshots_dir(app, note_id)?;
     std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
 
-    // 从视频路径提取文件名（不含扩展名）
     let video_name = Path::new(video_path)
         .file_stem()
         .and_then(|s| s.to_str())
@@ -588,27 +588,60 @@ async fn capture_chapter_screenshots(
     let safe_video_name = sanitize_filename(video_name);
 
     let total = chapters.len();
-    tracing::info!("[章节截图] 开始为 {} 个章节生成截图，保存目录: {:?}", total, screenshots_dir);
+    tracing::info!("[章节截图] 开始为 {} 个章节并发生成截图（并发数={}），保存目录: {:?}", total, SCREENSHOT_CONCURRENCY, screenshots_dir);
 
-    for (i, chapter) in chapters.iter_mut().enumerate() {
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(SCREENSHOT_CONCURRENCY));
+    let mut tasks = Vec::with_capacity(total);
+
+    for (i, chapter) in chapters.iter().enumerate() {
         if abort_flag.load(Ordering::Relaxed) {
             return Err("已中止".to_string());
         }
 
-        // 截图命名：{视频名称}_{时间戳}.jpg
-        let timestamp_str = format_timestamp_for_filename(chapter.start_time);
+        let semaphore = semaphore.clone();
+        let abort_flag = abort_flag.clone();
+        let video_path = video_path.to_string();
+        let start_time = chapter.start_time;
+        let timestamp_str = format_timestamp_for_filename(start_time);
         let screenshot_filename = format!("{}_{}.jpg", safe_video_name, timestamp_str);
         let screenshot_path = screenshots_dir.join(&screenshot_filename);
+        let screenshot_path_str = screenshot_path.to_string_lossy().to_string();
 
-        match capture_video_screenshot(video_path, chapter.start_time, screenshot_path.to_str().unwrap()) {
-            Ok(_) => {
-                chapter.screenshot_path = Some(screenshot_path.to_string_lossy().to_string());
-                tracing::info!("[章节截图] 第 {}/{} 张截图成功: {}", i + 1, total, screenshot_filename);
+        let task = tokio::spawn(async move {
+            let _permit = semaphore.acquire().await.map_err(|e| e.to_string())?;
+            if abort_flag.load(Ordering::Relaxed) {
+                return Err::<(usize, Option<String>), String>("已中止".to_string());
             }
-            Err(e) => {
-                tracing::error!("[章节截图] 第 {}/{} 张截图失败: {}", i + 1, total, e);
-                // 继续处理下一张，不中断
+            match tokio::task::spawn_blocking(move || {
+                capture_video_screenshot(&video_path, start_time, &screenshot_path_str)
+            }).await {
+                Ok(Ok(_)) => {
+                    tracing::info!("[章节截图] 第 {}/{} 张截图成功: {}", i + 1, total, screenshot_filename);
+                    Ok((i, Some(screenshot_path.to_string_lossy().to_string())))
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("[章节截图] 第 {}/{} 张截图失败: {}", i + 1, total, e);
+                    Ok((i, None))
+                }
+                Err(e) => {
+                    tracing::error!("[章节截图] 第 {}/{} 张截图任务异常: {}", i + 1, total, e);
+                    Ok((i, None))
+                }
             }
+        });
+
+        tasks.push(task);
+    }
+
+    for task in tasks {
+        match task.await {
+            Ok(Ok((idx, path))) => {
+                chapters[idx].screenshot_path = path;
+            }
+            Ok(Err(e)) if e == "已中止" => {
+                return Err("已中止".to_string());
+            }
+            _ => {}
         }
     }
 

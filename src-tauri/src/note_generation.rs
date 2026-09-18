@@ -28,9 +28,11 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
 use tauri::{AppHandle, Emitter};
 use std::sync::OnceLock;
+use futures::stream::{self, StreamExt};
 
 // ============================================================================
 // 数据结构定义
@@ -58,7 +60,7 @@ pub struct GenerationOptions {
     /// 是否重新生成已存在的内容
     #[serde(default)]
     pub regenerate: bool,
-    /// 并发数限制（1-5，默认3）
+    /// 并发数限制（1-10，与 AiConfig.concurrent_limit / 模型池一致）
     #[serde(default = "default_concurrent_limit")]
     pub concurrent_limit: usize,
     /// AI 笔记样式（可选）
@@ -131,6 +133,19 @@ pub enum GenerationEvent {
         tab_type: String,
         content: String,
     },
+    /// 渐进式结果：标签页尚未全部完成，但已有可展示的部分内容
+    #[allow(dead_code)]
+    TabPartial {
+        tab_type: String,
+        content: String,
+    },
+    ChapterPartial {
+        tab_type: String,
+        index: usize,
+        total: usize,
+        chapter: DetailedReadingChapter,
+        total_duration: f64,
+    },
     TabError {
         tab_type: String,
         error: String,
@@ -145,6 +160,94 @@ pub enum GenerationEvent {
     Aborted {
         reason: String,
     },
+}
+
+fn is_abort_error(err: &str) -> bool {
+    err == "已中止"
+        || err.contains("取消")
+        || err.contains("中止")
+        || err.contains("Aborted")
+        || err.contains("aborted")
+}
+
+fn clamp_concurrent_limit(limit: usize) -> usize {
+    limit.max(1).min(10)
+}
+
+fn fallback_chapter_content(subtitle_text: &str) -> String {
+    let excerpt: String = subtitle_text.chars().take(80).collect();
+    if excerpt.is_empty() {
+        "该段生成失败，可稍后重试".to_string()
+    } else {
+        format!("{}…", excerpt)
+    }
+}
+
+fn snapshot_completed_chapters(
+    slots: &[Option<DetailedReadingChapter>],
+    total_duration: f64,
+) -> DetailedReadingData {
+    DetailedReadingData {
+        chapters: slots.iter().flatten().cloned().collect(),
+        total_duration,
+        generated_at: chrono::Local::now().to_rfc3339(),
+    }
+}
+
+fn emit_detailed_reading_chapter_partial(
+    app: &AppHandle,
+    event_name: &str,
+    index: usize,
+    total: usize,
+    chapter: &DetailedReadingChapter,
+    total_duration: f64,
+) {
+    let _ = app.emit(
+        event_name,
+        GenerationEvent::ChapterPartial {
+            tab_type: "DetailedReading".to_string(),
+            index,
+            total,
+            chapter: chapter.clone(),
+            total_duration,
+        },
+    );
+}
+
+fn persist_detailed_reading_snapshot(note_id: &str, model_id: &str, data: &DetailedReadingData) {
+    let Ok(content) = serde_json::to_string(data) else {
+        return;
+    };
+    if let Some(db) = crate::DATABASE.get() {
+        if let Err(e) = update_note_tab(
+            db,
+            note_id,
+            &TabType::DetailedReading,
+            &content,
+            model_id,
+            None,
+            None,
+            None,
+        ) {
+            tracing::warn!("[detailed_reading] persist failed: {}", e);
+        }
+    }
+}
+
+const DETAILED_READING_DB_DEBOUNCE: Duration = Duration::from_millis(400);
+
+fn persist_detailed_reading_snapshot_if_due(
+    last_persist_at: &mut Instant,
+    force: bool,
+    note_id: &str,
+    model_id: &str,
+    data: &DetailedReadingData,
+) {
+    if !force && last_persist_at.elapsed() < DETAILED_READING_DB_DEBOUNCE {
+        return;
+    }
+    persist_detailed_reading_snapshot(note_id, model_id, data);
+    *last_persist_at = Instant::now();
 }
 
 /// 单个标签页的生成结果
@@ -887,19 +990,18 @@ async fn generate_full_summary_layered(
     }
     tracing::info!("[笔记生成] ========================================");
 
-    // 执行单个分段摘要请求（供并发批次和失败重试共用）
-    let generate_chunk = |chunk_index: usize, chunk: &str| {
+    // 槽位一空就跑下一段；失败只重试该段，不阻塞其它分段
+    let generate_chunk = |chunk_index: usize, chunk: String| {
         let app = app.clone();
         let event_name_for_task = event_name.clone();
         let ai_config = layered_ai_config.clone();
-        let chunk = chunk.to_string();
         let abort_flag = abort_flag.clone();
         async move {
             tracing::info!("[笔记生成] 段 {}/{}: 开始执行...", chunk_index + 1, total_chunks);
 
             if abort_flag.load(Ordering::Relaxed) {
                 tracing::info!("[笔记生成] 段 {}/{}: 已中止", chunk_index + 1, total_chunks);
-                return Err::<String, String>("已中止".to_string());
+                return Err::<(usize, String), String>("已中止".to_string());
             }
 
             let _ = app.emit(
@@ -913,81 +1015,64 @@ async fn generate_full_summary_layered(
             );
 
             let prompt = PromptTemplates::chunk_summary(&chunk);
-
-            match execute_streaming_and_collect_with_max_tokens(
-                ai_config,
-                prompt,
-                &abort_flag,
-                Some(CHUNK_MAX_TOKENS),
-            )
-            .await
-            {
-                Ok(summary) => {
-                    tracing::info!("[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)", chunk_index + 1, total_chunks, summary.len());
-                    Ok(summary)
+            let mut last_error = None;
+            for attempt in 0..2 {
+                if abort_flag.load(Ordering::Relaxed) {
+                    return Err("已中止".to_string());
                 }
-                Err(e) => {
-                    tracing::warn!("[笔记生成] 段 {}/{}: 失败 - {}", chunk_index + 1, total_chunks, e);
-                    Err(e)
+                match execute_streaming_and_collect_with_max_tokens(
+                    ai_config.clone(),
+                    prompt.clone(),
+                    &abort_flag,
+                    Some(CHUNK_MAX_TOKENS),
+                )
+                .await
+                {
+                    Ok(summary) => {
+                        tracing::info!(
+                            "[笔记生成] 段 {}/{}: 完成 (生成 {} 字符)",
+                            chunk_index + 1,
+                            total_chunks,
+                            summary.len()
+                        );
+                        return Ok((chunk_index, summary));
+                    }
+                    Err(e) => {
+                        if is_abort_error(&e) {
+                            return Err(e);
+                        }
+                        tracing::warn!(
+                            "[笔记生成] 段 {}/{}: {}失败 - {}",
+                            chunk_index + 1,
+                            total_chunks,
+                            if attempt == 0 { "第1次" } else { "重试仍" },
+                            e
+                        );
+                        last_error = Some(e);
+                    }
                 }
             }
+            Err(last_error.unwrap_or_else(|| "分段摘要生成失败".to_string()))
         }
     };
 
-    // 受控并发生成各段摘要；单个分段失败不中止整体，只记录待重试
-    let task_concurrency = concurrent_limit.max(1).min(total_chunks.max(1));
+    let task_concurrency = clamp_concurrent_limit(concurrent_limit).min(total_chunks.max(1));
     let mut chunk_summaries: Vec<Option<String>> = vec![None; total_chunks];
-    let mut pending_indices: Vec<usize> = Vec::new();
+    let mut stream = stream::iter(chunks.into_iter().enumerate())
+        .map(|(chunk_index, chunk)| generate_chunk(chunk_index, chunk))
+        .buffer_unordered(task_concurrency);
 
-    for (batch_index, chunk_batch) in chunks.chunks(task_concurrency).enumerate() {
+    while let Some(result) = stream.next().await {
         if abort_flag.load(Ordering::Relaxed) {
             break;
         }
-
-        let batch_start = batch_index * task_concurrency;
-        let mut tasks = Vec::with_capacity(chunk_batch.len());
-
-        for (offset, chunk) in chunk_batch.iter().enumerate() {
-            let chunk_index = batch_start + offset;
-            let task = tokio::spawn(generate_chunk(chunk_index, chunk));
-            tasks.push((chunk_index, task));
-        }
-
-        for (chunk_index, task) in tasks {
-            match task.await {
-                Ok(Ok(summary)) => {
-                    chunk_summaries[chunk_index] = Some(summary);
-                }
-                Ok(Err(e)) => {
-                    if e != "已中止" {
-                        pending_indices.push(chunk_index);
-                    }
-                }
-                Err(e) => {
-                    pending_indices.push(chunk_index);
-                    tracing::warn!("[笔记生成] 段 {}: 任务执行出错 - {}", chunk_index + 1, e);
-                }
+        match result {
+            Ok((chunk_index, summary)) => {
+                chunk_summaries[chunk_index] = Some(summary);
             }
-        }
-    }
-
-    // 对失败的分段串行重试一轮（避开并发批次内的资源竞争，提高成功率）
-    if !pending_indices.is_empty() && !abort_flag.load(Ordering::Relaxed) {
-        let retry_indices = pending_indices.clone();
-        tracing::info!("[笔记生成] 对 {} 个失败分段串行重试: {:?}", retry_indices.len(), retry_indices);
-        for chunk_index in retry_indices {
-            if abort_flag.load(Ordering::Relaxed) {
-                break;
-            }
-            match generate_chunk(chunk_index, &chunks[chunk_index]).await {
-                Ok(summary) => {
-                    chunk_summaries[chunk_index] = Some(summary);
-                }
-                Err(e) => {
-                    if e == "已中止" {
-                        break;
-                    }
-                    tracing::warn!("[笔记生成] 段 {}: 重试仍失败，跳过该段继续 - {}", chunk_index + 1, e);
+            Err(e) => {
+                if is_abort_error(&e) {
+                    break;
                 }
             }
         }
@@ -1442,41 +1527,52 @@ pub async fn generate_detailed_reading_chapters(
 
     tracing::info!("[原文细读] 分段数: {}", planned_segments.len());
 
-    // 第二步：为分段生成章节内容，受控并发执行，首个失败后停止后续子任务
+    // 第二步：信号量流水线生成章节内容。单段失败只重试该段，成功段立即可见。
+    // 标题优化（原第四步）对原文细读无收益：DetailedReadingChapter 不含 level，故跳过。
     let total_chunks = planned_segments.len();
-    let task_concurrency = concurrent_limit.max(1).min(total_chunks.max(1));
-    let child_abort_flag = Arc::new(AtomicBool::new(false));
-    let mut results: Vec<(usize, String, String, f64, f64)> = Vec::new();
-    let mut first_error: Option<String> = None;
+    let task_concurrency = clamp_concurrent_limit(concurrent_limit).min(total_chunks.max(1));
+    let screenshots_dir = storage_paths::chapter_screenshots_dir(app, note_id)?;
+    std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
+    let video_name = Path::new(video_path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("video");
+    let safe_video_name = sanitize_filename(video_name);
+    let model_id = ai_config.id.clone();
 
-    for (batch_index, segment_batch) in planned_segments.chunks(task_concurrency).enumerate() {
-        if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
-            break;
-        }
+    let slots = std::sync::Arc::new(std::sync::Mutex::new(vec![None; total_chunks]));
+    let screenshot_sem = std::sync::Arc::new(Semaphore::new(4));
+    let mut screenshot_set = tokio::task::JoinSet::new();
+    let mut success_count = 0usize;
+    let mut aborted = false;
+    let mut last_persist_at = Instant::now() - DETAILED_READING_DB_DEBOUNCE;
 
-        let batch_start = batch_index * task_concurrency;
-        let mut tasks = Vec::with_capacity(segment_batch.len());
-
-        for (offset, (start_index, end_index)) in segment_batch.iter().copied().enumerate() {
+    let mut ai_stream = stream::iter(planned_segments.into_iter().enumerate()).map(
+        |(chunk_idx, (start_index, end_index))| {
             let ai_config = ai_config.clone();
             let abort_flag = abort_flag.clone();
-            let child_abort_flag = child_abort_flag.clone();
             let app = app.clone();
             let event_name = event_name.to_string();
-            let subtitle_entries = subtitle_entries.to_vec();
-            let chunk_idx = batch_start + offset;
-
-            let task = tokio::spawn(async move {
-                if abort_flag.load(Ordering::Relaxed) || child_abort_flag.load(Ordering::Relaxed) {
-                    return Err::<(usize, String, String, f64, f64), String>("已中止".to_string());
+            let safe_start = start_index.min(subtitle_entries.len().saturating_sub(1));
+            let safe_end = end_index.min(subtitle_entries.len());
+            let segment_entries = if safe_end > safe_start {
+                subtitle_entries[safe_start..safe_end].to_vec()
+            } else {
+                Vec::new()
+            };
+            async move {
+                if abort_flag.load(Ordering::Relaxed) {
+                    return Err("已中止".to_string());
                 }
-
-                let safe_start = start_index.min(subtitle_entries.len().saturating_sub(1));
-                let safe_end = end_index.min(subtitle_entries.len());
-
-                if safe_end <= safe_start {
-                    child_abort_flag.store(true, Ordering::Relaxed);
-                    return Err::<(usize, String, String, f64, f64), String>("无效章节边界".to_string());
+                if segment_entries.is_empty() {
+                    return Ok((
+                        chunk_idx,
+                        format!("章节 {}", chunk_idx + 1),
+                        "该段字幕为空".to_string(),
+                        0.0,
+                        0.0,
+                        false,
+                    ));
                 }
 
                 tracing::info!(
@@ -1487,183 +1583,265 @@ pub async fn generate_detailed_reading_chapters(
                     safe_end
                 );
 
-                let _ = app.emit(&event_name, GenerationEvent::TabProgress {
-                    tab_type: "DetailedReading".to_string(),
-                    current: chunk_idx + 1,
-                    total: total_chunks + 1,
-                    message: format!("AI正在生成第 {}/{} 章节内容...", chunk_idx + 1, total_chunks),
-                });
+                let _ = app.emit(
+                    &event_name,
+                    GenerationEvent::TabProgress {
+                        tab_type: "DetailedReading".to_string(),
+                        current: chunk_idx + 1,
+                        total: total_chunks + 1,
+                        message: format!("AI正在生成第 {}/{} 章节内容...", chunk_idx + 1, total_chunks),
+                    },
+                );
 
-                let segment_subtitles: Vec<&SubtitleEntry> = subtitle_entries
-                    .iter()
-                    .skip(safe_start)
-                    .take(safe_end - safe_start)
-                    .collect();
-
-                let subtitle_text: String = segment_subtitles
+                let start_time = segment_entries[0].start_time;
+                let end_time = segment_entries
+                    .last()
+                    .map(|e| e.end_time)
+                    .unwrap_or(start_time);
+                let subtitle_text: String = segment_entries
                     .iter()
                     .map(|e| e.text.as_str())
                     .collect::<Vec<_>>()
                     .join(" ");
-
-                let start_time = subtitle_entries
-                    .get(safe_start)
-                    .map(|e| e.start_time)
-                    .unwrap_or(0.0);
-                let end_time = subtitle_entries
-                    .get(safe_end.saturating_sub(1))
-                    .map(|e| e.end_time)
-                    .unwrap_or(total_duration);
-
                 let prompt = build_detailed_reading_chapter_prompt(&subtitle_text);
+                let mut last_error = None;
 
-                match execute_streaming_and_collect(ai_config, prompt, &abort_flag).await {
-                    Ok(ref response) => match parse_detailed_reading_chapter_response(response) {
-                        Ok((title, content)) => Ok((chunk_idx, title, content, start_time, end_time)),
+                for attempt in 0..2 {
+                    if abort_flag.load(Ordering::Relaxed) {
+                        return Err("已中止".to_string());
+                    }
+                    match execute_streaming_and_collect(ai_config.clone(), prompt.clone(), &abort_flag)
+                        .await
+                    {
+                        Ok(response) => match parse_detailed_reading_chapter_response(&response) {
+                            Ok((title, content)) => {
+                                return Ok((chunk_idx, title, content, start_time, end_time, true));
+                            }
+                            Err(e) => last_error = Some(e),
+                        },
                         Err(e) => {
-                            child_abort_flag.store(true, Ordering::Relaxed);
-                            tracing::error!("[原文细读] 第 {} 段解析失败: {}", chunk_idx + 1, e);
-                            Err(format!("第 {} 段解析失败: {}", chunk_idx + 1, e))
+                            if is_abort_error(&e) {
+                                return Err(e);
+                            }
+                            last_error = Some(e);
                         }
-                    },
-                    Err(e) => {
-                        child_abort_flag.store(true, Ordering::Relaxed);
-                        tracing::error!("[原文细读] 第 {} 段 AI 调用失败: {}", chunk_idx + 1, e);
-                        Err(format!("第 {} 段 AI 调用失败: {}", chunk_idx + 1, e))
+                    }
+                    if attempt == 0 {
+                        tracing::warn!(
+                            "[原文细读] 第 {} 段失败，重试一次: {}",
+                            chunk_idx + 1,
+                            last_error.as_deref().unwrap_or("")
+                        );
                     }
                 }
-            });
 
-            tasks.push(task);
+                tracing::error!(
+                    "[原文细读] 第 {} 段最终失败: {}",
+                    chunk_idx + 1,
+                    last_error.as_deref().unwrap_or("未知错误")
+                );
+                Ok((
+                    chunk_idx,
+                    format!("章节 {}", chunk_idx + 1),
+                    fallback_chapter_content(&subtitle_text),
+                    start_time,
+                    end_time,
+                    false,
+                ))
+            }
+        },
+    )
+    .buffer_unordered(task_concurrency);
+
+    let mut ai_done = false;
+    loop {
+        if abort_flag.load(Ordering::Relaxed) {
+            aborted = true;
+            screenshot_set.abort_all();
+            break;
         }
 
-        for task in tasks {
-            match task.await {
-                Ok(Ok(result)) => {
-                    if first_error.is_none() {
-                        results.push(result);
+        tokio::select! {
+            maybe_ai = ai_stream.next(), if !ai_done => {
+                match maybe_ai {
+                    Some(Ok((chunk_idx, title, content, start_time, end_time, succeeded))) => {
+                        if succeeded {
+                            success_count += 1;
+                        }
+                        let chapter = DetailedReadingChapter {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            title,
+                            start_time,
+                            end_time,
+                            content: Some(content),
+                            subtitle_entries: Vec::new(),
+                            screenshot_path: None,
+                        };
+                        {
+                            let mut guard = slots.lock().unwrap();
+                            guard[chunk_idx] = Some(chapter.clone());
+                        }
+                        emit_detailed_reading_chapter_partial(
+                            app,
+                            event_name,
+                            chunk_idx,
+                            total_chunks,
+                            &chapter,
+                            total_duration,
+                        );
+                        let data = {
+                            let guard = slots.lock().unwrap();
+                            snapshot_completed_chapters(&guard, total_duration)
+                        };
+                        persist_detailed_reading_snapshot_if_due(
+                            &mut last_persist_at,
+                            false,
+                            note_id,
+                            &model_id,
+                            &data,
+                        );
+
+                        let sem = screenshot_sem.clone();
+                        let abort = abort_flag.clone();
+                        let vp = video_path.to_string();
+                        let screenshot_filename = format!(
+                            "{}_{}.jpg",
+                            safe_video_name,
+                            format_timestamp_for_filename(start_time)
+                        );
+                        let screenshot_path = screenshots_dir.join(&screenshot_filename);
+                        let screenshot_path_str = screenshot_path.to_string_lossy().to_string();
+                        screenshot_set.spawn(async move {
+                            let _permit = sem.acquire().await.map_err(|e| e.to_string())?;
+                            if abort.load(Ordering::Relaxed) {
+                                return Err::<(usize, Option<String>), String>("已中止".to_string());
+                            }
+                            let captured = tokio::task::spawn_blocking(move || {
+                                capture_video_screenshot(&vp, start_time, &screenshot_path_str)
+                            })
+                            .await;
+                            match captured {
+                                Ok(Ok(_)) => {
+                                    tracing::info!(
+                                        "[原文细读] 第 {}/{} 章截图成功: {}",
+                                        chunk_idx + 1,
+                                        total_chunks,
+                                        screenshot_filename
+                                    );
+                                    Ok((chunk_idx, Some(screenshot_path.to_string_lossy().to_string())))
+                                }
+                                Ok(Err(e)) => {
+                                    tracing::error!(
+                                        "[原文细读] 第 {}/{} 章截图失败: {}",
+                                        chunk_idx + 1,
+                                        total_chunks,
+                                        e
+                                    );
+                                    Ok((chunk_idx, None))
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "[原文细读] 第 {}/{} 章截图任务异常: {}",
+                                        chunk_idx + 1,
+                                        total_chunks,
+                                        e
+                                    );
+                                    Ok((chunk_idx, None))
+                                }
+                            }
+                        });
                     }
-                }
-                Ok(Err(e)) => {
-                    if e != "已中止" && first_error.is_none() {
-                        child_abort_flag.store(true, Ordering::Relaxed);
-                        first_error = Some(e);
+                    Some(Err(e)) => {
+                        if is_abort_error(&e) {
+                            aborted = true;
+                            screenshot_set.abort_all();
+                            break;
+                        }
+                        tracing::error!("[原文细读] 分段任务失败: {}", e);
                     }
-                }
-                Err(e) => {
-                    if first_error.is_none() {
-                        child_abort_flag.store(true, Ordering::Relaxed);
-                        first_error = Some(format!("任务执行出错: {}", e));
+                    None => {
+                        ai_done = true;
                     }
                 }
             }
+            maybe_shot = screenshot_set.join_next(), if !screenshot_set.is_empty() => {
+                match maybe_shot {
+                    Some(Ok(Ok((chunk_idx, Some(path))))) => {
+                        let updated = {
+                            let mut guard = slots.lock().unwrap();
+                            if let Some(chapter) = guard[chunk_idx].as_mut() {
+                                chapter.screenshot_path = Some(path);
+                                Some(chapter.clone())
+                            } else {
+                                None
+                            }
+                        };
+                        if let Some(chapter) = updated {
+                            emit_detailed_reading_chapter_partial(
+                                app,
+                                event_name,
+                                chunk_idx,
+                                total_chunks,
+                                &chapter,
+                                total_duration,
+                            );
+                            let data = {
+                                let guard = slots.lock().unwrap();
+                                snapshot_completed_chapters(&guard, total_duration)
+                            };
+                            persist_detailed_reading_snapshot_if_due(
+                                &mut last_persist_at,
+                                false,
+                                note_id,
+                                &model_id,
+                                &data,
+                            );
+                        }
+                    }
+                    Some(Ok(Err(e))) if is_abort_error(&e) => {
+                        aborted = true;
+                        screenshot_set.abort_all();
+                        break;
+                    }
+                    Some(Err(e)) => {
+                        tracing::error!("[原文细读] 截图任务异常: {}", e);
+                    }
+                    _ => {}
+                }
+            }
+            else => break,
         }
     }
 
-    if let Some(error) = first_error {
-        return Err(error);
+    if aborted || abort_flag.load(Ordering::Relaxed) {
+        return Err("已中止".to_string());
     }
 
-    results.sort_by_key(|(idx, _, _, _, _)| *idx);
-
-    if results.is_empty() {
-        return Err("未能生成任何章节".to_string());
+    if success_count == 0 {
+        return Err("所有章节均生成失败，请检查模型配置和网络后重试".to_string());
     }
 
-    // 第三步：为每个章节截图
-    let _ = app.emit(
-        event_name,
-        GenerationEvent::TabProgress {
-            tab_type: "DetailedReading".to_string(),
-            current: total_chunks,
-            total: total_chunks + 1,
-            message: "正在截取章节画面...".to_string(),
-        },
-    );
-
-    // 准备截图目录
-    let screenshots_dir = storage_paths::chapter_screenshots_dir(app, note_id)?;
-    std::fs::create_dir_all(&screenshots_dir).map_err(|e| e.to_string())?;
-
-    // 从视频路径提取文件名
-    let video_name = Path::new(video_path)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("video");
-    let safe_video_name = sanitize_filename(video_name);
-
-    // 构建章节列表（先构建临时 Chapter 用于标题优化）
-    let mut temp_chapters: Vec<Chapter> = Vec::new();
-
-    for (_, title, content, start_time, end_time) in results {
-        temp_chapters.push(Chapter {
-            id: uuid::Uuid::new_v4().to_string(),
-            title,
-            start_time,
-            end_time,
-            content,
-            screenshot_path: None,
-            level: None,
-            parent_id: None,
-        });
-    }
-
-    tracing::info!("[原文细读] 成功生成 {} 个章节", temp_chapters.len());
-
-    // 第四步：优化标题（添加层级信息）
-    let _ = app.emit(
-        event_name,
-        GenerationEvent::TabProgress {
-            tab_type: "DetailedReading".to_string(),
-            current: total_chunks + 1,
-            total: total_chunks + 2,
-            message: "AI正在优化章节标题...".to_string(),
-        },
-    );
-
-    if let Err(e) = optimize_chapter_titles(ai_config, &mut temp_chapters, abort_flag).await {
-        tracing::error!("[原文细读] 标题优化失败: {}", e);
-    }
-
-    // 第五步：构建 DetailedReadingChapter（仅保留时间范围、内容和截图，字幕按前端按需切片）
-    let mut detailed_chapters: Vec<DetailedReadingChapter> = Vec::new();
-
-    for (idx, chapter) in temp_chapters.iter().enumerate() {
-        // 截图
-        let timestamp_str = format_timestamp_for_filename(chapter.start_time);
-        let screenshot_filename = format!("{}_{}.jpg", safe_video_name, timestamp_str);
-        let screenshot_path = screenshots_dir.join(&screenshot_filename);
-
-        let screenshot_path_str = match capture_video_screenshot(video_path, chapter.start_time, screenshot_path.to_str().unwrap()) {
-            Ok(_) => {
-                tracing::info!("[原文细读] 第 {} 章截图成功: {}", idx + 1, screenshot_filename);
-                Some(screenshot_path.to_string_lossy().to_string())
-            }
-            Err(e) => {
-                tracing::error!("[原文细读] 第 {} 章截图失败: {}", idx + 1, e);
-                None
-            }
-        };
-
-        detailed_chapters.push(DetailedReadingChapter {
-            id: chapter.id.clone(),
-            title: chapter.title.clone(),
-            start_time: chapter.start_time,
-            end_time: chapter.end_time,
-            content: Some(chapter.content.clone()),
-            subtitle_entries: Vec::new(),
-            screenshot_path: screenshot_path_str,
-        });
-    }
-
-    tracing::info!("[原文细读] ========================================");
-    tracing::info!("[原文细读] 生成的章节数: {}", detailed_chapters.len());
-
-    Ok(DetailedReadingData {
-        chapters: detailed_chapters,
+    let detailed_chapters = {
+        let guard = slots.lock().unwrap();
+        guard.iter().flatten().cloned().collect::<Vec<_>>()
+    };
+    let detailed_data = DetailedReadingData {
+        chapters: detailed_chapters.clone(),
         total_duration,
         generated_at: chrono::Local::now().to_rfc3339(),
-    })
+    };
+    persist_detailed_reading_snapshot_if_due(
+        &mut last_persist_at,
+        true,
+        note_id,
+        &model_id,
+        &detailed_data,
+    );
+
+    tracing::info!("[原文细读] ========================================");
+    tracing::info!("[原文细读] 生成的章节数: {} (成功 {} 段)", detailed_chapters.len(), success_count);
+
+    Ok(detailed_data)
 }
 
 // ============================================================================
@@ -1996,57 +2174,210 @@ async fn generate_note_internal(
             .copied()
             .collect();
 
-        // 处理 DetailedReading（生成章节数据）
-        if has_detailed_reading {
-        let _ = app.emit(
-            &event_name,
-            GenerationEvent::TabStarted {
-                tab_type: "DetailedReading".to_string(),
-                tab_name: "原文细读".to_string(),
-            },
-        );
+        // 原文细读与其它标签页并行：细读内部走模型池限流，不再独占整段临界路径
+        let detailed_handle = if has_detailed_reading {
+            let _ = app.emit(
+                &event_name,
+                GenerationEvent::TabStarted {
+                    tab_type: "DetailedReading".to_string(),
+                    tab_name: "原文细读".to_string(),
+                },
+            );
+            let app = app.clone();
+            let event_name = event_name.clone();
+            let ai_config = ai_config.clone();
+            let entries = entries.clone();
+            let video_path = note.video_path.clone();
+            let note_id = request.note_id.clone();
+            let abort_flag = abort_flag.clone();
+            let concurrent_limit = request.options.concurrent_limit;
+            Some(tokio::spawn(async move {
+                generate_detailed_reading_chapters(
+                    &app,
+                    &event_name,
+                    &ai_config,
+                    &entries,
+                    &video_path,
+                    &note_id,
+                    &abort_flag,
+                    concurrent_limit,
+                )
+                .await
+            }))
+        } else {
+            None
+        };
 
-        match generate_detailed_reading_chapters(
-            &app,
-            &event_name,
-            &ai_config,
-            &entries,
-            &note.video_path,
-            &request.note_id,
-            &abort_flag,
-            request.options.concurrent_limit,
-        ).await {
-            Ok(chapter_data) => {
-                // 序列化为 JSON 存储
-                // 失败路径：记录错误并补发 TabError 后直接返回（并发分支里 DetailedReading 是独占阶段）
-                let content = match serde_json::to_string(&chapter_data) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        let err = format!("序列化章节数据失败: {}", e);
-                        tracing::error!("[笔记生成] {}", err);
-                        let _ = app.emit(
-                            &event_name,
-                            GenerationEvent::TabError {
-                                tab_type: "DetailedReading".to_string(),
-                                error: err,
-                            },
-                        );
-                        return Ok(());
-                    }
+        if !other_tabs.is_empty() {
+            let semaphore = Arc::new(Semaphore::new(clamp_concurrent_limit(request.options.concurrent_limit)));
+            let mut tasks = Vec::new();
+
+            for tab_type in other_tabs {
+                let semaphore = semaphore.clone();
+                let app = app.clone();
+                let event_name = event_name.clone();
+                let ai_config = ai_config.clone();
+                let note = note.clone();
+                let subtitle_text = if tab_type == TabType::AiNote {
+                    ai_note_transcript.clone()
+                } else {
+                    subtitle_text.clone()
                 };
+                let abort_flag = abort_flag.clone();
+                let tab_name = get_tab_name(&tab_type);
+                let style = request.options.style.clone();
+                let custom_prompt = request.options.custom_prompt.clone();
+                let screenshot_density = request.options.screenshot_density.clone();
+                let concurrent_limit = request.options.concurrent_limit;
 
-                if let Err(e) = update_note_tab(
-                    db,
-                    &request.note_id,
-                    &TabType::DetailedReading,
-                    &content,
-                    &request.model_id,
-                    request.options.style.as_deref(),
-                    request.options.custom_prompt.as_deref(),
-                    request.options.screenshot_density.as_deref(),
-                ) {
-                    tracing::error!("[笔记生成] 更新数据库失败: {}", e);
-                    let err = format!("更新数据库失败: {}", e);
+                let task = tokio::spawn(async move {
+                    let _permit = match semaphore.acquire().await {
+                        Ok(permit) => permit,
+                        Err(e) => {
+                            tracing::error!("[笔记生成] 获取信号量失败: {}", e);
+                            return TabResult {
+                                tab_type,
+                                content: String::new(),
+                                success: false,
+                                error: Some(format!("获取信号量失败: {}", e)),
+                            };
+                        }
+                    };
+
+                    generate_single_tab(
+                        &app,
+                        &event_name,
+                        &tab_type,
+                        &ai_config,
+                        &note,
+                        &subtitle_text,
+                        &abort_flag,
+                        model_context_size,
+                        concurrent_limit,
+                        tab_name,
+                        style.as_deref(),
+                        custom_prompt.as_deref(),
+                        screenshot_density.as_deref(),
+                    ).await
+                });
+
+                tasks.push(task);
+            }
+
+            for task in tasks {
+                match task.await {
+                    Ok(result) => {
+                        if result.success {
+                            generated_count += 1;
+                            if let Err(e) = update_note_tab(
+                                db,
+                                &request.note_id,
+                                &result.tab_type,
+                                &result.content,
+                                &request.model_id,
+                                request.options.style.as_deref(),
+                                request.options.custom_prompt.as_deref(),
+                                request.options.screenshot_density.as_deref(),
+                            ) {
+                                tracing::error!("[笔记生成] 更新数据库失败: {}", e);
+                                if first_error.is_none() {
+                                    first_error = Some(format!("更新数据库失败: {}", e));
+                                }
+                                failed_count += 1;
+                            }
+                        } else {
+                            if first_error.is_none() {
+                                first_error = result.error.clone();
+                            }
+                            failed_count += 1;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("[笔记生成] 任务执行异常: {}", e);
+                        if first_error.is_none() {
+                            first_error = Some(format!("任务执行异常: {}", e));
+                        }
+                        failed_count += 1;
+                    }
+                }
+            }
+        }
+
+        if let Some(handle) = detailed_handle {
+            match handle.await {
+                Ok(Ok(chapter_data)) => {
+                    match serde_json::to_string(&chapter_data) {
+                        Ok(content) => {
+                            if let Err(e) = update_note_tab(
+                                db,
+                                &request.note_id,
+                                &TabType::DetailedReading,
+                                &content,
+                                &request.model_id,
+                                request.options.style.as_deref(),
+                                request.options.custom_prompt.as_deref(),
+                                request.options.screenshot_density.as_deref(),
+                            ) {
+                                tracing::error!("[笔记生成] 更新数据库失败: {}", e);
+                                let err = format!("更新数据库失败: {}", e);
+                                let _ = app.emit(
+                                    &event_name,
+                                    GenerationEvent::TabError {
+                                        tab_type: "DetailedReading".to_string(),
+                                        error: err.clone(),
+                                    },
+                                );
+                                if first_error.is_none() {
+                                    first_error = Some(err);
+                                }
+                                failed_count += 1;
+                            } else {
+                                let _ = app.emit(
+                                    &event_name,
+                                    GenerationEvent::TabCompleted {
+                                        tab_type: "DetailedReading".to_string(),
+                                        content,
+                                    },
+                                );
+                                generated_count += 1;
+                            }
+                        }
+                        Err(e) => {
+                            let err = format!("序列化章节数据失败: {}", e);
+                            tracing::error!("[笔记生成] {}", err);
+                            let _ = app.emit(
+                                &event_name,
+                                GenerationEvent::TabError {
+                                    tab_type: "DetailedReading".to_string(),
+                                    error: err.clone(),
+                                },
+                            );
+                            if first_error.is_none() {
+                                first_error = Some(err);
+                            }
+                            failed_count += 1;
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    if first_error.is_none() {
+                        first_error = Some(e.clone());
+                    }
+                    let _ = app.emit(
+                        &event_name,
+                        GenerationEvent::TabError {
+                            tab_type: "DetailedReading".to_string(),
+                            error: e,
+                        },
+                    );
+                    failed_count += 1;
+                }
+                Err(e) => {
+                    let err = format!("原文细读任务异常: {}", e);
+                    tracing::error!("[笔记生成] {}", err);
+                    if first_error.is_none() {
+                        first_error = Some(err.clone());
+                    }
                     let _ = app.emit(
                         &event_name,
                         GenerationEvent::TabError {
@@ -2054,133 +2385,11 @@ async fn generate_note_internal(
                             error: err,
                         },
                     );
-                    return Ok(());
-                }
-
-                let _ = app.emit(
-                    &event_name,
-                    GenerationEvent::TabCompleted {
-                        tab_type: "DetailedReading".to_string(),
-                        content,
-                    },
-                );
-                generated_count += 1;
-            }
-            Err(e) => {
-                if first_error.is_none() {
-                    first_error = Some(e.clone());
-                }
-                let _ = app.emit(
-                    &event_name,
-                    GenerationEvent::TabError {
-                        tab_type: "DetailedReading".to_string(),
-                        error: e,
-                    },
-                );
-                failed_count += 1;
-            }
-        }
-    }
-
-    // 并发生成其他标签页（使用配置的并发数）
-    if !other_tabs.is_empty() {
-        let semaphore = Arc::new(Semaphore::new(request.options.concurrent_limit));
-        let mut tasks = Vec::new();
-
-        for tab_type in other_tabs {
-            let semaphore = semaphore.clone();
-            let app = app.clone();
-            let event_name = event_name.clone();
-            let ai_config = ai_config.clone();
-            let note = note.clone();
-            let subtitle_text = if tab_type == TabType::AiNote {
-                ai_note_transcript.clone()
-            } else {
-                subtitle_text.clone()
-            };
-            let abort_flag = abort_flag.clone();
-            let tab_name = get_tab_name(&tab_type);
-            let style = request.options.style.clone();
-            let custom_prompt = request.options.custom_prompt.clone();
-            let screenshot_density = request.options.screenshot_density.clone();
-
-            let task = tokio::spawn(async move {
-                // 获取信号量许可（控制标签页级别的并发）
-                let _permit = match semaphore.acquire().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        tracing::error!("[笔记生成] 获取信号量失败: {}", e);
-                        return TabResult {
-                            tab_type,
-                            content: String::new(),
-                            success: false,
-                            error: Some(format!("获取信号量失败: {}", e)),
-                        };
-                    }
-                };
-
-                // 执行生成
-                generate_single_tab(
-                    &app,
-                    &event_name,
-                    &tab_type,
-                    &ai_config,
-                    &note,
-                    &subtitle_text,
-                    &abort_flag,
-                    model_context_size,
-                    request.options.concurrent_limit,
-                    tab_name,
-                    style.as_deref(),
-                    custom_prompt.as_deref(),
-                    screenshot_density.as_deref(),
-                ).await
-            });
-
-            tasks.push(task);
-        }
-
-        // 等待所有任务完成
-        for task in tasks {
-            match task.await {
-                Ok(result) => {
-                    if result.success {
-                        generated_count += 1;
-                        // 更新数据库
-                        if let Err(e) = update_note_tab(
-                            db,
-                            &request.note_id,
-                            &result.tab_type,
-                            &result.content,
-                            &request.model_id,
-                            request.options.style.as_deref(),
-                            request.options.custom_prompt.as_deref(),
-                            request.options.screenshot_density.as_deref(),
-                        ) {
-                            tracing::error!("[笔记生成] 更新数据库失败: {}", e);
-                            if first_error.is_none() {
-                                first_error = Some(format!("更新数据库失败: {}", e));
-                            }
-                            failed_count += 1;
-                        }
-                    } else {
-                        if first_error.is_none() {
-                            first_error = result.error.clone();
-                        }
-                        failed_count += 1;
-                    }
-                }
-                Err(e) => {
-                    // 任务 panic 或被取消，记录错误但继续处理其他任务
-                    tracing::error!("[笔记生成] 任务执行异常: {}", e);
-                    if first_error.is_none() {
-                        first_error = Some(format!("任务执行异常: {}", e));
-                    }
                     failed_count += 1;
                 }
             }
         }
-    }
+
     } // 结束 else 分支（并发生成）
 
     if cleanup_owned_abort_flag {
@@ -3072,4 +3281,81 @@ mod tests {
         assert!(!re.is_match("[SCREENSHOT:01:23:45]"));
         assert!(!re.is_match("[[screenshot:01:23:45]]"));
     }
+
+    #[test]
+    fn abort_error_detects_cancel_and_abort_messages() {
+        assert!(is_abort_error("已中止"));
+        assert!(is_abort_error("请求已取消"));
+        assert!(is_abort_error("Aborted by user"));
+        assert!(!is_abort_error("JSON解析失败"));
+    }
+
+    #[test]
+    fn concurrent_limit_is_clamped_to_model_pool_range() {
+        assert_eq!(clamp_concurrent_limit(0), 1);
+        assert_eq!(clamp_concurrent_limit(5), 5);
+        assert_eq!(clamp_concurrent_limit(99), 10);
+    }
+
+    #[test]
+    fn snapshot_completed_chapters_skips_empty_slots_and_keeps_order() {
+        let mut slots = vec![None, None, None];
+        slots[0] = Some(DetailedReadingChapter {
+            id: "a".to_string(),
+            title: "一".to_string(),
+            start_time: 0.0,
+            end_time: 1.0,
+            content: Some("c1".to_string()),
+            subtitle_entries: Vec::new(),
+            screenshot_path: None,
+        });
+        slots[2] = Some(DetailedReadingChapter {
+            id: "c".to_string(),
+            title: "三".to_string(),
+            start_time: 2.0,
+            end_time: 3.0,
+            content: Some("c3".to_string()),
+            subtitle_entries: Vec::new(),
+            screenshot_path: Some("shot.jpg".to_string()),
+        });
+        let data = snapshot_completed_chapters(&slots, 12.0);
+        assert_eq!(data.total_duration, 12.0);
+        assert_eq!(data.chapters.len(), 2);
+        assert_eq!(data.chapters[0].id, "a");
+        assert_eq!(data.chapters[1].id, "c");
+        assert_eq!(data.chapters[1].screenshot_path.as_deref(), Some("shot.jpg"));
+    }
+
+    #[test]
+    fn fallback_chapter_content_uses_excerpt_or_default() {
+        assert_eq!(fallback_chapter_content(""), "该段生成失败，可稍后重试");
+        let content = fallback_chapter_content("abcdefghij");
+        assert!(content.starts_with("abcdefghij"));
+        assert!(content.ends_with("…"));
+    }
+    #[test]
+    fn chapter_partial_serializes_with_status_tag() {
+        let event = GenerationEvent::ChapterPartial {
+            tab_type: "DetailedReading".to_string(),
+            index: 1,
+            total: 3,
+            chapter: DetailedReadingChapter {
+                id: "c1".to_string(),
+                title: "t".to_string(),
+                start_time: 0.0,
+                end_time: 1.0,
+                content: Some("body".to_string()),
+                subtitle_entries: Vec::new(),
+                screenshot_path: None,
+            },
+            total_duration: 12.0,
+        };
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["status"], "ChapterPartial");
+        assert_eq!(value["index"], 1);
+        assert_eq!(value["total"], 3);
+        assert_eq!(value["chapter"]["id"], "c1");
+        assert_eq!(value["total_duration"], 12.0);
+    }
+
 }

@@ -8,6 +8,7 @@ import { useSettings } from "./context/SettingsContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
+import { SubtitleGenerationIndicator } from "./components/SubtitleGenerationIndicator";
 import { cn } from "./utils/cn";
 import { useGlassBg } from "./hooks/useGlassBg";
 import { VIEW_TYPES, type NavigableViewType } from "./types";
@@ -313,6 +314,7 @@ function AppContent() {
           )}
         </main>
       </div>
+      <SubtitleGenerationIndicator />
     </div>
   );
 }

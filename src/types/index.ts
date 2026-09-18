@@ -320,6 +320,8 @@ export type GenerationEvent =
   | { status: "TabStarted"; tab_type: string; tab_name: string }
   | { status: "TabProgress"; tab_type: string; current: number; total: number; message: string }
   | { status: "TabCompleted"; tab_type: string; content: string }
+  | { status: "TabPartial"; tab_type: string; content: string }
+  | { status: "ChapterPartial"; tab_type: string; index: number; total: number; chapter: DetailedReadingChapter; total_duration: number }
   | { status: "TabError"; tab_type: string; error: string }
   | { status: "AllCompleted"; generated: number; failed: number; total: number }
   | { status: "Aborted"; reason: string };

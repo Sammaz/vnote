@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 import { subscribeVideoTime } from "../../hooks/useVideoTime";
@@ -61,7 +61,7 @@ import { message } from "../../utils/message";
 import { copyText } from "../../utils/clipboard";
 import { assembleChapterMarkdown } from "../../utils/markdownAssembler";
 import { stripHeadingTimestamps } from "../../utils/markdownUtils";
-import { findCurrentDetailedReadingChapter } from "../../utils/detailedReadingChapters";
+import { findCurrentDetailedReadingChapter, mergeDetailedReadingChapter } from "../../utils/detailedReadingChapters";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import {
   getNoteGenerationState,
@@ -74,6 +74,14 @@ import {
   setHighlightGenerating,
   setFlashcardGenerating,
   setChapterGenerating,
+  stashDetailedReadingPartial,
+  stashDetailedReadingChapter,
+  stashDetailedReadingData,
+  seedDetailedReadingStash,
+  takeDetailedReadingData,
+  clearDetailedReadingPartial,
+  markPendingNoteRefresh,
+  takePendingNoteRefresh,
 } from "../../utils/noteGenerationState";
 
 type TabId = "summary" | "original" | "highlights" | "script" | "visual" | "custom" | "ai_note" | "flashcard" | "panoramic_blueprint" | "quicknotes" | "mindmap" | "canvas";
@@ -141,6 +149,7 @@ const USER_CHAPTER_SEEK_SUPPRESSION_MS = 800;
 
 interface NoteContentPanelProps {
   note: Note;
+  isPageVisible: boolean;
   onGenerationComplete?: () => void;
   aiConfigs: AiConfig[];
   currentModelId?: string | null;
@@ -251,12 +260,16 @@ function ToolbarIconButton({
   );
 }
 
-export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, currentModelId, defaultAiConfigId, promptConfigs = [] }: NoteContentPanelProps) {
+export function NoteContentPanel({ note, isPageVisible, onGenerationComplete, aiConfigs, currentModelId, defaultAiConfigId, promptConfigs = [] }: NoteContentPanelProps) {
 
   const glassPanel = useGlassBg("panel");
   const glassModal = useGlassBg("modal");
   const glassInput = useGlassBg("input");
   const glassMenu = useGlassBg("menu");
+  const isPageVisibleRef = useRef(isPageVisible);
+  isPageVisibleRef.current = isPageVisible;
+  const onGenerationCompleteRef = useRef(onGenerationComplete);
+  onGenerationCompleteRef.current = onGenerationComplete;
 
   // 当前激活的标签页
   const [activeTab, setActiveTab] = useState<TabId>("summary");
@@ -328,6 +341,11 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
   // 辅助模式状态
   const [isAssistModeActive, setIsAssistModeActive] = useState(false);
+  const isDetailedReadingSurfaceVisibleRef = useRef(false);
+  isDetailedReadingSurfaceVisibleRef.current = isPageVisible && activeTab === "original" && !isAssistModeActive;
+  const detailedReadingDataRef = useRef(detailedReadingData);
+  detailedReadingDataRef.current = detailedReadingData;
+  const skipDetailedReadingDbParseRef = useRef(false);
   // 辅助模式下的截图标记（从 AssistModeView 同步）
   const [assistModeMarkers, setAssistModeMarkers] = useState<ScreenshotMarker[]>([]);
   // 辅助模式生成状态
@@ -377,14 +395,6 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   }>({ title: "", message: "", onConfirm: () => {} });
 
   // 解析 detailed_reading 为 DetailedReadingData
-  useEffect(() => {
-    const parsed = parseDetailedReadingData(note.detailed_reading);
-    if (parsed) {
-      setDetailedReadingData(parsed);
-    } else {
-      setDetailedReadingData(null);
-    }
-  }, [note.id, note.detailed_reading]);
 
   // 加载字幕数据（用于字幕优化）
   useEffect(() => {
@@ -795,12 +805,46 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             regeneratingTabs: newRegeneratingOnStart,
             progress: { ...state.progress, message: `正在生成 ${data.tab_name}...` },
           });
+          if (startedTab === "detailed_reading" && noteId === note.id) {
+            clearDetailedReadingPartial(noteId);
+            setChapterGenerating(noteId, true);
+            const empty = { chapters: [], total_duration: 0, generated_at: "" };
+            if (isPageVisibleRef.current) {
+              setChapterIsGenerating(true);
+            }
+            if (isDetailedReadingSurfaceVisibleRef.current) {
+              setDetailedReadingData(empty);
+            } else {
+              stashDetailedReadingData(noteId, empty);
+            }
+          }
           break;
 
         case "TabProgress":
           setNoteGenerationState(noteId, {
             progress: { current: data.current, total: data.total, message: data.message },
           });
+          break;
+
+        case "TabPartial":
+          if (convertTabType(data.tab_type) === "detailed_reading" && noteId === note.id) {
+            if (!isDetailedReadingSurfaceVisibleRef.current) {
+              stashDetailedReadingPartial(noteId, data.content);
+            }
+          }
+          break;
+
+        case "ChapterPartial":
+          if (convertTabType(data.tab_type) === "detailed_reading" && noteId === note.id) {
+            if (!isDetailedReadingSurfaceVisibleRef.current) {
+              seedDetailedReadingStash(noteId, detailedReadingDataRef.current);
+              stashDetailedReadingChapter(noteId, data.chapter, data.total_duration);
+              break;
+            }
+            setDetailedReadingData((prev) =>
+              mergeDetailedReadingChapter(prev, data.chapter, data.total_duration)
+            );
+          }
           break;
 
         case "TabCompleted":
@@ -813,14 +857,23 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           });
           // 原文细读完成后停止闪烁小点（isGeneratingChapters 驱动该 tab 的动画）
           if (completedTab === "detailed_reading") {
-            setChapterIsGenerating(false);
             setChapterGenerating(noteId, false);
+            if (isPageVisibleRef.current) {
+              setChapterIsGenerating(false);
+            }
+            if (!isDetailedReadingSurfaceVisibleRef.current && noteId === note.id) {
+              stashDetailedReadingPartial(noteId, data.content);
+            }
           }
 
           // 刷新笔记数据以显示新生成的内容
-          setTimeout(() => {
-            onGenerationComplete?.();
-          }, 500);
+          if (isPageVisibleRef.current) {
+            setTimeout(() => {
+              onGenerationCompleteRef.current?.();
+            }, 500);
+          } else {
+            markPendingNoteRefresh(noteId);
+          }
           break;
 
         case "TabError":
@@ -858,8 +911,10 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
             completedTabs: newCompletedTabs,
           });
           // 全部生成结束，停止原文细读标签页的闪烁小点
-          setChapterIsGenerating(false);
           setChapterGenerating(noteId, false);
+          if (isPageVisibleRef.current) {
+            setChapterIsGenerating(false);
+          }
           // 清理事件监听器
           const unlisten = activeListeners.get(genId);
           if (unlisten) {
@@ -870,9 +925,13 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           unregisterActiveGenerationId(noteId, genId);
 
           // 延迟刷新笔记数据，避免与事件处理冲突
-          setTimeout(() => {
-            onGenerationComplete?.();
-          }, 200);
+          if (isPageVisibleRef.current) {
+            setTimeout(() => {
+              onGenerationCompleteRef.current?.();
+            }, 200);
+          } else {
+            markPendingNoteRefresh(noteId);
+          }
           break;
 
         case "Aborted":
@@ -892,8 +951,8 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
           break;
       }
 
-      // 通知当前显示的笔记更新UI（如果是当前笔记）
-      if (noteId === note.id) {
+      // 通知当前显示的笔记更新UI（隐藏页只写全局状态，回页后再 flush）
+      if (noteId === note.id && isPageVisibleRef.current) {
         const updatedState = getNoteGenerationState(noteId);
         setIsGenerating(updatedState.isGenerating);
         setGenerationId(updatedState.generationId);
@@ -914,6 +973,7 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
   // 订阅全局生成状态变更（替代 200ms 轮询，避免长时间运行时持续重渲染）
   useEffect(() => {
     const sync = () => {
+      if (!isPageVisibleRef.current) return;
       const globalState = getNoteGenerationState(note.id);
       setIsGenerating(globalState.isGenerating);
       setGenerationId(globalState.generationId);
@@ -929,6 +989,42 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     return subscribeNoteGenerationState(note.id, sync);
   }, [note.id]);
+
+  // 回到笔记页时 flush 一次：stash 优先于 note.detailed_reading
+  useLayoutEffect(() => {
+    if (!isPageVisible || activeTab !== "original" || isAssistModeActive) return;
+    const stashed = takeDetailedReadingData(note.id);
+    if (stashed) {
+      setDetailedReadingData(stashed);
+      skipDetailedReadingDbParseRef.current = true;
+    }
+  }, [isPageVisible, activeTab, isAssistModeActive, note.id]);
+
+  useEffect(() => {
+    if (!isPageVisible || activeTab !== "original" || isAssistModeActive) return;
+    if (skipDetailedReadingDbParseRef.current) {
+      skipDetailedReadingDbParseRef.current = false;
+      return;
+    }
+    if (chapterIsGenerating || getNoteGenerationState(note.id).isGeneratingChapters) return;
+    const parsed = parseDetailedReadingData(note.detailed_reading);
+    setDetailedReadingData(parsed);
+  }, [isPageVisible, activeTab, isAssistModeActive, note.id, note.detailed_reading]);
+
+  useEffect(() => {
+    if (!isPageVisible) return;
+    const globalState = getNoteGenerationState(note.id);
+    setIsGenerating(globalState.isGenerating);
+    setGenerationId(globalState.generationId);
+    setProgress({ ...globalState.progress });
+    setCompletedTabs(new Set(globalState.completedTabs) as Set<TabType>);
+    setFailedTabs(new Map(globalState.failedTabs) as Map<TabType, string>);
+    setRegeneratingTabs(new Set(globalState.regeneratingTabs) as Set<TabType>);
+    setChapterIsGenerating(globalState.isGeneratingChapters);
+    if (takePendingNoteRefresh(note.id)) {
+      onGenerationCompleteRef.current?.();
+    }
+  }, [isPageVisible, note.id]);
 
   // 看门狗：注册全局回调，卡死复位时弹出提示
   useEffect(() => {
@@ -959,6 +1055,12 @@ export function NoteContentPanel({ note, onGenerationComplete, aiConfigs, curren
 
     return "";
   }, [currentModelId, defaultAiConfigId, aiConfigs]);
+
+  const resolveConcurrentLimit = useCallback((modelId?: string | null) => {
+    const id = modelId || currentModelId || defaultAiConfigId;
+    if (!id) return undefined;
+    return aiConfigs.find((config) => config.id === id)?.concurrent_limit;
+  }, [aiConfigs, currentModelId, defaultAiConfigId]);
 
   const customSummaryPromptConfigs = promptConfigs;
 
@@ -2435,6 +2537,7 @@ Video subtitles content:`;
         regenerate: true,
         tabsToGenerate: ["full_summary"],
         customPrompt: defaultPrompt,
+        concurrentLimit: resolveConcurrentLimit(effectiveModelId),
       });
     } catch (error) {
       // 出错时重置状态
@@ -2446,7 +2549,7 @@ Video subtitles content:`;
       setRegeneratingTabs(currentTabs as Set<TabType>);
       message.error(`生成失败: ${error}`);
     }
-  }, [note.id, currentModelId, defaultAiConfigId, aiConfigs, setupGenerationListener, generateDynamicPrompt]);
+  }, [note.id, currentModelId, defaultAiConfigId, aiConfigs, setupGenerationListener, generateDynamicPrompt, resolveConcurrentLimit]);
 
   // 执行生成（弹框中的重新生成）
   const handleCustomGenerate = async () => {
@@ -2505,6 +2608,7 @@ Video subtitles content:`;
         regenerate: true,
         tabsToGenerate: [TAB_TYPE_MAPPING[activeTab]],
         customPrompt: finalPrompt,
+        concurrentLimit: resolveConcurrentLimit(selectedModelId),
       });
     } catch (error) {
       // 出错时重置状态
@@ -2861,6 +2965,7 @@ Video subtitles content:`;
                             concurrent: true,
                             regenerate: true,
                             tabsToGenerate: ["detailed_reading"],
+                            concurrentLimit: resolveConcurrentLimit(currentModelId || defaultAiConfigId),
                           });
                         } catch (error) {
                           setChapterIsGenerating(false);
@@ -3253,6 +3358,7 @@ Video subtitles content:`;
                             concurrent: true,
                             regenerate: true,
                             tabsToGenerate: ["detailed_reading"],
+                            concurrentLimit: resolveConcurrentLimit(currentModelId || defaultAiConfigId),
                           });
                         } catch (error) {
                           setChapterIsGenerating(false);

@@ -65,7 +65,7 @@ export function DetailedReadingView({
             optimizedSubtitle={optimizedSubtitles?.get(chapter.id)}
             isOptimizing={optimizingChapterIds?.has(chapter.id)}
             optimizationFailed={failedChapterIds?.has(chapter.id)}
-            onReoptimize={onReoptimizeChapter ? () => onReoptimizeChapter(chapter.id) : undefined}
+            onReoptimizeChapter={onReoptimizeChapter}
             compact={compact}
           />
         ))}

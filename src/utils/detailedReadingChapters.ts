@@ -1,4 +1,4 @@
-import type { DetailedReadingChapter } from "../types";
+import type { DetailedReadingChapter, DetailedReadingData } from "../types";
 
 const CHAPTER_TIME_EPSILON = 1e-6;
 
@@ -39,4 +39,51 @@ export function findCurrentDetailedReadingChapter(
   }
 
   return current;
+}
+
+
+export function mergeDetailedReadingChapter(
+  prev: DetailedReadingData | null,
+  chapter: DetailedReadingChapter,
+  totalDuration: number,
+): DetailedReadingData {
+  const generatedAt = prev?.generated_at || new Date().toISOString();
+  if (!prev || prev.chapters.length === 0) {
+    return {
+      chapters: [chapter],
+      total_duration: totalDuration,
+      generated_at: generatedAt,
+    };
+  }
+
+  const existingIndex = prev.chapters.findIndex((item) => item.id === chapter.id);
+  if (existingIndex >= 0) {
+    const old = prev.chapters[existingIndex];
+    if (
+      old.title === chapter.title &&
+      old.content === chapter.content &&
+      old.screenshot_path === chapter.screenshot_path &&
+      old.start_time === chapter.start_time &&
+      old.end_time === chapter.end_time
+    ) {
+      return prev;
+    }
+    const chapters = prev.chapters.slice();
+    chapters[existingIndex] = chapter;
+    return {
+      ...prev,
+      chapters,
+      total_duration: totalDuration,
+    };
+  }
+
+  const chapters = prev.chapters.concat(chapter).sort((left, right) => {
+    if (left.start_time !== right.start_time) return left.start_time - right.start_time;
+    return left.end_time - right.end_time;
+  });
+  return {
+    chapters,
+    total_duration: totalDuration,
+    generated_at: generatedAt,
+  };
 }

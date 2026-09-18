@@ -7,6 +7,9 @@ import { VideoToolbar } from "./VideoToolbar";
 import { EditNoteModal } from "../Notes/EditNoteModal";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
+import { useInitializationRuntime } from "../../context/InitializationRuntimeContext";
+import { isNoteWaitingForSubtitles } from "../../utils/subtitleGeneration";
+import { cn } from "../../utils/cn";
 
 // 拖拽分隔条组件
 interface ResizerProps {
@@ -59,8 +62,9 @@ function Resizer({ onDrag, isDragging }: ResizerProps) {
 }
 
 export function NotePage() {
-  const { notes, selectedNoteId, selectedCollectionId, setCurrentView, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, toggleSidebar, sidebar, setSelectedNoteId, defaultAiConfigId, notePageModelSelections, setNotePageModelSelection } = useApp();
+  const { notes, selectedNoteId, selectedCollectionId, currentView, setCurrentView, toolbarSettings, aiConfigs, promptConfigs, refreshNotes, setLayoutPanelWidth, toggleSidebar, sidebar, setSelectedNoteId, defaultAiConfigId, notePageModelSelections, setNotePageModelSelection } = useApp();
   const { expandCollectionPath } = useCollections();
+  const { runtimeQueue, currentTask } = useInitializationRuntime();
 
   // 找到当前选中的笔记
   const currentNote = notes.find((note) => note.id === selectedNoteId);
@@ -236,18 +240,35 @@ export function NotePage() {
     </div>
   );
 
+  const actionsLocked = isNoteWaitingForSubtitles({
+    noteId: currentNote.id,
+    subtitlePath: currentNote.subtitle_path,
+    currentTask,
+    runtimeQueue,
+  });
+
   // 笔记内容面板
   const notePanel = (
-    <div className="min-w-0" style={{ width: `${rightWidth}%` }}>
-      <NoteContentPanel
-        key={currentNote.id}
-        note={currentNote}
-        onGenerationComplete={refreshNotes}
-        aiConfigs={aiConfigs}
-        currentModelId={currentModelId}
-        defaultAiConfigId={defaultAiConfigId}
-        promptConfigs={promptConfigs}
-      />
+    <div className="relative min-w-0" style={{ width: `${rightWidth}%` }}>
+      <div className={cn("h-full", actionsLocked && "pointer-events-none select-none opacity-60")}>
+        <NoteContentPanel
+          key={currentNote.id}
+          note={currentNote}
+          isPageVisible={currentView === "note"}
+          onGenerationComplete={refreshNotes}
+          aiConfigs={aiConfigs}
+          currentModelId={currentModelId}
+          defaultAiConfigId={defaultAiConfigId}
+          promptConfigs={promptConfigs}
+        />
+      </div>
+      {actionsLocked && (
+        <div
+          className="absolute inset-0 z-40 cursor-not-allowed rounded-lg"
+          title="字幕生成中，请稍候"
+          aria-hidden="true"
+        />
+      )}
     </div>
   );
 
