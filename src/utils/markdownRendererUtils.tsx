@@ -6,7 +6,7 @@ const BRACKET_TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/;
 const CLOCK_TIMESTAMP_RE = /⏱\s*(\d{1,2}:\d{2}(?::\d{2})?)/;
 const CHINESE_TIMESTAMP_RE = /（时间：(\d{1,2}:\d{2}(?::\d{2})?)）/;
 const TIMESTAMP_RANGE_RE = /^\((\d{1,2}:\d{2}(?::\d{2})?)\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\)$/;
-const DECORATION_REGEX = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\))|(#[^\s#]+)|(==[^=]+==)|(\[证据\s*\d+(?:\s*[,，、]\s*\d+)*\])/g;
+const DECORATION_REGEX = /(\[\d{1,2}:\d{2}(?::\d{2})?\])|(⏱\s*\d{1,2}:\d{2}(?::\d{2})?)|(（时间：\d{1,2}:\d{2}(?::\d{2})?）)|(\(\d{1,2}:\d{2}(?::\d{2})?\s*-\s*\d{1,2}:\d{2}(?::\d{2})?\))|(#[^\s#]+)|(==[^=]+==)|(\[证据\s*\d+(?:\s*[,，、]\s*\d+)*\])|(\[补充[·•.\-—]模型\])/g;
 
 export interface MarkdownDecorationOptions {
   enableSeekTimestamps?: boolean;
@@ -243,6 +243,16 @@ function renderDecoratedString(
         );
       });
       partIndex += 1;
+    } else if (match[8]) {
+      result.push(
+        <span
+          key={`${keyPrefix}-model-supplement-${partIndex++}`}
+          className="inline-flex items-center px-1.5 py-0.5 mx-0.5 rounded-md text-[10px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300"
+          title="模型知识补充，非笔记原文"
+        >
+          补充·模型
+        </span>,
+      );
     } else {
       result.push(matchedText);
       partIndex += 1;

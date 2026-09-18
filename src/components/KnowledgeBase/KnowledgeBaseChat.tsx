@@ -20,6 +20,7 @@ import {
   ScrollText,
   RotateCcw,
   AlertCircle,
+  Globe,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { MarkdownRenderer } from "../Markdown/MarkdownRenderer";
@@ -29,6 +30,7 @@ import { useGlassBg } from "../../hooks/useGlassBg";
 import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 import { copyText } from "../../utils/clipboard";
+import { extractModelSupplements } from "../../utils/knowledgeSupplements";
 import type {
   KnowledgeAgentRunRecord,
   KnowledgeChatEvent,
@@ -232,12 +234,18 @@ interface SessionRuntime {
   accumulatedContent: string;
   composerError: string | null;
   inspectorMessageId: string | null;
+  enableSupplement: boolean;
+}
+
+function defaultEnableSupplement(mode: KnowledgeChatMode) {
+  return mode === "agent";
 }
 
 function createInitialRuntime(overrides?: Partial<SessionRuntime>): SessionRuntime {
+  const mode = overrides?.mode ?? DEFAULT_PREFERENCES.default_mode;
   return {
     messages: [],
-    mode: DEFAULT_PREFERENCES.default_mode,
+    mode,
     modelId: null,
     promptId: null,
     streaming: false,
@@ -249,6 +257,7 @@ function createInitialRuntime(overrides?: Partial<SessionRuntime>): SessionRunti
     accumulatedContent: "",
     composerError: null,
     inspectorMessageId: null,
+    enableSupplement: defaultEnableSupplement(mode),
     ...overrides,
   };
 }
@@ -298,6 +307,8 @@ export function KnowledgeBaseChat() {
   const [deleteConfirmPanelMinWidth, setDeleteConfirmPanelMinWidth] = useState<number | null>(null);
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [activeCitation, setActiveCitation] = useState<{ messageId: string; rank: number } | null>(null);
+  const [sourceInspectorTab, setSourceInspectorTab] = useState<"notes" | "model" | "web">("notes");
+  const [expandedSupplementKeys, setExpandedSupplementKeys] = useState<Record<string, boolean>>({});
 
   const deleteConfirmPanelRef = useRef<HTMLDivElement>(null);
   const initializedRef = useRef(false);
@@ -359,6 +370,7 @@ export function KnowledgeBaseChat() {
   const selectedPromptId = currentRuntime.promptId;
   const composerError = currentRuntime.composerError;
   const inspectorMessageId = currentRuntime.inspectorMessageId;
+  const enableSupplement = currentRuntime.enableSupplement;
 
   const activeModel = useMemo(
     () => aiConfigs.find((config) => config.id === localModelId) ?? null,
@@ -449,6 +461,7 @@ export function KnowledgeBaseChat() {
           accumulatedContent: "",
           composerError: null,
           inspectorMessageId: latestAssistant?.id ?? null,
+          enableSupplement: existing?.enableSupplement ?? defaultEnableSupplement(detail.session.mode),
         },
       };
     });
@@ -537,6 +550,7 @@ export function KnowledgeBaseChat() {
               mode: mergedPrefs.default_mode,
               modelId: mergedPrefs.default_model_id ?? selectedModelId ?? null,
               promptId: mergedPrefs.default_prompt_id ?? null,
+              enableSupplement: defaultEnableSupplement(mergedPrefs.default_mode),
             },
           };
         });
@@ -1157,6 +1171,7 @@ export function KnowledgeBaseChat() {
         images: imagePayload,
         mode: chatMode,
         step_budget: chatMode === "agent" ? 3 : undefined,
+        enable_supplement: runtime.enableSupplement,
       };
 
       const response = await invoke<KnowledgeChatSubmitResponse>("knowledge_base_chat", { request });
@@ -1369,6 +1384,20 @@ export function KnowledgeBaseChat() {
   }, [editingMessageId, editingMessageValue, handleSend]);
 
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
+  const inspectorMessage = selectedInspectorMessage ?? latestAssistantMessage;
+  const inspectorNoteSources = inspectorMessage?.sources ?? [];
+  const inspectorModelSupplements = extractModelSupplements(inspectorMessage?.content ?? "");
+
+  useEffect(() => {
+    if (inspectorMessage?.status === "streaming") return;
+    if (inspectorModelSupplements.length > 0 && inspectorNoteSources.length === 0) {
+      setSourceInspectorTab("model");
+      return;
+    }
+    if (inspectorNoteSources.length > 0) {
+      setSourceInspectorTab("notes");
+    }
+  }, [inspectorMessage?.id, inspectorMessage?.status]);
 
   useEffect(() => {
     if (!selectedSessionId || messages.length === 0 || streaming) return;
@@ -1953,6 +1982,24 @@ export function KnowledgeBaseChat() {
                       </div>
                     )}
                   </div>
+
+                  <button
+                    onClick={() => {
+                      patchRuntime(activeRuntimeKey, { enableSupplement: !enableSupplement });
+                      setShowModelDropdown(false);
+                      setShowPromptDropdown(false);
+                    }}
+                    title="开启后，笔记证据不足时可用模型知识补充通用事实（官网、定义、价格、联系方式等）"
+                    className={cn(
+                      "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs border transition-colors cursor-pointer",
+                      enableSupplement
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-300"
+                        : "border-slate-200/80 dark:border-vnote-border/80 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/5"
+                    )}
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    联网
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -2027,64 +2074,126 @@ export function KnowledgeBaseChat() {
 
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
               <section className="rounded-2xl border border-slate-200/80 dark:border-vnote-border/80 bg-white/36 dark:bg-vnote-card/38 backdrop-blur-xl overflow-hidden shadow-soft">
-                <div className="px-4 py-3 border-b border-slate-200/60 dark:border-vnote-border/60 flex items-center gap-2">
-                  <Search className="w-4 h-4 text-blue-500" />
-                  <div className="text-sm font-medium text-slate-700 dark:text-slate-200">引用来源</div>
-                  <div className="ml-auto text-xs text-slate-400 dark:text-slate-500">
-                    {selectedInspectorMessage?.sources.length ?? latestAssistantMessage?.sources.length ?? 0} 条
+                <div className="px-4 py-3 border-b border-slate-200/60 dark:border-vnote-border/60">
+                  <div className="flex items-center gap-2">
+                    <Search className="w-4 h-4 text-blue-500" />
+                    <div className="text-sm font-medium text-slate-700 dark:text-slate-200">引用来源</div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-1">
+                    {([
+                      { id: "notes" as const, label: "笔记", count: inspectorNoteSources.length },
+                      { id: "model" as const, label: "模型知识", count: inspectorModelSupplements.length },
+                      { id: "web" as const, label: "网页补充", count: 0 },
+                    ]).map((tab) => (
+                      <button
+                        key={tab.id}
+                        onClick={() => setSourceInspectorTab(tab.id)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-[11px] border cursor-pointer transition-colors",
+                          sourceInspectorTab === tab.id
+                            ? "border-blue-200 bg-blue-50 text-blue-600 dark:border-blue-800 dark:bg-blue-900/20 dark:text-blue-300"
+                            : "border-transparent text-slate-500 dark:text-slate-400 hover:bg-white/50 dark:hover:bg-white/5"
+                        )}
+                      >
+                        {tab.label}
+                        <span className="ml-1 text-[10px] opacity-70">{tab.count}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
                 <div className="p-3 space-y-2">
-                  {(selectedInspectorMessage?.sources ?? latestAssistantMessage?.sources ?? []).length === 0 ? (
-                    <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
-                      {selectedInspectorMessage?.status === "error"
-                        ? "这次回答在生成阶段报错，还没有成功落库来源。"
-                        : selectedInspectorMessage?.status === "aborted"
-                          ? "这次回答已中止，系统没有保留完整来源。"
-                          : "当前回答暂无可展示来源，可能是检索未命中或结果仍在整理中。"}
-                    </div>
-                  ) : (
-                    (selectedInspectorMessage?.sources ?? latestAssistantMessage?.sources ?? []).map((source, index) => {
-                      const rank = index + 1;
-                      const sourceMessageId = selectedInspectorMessage?.id ?? latestAssistantMessage?.id;
-                      const isActive =
-                        !!sourceMessageId &&
-                        activeCitation?.messageId === sourceMessageId &&
-                        activeCitation?.rank === rank;
-                      return (
-                        <button
-                          key={source.chunk_id}
-                          id={sourceMessageId ? `kb-source-${sourceMessageId}-${rank}` : undefined}
-                          onClick={() => void handleNavigateToNote(source.note_id)}
-                          className={cn(
-                            "w-full text-left p-3 rounded-xl border bg-white/36 dark:bg-black/10 transition-all cursor-pointer",
-                            isActive
-                              ? "border-blue-400 dark:border-blue-500 ring-2 ring-blue-400/40 citation-pulse"
-                              : "border-slate-200/70 dark:border-vnote-border/70 hover:border-blue-300 dark:hover:border-blue-700"
-                          )}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
-                                <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-md border border-blue-200 bg-blue-50 text-[11px] font-medium text-blue-600 leading-none flex-shrink-0 dark:border-blue-800/70 dark:bg-blue-900/25 dark:text-blue-200">
-                                  {rank}
-                                </span>
-                                <FileText className="w-3.5 h-3.5 flex-shrink-0" />
-                                <span className="truncate">{source.note_title}</span>
-                              </div>
-                              {showSourcesExpanded && (
-                                <div className="mt-2 text-xs leading-6 text-slate-600 dark:text-slate-400 line-clamp-5">
-                                  {source.content}
+                  {sourceInspectorTab === "notes" && (
+                    inspectorNoteSources.length === 0 ? (
+                      <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
+                        {inspectorMessage?.status === "error"
+                          ? "这次回答在生成阶段报错，还没有成功落库来源。"
+                          : inspectorMessage?.status === "aborted"
+                            ? "这次回答已中止，系统没有保留完整来源。"
+                            : "当前回答暂无可展示笔记来源，可能是检索未命中或结果仍在整理中。"}
+                      </div>
+                    ) : (
+                      inspectorNoteSources.map((source, index) => {
+                        const rank = index + 1;
+                        const sourceMessageId = inspectorMessage?.id;
+                        const isActive =
+                          !!sourceMessageId &&
+                          activeCitation?.messageId === sourceMessageId &&
+                          activeCitation?.rank === rank;
+                        return (
+                          <button
+                            key={source.chunk_id}
+                            id={sourceMessageId ? `kb-source-${sourceMessageId}-${rank}` : undefined}
+                            onClick={() => void handleNavigateToNote(source.note_id)}
+                            className={cn(
+                              "w-full text-left p-3 rounded-xl border bg-white/36 dark:bg-black/10 transition-all cursor-pointer",
+                              isActive
+                                ? "border-blue-400 dark:border-blue-500 ring-2 ring-blue-400/40 citation-pulse"
+                                : "border-slate-200/70 dark:border-vnote-border/70 hover:border-blue-300 dark:hover:border-blue-700"
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
+                                  <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-md border border-blue-200 bg-blue-50 text-[11px] font-medium text-blue-600 leading-none flex-shrink-0 dark:border-blue-800/70 dark:bg-blue-900/25 dark:text-blue-200">
+                                    {rank}
+                                  </span>
+                                  <FileText className="w-3.5 h-3.5 flex-shrink-0" />
+                                  <span className="truncate">{source.note_title}</span>
                                 </div>
-                              )}
+                                {showSourcesExpanded && (
+                                  <div className="mt-2 text-xs leading-6 text-slate-600 dark:text-slate-400 line-clamp-5">
+                                    {source.content}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-slate-500 flex-shrink-0">
+                                {(source.score * 100).toFixed(1)}%
+                              </div>
                             </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-500 flex-shrink-0">
-                              {(source.score * 100).toFixed(1)}%
+                          </button>
+                        );
+                      })
+                    )
+                  )}
+                  {sourceInspectorTab === "model" && (
+                    inspectorModelSupplements.length === 0 ? (
+                      <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
+                        当前回答没有模型知识补充。开启「联网」后，若笔记证据不足且问题属于通用事实，模型会以 [补充·模型] 标注补充内容。
+                      </div>
+                    ) : (
+                      inspectorModelSupplements.map((item, index) => {
+                        const key = `${inspectorMessage?.id ?? "none"}-model-${index}`;
+                        const expanded = Boolean(expandedSupplementKeys[key]);
+                        return (
+                          <button
+                            key={key}
+                            onClick={() => setExpandedSupplementKeys((prev) => ({ ...prev, [key]: !prev[key] }))}
+                            className="w-full text-left p-3 rounded-xl border border-amber-200/80 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-900/10 transition-all cursor-pointer"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300">
+                                <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
+                                <span>模型知识 {index + 1}</span>
+                              </div>
+                              <ChevronDown className={cn("w-3.5 h-3.5 text-amber-500 transition-transform", expanded && "rotate-180")} />
                             </div>
-                          </div>
-                        </button>
-                      );
-                    })
+                            <div className={cn("mt-2 text-xs leading-6 text-slate-600 dark:text-slate-400", !expanded && "line-clamp-2")}>
+                              {item.sentence}
+                            </div>
+                            {expanded && (
+                              <div className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
+                                来源：模型知识 · 非笔记原文
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })
+                    )
+                  )}
+                  {sourceInspectorTab === "web" && (
+                    <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
+                      本期尚未接入网页检索。开启「联网」后，当前会在证据不足时用模型知识补充通用事实。
+                    </div>
                   )}
                 </div>
               </section>
@@ -2193,6 +2302,7 @@ function MessageCard({
 }) {
   const isUser = message.role === "user";
   const [copied, setCopied] = useState(false);
+  const modelSupplements = extractModelSupplements(message.content);
 
   const handleCopy = () => {
     if (!message.content) return;
@@ -2301,6 +2411,12 @@ function MessageCard({
             <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-300 cursor-default">
               <FileText className="w-3.5 h-3.5" />
               {message.sources.length} 条来源
+            </span>
+          )}
+          {modelSupplements.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300 cursor-default">
+              <Sparkles className="w-3.5 h-3.5" />
+              模型知识 {modelSupplements.length}
             </span>
           )}
           {message.status === "error" && (

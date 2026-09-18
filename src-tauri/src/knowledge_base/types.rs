@@ -60,6 +60,8 @@ pub struct KnowledgeChatRequest {
     pub images: Option<Vec<KnowledgeChatImageData>>,
     pub mode: Option<KnowledgeChatMode>,
     pub step_budget: Option<i32>,
+    #[serde(default)]
+    pub enable_supplement: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

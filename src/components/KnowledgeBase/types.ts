@@ -45,6 +45,7 @@ export interface KnowledgeChatRequest {
   images?: KnowledgeChatImageData[];
   mode?: KnowledgeChatMode;
   step_budget?: number;
+  enable_supplement?: boolean;
 }
 
 export interface KnowledgeChatSubmitResponse {

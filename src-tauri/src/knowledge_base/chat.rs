@@ -26,6 +26,23 @@ const DEFAULT_AGENT_STEP_BUDGET: i32 = 3;
 const AGENT_TOP_K: i32 = 8;
 const STANDARD_TOP_K: i32 = 8;
 const AUTO_TITLE_MAX_CHARS: usize = 26;
+const MODEL_KNOWLEDGE_SUPPLEMENT_PROMPT: &str = "
+【知识补充规则】
+如果证据不足，请补充通用知识。
+仅当同时满足以下条件时，才允许使用模型自身知识：
+1. 检索证据为空
+2. 问题属于通用事实类（官网、定义、价格、联系方式等）
+
+补充时必须遵守：
+- 回答开头先写一句「补充信息（非笔记原文）」
+- 回答结构固定为：
+  1. 知识库证据总结
+  2. 缺口说明（明确写「笔记中未提及」）
+  3. 模型补充：每条补充句写在正文后，紧跟标注 [补充·模型]
+  4. 建议回笔记补充某段
+- 模型知识不得伪装成笔记原文，不得虚构 [证据N] 编号
+- 如果证据充足，或问题不是通用事实类，不要使用模型知识补充
+";
 
 fn merge_stream_fragment(accumulated: &mut String, incoming: &str) -> String {
     if incoming.is_empty() {
@@ -429,7 +446,11 @@ async fn run_standard_chat(
         },
     );
 
-    let rag_context = Some(build_standard_context(&search_results, request.system_prompt.as_deref()));
+    let enable_supplement = resolve_enable_supplement(&request, &KnowledgeChatMode::Standard);
+    let rag_context = Some(with_supplement_prompt(
+        build_standard_context(&search_results, request.system_prompt.as_deref()),
+        enable_supplement,
+    ));
     let history = convert_messages(&request.messages);
     let images = convert_images(request.images);
 
@@ -617,7 +638,11 @@ async fn run_agent_chat(
         None,
     )?;
 
-    let rag_context = Some(build_agent_context(&plan, &aggregated_results, request.system_prompt.as_deref()));
+    let enable_supplement = resolve_enable_supplement(&request, &KnowledgeChatMode::Agent);
+    let rag_context = Some(with_supplement_prompt(
+        build_agent_context(&plan, &aggregated_results, request.system_prompt.as_deref()),
+        enable_supplement,
+    ));
     let history = convert_messages(&request.messages);
     let images = convert_images(request.images);
     let full_content = stream_response_and_collect(
@@ -1006,6 +1031,20 @@ fn dedupe_queries(queries: Vec<String>, limit: usize) -> Vec<String> {
         .collect()
 }
 
+fn resolve_enable_supplement(request: &KnowledgeChatRequest, mode: &KnowledgeChatMode) -> bool {
+    request
+        .enable_supplement
+        .unwrap_or(matches!(mode, KnowledgeChatMode::Agent))
+}
+
+fn with_supplement_prompt(context: String, enabled: bool) -> String {
+    if enabled {
+        format!("{context}{MODEL_KNOWLEDGE_SUPPLEMENT_PROMPT}")
+    } else {
+        context
+    }
+}
+
 fn build_standard_context(results: &[KnowledgeSearchResult], custom_prompt: Option<&str>) -> String {
     let references = if results.is_empty() {
         "未找到相关 visual_summary 内容。请明确说明依据不足，并尽量给出可执行的后续提问建议。".to_string()
@@ -1224,4 +1263,56 @@ fn resolve_chunk_content(db: &Database, chunk_id: &str) -> String {
         |row| row.get::<_, String>(0),
     )
     .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn supplement_prompt_is_appended_only_when_enabled() {
+        let base = "BASE_CONTEXT".to_string();
+        let enabled = with_supplement_prompt(base.clone(), true);
+        assert!(enabled.starts_with("BASE_CONTEXT"));
+        assert!(enabled.contains("如果证据不足，请补充通用知识"));
+        assert!(enabled.contains("补充信息（非笔记原文）"));
+        assert!(enabled.contains("笔记中未提及"));
+        assert!(enabled.contains("[补充·模型]"));
+        assert_eq!(with_supplement_prompt(base, false), "BASE_CONTEXT");
+    }
+
+    #[test]
+    fn agent_mode_enables_supplement_by_default() {
+        let request = KnowledgeChatRequest {
+            session_id: None,
+            messages: Vec::new(),
+            model_id: None,
+            system_prompt: None,
+            prompt_id: None,
+            images: None,
+            mode: Some(KnowledgeChatMode::Agent),
+            step_budget: None,
+            enable_supplement: None,
+        };
+        assert!(resolve_enable_supplement(&request, &KnowledgeChatMode::Agent));
+        assert!(!resolve_enable_supplement(&request, &KnowledgeChatMode::Standard));
+    }
+
+    #[test]
+    fn explicit_supplement_flag_overrides_mode_default() {
+        let mut request = KnowledgeChatRequest {
+            session_id: None,
+            messages: Vec::new(),
+            model_id: None,
+            system_prompt: None,
+            prompt_id: None,
+            images: None,
+            mode: Some(KnowledgeChatMode::Agent),
+            step_budget: None,
+            enable_supplement: Some(false),
+        };
+        assert!(!resolve_enable_supplement(&request, &KnowledgeChatMode::Agent));
+        request.enable_supplement = Some(true);
+        assert!(resolve_enable_supplement(&request, &KnowledgeChatMode::Standard));
+    }
 }

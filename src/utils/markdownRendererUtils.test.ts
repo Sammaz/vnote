@@ -64,3 +64,17 @@ describe("timestamp range decoration", () => {
     expect(screen.getByText("(1:02:03 - 1:04:05)")).toHaveClass("timestamp-range");
   });
 });
+
+describe("model supplement decoration", () => {
+  it("renders model supplement markers as badges", () => {
+    render(React.createElement(
+      React.Fragment,
+      null,
+      renderDecoratedReactNode("官方网站是 https://example.com [补充·模型]", {}),
+    ));
+
+    expect(screen.getByText("补充·模型")).toBeInTheDocument();
+    expect(screen.getByTitle("模型知识补充，非笔记原文")).toBeInTheDocument();
+  });
+});
+
