@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DetailedReadingChapter } from "../types";
-import { findCurrentDetailedReadingChapter, mergeDetailedReadingChapter } from "./detailedReadingChapters";
+import { findCurrentDetailedReadingChapter, getDetailedReadingChapterStatus, mergeDetailedReadingChapter } from "./detailedReadingChapters";
 
 const chapter = (
   id: string,
@@ -95,5 +95,26 @@ describe("mergeDetailedReadingChapter", () => {
     expect(merged.chapters).toHaveLength(1);
     expect(merged.chapters[0]).toBe(withShot);
     expect(merged.chapters[0].screenshot_path).toBe("shot.jpg");
+  });
+
+  it("replaces an existing chapter by id when status changes", () => {
+    const first = chapter("first", 0, 60);
+    const failed = { ...first, status: "failed" as const, error: "timeout" };
+    const merged = mergeDetailedReadingChapter(
+      { chapters: [first], total_duration: 60, generated_at: "t" },
+      failed,
+      60
+    );
+
+    expect(merged.chapters).toHaveLength(1);
+    expect(merged.chapters[0].status).toBe("failed");
+    expect(merged.chapters[0].error).toBe("timeout");
+  });
+});
+
+describe("getDetailedReadingChapterStatus", () => {
+  it("treats missing status as success", () => {
+    expect(getDetailedReadingChapterStatus(chapter("first", 0, 60))).toBe("success");
+    expect(getDetailedReadingChapterStatus({ status: "failed" })).toBe("failed");
   });
 });

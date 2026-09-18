@@ -1,4 +1,10 @@
-import type { DetailedReadingChapter, DetailedReadingData } from "../types";
+import type { DetailedReadingChapter, DetailedReadingChapterStatus, DetailedReadingData } from "../types";
+
+export function getDetailedReadingChapterStatus(
+  chapter: Pick<DetailedReadingChapter, "status">,
+): DetailedReadingChapterStatus {
+  return chapter.status ?? "success";
+}
 
 const CHAPTER_TIME_EPSILON = 1e-6;
 
@@ -64,7 +70,9 @@ export function mergeDetailedReadingChapter(
       old.content === chapter.content &&
       old.screenshot_path === chapter.screenshot_path &&
       old.start_time === chapter.start_time &&
-      old.end_time === chapter.end_time
+      old.end_time === chapter.end_time &&
+      old.status === chapter.status &&
+      old.error === chapter.error
     ) {
       return prev;
     }

@@ -66,6 +66,17 @@ pub struct ChapterData {
     pub generated_at: String,
 }
 
+/// 原文细读章节生成状态
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DetailedReadingChapterStatus {
+    Pending,
+    Generating,
+    #[default]
+    Success,
+    Failed,
+}
+
 /// 原文细读章节数据
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DetailedReadingChapter {
@@ -76,6 +87,26 @@ pub struct DetailedReadingChapter {
     pub content: Option<String>,
     pub subtitle_entries: Vec<SubtitleEntry>,
     pub screenshot_path: Option<String>,
+    #[serde(default)]
+    pub status: DetailedReadingChapterStatus,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+impl Default for DetailedReadingChapter {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            title: String::new(),
+            start_time: 0.0,
+            end_time: 0.0,
+            content: None,
+            subtitle_entries: Vec::new(),
+            screenshot_path: None,
+            status: DetailedReadingChapterStatus::Success,
+            error: None,
+        }
+    }
 }
 
 /// 原文细读数据容器

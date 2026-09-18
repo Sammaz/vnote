@@ -322,6 +322,7 @@ export type GenerationEvent =
   | { status: "TabCompleted"; tab_type: string; content: string }
   | { status: "TabPartial"; tab_type: string; content: string }
   | { status: "ChapterPartial"; tab_type: string; index: number; total: number; chapter: DetailedReadingChapter; total_duration: number }
+  | { status: "ChaptersPlanned"; tab_type: string; chapters: DetailedReadingChapter[]; total_duration: number }
   | { status: "TabError"; tab_type: string; error: string }
   | { status: "AllCompleted"; generated: number; failed: number; total: number }
   | { status: "Aborted"; reason: string };
@@ -369,6 +370,8 @@ export interface ChapterData {
 }
 
 // 原文细读章节数据
+export type DetailedReadingChapterStatus = "pending" | "generating" | "success" | "failed";
+
 export interface DetailedReadingChapter {
   id: string;
   title: string;
@@ -377,7 +380,14 @@ export interface DetailedReadingChapter {
   content?: string;
   subtitle_entries: SubtitleEntry[];
   screenshot_path: string | null;
+  status?: DetailedReadingChapterStatus;
+  error?: string | null;
 }
+
+export type DetailedReadingChapterRegenEvent =
+  | { status: "Started"; chapter_id: string }
+  | { status: "Completed"; chapter: DetailedReadingChapter }
+  | { status: "Failed"; chapter_id: string; error: string };
 
 // 原文细读数据容器
 export interface DetailedReadingData {

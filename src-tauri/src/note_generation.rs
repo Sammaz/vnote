@@ -16,7 +16,7 @@ use crate::ai_pool::{
 use crate::chapter::{
     analyze_subtitle_for_chapters, capture_video_screenshot, sanitize_filename,
     split_subtitle_into_chunks, format_timestamp_for_filename, Chapter, ChapterData, ChapterGenerationEvent,
-    DetailedReadingChapter, DetailedReadingData,
+    DetailedReadingChapter, DetailedReadingChapterStatus, DetailedReadingData,
 };
 use crate::db::{AiConfig, Database, ScreenshotMarker};
 use crate::subtitle::{parse_subtitle_file, SubtitleEntry};
@@ -146,6 +146,11 @@ pub enum GenerationEvent {
         chapter: DetailedReadingChapter,
         total_duration: f64,
     },
+    ChaptersPlanned {
+        tab_type: String,
+        chapters: Vec<DetailedReadingChapter>,
+        total_duration: f64,
+    },
     TabError {
         tab_type: String,
         error: String,
@@ -212,6 +217,95 @@ fn emit_detailed_reading_chapter_partial(
             total_duration,
         },
     );
+}
+
+fn emit_detailed_reading_chapters_planned(
+    app: &AppHandle,
+    event_name: &str,
+    chapters: &[DetailedReadingChapter],
+    total_duration: f64,
+) {
+    let _ = app.emit(
+        event_name,
+        GenerationEvent::ChaptersPlanned {
+            tab_type: "DetailedReading".to_string(),
+            chapters: chapters.to_vec(),
+            total_duration,
+        },
+    );
+}
+
+fn segment_time_range(entries: &[SubtitleEntry], start_index: usize, end_index: usize) -> (f64, f64) {
+    if entries.is_empty() {
+        return (0.0, 0.0);
+    }
+    let safe_start = start_index.min(entries.len().saturating_sub(1));
+    let safe_end = end_index.min(entries.len()).max(safe_start + 1);
+    (
+        entries[safe_start].start_time,
+        entries[safe_end - 1].end_time,
+    )
+}
+
+fn new_placeholder_chapter(index: usize, start_time: f64, end_time: f64) -> DetailedReadingChapter {
+    DetailedReadingChapter {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: format!("章节 {}", index + 1),
+        start_time,
+        end_time,
+        content: None,
+        subtitle_entries: Vec::new(),
+        screenshot_path: None,
+        status: DetailedReadingChapterStatus::Pending,
+        error: None,
+    }
+}
+
+async fn generate_detailed_reading_chapter_content(
+    ai_config: AiConfig,
+    subtitle_text: String,
+    abort_flag: Arc<AtomicBool>,
+) -> Result<(String, String), String> {
+    if subtitle_text.trim().is_empty() {
+        return Err("该段字幕为空".to_string());
+    }
+
+    let prompt = build_detailed_reading_chapter_prompt(&subtitle_text);
+    let mut last_error = None;
+
+    for attempt in 0..2 {
+        if abort_flag.load(Ordering::Relaxed) {
+            return Err("已中止".to_string());
+        }
+        match execute_streaming_and_collect(ai_config.clone(), prompt.clone(), &abort_flag).await {
+            Ok(response) => match parse_detailed_reading_chapter_response(&response) {
+                Ok(parsed) => return Ok(parsed),
+                Err(e) => last_error = Some(e),
+            },
+            Err(e) => {
+                if is_abort_error(&e) {
+                    return Err(e);
+                }
+                last_error = Some(e);
+            }
+        }
+        if attempt == 0 {
+            tracing::warn!(
+                "[原文细读] 章节生成失败，重试一次: {}",
+                last_error.as_deref().unwrap_or("")
+            );
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| fallback_chapter_content("")))
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(tag = "status")]
+pub enum DetailedReadingChapterRegenEvent {
+    Started { chapter_id: String },
+    Completed { chapter: DetailedReadingChapter },
+    Failed { chapter_id: String, error: String },
 }
 
 fn persist_detailed_reading_snapshot(note_id: &str, model_id: &str, data: &DetailedReadingData) {
@@ -1540,19 +1634,42 @@ pub async fn generate_detailed_reading_chapters(
     let safe_video_name = sanitize_filename(video_name);
     let model_id = ai_config.id.clone();
 
-    let slots = std::sync::Arc::new(std::sync::Mutex::new(vec![None; total_chunks]));
+    let placeholders: Vec<DetailedReadingChapter> = planned_segments
+        .iter()
+        .copied()
+        .enumerate()
+        .map(|(idx, (start_index, end_index))| {
+            let (start_time, end_time) = segment_time_range(subtitle_entries, start_index, end_index);
+            new_placeholder_chapter(idx, start_time, end_time)
+        })
+        .collect();
+    emit_detailed_reading_chapters_planned(app, event_name, &placeholders, total_duration);
+    persist_detailed_reading_snapshot(
+        note_id,
+        &model_id,
+        &DetailedReadingData {
+            chapters: placeholders.clone(),
+            total_duration,
+            generated_at: chrono::Local::now().to_rfc3339(),
+        },
+    );
+
+    let slots = std::sync::Arc::new(std::sync::Mutex::new(
+        placeholders.iter().cloned().map(Some).collect::<Vec<_>>(),
+    ));
     let screenshot_sem = std::sync::Arc::new(Semaphore::new(4));
     let mut screenshot_set = tokio::task::JoinSet::new();
     let mut success_count = 0usize;
     let mut aborted = false;
     let mut last_persist_at = Instant::now() - DETAILED_READING_DB_DEBOUNCE;
 
-    let mut ai_stream = stream::iter(planned_segments.into_iter().enumerate()).map(
-        |(chunk_idx, (start_index, end_index))| {
+    let mut ai_stream = stream::iter(planned_segments.into_iter().zip(placeholders.clone()).enumerate()).map(
+        |(chunk_idx, ((start_index, end_index), placeholder))| {
             let ai_config = ai_config.clone();
             let abort_flag = abort_flag.clone();
             let app = app.clone();
             let event_name = event_name.to_string();
+            let slots = slots.clone();
             let safe_start = start_index.min(subtitle_entries.len().saturating_sub(1));
             let safe_end = end_index.min(subtitle_entries.len());
             let segment_entries = if safe_end > safe_start {
@@ -1564,23 +1681,29 @@ pub async fn generate_detailed_reading_chapters(
                 if abort_flag.load(Ordering::Relaxed) {
                     return Err("已中止".to_string());
                 }
-                if segment_entries.is_empty() {
-                    return Ok((
-                        chunk_idx,
-                        format!("章节 {}", chunk_idx + 1),
-                        "该段字幕为空".to_string(),
-                        0.0,
-                        0.0,
-                        false,
-                    ));
-                }
 
                 tracing::info!(
-                    "[原文细读] 处理第 {}/{} 段，字幕索引范围: [{}, {})",
+                    "[原文细读] 正在生成 {}/{} 段，字幕索引范围: [{}, {})",
                     chunk_idx + 1,
                     total_chunks,
                     safe_start,
                     safe_end
+                );
+
+                let mut generating = placeholder.clone();
+                generating.status = DetailedReadingChapterStatus::Generating;
+                generating.error = None;
+                {
+                    let mut guard = slots.lock().unwrap();
+                    guard[chunk_idx] = Some(generating.clone());
+                }
+                emit_detailed_reading_chapter_partial(
+                    &app,
+                    &event_name,
+                    chunk_idx,
+                    total_chunks,
+                    &generating,
+                    generating.end_time.max(placeholder.end_time),
                 );
 
                 let _ = app.emit(
@@ -1593,61 +1716,31 @@ pub async fn generate_detailed_reading_chapters(
                     },
                 );
 
-                let start_time = segment_entries[0].start_time;
-                let end_time = segment_entries
-                    .last()
-                    .map(|e| e.end_time)
-                    .unwrap_or(start_time);
                 let subtitle_text: String = segment_entries
                     .iter()
                     .map(|e| e.text.as_str())
                     .collect::<Vec<_>>()
                     .join(" ");
-                let prompt = build_detailed_reading_chapter_prompt(&subtitle_text);
-                let mut last_error = None;
 
-                for attempt in 0..2 {
-                    if abort_flag.load(Ordering::Relaxed) {
-                        return Err("已中止".to_string());
-                    }
-                    match execute_streaming_and_collect(ai_config.clone(), prompt.clone(), &abort_flag)
-                        .await
-                    {
-                        Ok(response) => match parse_detailed_reading_chapter_response(&response) {
-                            Ok((title, content)) => {
-                                return Ok((chunk_idx, title, content, start_time, end_time, true));
-                            }
-                            Err(e) => last_error = Some(e),
-                        },
-                        Err(e) => {
-                            if is_abort_error(&e) {
-                                return Err(e);
-                            }
-                            last_error = Some(e);
+                match generate_detailed_reading_chapter_content(
+                    ai_config,
+                    subtitle_text,
+                    abort_flag,
+                )
+                .await
+                {
+                    Ok((title, content)) => Ok((chunk_idx, placeholder, title, Some(content), None, true)),
+                    Err(e) => {
+                        if is_abort_error(&e) {
+                            return Err(e);
+                        }
+                        tracing::error!("[原文细读] 第 {} 段最终失败: {}", chunk_idx + 1, e);
+                        {
+                            let title = placeholder.title.clone();
+                            Ok((chunk_idx, placeholder, title, None, Some(e), false))
                         }
                     }
-                    if attempt == 0 {
-                        tracing::warn!(
-                            "[原文细读] 第 {} 段失败，重试一次: {}",
-                            chunk_idx + 1,
-                            last_error.as_deref().unwrap_or("")
-                        );
-                    }
                 }
-
-                tracing::error!(
-                    "[原文细读] 第 {} 段最终失败: {}",
-                    chunk_idx + 1,
-                    last_error.as_deref().unwrap_or("未知错误")
-                );
-                Ok((
-                    chunk_idx,
-                    format!("章节 {}", chunk_idx + 1),
-                    fallback_chapter_content(&subtitle_text),
-                    start_time,
-                    end_time,
-                    false,
-                ))
             }
         },
     )
@@ -1664,18 +1757,24 @@ pub async fn generate_detailed_reading_chapters(
         tokio::select! {
             maybe_ai = ai_stream.next(), if !ai_done => {
                 match maybe_ai {
-                    Some(Ok((chunk_idx, title, content, start_time, end_time, succeeded))) => {
+                    Some(Ok((chunk_idx, placeholder, title, content, error, succeeded))) => {
                         if succeeded {
                             success_count += 1;
                         }
                         let chapter = DetailedReadingChapter {
-                            id: uuid::Uuid::new_v4().to_string(),
+                            id: placeholder.id,
                             title,
-                            start_time,
-                            end_time,
-                            content: Some(content),
+                            start_time: placeholder.start_time,
+                            end_time: placeholder.end_time,
+                            content,
                             subtitle_entries: Vec::new(),
                             screenshot_path: None,
+                            status: if succeeded {
+                                DetailedReadingChapterStatus::Success
+                            } else {
+                                DetailedReadingChapterStatus::Failed
+                            },
+                            error,
                         };
                         {
                             let mut guard = slots.lock().unwrap();
@@ -1701,6 +1800,11 @@ pub async fn generate_detailed_reading_chapters(
                             &data,
                         );
 
+                        if !succeeded {
+                            continue;
+                        }
+
+                        let start_time = chapter.start_time;
                         let sem = screenshot_sem.clone();
                         let abort = abort_flag.clone();
                         let vp = video_path.to_string();
@@ -1818,7 +1922,7 @@ pub async fn generate_detailed_reading_chapters(
     }
 
     if success_count == 0 {
-        return Err("所有章节均生成失败，请检查模型配置和网络后重试".to_string());
+        tracing::warn!("[原文细读] 所有章节均生成失败，保留失败行供单章重试");
     }
 
     let detailed_chapters = {
@@ -2899,6 +3003,129 @@ fn parse_chapter_content_response(response: &str) -> Result<(String, String), St
 ///
 /// 该函数根据用户在辅助模式下添加的截图标记来分段生成章节，
 /// 而不是使用 AI 自动分段。
+
+pub async fn regenerate_detailed_reading_chapter(
+    app: AppHandle,
+    generation_id: String,
+    note_id: String,
+    chapter_id: String,
+    model_id: String,
+) -> Result<(), String> {
+    let event_name = format!("detailed-reading-chapter-{}", generation_id);
+    let db = crate::DATABASE
+        .get()
+        .ok_or_else(|| "数据库未初始化".to_string())?;
+
+    let note = db
+        .get_note_by_id(&note_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "笔记不存在".to_string())?;
+    let raw = note
+        .detailed_reading
+        .as_deref()
+        .ok_or_else(|| "没有原文细读数据".to_string())?;
+    let mut data: DetailedReadingData =
+        serde_json::from_str(raw).map_err(|e| format!("解析原文细读数据失败: {}", e))?;
+    let chapter_index = data
+        .chapters
+        .iter()
+        .position(|chapter| chapter.id == chapter_id)
+        .ok_or_else(|| "章节不存在".to_string())?;
+
+    let subtitle_path = note
+        .subtitle_path
+        .as_deref()
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| "无字幕文件".to_string())?;
+    let subtitle_entries = parse_subtitle_file(subtitle_path)?;
+    let ai_config = db
+        .get_ai_config_by_id(&model_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "AI配置不存在".to_string())?;
+
+    let start_time = data.chapters[chapter_index].start_time;
+    let end_time = data.chapters[chapter_index].end_time;
+    let subtitle_text = subtitle_entries
+        .iter()
+        .filter(|entry| entry.start_time >= start_time && entry.start_time < end_time)
+        .map(|entry| entry.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    data.chapters[chapter_index].status = DetailedReadingChapterStatus::Generating;
+    data.chapters[chapter_index].error = None;
+    persist_detailed_reading_snapshot(&note_id, &model_id, &data);
+    let _ = app.emit(
+        &event_name,
+        DetailedReadingChapterRegenEvent::Started {
+            chapter_id: chapter_id.clone(),
+        },
+    );
+
+    let abort_flag = std::sync::Arc::new(AtomicBool::new(false));
+    match generate_detailed_reading_chapter_content(ai_config, subtitle_text, abort_flag).await {
+        Ok((title, content)) => {
+            data.chapters[chapter_index].title = title;
+            data.chapters[chapter_index].content = Some(content);
+            data.chapters[chapter_index].status = DetailedReadingChapterStatus::Success;
+            data.chapters[chapter_index].error = None;
+
+            let screenshots_dir = storage_paths::chapter_screenshots_dir(&app, &note_id)?;
+            let _ = std::fs::create_dir_all(&screenshots_dir);
+            let video_name = Path::new(&note.video_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("video");
+            let screenshot_filename = format!(
+                "{}_{}.jpg",
+                sanitize_filename(video_name),
+                format_timestamp_for_filename(start_time)
+            );
+            let screenshot_path = screenshots_dir.join(&screenshot_filename);
+            let screenshot_path_str = screenshot_path.to_string_lossy().to_string();
+            let video_path = note.video_path.clone();
+            match tokio::task::spawn_blocking(move || {
+                capture_video_screenshot(&video_path, start_time, &screenshot_path_str)
+            })
+            .await
+            {
+                Ok(Ok(_)) => {
+                    data.chapters[chapter_index].screenshot_path =
+                        Some(screenshot_path.to_string_lossy().to_string());
+                }
+                Ok(Err(e)) => {
+                    tracing::error!("[原文细读] 单章重试截图失败: {}", e);
+                }
+                Err(e) => {
+                    tracing::error!("[原文细读] 单章重试截图任务异常: {}", e);
+                }
+            }
+
+            persist_detailed_reading_snapshot(&note_id, &model_id, &data);
+            let _ = app.emit(
+                &event_name,
+                DetailedReadingChapterRegenEvent::Completed {
+                    chapter: data.chapters[chapter_index].clone(),
+                },
+            );
+            Ok(())
+        }
+        Err(error) => {
+            data.chapters[chapter_index].status = DetailedReadingChapterStatus::Failed;
+            data.chapters[chapter_index].error = Some(error.clone());
+            persist_detailed_reading_snapshot(&note_id, &model_id, &data);
+            let _ = app.emit(
+                &event_name,
+                DetailedReadingChapterRegenEvent::Failed {
+                    chapter_id,
+                    error: error.clone(),
+                },
+            );
+            Err(error)
+        }
+    }
+}
+
 pub async fn generate_chapters_with_markers(
     app: AppHandle,
     db: &Database,
@@ -3308,6 +3535,7 @@ mod tests {
             content: Some("c1".to_string()),
             subtitle_entries: Vec::new(),
             screenshot_path: None,
+            ..Default::default()
         });
         slots[2] = Some(DetailedReadingChapter {
             id: "c".to_string(),
@@ -3317,6 +3545,7 @@ mod tests {
             content: Some("c3".to_string()),
             subtitle_entries: Vec::new(),
             screenshot_path: Some("shot.jpg".to_string()),
+            ..Default::default()
         });
         let data = snapshot_completed_chapters(&slots, 12.0);
         assert_eq!(data.total_duration, 12.0);
@@ -3347,6 +3576,7 @@ mod tests {
                 content: Some("body".to_string()),
                 subtitle_entries: Vec::new(),
                 screenshot_path: None,
+                ..Default::default()
             },
             total_duration: 12.0,
         };
@@ -3356,6 +3586,36 @@ mod tests {
         assert_eq!(value["total"], 3);
         assert_eq!(value["chapter"]["id"], "c1");
         assert_eq!(value["total_duration"], 12.0);
+        assert_eq!(value["chapter"]["status"], "success");
+    }
+
+    #[test]
+    fn detailed_reading_chapter_status_defaults_to_success() {
+        let chapter: DetailedReadingChapter = serde_json::from_value(serde_json::json!({
+            "id": "c1",
+            "title": "t",
+            "start_time": 0.0,
+            "end_time": 1.0,
+            "content": null,
+            "subtitle_entries": [],
+            "screenshot_path": null
+        }))
+        .unwrap();
+        assert_eq!(chapter.status, DetailedReadingChapterStatus::Success);
+        assert_eq!(chapter.error, None);
+    }
+
+    #[test]
+    fn chapters_planned_serializes_with_status_tag() {
+        let event = GenerationEvent::ChaptersPlanned {
+            tab_type: "DetailedReading".to_string(),
+            chapters: vec![new_placeholder_chapter(0, 0.0, 10.0)],
+            total_duration: 10.0,
+        };
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["status"], "ChaptersPlanned");
+        assert_eq!(value["chapters"][0]["status"], "pending");
+        assert_eq!(value["total_duration"], 10.0);
     }
 
 }

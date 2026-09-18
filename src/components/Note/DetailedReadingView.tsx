@@ -12,6 +12,9 @@ interface DetailedReadingViewProps {
   optimizingChapterIds?: Set<string>;
   failedChapterIds?: Set<string>;
   onReoptimizeChapter?: (chapterId: string) => void;
+  regeneratingChapterIds?: Set<string>;
+  regenerateLocked?: boolean;
+  onRegenerateChapter?: (chapterId: string) => void;
 }
 
 export function DetailedReadingView({
@@ -24,6 +27,9 @@ export function DetailedReadingView({
   optimizingChapterIds,
   failedChapterIds,
   onReoptimizeChapter,
+  regeneratingChapterIds,
+  regenerateLocked = false,
+  onRegenerateChapter,
 }: DetailedReadingViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [compact, setCompact] = useState(false);
@@ -66,6 +72,9 @@ export function DetailedReadingView({
             isOptimizing={optimizingChapterIds?.has(chapter.id)}
             optimizationFailed={failedChapterIds?.has(chapter.id)}
             onReoptimizeChapter={onReoptimizeChapter}
+            isRegenerating={regeneratingChapterIds?.has(chapter.id)}
+            regenerateLocked={regenerateLocked}
+            onRegenerateChapter={onRegenerateChapter}
             compact={compact}
           />
         ))}

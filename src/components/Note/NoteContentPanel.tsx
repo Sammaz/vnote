@@ -37,7 +37,7 @@ import { cn } from "../../utils/cn";
 import { useGlassBg } from "../../hooks/useGlassBg";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData, FlashcardGenerationEvent, DetailedReadingData, DetailedReadingChapter, ChapterGenerationEvent } from "../../types";
+import type { Note, GenerationEvent, TabType, AiConfig, PromptConfig, ChapterData, SubtitleOptimizationEvent, SingleChapterOptimizationEvent, SubtitleEntry, OptimizedSubtitle, NoteUiState, SubtitleOptimizationTaskState, HighlightData, ScreenshotMarker, FlashcardData, FlashcardGenerationEvent, DetailedReadingData, DetailedReadingChapter, DetailedReadingChapterRegenEvent, ChapterGenerationEvent } from "../../types";
 import { parseDetailedReadingData } from "../../types";
 import { ResponsiveTabs } from "./ResponsiveTabs";
 import { EditableMarkdown } from "./EditableMarkdown";
@@ -377,6 +377,8 @@ export function NoteContentPanel({ note, isPageVisible, onGenerationComplete, ai
 
   // 章节生成状态（用于显示闪烁小点）
   const [chapterIsGenerating, setChapterIsGenerating] = useState(false);
+  const [regeneratingChapterIds, setRegeneratingChapterIds] = useState<Set<string>>(new Set());
+
 
   // 闪记卡生成状态（用于显示闪烁小点）
   const [flashcardIsGenerating, setFlashcardIsGenerating] = useState(false);
@@ -831,6 +833,21 @@ export function NoteContentPanel({ note, isPageVisible, onGenerationComplete, ai
             if (!isDetailedReadingSurfaceVisibleRef.current) {
               stashDetailedReadingPartial(noteId, data.content);
             }
+          }
+          break;
+
+        case "ChaptersPlanned":
+          if (convertTabType(data.tab_type) === "detailed_reading" && noteId === note.id) {
+            const planned = {
+              chapters: data.chapters,
+              total_duration: data.total_duration,
+              generated_at: new Date().toISOString(),
+            };
+            if (!isDetailedReadingSurfaceVisibleRef.current) {
+              stashDetailedReadingData(noteId, planned);
+              break;
+            }
+            setDetailedReadingData(planned);
           }
           break;
 
@@ -2267,6 +2284,192 @@ export function NoteContentPanel({ note, isPageVisible, onGenerationComplete, ai
   }, [note.id, note.subtitle_path, currentModelId, defaultAiConfigId, detailedReadingData?.total_duration, onGenerationComplete, highlightIsGenerating]);
 
   // 单章节重新优化字幕
+  const handleRegenerateDetailedReadingChapter = useCallback(async (chapterId: string) => {
+    if (chapterIsGenerating || regeneratingChapterIds.has(chapterId)) {
+      return;
+    }
+
+    const effectiveModelId = currentModelId || defaultAiConfigId;
+    if (!effectiveModelId) {
+      message.warning("请先配置 AI 模型");
+      return;
+    }
+
+    const generationId = crypto.randomUUID();
+    setRegeneratingChapterIds((prev) => {
+      const next = new Set(prev);
+      next.add(chapterId);
+      return next;
+    });
+    setDetailedReadingData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        chapters: prev.chapters.map((chapter) =>
+          chapter.id === chapterId
+            ? { ...chapter, status: "generating", error: null }
+            : chapter
+        ),
+      };
+    });
+
+    const eventName = `detailed-reading-chapter-${generationId}`;
+    const unlisten = await listen<DetailedReadingChapterRegenEvent>(eventName, (event) => {
+      const data = event.payload;
+      switch (data.status) {
+        case "Started":
+          break;
+        case "Completed":
+          setDetailedReadingData((prev) =>
+            prev ? mergeDetailedReadingChapter(prev, data.chapter, prev.total_duration) : prev
+          );
+          setRegeneratingChapterIds((prev) => {
+            const next = new Set(prev);
+            next.delete(chapterId);
+            return next;
+          });
+          message.success("章节已重新生成");
+          unlisten();
+          break;
+        case "Failed":
+          setDetailedReadingData((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              chapters: prev.chapters.map((chapter) =>
+                chapter.id === chapterId
+                  ? { ...chapter, status: "failed", error: data.error }
+                  : chapter
+              ),
+            };
+          });
+          setRegeneratingChapterIds((prev) => {
+            const next = new Set(prev);
+            next.delete(chapterId);
+            return next;
+          });
+          message.error(`章节重新生成失败: ${data.error}`);
+          unlisten();
+          break;
+      }
+    });
+
+    try {
+      await invoke("regenerate_detailed_reading_chapter", {
+        generationId,
+        noteId: note.id,
+        chapterId,
+        modelId: effectiveModelId,
+      });
+    } catch (error) {
+      console.error("[RegenerateDetailedReadingChapter] 调用失败:", error);
+      message.error(`章节重新生成失败: ${error}`);
+      setRegeneratingChapterIds((prev) => {
+        const next = new Set(prev);
+        next.delete(chapterId);
+        return next;
+      });
+      setDetailedReadingData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          chapters: prev.chapters.map((chapter) =>
+            chapter.id === chapterId
+              ? { ...chapter, status: "failed", error: String(error) }
+              : chapter
+          ),
+        };
+      });
+      unlisten();
+    }
+  }, [chapterIsGenerating, regeneratingChapterIds, currentModelId, defaultAiConfigId, note.id]);
+
+  const regenerateOriginalDetailedReading = useCallback(async () => {
+    const effectiveModelId = currentModelId || defaultAiConfigId;
+    if (!effectiveModelId) {
+      message.warning("请先配置 AI 模型");
+      return;
+    }
+
+    const globalState = getNoteGenerationState(note.id);
+    if (globalState.regeneratingTabs.has("detailed_reading")) {
+      message.warning("原文细读正在生成中，请稍后再试");
+      return;
+    }
+
+    setOptimizedSubtitles(new Map());
+    setSubtitleOptimizationEnabled(false);
+    setFailedChapterIds(new Set());
+    try {
+      await invoke("delete_optimized_subtitles", { noteId: note.id });
+    } catch (err) {
+      console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
+    }
+    try {
+      await invoke("clear_chapter_screenshots", { noteId: note.id });
+    } catch (err) {
+      console.error("[NoteContentPanel] 清除截图缓存失败:", err);
+    }
+    try {
+      await invoke("clear_visual_summary", { noteId: note.id });
+    } catch (err) {
+      console.error("[NoteContentPanel] 清除视觉化总结缓存失败:", err);
+    }
+
+    const generationId = crypto.randomUUID();
+    const currentTabs = new Set(globalState.regeneratingTabs);
+    currentTabs.add("detailed_reading");
+    setNoteGenerationState(note.id, {
+      regeneratingTabs: currentTabs,
+    });
+    setRegeneratingTabs(currentTabs as Set<TabType>);
+    setChapterIsGenerating(true);
+    setChapterGenerating(note.id, true);
+    clearDetailedReadingPartial(note.id);
+    setDetailedReadingData({ chapters: [], total_duration: 0, generated_at: "" });
+    registerActiveGenerationId(note.id, generationId);
+
+    try {
+      await setupGenerationListener(note.id, generationId);
+      await invoke("generate_note_content", {
+        generationId,
+        noteId: note.id,
+        modelId: effectiveModelId,
+        concurrent: true,
+        regenerate: true,
+        tabsToGenerate: ["detailed_reading"],
+        concurrentLimit: resolveConcurrentLimit(effectiveModelId),
+      });
+    } catch (error) {
+      const nextTabs = new Set(getNoteGenerationState(note.id).regeneratingTabs);
+      nextTabs.delete("detailed_reading");
+      setNoteGenerationState(note.id, {
+        regeneratingTabs: nextTabs,
+      });
+      setRegeneratingTabs(nextTabs as Set<TabType>);
+      setChapterIsGenerating(false);
+      setChapterGenerating(note.id, false);
+      unregisterActiveGenerationId(note.id, generationId);
+      message.error(`重新生成章节失败: ${error}`);
+    }
+  }, [note.id, currentModelId, defaultAiConfigId, setupGenerationListener, resolveConcurrentLimit]);
+
+  const confirmRegenerateOriginalDetailedReading = useCallback(() => {
+    setConfirmDialogConfig({
+      title: "确认重新生成",
+      message: "重新生成将覆盖当前的章节内容，此操作不可撤销。是否继续？",
+      onConfirm: async () => {
+        setShowConfirmDialog(false);
+        if (isAssistModeActive) {
+          generateChaptersWithMarkers(assistModeMarkers);
+        } else {
+          await regenerateOriginalDetailedReading();
+        }
+      },
+    });
+    setShowConfirmDialog(true);
+  }, [isAssistModeActive, assistModeMarkers, generateChaptersWithMarkers, regenerateOriginalDetailedReading]);
+
   const handleReoptimizeChapter = useCallback(async (chapterId: string) => {
     // 检查是否有正在进行的优化
     if (optimizingChapterIds.has(chapterId)) {
@@ -2644,6 +2847,8 @@ Video subtitles content:`;
     "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0 disabled:hover:shadow-sm"
   );
 
+  const isOriginalRegenerating = assistModeGenerating || getNoteGenerationState(note.id).regeneratingTabs.has("detailed_reading");
+
   return (
     <div className={cn("isolate flex h-full flex-col overflow-visible rounded-lg border border-slate-200/70 shadow-soft dark:border-vnote-border/80", glassPanel)}>
       {/* 标签页头部 */}
@@ -2895,10 +3100,10 @@ Video subtitles content:`;
                 辅助模式
               </ToolbarIconButton>
               <ToolbarIconButton
-                icon={assistModeGenerating ? Loader2 : RefreshCw}
-                label={assistModeGenerating ? "生成中" : "重新生成"}
-                disabled={assistModeGenerating}
-                spinning={assistModeGenerating}
+                icon={isOriginalRegenerating ? Loader2 : RefreshCw}
+                label={isOriginalRegenerating ? "生成中" : "重新生成"}
+                disabled={isOriginalRegenerating}
+                spinning={isOriginalRegenerating}
                 compact={true}
                 className={cn(toolbarButtonClass, toolbarCompactButtonClass)}
                 onClick={() => {}}
@@ -2918,68 +3123,15 @@ Video subtitles content:`;
                 辅助模式
               </ToolbarIconButton>
               <ToolbarIconButton
-                icon={assistModeGenerating ? Loader2 : RefreshCw}
-                label={assistModeGenerating ? "生成中" : "重新生成"}
-                disabled={assistModeGenerating}
-                spinning={assistModeGenerating}
+                icon={isOriginalRegenerating ? Loader2 : RefreshCw}
+                label={isOriginalRegenerating ? "生成中" : "重新生成"}
+                disabled={isOriginalRegenerating}
+                spinning={isOriginalRegenerating}
                 compact={false}
                 className={cn(toolbarButtonClass, toolbarActionButtonClass)}
-                onClick={() => {
-                  setConfirmDialogConfig({
-                    title: "确认重新生成",
-                    message: "重新生成将覆盖当前的章节内容，此操作不可撤销。是否继续？",
-                    onConfirm: async () => {
-                      setShowConfirmDialog(false);
-                      if (isAssistModeActive) {
-                        generateChaptersWithMarkers(assistModeMarkers);
-                      } else {
-                        // 清除字幕优化缓存
-                        setOptimizedSubtitles(new Map());
-                        setSubtitleOptimizationEnabled(false);
-                        setFailedChapterIds(new Set());
-                        try {
-                          await invoke("delete_optimized_subtitles", { noteId: note.id });
-                        } catch (err) {
-                          console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
-                        }
-                        try {
-                          await invoke("clear_chapter_screenshots", { noteId: note.id });
-                        } catch (err) {
-                          console.error("[NoteContentPanel] 清除截图缓存失败:", err);
-                        }
-                        // 清除视觉化总结缓存，使其在章节重新生成后回退到动态组装
-                        try {
-                          await invoke("clear_visual_summary", { noteId: note.id });
-                        } catch (err) {
-                          console.error("[NoteContentPanel] 清除视觉化总结缓存失败:", err);
-                        }
-                        setChapterIsGenerating(true);
-                        setChapterGenerating(note.id, true);
-                        const generationId = crypto.randomUUID();
-                        registerActiveGenerationId(note.id, generationId);
-                        try {
-                          await invoke("generate_note_content", {
-                            generationId,
-                            noteId: note.id,
-                            modelId: currentModelId || defaultAiConfigId,
-                            concurrent: true,
-                            regenerate: true,
-                            tabsToGenerate: ["detailed_reading"],
-                            concurrentLimit: resolveConcurrentLimit(currentModelId || defaultAiConfigId),
-                          });
-                        } catch (error) {
-                          setChapterIsGenerating(false);
-                          setChapterGenerating(note.id, false);
-                          unregisterActiveGenerationId(note.id, generationId);
-                          message.error(`重新生成章节失败: ${error}`);
-                        }
-                      }
-                    },
-                  });
-                  setShowConfirmDialog(true);
-                }}
+                onClick={confirmRegenerateOriginalDetailedReading}
               >
-                {assistModeGenerating ? "生成中..." : "重新生成"}
+                {isOriginalRegenerating ? "生成中..." : "重新生成"}
               </ToolbarIconButton>
             </div>
           </div>
@@ -3307,75 +3459,18 @@ Video subtitles content:`;
                 辅助模式
               </ToolbarIconButton>
               <ToolbarIconButton
-                icon={assistModeGenerating ? Loader2 : RefreshCw}
-                label={assistModeGenerating ? "生成中" : "重新生成"}
-                disabled={assistModeGenerating}
-                spinning={assistModeGenerating}
+                icon={isOriginalRegenerating ? Loader2 : RefreshCw}
+                label={isOriginalRegenerating ? "生成中" : "重新生成"}
+                disabled={isOriginalRegenerating}
+                spinning={isOriginalRegenerating}
                 compact={isCompactOriginalToolbarRight}
                 className={cn(toolbarButtonClass, isCompactOriginalToolbarRight ? toolbarCompactButtonClass : toolbarActionButtonClass)}
-                onClick={() => {
-                  setConfirmDialogConfig({
-                    title: "确认重新生成",
-                    message: "重新生成将覆盖当前的章节内容，此操作不可撤销。是否继续？",
-                    onConfirm: async () => {
-                      setShowConfirmDialog(false);
-                      if (isAssistModeActive) {
-                        // 辅助模式下：使用截图标记生成章节
-                        generateChaptersWithMarkers(assistModeMarkers);
-                      } else {
-                        // 普通模式下：清除缓存并重新生成
-                        // 清除字幕优化缓存（内存和数据库）
-                        setOptimizedSubtitles(new Map());
-                        setSubtitleOptimizationEnabled(false);
-                        setFailedChapterIds(new Set());
-                        try {
-                          await invoke("delete_optimized_subtitles", { noteId: note.id });
-                        } catch (err) {
-                          console.error("[NoteContentPanel] 清除数据库字幕缓存失败:", err);
-                        }
-                        // 清除之前生成的截图
-                        try {
-                          await invoke("clear_chapter_screenshots", { noteId: note.id });
-                        } catch (err) {
-                          console.error("[NoteContentPanel] 清除截图缓存失败:", err);
-                        }
-                        // 清除视觉化总结缓存，使其在章节重新生成后回退到动态组装
-                        try {
-                          await invoke("clear_visual_summary", { noteId: note.id });
-                        } catch (err) {
-                          console.error("[NoteContentPanel] 清除视觉化总结缓存失败:", err);
-                        }
-                        // 重新生成章节（统一走详细阅读链路）
-                        setChapterIsGenerating(true);
-                        setChapterGenerating(note.id, true);
-                        const generationId = crypto.randomUUID();
-                        registerActiveGenerationId(note.id, generationId);
-                        try {
-                          await invoke("generate_note_content", {
-                            generationId,
-                            noteId: note.id,
-                            modelId: currentModelId || defaultAiConfigId,
-                            concurrent: true,
-                            regenerate: true,
-                            tabsToGenerate: ["detailed_reading"],
-                            concurrentLimit: resolveConcurrentLimit(currentModelId || defaultAiConfigId),
-                          });
-                        } catch (error) {
-                          setChapterIsGenerating(false);
-                          setChapterGenerating(note.id, false);
-                          unregisterActiveGenerationId(note.id, generationId);
-                          message.error(`重新生成章节失败: ${error}`);
-                        }
-                      }
-                    }
-                  });
-                  setShowConfirmDialog(true);
-                }}
+                onClick={confirmRegenerateOriginalDetailedReading}
               >
-                {assistModeGenerating ? (
+                {isOriginalRegenerating ? (
                   <>
                     生成中...
-                    {assistModeProgress && !isCompactOriginalToolbarRight && (
+                    {assistModeGenerating && assistModeProgress && !isCompactOriginalToolbarRight && (
                       <span className="text-xs ml-1">
                         ({assistModeProgress.current}/{assistModeProgress.total})
                       </span>
@@ -3810,7 +3905,7 @@ Video subtitles content:`;
           }
 
           // 使用新格式 DetailedReadingData
-          if (detailedReadingData) {
+          if (detailedReadingData && detailedReadingData.chapters.length > 0) {
             return (
               <DetailedReadingView
                 data={detailedReadingData}
@@ -3822,7 +3917,21 @@ Video subtitles content:`;
                 optimizingChapterIds={optimizingChapterIds}
                 failedChapterIds={failedChapterIds}
                 onReoptimizeChapter={handleReoptimizeChapter}
+                regeneratingChapterIds={regeneratingChapterIds}
+                regenerateLocked={chapterIsGenerating}
+                onRegenerateChapter={handleRegenerateDetailedReadingChapter}
               />
+            );
+          }
+
+          if (chapterIsGenerating || isOriginalRegenerating) {
+            return (
+              <div className="flex h-full items-center justify-center p-6">
+                <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-500" />
+                  正在规划章节...
+                </div>
+              </div>
             );
           }
 

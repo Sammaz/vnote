@@ -1299,6 +1299,32 @@ async fn abort_note_generation(generation_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+async fn regenerate_detailed_reading_chapter(
+    app: AppHandle,
+    generation_id: Option<String>,
+    note_id: String,
+    chapter_id: String,
+    model_id: String,
+) -> Result<String, String> {
+    let generation_id = generation_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let return_id = generation_id.clone();
+    tokio::spawn(async move {
+        if let Err(e) = note_generation::regenerate_detailed_reading_chapter(
+            app,
+            generation_id,
+            note_id,
+            chapter_id,
+            model_id,
+        )
+        .await
+        {
+            tracing::error!("[regenerate_detailed_reading_chapter] 生成失败: {}", e);
+        }
+    });
+    Ok(return_id)
+}
+
+#[tauri::command]
 async fn generate_ai_note_content(
     app: AppHandle,
     generation_id: Option<String>,
@@ -1727,6 +1753,7 @@ fn chapter_data_to_detailed_reading_data(
                 content: Some(ch.content.clone()),
                 subtitle_entries: Vec::new(),
                 screenshot_path: ch.screenshot_path.clone(),
+                ..Default::default()
             }
         })
         .collect::<Vec<_>>();
@@ -2247,6 +2274,7 @@ pub fn run() {
             delete_prompt_config,
             generate_note_content,
             abort_note_generation,
+            regenerate_detailed_reading_chapter,
             generate_ai_note_content,
             generate_chapters,
             abort_chapter_generation,

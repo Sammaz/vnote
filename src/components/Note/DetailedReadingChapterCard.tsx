@@ -4,6 +4,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { DetailedReadingChapter, SubtitleEntry } from "../../types";
 import { cn } from "../../utils/cn";
 import { useGlassBg } from "../../hooks/useGlassBg";
+import { getDetailedReadingChapterStatus } from "../../utils/detailedReadingChapters";
 
 interface DetailedReadingChapterCardProps {
   chapter: DetailedReadingChapter;
@@ -16,6 +17,9 @@ interface DetailedReadingChapterCardProps {
   isOptimizing?: boolean;
   optimizationFailed?: boolean;
   onReoptimizeChapter?: (chapterId: string) => void;
+  isRegenerating?: boolean;
+  regenerateLocked?: boolean;
+  onRegenerateChapter?: (chapterId: string) => void;
   compact?: boolean;
 }
 
@@ -388,6 +392,9 @@ function DetailedReadingChapterCardInner({
   isOptimizing = false,
   optimizationFailed = false,
   onReoptimizeChapter,
+  isRegenerating = false,
+  regenerateLocked = false,
+  onRegenerateChapter,
   compact = false,
 }: DetailedReadingChapterCardProps) {
   const [expanded, setExpanded] = useState(false);
@@ -406,6 +413,10 @@ function DetailedReadingChapterCardInner({
     () => alignOriginalEntriesByOptimizedParagraphs(chapterSubtitleEntries, optimizedSubtitle),
     [chapterSubtitleEntries, optimizedSubtitle]
   );
+
+  const generationStatus = isRegenerating ? "generating" : getDetailedReadingChapterStatus(chapter);
+  const isChapterGenerating = generationStatus === "pending" || generationStatus === "generating";
+  const isChapterFailed = generationStatus === "failed";
 
   const hasSubtitles = chapterSubtitleEntries.length > 0;
   const hasOptimizedSubtitle = subtitleOptimizationEnabled && !!optimizedSubtitle && optimizedSubtitle.length > 0;
@@ -457,7 +468,15 @@ function DetailedReadingChapterCardInner({
               <Clock className="w-3 h-3 flex-shrink-0" />
               <span className="whitespace-nowrap">{formatTime(chapter.start_time)} - {formatTime(chapter.end_time)}</span>
             </p>
-            {chapter.content?.trim() && (
+            {isChapterGenerating && (
+              <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">正在生成...</p>
+            )}
+            {isChapterFailed && (
+              <p className="mt-2 text-sm text-orange-500 dark:text-orange-400">
+                {chapter.error?.trim() || "该段生成失败，请稍后重试"}
+              </p>
+            )}
+            {!isChapterGenerating && !isChapterFailed && chapter.content?.trim() && (
               <p className={cn("mt-2 text-sm text-slate-600 dark:text-slate-400 leading-relaxed", !compact && "line-clamp-3")}>
                 {chapter.content}
               </p>
@@ -465,6 +484,27 @@ function DetailedReadingChapterCardInner({
           </div>
 
           <div className="flex items-center gap-2 flex-shrink-0">
+            {isChapterGenerating && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
+            {isChapterFailed && !isChapterGenerating && onRegenerateChapter && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onRegenerateChapter(chapter.id);
+                }}
+                disabled={regenerateLocked}
+                className={cn(
+                  "flex items-center gap-1 px-2 py-1 text-xs rounded-md transition-colors",
+                  regenerateLocked
+                    ? "text-slate-400 cursor-not-allowed"
+                    : "text-orange-500 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/20 cursor-pointer"
+                )}
+                title="重新生成这一章"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                重新生成
+              </button>
+            )}
             {isOptimizing && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
             {optimizationFailed && !isOptimizing && (
               <span title="字幕优化失败">
