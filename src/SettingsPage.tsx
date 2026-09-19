@@ -84,6 +84,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                 setPromptConfigs(promptCfgs);
             } catch (error) {
                 console.error("Failed to load settings:", error);
+                message.error(`加载设置失败：${String(error)}`);
             } finally {
                 setLoading(false);
             }
@@ -173,6 +174,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
             await refreshAiConfigs();
         } catch (error) {
             console.error("Failed to save AI config:", error);
+            message.error(`保存对话模型失败：${String(error)}`);
         }
     };
 
@@ -434,7 +436,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
     const openAiEditor = (config: AiConfig) => {
         setEditingType("ai");
-        setEditingAiConfig(config);
+        setEditingAiConfig({
+            ...config,
+            reasoning_effort: config.reasoning_effort || "off",
+            concurrent_limit: config.concurrent_limit ?? 5,
+            request_timeout: config.request_timeout ?? 180,
+            rate_limit: config.rate_limit ?? 60,
+        });
     };
 
     const openEmbeddingEditor = (config: EmbeddingConfig) => {

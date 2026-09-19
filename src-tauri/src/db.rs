@@ -13,6 +13,10 @@ const INIT_SQL: &str = include_str!("sql/init.sql");
 /// API 密钥已迁移到系统密钥环的占位符
 pub const API_KEY_MIGRATED_PLACEHOLDER: &str = "***MIGRATED***";
 
+fn default_reasoning_effort() -> String {
+    "off".to_string()
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AiConfig {
     pub id: String,
@@ -20,6 +24,7 @@ pub struct AiConfig {
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    #[serde(default = "default_reasoning_effort")]
     pub reasoning_effort: String,
     pub sort_order: i32,
     pub is_default: bool,
@@ -511,6 +516,68 @@ impl Database {
     fn init_tables(&self) -> SqliteResult<()> {
         let conn = self.connection();
         conn.execute_batch(INIT_SQL)?;
+        Self::migrate_schema(&conn)?;
+        Ok(())
+    }
+
+    fn table_has_column(conn: &rusqlite::Connection, table: &str, column: &str) -> bool {
+        let sql = format!(
+            "SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'"
+        );
+        conn.prepare(&sql)
+            .and_then(|mut stmt| stmt.query_row([], |row| row.get::<_, i64>(0)))
+            .map(|count| count > 0)
+            .unwrap_or(false)
+    }
+
+    fn ensure_column(
+        conn: &rusqlite::Connection,
+        table: &str,
+        column: &str,
+        definition: &str,
+    ) -> SqliteResult<()> {
+        if Self::table_has_column(conn, table, column) {
+            return Ok(());
+        }
+        conn.execute(
+            &format!("ALTER TABLE {table} ADD COLUMN {definition}"),
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn migrate_schema(conn: &rusqlite::Connection) -> SqliteResult<()> {
+        // CREATE TABLE IF NOT EXISTS will not add columns to existing installs.
+        Self::ensure_column(
+            conn,
+            "ai_configs",
+            "is_default",
+            "is_default INTEGER NOT NULL DEFAULT 0",
+        )?;
+        Self::ensure_column(
+            conn,
+            "ai_configs",
+            "concurrent_limit",
+            "concurrent_limit INTEGER NOT NULL DEFAULT 5",
+        )?;
+        Self::ensure_column(
+            conn,
+            "ai_configs",
+            "request_timeout",
+            "request_timeout INTEGER NOT NULL DEFAULT 180",
+        )?;
+        Self::ensure_column(
+            conn,
+            "ai_configs",
+            "rate_limit",
+            "rate_limit INTEGER NOT NULL DEFAULT 60",
+        )?;
+        Self::ensure_column(
+            conn,
+            "ai_configs",
+            "reasoning_effort",
+            "reasoning_effort TEXT NOT NULL DEFAULT 'off'",
+        )?;
         Ok(())
     }
 
@@ -3394,6 +3461,62 @@ mod tests {
             [id],
         );
         assert!(result.is_err(), "invalid reasoning effort should be rejected");
+    }
+
+    #[test]
+    fn test_ai_config_reasoning_effort_column_migration() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("vnote.db");
+        {
+            let conn = Connection::open(&db_path).expect("open old schema db");
+            conn.execute_batch(
+                "CREATE TABLE ai_configs (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    base_url TEXT NOT NULL,
+                    api_key TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL DEFAULT 0,
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    concurrent_limit INTEGER NOT NULL DEFAULT 5,
+                    request_timeout INTEGER NOT NULL DEFAULT 180,
+                    rate_limit INTEGER NOT NULL DEFAULT 60
+                );",
+            )
+            .expect("create old ai_configs schema");
+            conn.execute(
+                "INSERT INTO ai_configs (id, title, base_url, api_key, model) VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params!["old-id", "Old Model", "https://example.com/v1", "test-key", "old-model"],
+            )
+            .expect("insert legacy AI config");
+        }
+
+        let db = Database::new(temp_dir.path().to_path_buf()).expect("migrate existing database");
+        let configs = db.get_all_ai_configs().expect("load migrated AI configs");
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].id, "old-id");
+        assert_eq!(configs[0].reasoning_effort, "off");
+
+        let new_id = db
+            .create_ai_config(&AiConfig {
+                id: String::new(),
+                title: "New Model".to_string(),
+                base_url: "https://example.com/v1".to_string(),
+                api_key: "new-key".to_string(),
+                model: "new-model".to_string(),
+                reasoning_effort: "high".to_string(),
+                sort_order: 1,
+                is_default: false,
+                concurrent_limit: 5,
+                request_timeout: 180,
+                rate_limit: 60,
+            })
+            .expect("create AI config after migration");
+        let created = db
+            .get_ai_config_by_id(&new_id)
+            .expect("query created config")
+            .expect("created config should exist");
+        assert_eq!(created.reasoning_effort, "high");
     }
 
     /// Helper function to create a test note and return its ID
