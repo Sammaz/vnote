@@ -243,7 +243,7 @@ interface SessionRuntime {
 }
 
 function defaultEnableSupplement() {
-  return true;
+  return false;
 }
 
 function createInitialRuntime(overrides?: Partial<SessionRuntime>): SessionRuntime {

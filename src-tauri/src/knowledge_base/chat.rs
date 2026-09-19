@@ -1071,7 +1071,7 @@ fn dedupe_queries(queries: Vec<String>, limit: usize) -> Vec<String> {
 }
 
 fn resolve_enable_supplement(request: &KnowledgeChatRequest, _mode: &KnowledgeChatMode) -> bool {
-    request.enable_supplement.unwrap_or(true)
+    request.enable_supplement.unwrap_or(false)
 }
 
 fn with_supplement_prompt(context: String, enabled: bool) -> String {
@@ -1450,7 +1450,7 @@ mod tests {
     }
 
     #[test]
-    fn agent_mode_enables_supplement_by_default() {
+    fn supplement_is_disabled_by_default() {
         let request = KnowledgeChatRequest {
             session_id: None,
             messages: Vec::new(),
@@ -1462,8 +1462,8 @@ mod tests {
             step_budget: None,
             enable_supplement: None,
         };
-        assert!(resolve_enable_supplement(&request, &KnowledgeChatMode::Agent));
-        assert!(resolve_enable_supplement(&request, &KnowledgeChatMode::Standard));
+        assert!(!resolve_enable_supplement(&request, &KnowledgeChatMode::Agent));
+        assert!(!resolve_enable_supplement(&request, &KnowledgeChatMode::Standard));
     }
 
     #[test]
