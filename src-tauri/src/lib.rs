@@ -676,6 +676,58 @@ fn copy_text_to_clipboard(text: String) -> Result<(), String> {
         .map_err(|e| format!("Failed to write clipboard: {}", e))
 }
 
+fn prepare_external_http_url(url: &str) -> Result<String, String> {
+    crate::validation::validate_url(url)?;
+    Ok(url.trim().to_string())
+}
+
+fn open_in_default_browser(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", url])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to open browser: {}", e))?;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let url = prepare_external_http_url(&url)?;
+    open_in_default_browser(&url)
+}
+
 /// Event payload for TS to MP4 conversion result
 #[derive(Clone, serde::Serialize)]
 struct TsConversionResult {
@@ -2282,6 +2334,7 @@ pub fn run() {
             read_file_content,
             save_file_content,
             copy_text_to_clipboard,
+            open_external_url,
             convert_ts_to_mp4,
             start_ts_conversion,
             check_ffmpeg,

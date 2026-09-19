@@ -10,6 +10,7 @@ import { Sidebar } from "./components/Sidebar";
 import { HomePage } from "./components/HomePage";
 import { SubtitleGenerationIndicator } from "./components/SubtitleGenerationIndicator";
 import { cn } from "./utils/cn";
+import { handleExternalLinkClick } from "./utils/openExternalUrl";
 import { useGlassBg } from "./hooks/useGlassBg";
 import { VIEW_TYPES, type NavigableViewType } from "./types";
 import "./index.css";
@@ -73,6 +74,18 @@ function AppContent() {
     const handleContextMenu = (e: MouseEvent) => e.preventDefault();
     document.addEventListener("contextmenu", handleContextMenu);
     return () => document.removeEventListener("contextmenu", handleContextMenu);
+  }, []);
+
+  useEffect(() => {
+    const handleDocumentClick = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const anchor = target.closest("a");
+      if (!anchor) return;
+      handleExternalLinkClick(event, anchor.getAttribute("href") ?? anchor.href);
+    };
+    document.addEventListener("click", handleDocumentClick, true);
+    return () => document.removeEventListener("click", handleDocumentClick, true);
   }, []);
 
   const isTauri =

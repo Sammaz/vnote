@@ -31,6 +31,7 @@ import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 import { copyText } from "../../utils/clipboard";
 import { extractModelSupplements } from "../../utils/knowledgeSupplements";
+import { handleExternalLinkClick } from "../../utils/openExternalUrl";
 import { renderDecoratedReactNode } from "../../utils/markdownRendererUtils";
 import type {
   KnowledgeAgentRunRecord,
@@ -2236,6 +2237,7 @@ export function KnowledgeBaseChat() {
                           href={source.url}
                           target="_blank"
                           rel="noreferrer"
+                          onClick={(event) => handleExternalLinkClick(event, source.url)}
                           className="block w-full text-left p-3 rounded-xl border border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-900/10 transition-all"
                         >
                           <div className="flex items-start justify-between gap-2">

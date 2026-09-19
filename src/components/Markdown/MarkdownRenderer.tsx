@@ -13,6 +13,7 @@ import {
 } from "../../utils/markdownRendererUtils";
 import { MarkdownCodeBlock } from "./MarkdownCodeBlock";
 import { EvidenceCitationProvider, type EvidenceCitationSource } from "./EvidenceCitation";
+import { handleExternalLinkClick } from "../../utils/openExternalUrl";
 
 interface MarkdownRendererProps extends MarkdownDecorationOptions {
   content: string;
@@ -118,7 +119,7 @@ function MarkdownRendererImpl({
           href={href}
           target="_blank"
           rel="noreferrer"
-          onClick={(event) => event.stopPropagation()}
+          onClick={(event) => handleExternalLinkClick(event, href)}
         >
           {renderDecoratedReactNode(children, { ...decorationOptions, enableAutolinks: false }, "a-content")}
         </a>

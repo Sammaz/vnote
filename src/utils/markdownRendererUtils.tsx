@@ -1,6 +1,7 @@
 import React from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { EvidenceCitation } from "../components/Markdown/EvidenceCitation";
+import { handleExternalLinkClick } from "./openExternalUrl";
 
 const BRACKET_TIMESTAMP_RE = /\[(\d{1,2}:\d{2}(?::\d{2})?)\]/;
 const CLOCK_TIMESTAMP_RE = /⏱\s*(\d{1,2}:\d{2}(?::\d{2})?)/;
@@ -98,7 +99,7 @@ function renderHighlightedAutolinks(
         target="_blank"
         rel="noreferrer"
         className="text-blue-500 dark:text-blue-400 hover:underline break-all"
-        onClick={(event) => event.stopPropagation()}
+        onClick={(event) => handleExternalLinkClick(event, part.href)}
       >
         {highlighted}
       </a>
@@ -387,14 +388,14 @@ export function renderDecoratedReactNode(
     ));
   }
 
-  if (React.isValidElement<{ children?: React.ReactNode; onClick?: (event: React.MouseEvent<HTMLAnchorElement>) => void; target?: string; rel?: string }>(node)) {
+  if (React.isValidElement<{ children?: React.ReactNode; href?: string; onClick?: (event: React.MouseEvent<HTMLAnchorElement>) => void; target?: string; rel?: string }>(node)) {
     if (node.type === "a") {
       return React.cloneElement(node, {
         ...node.props,
         target: node.props.target ?? "_blank",
         rel: node.props.rel ?? "noreferrer",
         onClick: (event: React.MouseEvent<HTMLAnchorElement>) => {
-          event.stopPropagation();
+          handleExternalLinkClick(event, event.currentTarget.getAttribute("href") ?? node.props.href);
           node.props.onClick?.(event);
         },
         children: node.props.children
