@@ -578,6 +578,18 @@ impl Database {
             "reasoning_effort",
             "reasoning_effort TEXT NOT NULL DEFAULT 'off'",
         )?;
+        Self::ensure_column(
+            conn,
+            "note_initialization_items",
+            "config_json",
+            "config_json TEXT",
+        )?;
+        Self::ensure_column(
+            conn,
+            "knowledge_chat_messages",
+            "images_json",
+            "images_json TEXT",
+        )?;
         Ok(())
     }
 
@@ -3517,6 +3529,62 @@ mod tests {
             .expect("query created config")
             .expect("created config should exist");
         assert_eq!(created.reasoning_effort, "high");
+    }
+
+    #[test]
+    fn test_note_initialization_item_config_json_column_migration() {
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let db_path = temp_dir.path().join("vnote.db");
+        {
+            let conn = Connection::open(&db_path).expect("open old schema db");
+            conn.execute_batch(
+                "CREATE TABLE note_initialization_items (
+                    id TEXT PRIMARY KEY,
+                    note_id TEXT NOT NULL,
+                    item_key TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    depends_on_json TEXT,
+                    last_model_id TEXT,
+                    last_error TEXT,
+                    output_present INTEGER NOT NULL DEFAULT 0,
+                    started_at TEXT,
+                    completed_at TEXT,
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+                    UNIQUE(note_id, item_key)
+                );",
+            )
+            .expect("create old note_initialization_items schema");
+            conn.execute(
+                "INSERT INTO note_initialization_items (id, note_id, item_key, status, output_present)
+                 VALUES (?1, ?2, ?3, ?4, 0)",
+                rusqlite::params!["item-1", "note-1", "full_summary", "pending"],
+            )
+            .expect("insert legacy initialization item");
+        }
+
+        let db = Database::new(temp_dir.path().to_path_buf()).expect("migrate existing database");
+        let items = db
+            .get_note_initialization_items("note-1")
+            .expect("load migrated initialization items");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_key, "full_summary");
+        assert_eq!(items[0].config_json, None);
+
+        let updated = db
+            .upsert_note_initialization_item(&UpsertNoteInitializationItemInput {
+                note_id: "note-1".to_string(),
+                item_key: "full_summary".to_string(),
+                status: NoteInitializationItemStatus::Pending,
+                depends_on: Vec::new(),
+                last_model_id: None,
+                last_error: None,
+                output_present: false,
+                config_json: Some(r#"{"overwrite":true}"#.to_string()),
+                started_at: None,
+                completed_at: None,
+            })
+            .expect("upsert config_json after migration");
+        assert_eq!(updated.config_json.as_deref(), Some(r#"{"overwrite":true}"#));
     }
 
     /// Helper function to create a test note and return its ID
