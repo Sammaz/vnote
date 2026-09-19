@@ -31,6 +31,7 @@ import { useApp } from "../../context/AppContext";
 import { useCollections } from "../../context/CollectionsContext";
 import { copyText } from "../../utils/clipboard";
 import { extractModelSupplements } from "../../utils/knowledgeSupplements";
+import { renderDecoratedReactNode } from "../../utils/markdownRendererUtils";
 import type {
   KnowledgeAgentRunRecord,
   KnowledgeChatEvent,
@@ -43,6 +44,7 @@ import type {
   KnowledgeChatSessionDetail,
   KnowledgeChatSubmitResponse,
   KnowledgeSearchResult,
+  KnowledgeWebSearchResult,
 } from "./types";
 
 type MessageRole = "user" | "assistant" | "system";
@@ -55,6 +57,7 @@ interface UiMessage {
   content: string;
   status: MessageStatus;
   sources: KnowledgeSearchResult[];
+  webSources: KnowledgeWebSearchResult[];
   agentRun: KnowledgeAgentRunRecord | null;
   parentMessageId?: string | null;
   errorMessage?: string | null;
@@ -107,6 +110,7 @@ function mapRecordToUiMessage(record: KnowledgeChatMessageRecord): UiMessage {
     sources: record.sources
       .map((item) => item.result)
       .filter((item): item is KnowledgeSearchResult => Boolean(item)),
+    webSources: record.web_sources ?? [],
     agentRun: record.agent_run,
     parentMessageId: record.message.parent_message_id,
     errorMessage: record.message.error_message,
@@ -237,8 +241,8 @@ interface SessionRuntime {
   enableSupplement: boolean;
 }
 
-function defaultEnableSupplement(mode: KnowledgeChatMode) {
-  return mode === "agent";
+function defaultEnableSupplement() {
+  return true;
 }
 
 function createInitialRuntime(overrides?: Partial<SessionRuntime>): SessionRuntime {
@@ -257,7 +261,7 @@ function createInitialRuntime(overrides?: Partial<SessionRuntime>): SessionRunti
     accumulatedContent: "",
     composerError: null,
     inspectorMessageId: null,
-    enableSupplement: defaultEnableSupplement(mode),
+    enableSupplement: defaultEnableSupplement(),
     ...overrides,
   };
 }
@@ -402,23 +406,37 @@ export function KnowledgeBaseChat() {
     return reversedIndex === -1 ? -1 : messages.length - 1 - reversedIndex;
   }, [messages]);
 
-  const patchRuntime = useCallback((key: string, updates: Partial<SessionRuntime>) => {
-    setSessionRuntimes((prev) => {
-      const base = prev[key] ?? createInitialRuntime();
-      return { ...prev, [key]: { ...base, ...updates } };
-    });
-  }, []);
-
-  const mergeRuntime = useCallback(
-    (key: string, updater: (prev: SessionRuntime) => SessionRuntime | null) => {
-      setSessionRuntimes((prev) => {
-        const base = prev[key] ?? createInitialRuntime();
-        const next = updater(base);
-        if (!next || next === base) return prev;
-        return { ...prev, [key]: next };
+  const writeRuntimes = useCallback(
+    (updater: (prev: Record<string, SessionRuntime>) => Record<string, SessionRuntime>) => {
+      setSessionRuntimes((reactPrev) => {
+        const latest = sessionRuntimesRef.current !== reactPrev
+          ? { ...reactPrev, ...sessionRuntimesRef.current }
+          : reactPrev;
+        const next = updater(latest);
+        sessionRuntimesRef.current = next;
+        return next;
       });
     },
     []
+  );
+
+  const patchRuntime = useCallback((key: string, updates: Partial<SessionRuntime>) => {
+    writeRuntimes((prev) => {
+      const base = prev[key] ?? createInitialRuntime();
+      return { ...prev, [key]: { ...base, ...updates } };
+    });
+  }, [writeRuntimes]);
+
+  const mergeRuntime = useCallback(
+    (key: string, updater: (prev: SessionRuntime) => SessionRuntime | null) => {
+      writeRuntimes((prev) => {
+        const base = prev[key] ?? createInitialRuntime();
+        const nextRuntime = updater(base);
+        if (!nextRuntime || nextRuntime === base) return prev;
+        return { ...prev, [key]: nextRuntime };
+      });
+    },
+    [writeRuntimes]
   );
 
   const scrollToBottom = useCallback(() => {
@@ -442,7 +460,7 @@ export function KnowledgeBaseChat() {
     const nextMessages = detail.messages.map(mapRecordToUiMessage);
     const latestAssistant = [...nextMessages].reverse().find((message) => message.role === "assistant") ?? null;
     setSelectedSessionId(detail.session.id);
-    setSessionRuntimes((prev) => {
+    writeRuntimes((prev) => {
       const base = prev[detail.session.id] ?? createInitialRuntime();
       return {
         ...prev,
@@ -461,17 +479,17 @@ export function KnowledgeBaseChat() {
           accumulatedContent: "",
           composerError: null,
           inspectorMessageId: latestAssistant?.id ?? null,
-          enableSupplement: existing?.enableSupplement ?? defaultEnableSupplement(detail.session.mode),
+          enableSupplement: existing?.enableSupplement ?? base.enableSupplement,
         },
       };
     });
     return detail;
-  }, []);
+  }, [writeRuntimes]);
 
   const resetDraft = useCallback((preferred?: KnowledgeChatPreferences | null) => {
     const newDraft = generateDraftId();
     const prefs = preferred ?? null;
-    setSessionRuntimes((prev) => ({
+    writeRuntimes((prev) => ({
       ...prev,
       [newDraft]: createInitialRuntime({
         mode: prefs?.default_mode ?? DEFAULT_PREFERENCES.default_mode,
@@ -485,7 +503,7 @@ export function KnowledgeBaseChat() {
     setEditingMessageId(null);
     setEditingMessageValue("");
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, [selectedModelId]);
+  }, [selectedModelId, writeRuntimes]);
 
   useEffect(() => {
     if (selectedModelId || selectedSessionId) return;
@@ -541,7 +559,7 @@ export function KnowledgeBaseChat() {
 
         // 用首选项初始化当前 draft
         const initialDraft = draftIdRef.current;
-        setSessionRuntimes((prev) => {
+        writeRuntimes((prev) => {
           const base = prev[initialDraft] ?? createInitialRuntime();
           return {
             ...prev,
@@ -550,7 +568,7 @@ export function KnowledgeBaseChat() {
               mode: mergedPrefs.default_mode,
               modelId: mergedPrefs.default_model_id ?? selectedModelId ?? null,
               promptId: mergedPrefs.default_prompt_id ?? null,
-              enableSupplement: defaultEnableSupplement(mergedPrefs.default_mode),
+              enableSupplement: base.enableSupplement,
             },
           };
         });
@@ -574,7 +592,7 @@ export function KnowledgeBaseChat() {
     return () => {
       cancelled = true;
     };
-  }, [loadSessionDetail, refreshSessions, resetDraft, selectedModelId]);
+  }, [loadSessionDetail, refreshSessions, resetDraft, selectedModelId, writeRuntimes]);
 
   useEffect(() => {
     if (!preferencesReady) return;
@@ -643,6 +661,9 @@ export function KnowledgeBaseChat() {
           switch (data.status) {
             case "ContextFound":
               messagesList[targetIndex] = { ...current, sources: data.sources };
+              return { ...runtime, messages: messagesList };
+            case "WebContextFound":
+              messagesList[targetIndex] = { ...current, webSources: data.sources };
               return { ...runtime, messages: messagesList };
             case "TraceStep": {
               const currentRun = current.agentRun ?? buildRunningAgentRun(data.run_id);
@@ -1103,6 +1124,7 @@ export function KnowledgeBaseChat() {
       content: text,
       status: "completed",
       sources: [],
+      webSources: [],
       agentRun: null,
       imageUrls: userImageUrls.length > 0 ? userImageUrls : undefined,
     };
@@ -1112,6 +1134,7 @@ export function KnowledgeBaseChat() {
       content: "",
       status: "streaming",
       sources: [],
+      webSources: [],
       agentRun: null,
     };
 
@@ -1135,7 +1158,7 @@ export function KnowledgeBaseChat() {
     const existingSessionId = isDraftKey(sendKey) ? null : sendKey;
 
     // 乐观更新 runtime:注入消息并进入流式态
-    setSessionRuntimes((prev) => {
+    writeRuntimes((prev) => {
       const base = prev[sendKey] ?? createInitialRuntime();
       const messagesList = [...baseMessages, optimisticUserMessage, optimisticAssistantMessage];
       return {
@@ -1178,7 +1201,7 @@ export function KnowledgeBaseChat() {
       const realSessionId = response.session_id;
 
       // 若 sendKey 是 draft,迁移到真实 sessionId;否则原地更新
-      setSessionRuntimes((prev) => {
+      writeRuntimes((prev) => {
         const source = prev[sendKey];
         if (!source) return prev;
         const updatedMessages = source.messages.map((m) => {
@@ -1215,7 +1238,7 @@ export function KnowledgeBaseChat() {
       await refreshSessions();
     } catch (error) {
       console.error("Failed to send knowledge chat message:", error);
-      setSessionRuntimes((prev) => {
+      writeRuntimes((prev) => {
         const source = prev[sendKey];
         if (!source) return prev;
         const updatedMessages = source.messages.map((message) =>
@@ -1247,6 +1270,7 @@ export function KnowledgeBaseChat() {
     input,
     patchRuntime,
     refreshSessions,
+    writeRuntimes,
     startChatListener,
     uploadedImages,
   ]);
@@ -1330,7 +1354,7 @@ export function KnowledgeBaseChat() {
     if (!currentSession || currentSession.mode !== nextMode) {
       // 切到另一模式的新 draft;现有 runtime(含后台流式)保留在 map 中
       const newDraft = generateDraftId();
-      setSessionRuntimes((prev) => ({
+      writeRuntimes((prev) => ({
         ...prev,
         [newDraft]: createInitialRuntime({
           mode: nextMode,
@@ -1348,7 +1372,7 @@ export function KnowledgeBaseChat() {
     } else {
       patchRuntime(currentKey, { mode: nextMode });
     }
-  }, [patchRuntime, sessions]);
+  }, [patchRuntime, sessions, writeRuntimes]);
 
   const handleModelChange = useCallback(async (nextModelId: string | null) => {
     const currentKey = selectedSessionIdRef.current ?? draftIdRef.current;
@@ -1386,10 +1410,15 @@ export function KnowledgeBaseChat() {
   const latestAssistantMessage = [...messages].reverse().find((message) => message.role === "assistant") ?? null;
   const inspectorMessage = selectedInspectorMessage ?? latestAssistantMessage;
   const inspectorNoteSources = inspectorMessage?.sources ?? [];
+  const inspectorWebSources = inspectorMessage?.webSources ?? [];
   const inspectorModelSupplements = extractModelSupplements(inspectorMessage?.content ?? "");
 
   useEffect(() => {
     if (inspectorMessage?.status === "streaming") return;
+    if (inspectorWebSources.length > 0 && inspectorNoteSources.length === 0) {
+      setSourceInspectorTab("web");
+      return;
+    }
     if (inspectorModelSupplements.length > 0 && inspectorNoteSources.length === 0) {
       setSourceInspectorTab("model");
       return;
@@ -1397,7 +1426,7 @@ export function KnowledgeBaseChat() {
     if (inspectorNoteSources.length > 0) {
       setSourceInspectorTab("notes");
     }
-  }, [inspectorMessage?.id, inspectorMessage?.status]);
+  }, [inspectorMessage?.id, inspectorMessage?.status, inspectorWebSources.length, inspectorNoteSources.length, inspectorModelSupplements.length]);
 
   useEffect(() => {
     if (!selectedSessionId || messages.length === 0 || streaming) return;
@@ -1989,7 +2018,7 @@ export function KnowledgeBaseChat() {
                       setShowModelDropdown(false);
                       setShowPromptDropdown(false);
                     }}
-                    title="开启后，笔记证据不足时可用模型知识补充通用事实（官网、定义、价格、联系方式等）"
+                    title="开启后，直接用百度搜索引擎检索网页，并在笔记证据不足时补充通用事实"
                     className={cn(
                       "flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs border transition-colors cursor-pointer",
                       enableSupplement
@@ -2083,7 +2112,7 @@ export function KnowledgeBaseChat() {
                     {([
                       { id: "notes" as const, label: "笔记", count: inspectorNoteSources.length },
                       { id: "model" as const, label: "模型知识", count: inspectorModelSupplements.length },
-                      { id: "web" as const, label: "网页补充", count: 0 },
+                      { id: "web" as const, label: "网页补充", count: inspectorWebSources.length },
                     ]).map((tab) => (
                       <button
                         key={tab.id}
@@ -2158,18 +2187,22 @@ export function KnowledgeBaseChat() {
                   {sourceInspectorTab === "model" && (
                     inspectorModelSupplements.length === 0 ? (
                       <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
-                        当前回答没有模型知识补充。开启「联网」后，若笔记证据不足且问题属于通用事实，模型会以 [补充·模型] 标注补充内容。
+                        当前回答没有模型知识补充。开启「联网」后，若笔记和网页都覆盖不到，模型会以 [补充·模型] 标注补充内容。
                       </div>
                     ) : (
                       inspectorModelSupplements.map((item, index) => {
                         const key = `${inspectorMessage?.id ?? "none"}-model-${index}`;
                         const expanded = Boolean(expandedSupplementKeys[key]);
                         return (
-                          <button
+                          <div
                             key={key}
-                            onClick={() => setExpandedSupplementKeys((prev) => ({ ...prev, [key]: !prev[key] }))}
-                            className="w-full text-left p-3 rounded-xl border border-amber-200/80 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-900/10 transition-all cursor-pointer"
+                            className="w-full text-left p-3 rounded-xl border border-amber-200/80 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-900/10 transition-all"
                           >
+                            <button
+                              type="button"
+                              onClick={() => setExpandedSupplementKeys((prev) => ({ ...prev, [key]: !prev[key] }))}
+                              className="w-full text-left cursor-pointer"
+                            >
                             <div className="flex items-center justify-between gap-2">
                               <div className="flex items-center gap-2 text-xs font-medium text-amber-700 dark:text-amber-300">
                                 <Sparkles className="w-3.5 h-3.5 flex-shrink-0" />
@@ -2177,23 +2210,56 @@ export function KnowledgeBaseChat() {
                               </div>
                               <ChevronDown className={cn("w-3.5 h-3.5 text-amber-500 transition-transform", expanded && "rotate-180")} />
                             </div>
+                            </button>
                             <div className={cn("mt-2 text-xs leading-6 text-slate-600 dark:text-slate-400", !expanded && "line-clamp-2")}>
-                              {item.sentence}
+                              {renderDecoratedReactNode(item.sentence, { enableHashtags: false, enableTimestampRanges: false })}
                             </div>
                             {expanded && (
                               <div className="mt-2 text-[11px] text-slate-400 dark:text-slate-500">
                                 来源：模型知识 · 非笔记原文
                               </div>
                             )}
-                          </button>
+                          </div>
                         );
                       })
                     )
                   )}
                   {sourceInspectorTab === "web" && (
-                    <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
-                      本期尚未接入网页检索。开启「联网」后，当前会在证据不足时用模型知识补充通用事实。
-                    </div>
+                    inspectorWebSources.length === 0 ? (
+                      <div className="px-2 py-6 text-center text-xs text-slate-500 dark:text-slate-500 leading-6">
+                        当前回答没有网页检索结果。开启「联网」后，会用百度搜索引擎检索官网、新闻和通用事实。
+                      </div>
+                    ) : (
+                      inspectorWebSources.map((source) => (
+                        <a
+                          key={source.id || `${source.url}-${source.rank}`}
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="block w-full text-left p-3 rounded-xl border border-emerald-200/80 dark:border-emerald-800/60 bg-emerald-50/40 dark:bg-emerald-900/10 transition-all"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 text-xs font-medium text-emerald-700 dark:text-emerald-300">
+                                <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-md border border-emerald-200 bg-emerald-50 text-[11px] font-medium text-emerald-600 leading-none flex-shrink-0 dark:border-emerald-800/70 dark:bg-emerald-900/25 dark:text-emerald-200">
+                                  {source.rank}
+                                </span>
+                                <Globe className="w-3.5 h-3.5 flex-shrink-0" />
+                                <span className="truncate">{source.title}</span>
+                              </div>
+                              {showSourcesExpanded && source.snippet && (
+                                <div className="mt-2 text-xs leading-6 text-slate-600 dark:text-slate-400 line-clamp-5">
+                                  {source.snippet}
+                                </div>
+                              )}
+                              <div className="mt-2 text-[11px] text-emerald-600/80 dark:text-emerald-400/80 truncate">
+                                {source.url}
+                              </div>
+                            </div>
+                          </div>
+                        </a>
+                      ))
+                    )
                   )}
                 </div>
               </section>

@@ -14,6 +14,35 @@ pub struct KnowledgeSearchResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnowledgeWebSearchResult {
+    pub id: String,
+    pub rank: i32,
+    pub title: String,
+    pub url: String,
+    pub snippet: String,
+    pub provider: String,
+    pub query_text: Option<String>,
+    pub retrieved_at: String,
+    pub verified: bool,
+}
+
+impl From<crate::db::KnowledgeChatWebSource> for KnowledgeWebSearchResult {
+    fn from(source: crate::db::KnowledgeChatWebSource) -> Self {
+        Self {
+            id: source.id,
+            rank: source.rank,
+            title: source.title,
+            url: source.url,
+            snippet: source.snippet,
+            provider: source.provider,
+            query_text: source.query_text,
+            retrieved_at: source.retrieved_at,
+            verified: source.verified,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KnowledgeIndexStatusResponse {
     pub note_id: String,
     pub note_title: String,
@@ -85,6 +114,7 @@ pub struct KnowledgeChatSessionDetail {
 pub struct KnowledgeChatMessageRecord {
     pub message: KnowledgeChatMessage,
     pub sources: Vec<KnowledgeChatMessageSourceRecord>,
+    pub web_sources: Vec<KnowledgeWebSearchResult>,
     pub agent_run: Option<KnowledgeAgentRunRecord>,
 }
 
@@ -169,6 +199,9 @@ pub enum KnowledgeChatEvent {
     },
     ContextFound {
         sources: Vec<KnowledgeSearchResult>,
+    },
+    WebContextFound {
+        sources: Vec<KnowledgeWebSearchResult>,
     },
     TraceStep {
         run_id: String,

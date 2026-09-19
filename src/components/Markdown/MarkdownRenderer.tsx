@@ -113,6 +113,16 @@ function MarkdownRendererImpl({
       h4: renderHeading("h4"),
       h5: renderHeading("h5"),
       h6: renderHeading("h6"),
+      a: ({ href, children }) => (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {renderDecoratedReactNode(children, { ...decorationOptions, enableAutolinks: false }, "a-content")}
+        </a>
+      ),
       p: ({ children }) => <p>{renderDecorated(children, "p-content")}</p>,
       strong: ({ children }) => <strong>{renderDecorated(children, "strong-content")}</strong>,
       em: ({ children }) => <em>{renderDecorated(children, "em-content")}</em>,

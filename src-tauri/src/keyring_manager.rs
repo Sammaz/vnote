@@ -18,6 +18,7 @@ pub enum KeyType {
     AiConfig,
     EmbeddingConfig,
     RerankerConfig,
+    SearchConfig,
 }
 
 impl KeyType {
@@ -26,6 +27,7 @@ impl KeyType {
             KeyType::AiConfig => "ai_config",
             KeyType::EmbeddingConfig => "embedding_config",
             KeyType::RerankerConfig => "reranker_config",
+            KeyType::SearchConfig => "search_config",
         }
     }
 }

@@ -1,7 +1,7 @@
 import React from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { parseEvidenceRanks, renderDecoratedReactNode } from "./markdownRendererUtils";
+import { parseEvidenceRanks, renderDecoratedReactNode, splitTextByUrls } from "./markdownRendererUtils";
 
 describe("parseEvidenceRanks", () => {
   it("解析单个证据编号", () => {
@@ -78,3 +78,40 @@ describe("model supplement decoration", () => {
   });
 });
 
+
+describe("url autolink decoration", () => {
+  it("splits www urls from surrounding text", () => {
+    expect(splitTextByUrls("快手官方网址是 www.kuaishou.com [补充·模型]")).toEqual([
+      { text: "快手官方网址是 " },
+      { text: "www.kuaishou.com", href: "https://www.kuaishou.com" },
+      { text: " [补充·模型]" },
+    ]);
+  });
+
+  it("renders www urls as clickable links", () => {
+    render(React.createElement(
+      React.Fragment,
+      null,
+      renderDecoratedReactNode("快手官方网址是 www.kuaishou.com [补充·模型]", {}),
+    ));
+
+    const link = screen.getByRole("link", { name: "www.kuaishou.com" });
+    expect(link).toHaveAttribute("href", "https://www.kuaishou.com");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(screen.getByText("补充·模型")).toBeInTheDocument();
+  });
+
+  it("does not wrap urls that are already inside anchors", () => {
+    render(React.createElement(
+      React.Fragment,
+      null,
+      renderDecoratedReactNode(
+        React.createElement("a", { href: "https://www.kuaishou.com" }, "www.kuaishou.com"),
+        {},
+      ),
+    ));
+
+    expect(screen.getAllByRole("link")).toHaveLength(1);
+    expect(screen.getByRole("link")).toHaveAttribute("href", "https://www.kuaishou.com");
+  });
+});

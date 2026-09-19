@@ -1,5 +1,5 @@
 import {
-    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, MessageSquareText, Search, HardDrive, ImagePlus, X as XIcon, SlidersHorizontal, Focus, ScanText, RefreshCw, ListChecks
+    ArrowLeft, Monitor, Moon, Palette, Settings as SettingsIcon, Sun, Bot, Eye, EyeOff, Loader2, Plus, Trash2, Star, Database, Sparkles, MessageSquareText, Search, HardDrive, ImagePlus, X as XIcon, SlidersHorizontal, Focus, ScanText, RefreshCw, ListChecks, Globe
 } from "lucide-react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useGlassBg } from "./hooks/useGlassBg";
@@ -10,7 +10,7 @@ import { useSettings } from "./context/SettingsContext";
 import { DataManagementSection } from "./components/Settings/DataManagementSection";
 import { InitializationManagementSection } from "./components/Settings/InitializationManagementSection";
 import { message } from "./utils/message";
-import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptConfig, ReasoningEffort } from "./types";
+import type { AiConfig, EmbeddingConfig, RerankerConfig, PromptConfig, ReasoningEffort, SearchConfig } from "./types";
 
 interface SettingsPageProps {
     currentTheme: "light" | "dark";
@@ -19,7 +19,7 @@ interface SettingsPageProps {
 }
 
 type SettingsTab = "general" | "model" | "prompt" | "data-management" | "initialization-management";
-type EditingType = "ai" | "embedding" | "reranker" | null;
+type EditingType = "ai" | "embedding" | "reranker" | "search" | null;
 
 export default function SettingsPage({ currentTheme, onThemeChange, onClose }: SettingsPageProps) {
     const { notes, refreshAiConfigs, refreshPromptConfigs } = useApp();
@@ -45,6 +45,11 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     const [editingRerankerConfig, setEditingRerankerConfig] = useState<RerankerConfig | null>(null);
     const [deletingRerankerConfigId, setDeletingRerankerConfigId] = useState<string | null>(null);
 
+    // Search config state
+    const [searchConfigs, setSearchConfigs] = useState<SearchConfig[]>([]);
+    const [editingSearchConfig, setEditingSearchConfig] = useState<SearchConfig | null>(null);
+    const [deletingSearchConfigId, setDeletingSearchConfigId] = useState<string | null>(null);
+
     // Shared editing state
     const [editingType, setEditingType] = useState<EditingType>(null);
     const [apiKeyVisible, setApiKeyVisible] = useState(false);
@@ -63,17 +68,19 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
     useEffect(() => {
         const loadSettings = async () => {
             try {
-                const [tray, aiCfgs, embCfgs, rerCfgs, promptCfgs] = await Promise.all([
+                const [tray, aiCfgs, embCfgs, rerCfgs, searchCfgs, promptCfgs] = await Promise.all([
                     invoke<boolean>("get_tray_enabled"),
                     invoke<AiConfig[]>("get_ai_configs"),
                     invoke<EmbeddingConfig[]>("get_embedding_configs"),
                     invoke<RerankerConfig[]>("get_reranker_configs"),
+                    invoke<SearchConfig[]>("get_search_configs"),
                     invoke<PromptConfig[]>("get_prompt_configs"),
                 ]);
                 setTrayEnabled(tray);
                 setAiConfigs(aiCfgs);
                 setEmbeddingConfigs(embCfgs);
                 setRerankerConfigs(rerCfgs);
+                setSearchConfigs(searchCfgs);
                 setPromptConfigs(promptCfgs);
             } catch (error) {
                 console.error("Failed to load settings:", error);
@@ -420,6 +427,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         setEditingAiConfig(null);
         setEditingEmbeddingConfig(null);
         setEditingRerankerConfig(null);
+        setEditingSearchConfig(null);
         setEditingPromptConfig(null);
         setApiKeyVisible(false);
     };
@@ -434,25 +442,106 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         setEditingEmbeddingConfig(config);
     };
 
+
+    // Search Config handlers
+    const createEmptySearchConfig = (): SearchConfig => ({
+        id: "",
+        title: "百度 AI 搜索",
+        provider: "baidu",
+        base_url: "https://qianfan.baidubce.com/v2",
+        api_key: "",
+        sort_order: searchConfigs.length,
+        is_default: false
+    });
+
+    const saveSearchConfig = async () => {
+        if (!editingSearchConfig) return;
+        try {
+            if (editingSearchConfig.id === "") {
+                const newId = await invoke<string>("create_search_config", { config: editingSearchConfig });
+                const isFirst = searchConfigs.length === 0;
+                setSearchConfigs([...searchConfigs, { ...editingSearchConfig, id: newId, is_default: isFirst }]);
+            } else {
+                await invoke("update_search_config", { config: editingSearchConfig });
+                setSearchConfigs(searchConfigs.map(c => c.id === editingSearchConfig.id ? editingSearchConfig : c));
+            }
+            closeEditor();
+        } catch (error) {
+            console.error("Failed to save search config:", error);
+            message.error(String(error));
+        }
+    };
+
+    const deleteSearchConfig = async (id: string) => {
+        try {
+            const deletingConfig = searchConfigs.find(c => c.id === id);
+            await invoke("delete_search_config", { id });
+            const remaining = searchConfigs.filter(c => c.id !== id);
+            if (deletingConfig?.is_default && remaining.length > 0) {
+                remaining[0].is_default = true;
+            }
+            setSearchConfigs(remaining);
+            setDeletingSearchConfigId(null);
+        } catch (error) {
+            console.error("Failed to delete search config:", error);
+        }
+    };
+
+    const toggleDefaultSearchConfig = async (id: string, currentIsDefault: boolean) => {
+        try {
+            if (currentIsDefault) {
+                if (searchConfigs.length <= 1) return;
+                const otherConfig = searchConfigs.find(c => c.id !== id);
+                if (otherConfig) {
+                    await invoke("set_default_search_config", { id: otherConfig.id });
+                    setSearchConfigs(searchConfigs.map(c => ({ ...c, is_default: c.id === otherConfig.id })));
+                }
+            } else {
+                await invoke("set_default_search_config", { id });
+                setSearchConfigs(searchConfigs.map(c => ({ ...c, is_default: c.id === id })));
+            }
+        } catch (error) {
+            console.error("Failed to toggle default search config:", error);
+        }
+    };
+
     const openRerankerEditor = (config: RerankerConfig) => {
         setEditingType("reranker");
         setEditingRerankerConfig(config);
     };
 
+    const openSearchEditor = (config: SearchConfig) => {
+        setEditingType("search");
+        setEditingSearchConfig(config);
+        setApiKeyVisible(false);
+    };
+
     const testApiConfig = async () => {
         const config = getCurrentEditingConfig();
-        if (!config?.base_url || !config?.model) return;
+        if (!config?.base_url) return;
+        if (editingType !== "search" && !("model" in config && config.model)) return;
+        if (editingType === "search" && !config.api_key) return;
 
         setTestingApi(true);
 
         try {
-            await invoke("test_api_connection", {
-                baseUrl: config.base_url,
-                apiKey: config.api_key || "",
-                model: config.model,
-                configType: editingType || "ai",
-            });
-            message.success("连接成功");
+            if (editingType === "search") {
+                const searchConfig = config as SearchConfig;
+                const result = await invoke<string>("test_search_connection", {
+                    provider: searchConfig.provider || "baidu",
+                    baseUrl: searchConfig.base_url,
+                    apiKey: searchConfig.api_key || "",
+                });
+                message.success(result || "连接成功");
+            } else {
+                await invoke("test_api_connection", {
+                    baseUrl: config.base_url,
+                    apiKey: config.api_key || "",
+                    model: "model" in config ? config.model : "",
+                    configType: editingType || "ai",
+                });
+                message.success("连接成功");
+            }
         } catch (error) {
             message.error(String(error));
         } finally {
@@ -473,16 +562,19 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         if (editingType === "ai") return editingAiConfig;
         if (editingType === "embedding") return editingEmbeddingConfig;
         if (editingType === "reranker") return editingRerankerConfig;
+        if (editingType === "search") return editingSearchConfig;
         return null;
     };
 
-    const setCurrentEditingConfig = (updates: Partial<AiConfig | EmbeddingConfig | RerankerConfig>) => {
+    const setCurrentEditingConfig = (updates: Partial<AiConfig | EmbeddingConfig | RerankerConfig | SearchConfig>) => {
         if (editingType === "ai" && editingAiConfig) {
             setEditingAiConfig({ ...editingAiConfig, ...updates });
         } else if (editingType === "embedding" && editingEmbeddingConfig) {
             setEditingEmbeddingConfig({ ...editingEmbeddingConfig, ...updates });
         } else if (editingType === "reranker" && editingRerankerConfig) {
             setEditingRerankerConfig({ ...editingRerankerConfig, ...updates });
+        } else if (editingType === "search" && editingSearchConfig) {
+            setEditingSearchConfig({ ...editingSearchConfig, ...updates });
         }
     };
 
@@ -490,6 +582,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         if (editingType === "ai") saveAiConfig();
         else if (editingType === "embedding") saveEmbeddingConfig();
         else if (editingType === "reranker") saveRerankerConfig();
+        else if (editingType === "search") saveSearchConfig();
     };
 
     const getEditorTitle = () => {
@@ -498,6 +591,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         if (editingType === "ai") return isNew ? "新增对话模型" : "编辑对话模型";
         if (editingType === "embedding") return isNew ? "新增 Embedding 模型" : "编辑 Embedding 模型";
         if (editingType === "reranker") return isNew ? "新增 Reranker 模型" : "编辑 Reranker 模型";
+        if (editingType === "search") return isNew ? "新增百度搜索" : "编辑百度搜索";
         return "";
     };
 
@@ -505,6 +599,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         if (editingType === "ai") return "配置用于对话的 AI 模型接口";
         if (editingType === "embedding") return "配置用于向量化的 Embedding 模型接口";
         if (editingType === "reranker") return "配置用于重排序的 Reranker 模型接口";
+        if (editingType === "search") return "配置百度千帆 AI 搜索，用于知识库对话联网检索";
         return "";
     };
 
@@ -526,7 +621,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
         onDelete,
         onToggleDefault
     }: {
-        config: { id: string; title: string; model: string; base_url: string; is_default: boolean };
+        config: { id: string; title: string; model?: string; base_url: string; is_default: boolean };
         icon: typeof Bot;
         onEdit: () => void;
         onDelete: () => void;
@@ -1177,7 +1272,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     type="text"
                                     value={currentConfig?.title || ""}
                                     onChange={e => setCurrentEditingConfig({ title: e.target.value })}
-                                    placeholder={editingType === "ai" ? "例如：OpenAI、DeepSeek" : editingType === "embedding" ? "例如：OpenAI Embedding" : "例如：Cohere Reranker"}
+                                    placeholder={editingType === "ai" ? "例如：OpenAI、DeepSeek" : editingType === "embedding" ? "例如：OpenAI Embedding" : editingType === "search" ? "例如：百度 AI 搜索" : "例如：Cohere Reranker"}
                                     className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput}`}
                                 />
                                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">为此配置设置一个易于识别的名称</p>
@@ -1189,7 +1284,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                     type="text"
                                     value={currentConfig?.base_url || ""}
                                     onChange={e => setCurrentEditingConfig({ base_url: e.target.value })}
-                                    placeholder="例如：https://api.openai.com/v1"
+                                    placeholder={editingType === "search" ? "例如：https://qianfan.baidubce.com/v2" : "例如：https://api.openai.com/v1"}
                                     className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm font-mono ${glassInput}`}
                                 />
                                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">API 服务的基础地址</p>
@@ -1202,7 +1297,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                         type={apiKeyVisible ? "text" : "password"}
                                         value={currentConfig?.api_key || ""}
                                         onChange={e => setCurrentEditingConfig({ api_key: e.target.value })}
-                                        placeholder="sk-..."
+                                        placeholder={editingType === "search" ? "bce-v3/ALTAK-..." : "sk-..."}
                                         className={`flex-1 px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm font-mono ${glassInput}`}
                                     />
                                     <button
@@ -1215,17 +1310,32 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                                 </div>
                             </div>
 
+                            {editingType !== "search" && (
                             <div className="flex flex-col w-full">
                                 <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">模型名称</div>
                                 <input
                                     type="text"
-                                    value={currentConfig?.model || ""}
+                                    value={"model" in (currentConfig ?? {}) ? (currentConfig as { model?: string }).model || "" : ""}
                                     onChange={e => setCurrentEditingConfig({ model: e.target.value })}
                                     placeholder={editingType === "ai" ? "例如：gpt-4o、deepseek-chat" : editingType === "embedding" ? "例如：text-embedding-3-small" : "例如：rerank-multilingual-v3.0"}
                                     className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm font-mono ${glassInput}`}
                                 />
                                 <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">要使用的模型 ID</p>
                             </div>
+                            )}
+
+                            {editingType === "search" && (
+                                <div className="flex flex-col w-full">
+                                    <div className="text-sm mb-2 font-bold text-slate-900 dark:text-slate-100">搜索服务</div>
+                                    <input
+                                        type="text"
+                                        value="百度千帆 AI 搜索"
+                                        disabled
+                                        className={`w-full px-3 py-2 rounded-md border border-slate-200 dark:border-slate-600 text-sm ${glassInput} opacity-80`}
+                                    />
+                                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">当前仅接入百度千帆 AI 搜索（web_search），请填写千帆 API Key</p>
+                                </div>
+                            )}
 
                             {editingType === "ai" && (
                                 <div className="flex flex-col w-full">
@@ -1291,7 +1401,7 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
 
                             <button
                                 onClick={testApiConfig}
-                                disabled={testingApi || !currentConfig?.base_url || !currentConfig?.model}
+                                disabled={testingApi || !currentConfig?.base_url || (editingType === "search" ? !currentConfig?.api_key : !("model" in (currentConfig ?? {}) && (currentConfig as AiConfig | EmbeddingConfig | RerankerConfig).model))}
                                 className="w-full px-4 py-2.5 text-sm font-medium rounded-md transition-colors flex items-center justify-center gap-2 border border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                             >
                                 {testingApi && <Loader2 size={14} className="animate-spin" />}
@@ -1385,6 +1495,43 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                             </div>
                         </div>
 
+
+                        {/* Search Config Section */}
+                        <div>
+                            <div className="flex items-center justify-between mb-4">
+                                <div className="flex items-center gap-2">
+                                    <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">联网搜索</h3>
+                                    <span className="px-2 py-0.5 text-xs rounded bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400">百度</span>
+                                </div>
+                                <button
+                                    onClick={() => openSearchEditor(createEmptySearchConfig())}
+                                    className="text-sm text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+                                >
+                                    <Plus size={14} /> 新增配置
+                                </button>
+                            </div>
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mb-3">
+                                知识库「联网」默认使用百度搜索引擎，无需配置。这里的千帆 API 是可选增强。
+                            </p>
+                            <div className="space-y-3">
+                                {searchConfigs.map((config) => (
+                                    <ConfigListItem
+                                        key={config.id}
+                                        config={{ ...config, model: "百度 AI 搜索" }}
+                                        icon={Globe}
+                                        onEdit={() => openSearchEditor(config)}
+                                        onDelete={() => setDeletingSearchConfigId(config.id)}
+                                        onToggleDefault={() => toggleDefaultSearchConfig(config.id, config.is_default)}
+                                    />
+                                ))}
+                                {searchConfigs.length === 0 && (
+                                    <div className="text-center py-6 text-slate-500 text-sm border border-dashed border-slate-200 dark:border-slate-700 rounded-lg">
+                                        未配置时会默认走百度搜索引擎。如需改用千帆 API，点击上方新增
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
                         {/* Reranker Config Section */}
                         <div>
                             <div className="flex items-center justify-between mb-4">
@@ -1442,6 +1589,13 @@ export default function SettingsPage({ currentTheme, onThemeChange, onClose }: S
                         title={rerankerConfigs.find(c => c.id === deletingRerankerConfigId)?.title || "未命名"}
                         onCancel={() => setDeletingRerankerConfigId(null)}
                         onConfirm={() => deleteRerankerConfig(deletingRerankerConfigId)}
+                    />
+                )}
+                {deletingSearchConfigId !== null && (
+                    <DeleteModal
+                        title={searchConfigs.find(c => c.id === deletingSearchConfigId)?.title || "未命名"}
+                        onCancel={() => setDeletingSearchConfigId(null)}
+                        onConfirm={() => deleteSearchConfig(deletingSearchConfigId)}
                     />
                 )}
                 {deletingPromptConfigId !== null && (

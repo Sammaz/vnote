@@ -7,6 +7,18 @@ export interface KnowledgeSearchResult {
   score: number;
 }
 
+export interface KnowledgeWebSearchResult {
+  id: string;
+  rank: number;
+  title: string;
+  url: string;
+  snippet: string;
+  provider: string;
+  query_text: string | null;
+  retrieved_at: string;
+  verified: boolean;
+}
+
 // 知识库索引状态
 export interface KnowledgeIndexStatus {
   note_id: string;
@@ -125,6 +137,7 @@ export interface KnowledgeChatMessageRecord {
     updated_at: string;
   };
   sources: KnowledgeChatMessageSourceRecord[];
+  web_sources: KnowledgeWebSearchResult[];
   agent_run: KnowledgeAgentRunRecord | null;
 }
 
@@ -162,6 +175,7 @@ export type KnowledgeChatEvent =
       total_iterations: number;
     }
   | { status: "ContextFound"; sources: KnowledgeSearchResult[] }
+  | { status: "WebContextFound"; sources: KnowledgeWebSearchResult[] }
   | { status: "TraceStep"; run_id: string; step: KnowledgeAgentTraceStep }
   | { status: "Streaming"; content: string }
   | {

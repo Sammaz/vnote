@@ -14,6 +14,96 @@ export interface MarkdownDecorationOptions {
   enableHashtags?: boolean;
   searchQuery?: string;
   enableEvidenceCitations?: boolean;
+  enableAutolinks?: boolean;
+}
+
+const URL_FIND_RE = /\b(?:https?:\/\/|www\.)[^\s<>"'`()[\]{}\uFF08\uFF09\u3010\u3011\u300A\u300B]+/gi;
+const TRAILING_URL_PUNCT_RE = /[.,;:!?\u3002\uFF0C\uFF1B\uFF1A\uFF01\uFF1F\u3001]+$/;
+
+export function normalizeExternalHref(raw: string): string | null {
+  const core = raw.trim().replace(TRAILING_URL_PUNCT_RE, "");
+  if (!core) return null;
+  const href = /^www\./i.test(core) ? `https://${core}` : core;
+  try {
+    const url = new URL(href);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+    return href;
+  } catch {
+    return null;
+  }
+}
+
+export function splitTextByUrls(text: string): Array<{ text: string; href?: string }> {
+  const result: Array<{ text: string; href?: string }> = [];
+  const matcher = new RegExp(URL_FIND_RE.source, URL_FIND_RE.flags);
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = matcher.exec(text)) !== null) {
+    const raw = match[0];
+    const trailing = raw.match(TRAILING_URL_PUNCT_RE)?.[0] ?? "";
+    const core = trailing ? raw.slice(0, -trailing.length) : raw;
+    const href = normalizeExternalHref(core);
+    if (match.index > lastIndex) {
+      result.push({ text: text.slice(lastIndex, match.index) });
+    }
+    if (href) {
+      result.push({ text: core, href });
+      if (trailing) {
+        result.push({ text: trailing });
+      }
+    } else {
+      result.push({ text: raw });
+    }
+    lastIndex = match.index + raw.length;
+  }
+
+  if (lastIndex < text.length) {
+    result.push({ text: text.slice(lastIndex) });
+  }
+
+  return result.length > 0 ? result : [{ text }];
+}
+
+function renderHighlightedAutolinks(
+  text: string,
+  options: MarkdownDecorationOptions,
+  keyPrefix: string,
+): React.ReactNode {
+  if (options.enableAutolinks === false) {
+    return highlightText(text, options.searchQuery, keyPrefix);
+  }
+
+  const parts = splitTextByUrls(text);
+  if (parts.length === 1 && !parts[0]?.href) {
+    return highlightText(text, options.searchQuery, keyPrefix);
+  }
+
+  return parts.map((part, index) => {
+    const highlighted = highlightText(part.text, options.searchQuery, `${keyPrefix}-${index}`);
+    if (!part.href) {
+      return (
+        <React.Fragment key={`${keyPrefix}-part-${index}`}>
+          {highlighted}
+        </React.Fragment>
+      );
+    }
+
+    return (
+      <a
+        key={`${keyPrefix}-url-${index}`}
+        href={part.href}
+        target="_blank"
+        rel="noreferrer"
+        className="text-blue-500 dark:text-blue-400 hover:underline break-all"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {highlighted}
+      </a>
+    );
+  });
 }
 
 export function parseTimestampToSeconds(value: string): number | null {
@@ -167,7 +257,7 @@ function renderDecoratedString(
     if (match.index > lastIndex) {
       result.push(
         <React.Fragment key={`${keyPrefix}-text-${partIndex++}`}>
-          {highlightText(value.slice(lastIndex, match.index), options.searchQuery, `${keyPrefix}-highlight-${partIndex}`)}
+          {renderHighlightedAutolinks(value.slice(lastIndex, match.index), options, `${keyPrefix}-highlight-${partIndex}`)}
         </React.Fragment>,
       );
     }
@@ -264,7 +354,7 @@ function renderDecoratedString(
   if (lastIndex < value.length) {
     result.push(
       <React.Fragment key={`${keyPrefix}-tail-${partIndex++}`}>
-        {highlightText(value.slice(lastIndex), options.searchQuery, `${keyPrefix}-tail-highlight-${partIndex}`)}
+        {renderHighlightedAutolinks(value.slice(lastIndex), options, `${keyPrefix}-tail-highlight-${partIndex}`)}
       </React.Fragment>,
     );
   }
@@ -297,7 +387,22 @@ export function renderDecoratedReactNode(
     ));
   }
 
-  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+  if (React.isValidElement<{ children?: React.ReactNode; onClick?: (event: React.MouseEvent<HTMLAnchorElement>) => void; target?: string; rel?: string }>(node)) {
+    if (node.type === "a") {
+      return React.cloneElement(node, {
+        ...node.props,
+        target: node.props.target ?? "_blank",
+        rel: node.props.rel ?? "noreferrer",
+        onClick: (event: React.MouseEvent<HTMLAnchorElement>) => {
+          event.stopPropagation();
+          node.props.onClick?.(event);
+        },
+        children: node.props.children
+          ? renderDecoratedReactNode(node.props.children, { ...options, enableAutolinks: false }, `${keyPrefix}-child`)
+          : node.props.children,
+      });
+    }
+
     if (!node.props.children) {
       return node;
     }

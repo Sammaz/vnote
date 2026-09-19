@@ -227,6 +227,14 @@ pub fn validate_api_key(api_key: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// 验证搜索服务类型
+pub fn validate_search_provider(provider: &str) -> Result<(), String> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "tavily" | "bocha" | "baidu" | "custom" => Ok(()),
+        _ => Err("不支持的搜索服务，当前请选择百度 AI 搜索".to_string()),
+    }
+}
+
 /// 验证模型名称
 ///
 /// # 规则
@@ -369,6 +377,13 @@ mod tests {
         // 空密钥
         assert!(validate_api_key("").is_err());
         assert!(validate_api_key("   ").is_err());
+    }
+
+    #[test]
+    fn test_validate_search_provider() {
+        assert!(validate_search_provider("baidu").is_ok());
+        assert!(validate_search_provider("Tavily").is_ok());
+        assert!(validate_search_provider("unknown").is_err());
     }
 
     #[test]

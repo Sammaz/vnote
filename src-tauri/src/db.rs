@@ -362,6 +362,32 @@ pub struct RerankerConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SearchConfig {
+    pub id: String,
+    pub title: String,
+    pub provider: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub sort_order: i32,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct KnowledgeChatWebSource {
+    pub id: String,
+    pub message_id: String,
+    pub rank: i32,
+    pub title: String,
+    pub url: String,
+    pub snippet: String,
+    pub provider: String,
+    pub query_text: Option<String>,
+    pub retrieved_at: String,
+    pub verified: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PromptConfig {
     pub id: String,
     pub title: String,
@@ -3045,6 +3071,254 @@ impl Database {
         self.get_knowledge_chat_preferences()?
             .ok_or(rusqlite::Error::QueryReturnedNoRows)
     }
+
+    // Search Config CRUD
+    fn map_search_config_row(row: &rusqlite::Row<'_>) -> SqliteResult<SearchConfig> {
+        let config_id: String = row.get(0)?;
+        let db_api_key: String = row.get(4)?;
+        let api_key = crate::keyring_manager::get_api_key(
+            crate::keyring_manager::KeyType::SearchConfig,
+            &config_id,
+        ).unwrap_or_else(|_| {
+            if !db_api_key.is_empty() && db_api_key != API_KEY_MIGRATED_PLACEHOLDER {
+                let _ = crate::keyring_manager::store_api_key(
+                    crate::keyring_manager::KeyType::SearchConfig,
+                    &config_id,
+                    &db_api_key,
+                );
+            }
+            db_api_key
+        });
+        Ok(SearchConfig {
+            id: config_id,
+            title: row.get(1)?,
+            provider: row.get(2)?,
+            base_url: row.get(3)?,
+            api_key,
+            sort_order: row.get(5)?,
+            is_default: row.get::<_, i64>(6)? != 0,
+        })
+    }
+
+    pub fn get_all_search_configs(&self) -> SqliteResult<Vec<SearchConfig>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, provider, base_url, api_key, sort_order, is_default FROM search_configs ORDER BY is_default DESC, sort_order"
+        )?;
+        let configs = stmt.query_map([], Self::map_search_config_row)?;
+        configs.collect()
+    }
+
+    pub fn get_default_search_config(&self) -> SqliteResult<Option<SearchConfig>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, title, provider, base_url, api_key, sort_order, is_default FROM search_configs ORDER BY is_default DESC, sort_order LIMIT 1"
+        )?;
+        match stmt.query_row([], Self::map_search_config_row) {
+            Ok(config) => Ok(Some(config)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn create_search_config(&self, config: &SearchConfig) -> SqliteResult<String> {
+        let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM search_configs", [], |row| row.get(0))?;
+        let is_default = if count == 0 { 1 } else { config.is_default as i32 };
+        let db_api_key = if crate::keyring_manager::is_keyring_available() {
+            API_KEY_MIGRATED_PLACEHOLDER
+        } else {
+            &config.api_key
+        };
+        conn.execute(
+            "INSERT INTO search_configs (id, title, provider, base_url, api_key, sort_order, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            (&new_id, &config.title, &config.provider, &config.base_url, db_api_key, config.sort_order, is_default),
+        )?;
+        if crate::keyring_manager::is_keyring_available() {
+            let _ = crate::keyring_manager::store_api_key(
+                crate::keyring_manager::KeyType::SearchConfig,
+                &new_id,
+                &config.api_key,
+            );
+        }
+        Ok(new_id)
+    }
+
+    pub fn update_search_config(&self, config: &SearchConfig) -> SqliteResult<()> {
+        let conn = self.connection();
+        let db_api_key = if crate::keyring_manager::is_keyring_available() {
+            API_KEY_MIGRATED_PLACEHOLDER
+        } else {
+            &config.api_key
+        };
+        conn.execute(
+            "UPDATE search_configs SET title = ?1, provider = ?2, base_url = ?3, api_key = ?4, sort_order = ?5, is_default = ?6 WHERE id = ?7",
+            (&config.title, &config.provider, &config.base_url, db_api_key, config.sort_order, config.is_default as i32, &config.id),
+        )?;
+        if crate::keyring_manager::is_keyring_available() {
+            let _ = crate::keyring_manager::store_api_key(
+                crate::keyring_manager::KeyType::SearchConfig,
+                &config.id,
+                &config.api_key,
+            );
+        }
+        Ok(())
+    }
+
+    pub fn set_default_search_config(&self, id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("UPDATE search_configs SET is_default = 0", [])?;
+        conn.execute("UPDATE search_configs SET is_default = 1 WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn unset_default_search_config(&self, id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("UPDATE search_configs SET is_default = 0 WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    pub fn delete_search_config(&self, id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        let is_default: i64 = conn.query_row(
+            "SELECT is_default FROM search_configs WHERE id = ?1",
+            [id],
+            |row| row.get(0),
+        ).unwrap_or(0);
+        conn.execute("DELETE FROM search_configs WHERE id = ?1", [id])?;
+        let _ = crate::keyring_manager::delete_api_key(
+            crate::keyring_manager::KeyType::SearchConfig,
+            id,
+        );
+        if is_default != 0 {
+            conn.execute(
+                "UPDATE search_configs SET is_default = 1 WHERE id = (SELECT id FROM search_configs ORDER BY sort_order LIMIT 1)",
+                [],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn get_web_search_cache(&self, key: &str) -> SqliteResult<Option<(String, String)>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT results_json, expires_at FROM web_search_cache WHERE cache_key = ?1"
+        )?;
+        match stmt.query_row([key], |row| Ok((row.get(0)?, row.get(1)?))) {
+            Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    pub fn upsert_web_search_cache(
+        &self,
+        key: &str,
+        provider: &str,
+        query_text: &str,
+        results_json: &str,
+        expires_at: &str,
+    ) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "INSERT INTO web_search_cache (cache_key, provider, query_text, results_json, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(cache_key) DO UPDATE SET
+                provider = excluded.provider,
+                query_text = excluded.query_text,
+                results_json = excluded.results_json,
+                expires_at = excluded.expires_at",
+            rusqlite::params![key, provider, query_text, results_json, expires_at],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_web_search_cache(&self, key: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("DELETE FROM web_search_cache WHERE cache_key = ?1", [key])?;
+        Ok(())
+    }
+
+    pub fn delete_knowledge_chat_web_sources(&self, message_id: &str) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute("DELETE FROM knowledge_chat_web_sources WHERE message_id = ?1", [message_id])?;
+        Ok(())
+    }
+
+    pub fn create_knowledge_chat_web_source(
+        &self,
+        message_id: &str,
+        rank: i32,
+        title: &str,
+        url: &str,
+        snippet: &str,
+        provider: &str,
+        query_text: Option<&str>,
+        retrieved_at: &str,
+        verified: bool,
+    ) -> SqliteResult<KnowledgeChatWebSource> {
+        let conn = self.connection();
+        let new_id = snowflake::generate_id_string();
+        conn.execute(
+            "INSERT INTO knowledge_chat_web_sources (
+                id, message_id, rank, title, url, snippet, provider, query_text, retrieved_at, verified
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            rusqlite::params![
+                &new_id, message_id, rank, title, url, snippet, provider, query_text, retrieved_at, verified as i32
+            ],
+        )?;
+        self.get_knowledge_chat_web_source_by_id(&new_id)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    fn get_knowledge_chat_web_source_by_id(&self, id: &str) -> SqliteResult<Option<KnowledgeChatWebSource>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, message_id, rank, title, url, snippet, provider, query_text, retrieved_at, verified, created_at
+             FROM knowledge_chat_web_sources WHERE id = ?1"
+        )?;
+        match stmt.query_row([id], Self::map_web_source_row) {
+            Ok(source) => Ok(Some(source)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn map_web_source_row(row: &rusqlite::Row<'_>) -> SqliteResult<KnowledgeChatWebSource> {
+        Ok(KnowledgeChatWebSource {
+            id: row.get(0)?,
+            message_id: row.get(1)?,
+            rank: row.get(2)?,
+            title: row.get(3)?,
+            url: row.get(4)?,
+            snippet: row.get(5)?,
+            provider: row.get(6)?,
+            query_text: row.get(7)?,
+            retrieved_at: row.get(8)?,
+            verified: row.get::<_, i64>(9)? != 0,
+            created_at: row.get(10)?,
+        })
+    }
+
+    pub fn get_knowledge_chat_web_sources(&self, message_id: &str) -> SqliteResult<Vec<KnowledgeChatWebSource>> {
+        let conn = self.connection();
+        let mut stmt = conn.prepare(
+            "SELECT id, message_id, rank, title, url, snippet, provider, query_text, retrieved_at, verified, created_at
+             FROM knowledge_chat_web_sources WHERE message_id = ?1 ORDER BY rank ASC, rowid ASC"
+        )?;
+        let sources = stmt.query_map([message_id], Self::map_web_source_row)?;
+        sources.collect()
+    }
+
+    pub fn set_knowledge_chat_web_source_verified(&self, id: &str, verified: bool) -> SqliteResult<()> {
+        let conn = self.connection();
+        conn.execute(
+            "UPDATE knowledge_chat_web_sources SET verified = ?1 WHERE id = ?2",
+            rusqlite::params![verified as i32, id],
+        )?;
+        Ok(())
+    }
 }
 
 
@@ -4032,5 +4306,26 @@ mod tests {
             let markers_after = db.get_screenshot_markers(&note_id).expect("Failed to get markers");
             prop_assert!(markers_after.is_empty(), "Markers should be deleted with note");
         }
+    }
+
+    #[test]
+    fn test_search_config_round_trip() {
+        let (db, _temp_dir) = create_test_db();
+        let id = db.create_search_config(&SearchConfig {
+            id: String::new(),
+            title: "Baidu".to_string(),
+            provider: "baidu".to_string(),
+            base_url: "https://qianfan.baidubce.com/v2".to_string(),
+            api_key: "test-key".to_string(),
+            sort_order: 0,
+            is_default: false,
+        }).expect("create search config");
+        let configs = db.get_all_search_configs().expect("list search configs");
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].id, id);
+        assert!(configs[0].is_default);
+        assert_eq!(configs[0].provider, "baidu");
+        let default = db.get_default_search_config().expect("default search config");
+        assert_eq!(default.unwrap().id, id);
     }
 }

@@ -328,3 +328,42 @@ CREATE TABLE IF NOT EXISTS knowledge_chat_preferences (
     FOREIGN KEY (default_model_id) REFERENCES ai_configs(id) ON DELETE SET NULL,
     FOREIGN KEY (default_prompt_id) REFERENCES prompt_configs(id) ON DELETE SET NULL
 );
+
+
+CREATE TABLE IF NOT EXISTS search_configs (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'baidu',
+    base_url TEXT NOT NULL,
+    api_key TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    is_default INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS web_search_cache (
+    cache_key TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    query_text TEXT NOT NULL,
+    results_json TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_web_search_cache_expires_at ON web_search_cache(expires_at);
+
+CREATE TABLE IF NOT EXISTS knowledge_chat_web_sources (
+    id TEXT PRIMARY KEY,
+    message_id TEXT NOT NULL,
+    rank INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    url TEXT NOT NULL,
+    snippet TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    query_text TEXT,
+    retrieved_at TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (message_id) REFERENCES knowledge_chat_messages(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_chat_web_sources_message_id ON knowledge_chat_web_sources(message_id, rank ASC);

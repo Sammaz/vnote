@@ -2,6 +2,7 @@ pub mod chat;
 pub mod indexing;
 pub mod search;
 pub mod types;
+pub mod web_search;
 
 use crate::DATABASE;
 use indexing::compute_content_hash;

@@ -25,7 +25,7 @@ pub mod storage_paths;
 
 use chat::ChatRequest;
 use data_management::{CleanupPreview, CleanupRequest, CleanupResult, DataManagementOverview, DataManagementScanResult};
-use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteInitializationDetail, NoteInitializationOverview, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, UpdateNoteMetadataRequest};
+use db::{AiConfig, AppSettings, Collection, CollectionItem, CreateCollectionRequest, CreateNoteRequest, Database, EmbeddingConfig, Note, NoteInitializationDetail, NoteInitializationOverview, NoteUiState, OptimizedSubtitle, PromptConfig, RerankerConfig, ScreenshotMarker, SearchConfig, UpdateNoteMetadataRequest};
 use regex::Regex;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -1188,6 +1188,56 @@ fn unset_default_reranker_config(id: String) -> Result<(), String> {
     get_db().unset_default_reranker_config(&id).map_err(|e| e.to_string())
 }
 
+
+fn normalize_search_config(mut config: SearchConfig) -> Result<SearchConfig, String> {
+    if config.provider.trim().is_empty() {
+        config.provider = "baidu".to_string();
+    }
+    validation::validate_search_provider(&config.provider)?;
+    validation::validate_config_title(&config.title)?;
+    if config.base_url.trim().is_empty() && config.provider.eq_ignore_ascii_case("baidu") {
+        config.base_url = crate::knowledge_base::web_search::default_base_url(
+            crate::knowledge_base::web_search::SearchProvider::Baidu,
+        )
+        .to_string();
+    }
+    validation::validate_url(&config.base_url)?;
+    validation::validate_api_key(&config.api_key)?;
+    Ok(config)
+}
+
+#[tauri::command]
+fn get_search_configs() -> Result<Vec<SearchConfig>, String> {
+    get_db().get_all_search_configs().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_search_config(config: SearchConfig) -> Result<String, String> {
+    let config = normalize_search_config(config)?;
+    get_db().create_search_config(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn update_search_config(config: SearchConfig) -> Result<(), String> {
+    let config = normalize_search_config(config)?;
+    get_db().update_search_config(&config).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_search_config(id: String) -> Result<(), String> {
+    get_db().delete_search_config(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_default_search_config(id: String) -> Result<(), String> {
+    get_db().set_default_search_config(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn unset_default_search_config(id: String) -> Result<(), String> {
+    get_db().unset_default_search_config(&id).map_err(|e| e.to_string())
+}
+
 // Prompt config commands
 #[tauri::command]
 fn get_prompt_configs() -> Result<Vec<PromptConfig>, String> {
@@ -2268,6 +2318,12 @@ pub fn run() {
             delete_reranker_config,
             set_default_reranker_config,
             unset_default_reranker_config,
+            get_search_configs,
+            create_search_config,
+            update_search_config,
+            delete_search_config,
+            set_default_search_config,
+            unset_default_search_config,
             get_prompt_configs,
             create_prompt_config,
             update_prompt_config,
@@ -2348,6 +2404,9 @@ pub fn run() {
             knowledge_base::knowledge_base_get_chat_preferences,
             knowledge_base::knowledge_base_save_chat_preferences,
             knowledge_base::knowledge_base_get_stats,
+            knowledge_base::web_search::test_search_connection,
+            knowledge_base::web_search::knowledge_base_web_search,
+            knowledge_base::web_search::knowledge_base_set_web_source_verified,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {

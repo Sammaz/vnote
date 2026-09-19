@@ -68,6 +68,10 @@ pub mod keys {
     pub const PROCESS_SEGMENT_SIZE: &str = "processing.segment_size";
     pub const PROCESS_TRUNCATION_LIMIT: &str = "processing.truncation_limit";
     pub const PROCESS_DEFAULT_CONCURRENT: &str = "processing.default_concurrent";
+
+    // Web Search Settings
+    pub const WEB_SEARCH_TIMEOUT: &str = "web_search.timeout_secs";
+    pub const WEB_SEARCH_CACHE_TTL: &str = "web_search.cache_ttl_secs";
 }
 
 // 默认值常量
@@ -95,5 +99,9 @@ pub mod defaults {
     pub const PROCESS_SEGMENT_SIZE: usize = 10000;
     pub const PROCESS_TRUNCATION_LIMIT: usize = 3000;
     pub const PROCESS_DEFAULT_CONCURRENT: usize = 2;
+
+    // Web Search
+    pub const WEB_SEARCH_TIMEOUT: u64 = 15;
+    pub const WEB_SEARCH_CACHE_TTL: i64 = 3600;
 }
 

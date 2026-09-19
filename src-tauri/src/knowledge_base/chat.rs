@@ -15,8 +15,9 @@ use super::search;
 use super::types::{
     ChatMessage, KnowledgeAgentRunRecord, KnowledgeChatEvent, KnowledgeChatMode,
     KnowledgeChatRequest, KnowledgeChatSessionDetail, KnowledgeChatSubmitResponse,
-    KnowledgeSearchResult,
+    KnowledgeSearchResult, KnowledgeWebSearchResult,
 };
+use super::web_search;
 
 static CHAT_ABORT_FLAGS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
 
@@ -26,11 +27,18 @@ const DEFAULT_AGENT_STEP_BUDGET: i32 = 3;
 const AGENT_TOP_K: i32 = 8;
 const STANDARD_TOP_K: i32 = 8;
 const AUTO_TITLE_MAX_CHARS: usize = 26;
+const WEB_SEARCH_CONTEXT_PROMPT: &str = "
+【网页使用规则】
+- 笔记证据不足以回答的部分，必须优先使用下面的网页检索结果
+- 引用网页时必须紧跟 `[网页N]` 标注（N 为网页编号）
+- 网页内容不是笔记原文，禁止伪装成 `[证据N]`
+- 本段网页结果视为可用证据，不受「只能基于 visual_summary」限制
+";
 const MODEL_KNOWLEDGE_SUPPLEMENT_PROMPT: &str = "
 【知识补充规则】
-如果证据不足，请补充通用知识。
+如果笔记证据不足，请结合网页结果或补充通用知识。
 仅当同时满足以下条件时，才允许使用模型自身知识：
-1. 检索证据为空
+1. 笔记证据为空，且网页结果也无法覆盖该问题
 2. 问题属于通用事实类（官网、定义、价格、联系方式等）
 
 补充时必须遵守：
@@ -293,9 +301,17 @@ fn hydrate_message_record(
         })
         .transpose()?;
 
+    let web_sources = db
+        .get_knowledge_chat_web_sources(&message.id)
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .map(KnowledgeWebSearchResult::from)
+        .collect::<Vec<_>>();
+
     Ok(super::types::KnowledgeChatMessageRecord {
         message,
         sources,
+        web_sources,
         agent_run,
     })
 }
@@ -447,8 +463,19 @@ async fn run_standard_chat(
     );
 
     let enable_supplement = resolve_enable_supplement(&request, &KnowledgeChatMode::Standard);
-    let rag_context = Some(with_supplement_prompt(
+    let web_results = maybe_fetch_web_results(
+        &app,
+        event_name,
+        db,
+        enable_supplement,
+        &user_message,
+        abort_flag,
+        &assistant_record.id,
+    )
+    .await;
+    let rag_context = Some(with_web_and_supplement_prompt(
         build_standard_context(&search_results, request.system_prompt.as_deref()),
+        &web_results,
         enable_supplement,
     ));
     let history = convert_messages(&request.messages);
@@ -625,6 +652,18 @@ async fn run_agent_chat(
         },
     );
 
+    let enable_supplement = resolve_enable_supplement(&request, &KnowledgeChatMode::Agent);
+    let web_results = maybe_fetch_web_results(
+        &app,
+        event_name,
+        db,
+        enable_supplement,
+        &user_message,
+        abort_flag,
+        &assistant_record.id,
+    )
+    .await;
+
     let evidence_summary = build_agent_evidence_summary(&aggregated_results);
     persist_trace_step(
         app.clone(),
@@ -638,9 +677,9 @@ async fn run_agent_chat(
         None,
     )?;
 
-    let enable_supplement = resolve_enable_supplement(&request, &KnowledgeChatMode::Agent);
-    let rag_context = Some(with_supplement_prompt(
+    let rag_context = Some(with_web_and_supplement_prompt(
         build_agent_context(&plan, &aggregated_results, request.system_prompt.as_deref()),
+        &web_results,
         enable_supplement,
     ));
     let history = convert_messages(&request.messages);
@@ -1031,17 +1070,104 @@ fn dedupe_queries(queries: Vec<String>, limit: usize) -> Vec<String> {
         .collect()
 }
 
-fn resolve_enable_supplement(request: &KnowledgeChatRequest, mode: &KnowledgeChatMode) -> bool {
-    request
-        .enable_supplement
-        .unwrap_or(matches!(mode, KnowledgeChatMode::Agent))
+fn resolve_enable_supplement(request: &KnowledgeChatRequest, _mode: &KnowledgeChatMode) -> bool {
+    request.enable_supplement.unwrap_or(true)
 }
 
 fn with_supplement_prompt(context: String, enabled: bool) -> String {
-    if enabled {
-        format!("{context}{MODEL_KNOWLEDGE_SUPPLEMENT_PROMPT}")
-    } else {
-        context
+    with_web_and_supplement_prompt(context, &[], enabled)
+}
+
+fn with_web_and_supplement_prompt(
+    context: String,
+    web_results: &[KnowledgeWebSearchResult],
+    enable_supplement: bool,
+) -> String {
+    let mut output = context;
+    if enable_supplement && !web_results.is_empty() {
+        output.push_str(WEB_SEARCH_CONTEXT_PROMPT);
+        output.push_str("
+【网页检索结果】
+");
+        output.push_str(&build_web_context(web_results));
+    }
+    if enable_supplement {
+        output.push_str(MODEL_KNOWLEDGE_SUPPLEMENT_PROMPT);
+        if !web_results.is_empty() {
+            output.push_str("
+如果已有【网页检索结果】，优先引用 [网页N]，不要再用模型知识重复同一事实。
+");
+        }
+    }
+    output
+}
+
+fn build_web_context(results: &[KnowledgeWebSearchResult]) -> String {
+    results
+        .iter()
+        .enumerate()
+        .map(|(index, result)| {
+            format!(
+                "[网页 {}] {}
+URL: {}
+{}",
+                index + 1,
+                result.title,
+                result.url,
+                result.snippet
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("
+
+")
+}
+
+async fn maybe_fetch_web_results(
+    app: &AppHandle,
+    event_name: &str,
+    db: &Database,
+    enable_web_search: bool,
+    user_message: &str,
+    abort_flag: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    assistant_message_id: &str,
+) -> Vec<KnowledgeWebSearchResult> {
+    if !web_search::should_use_web_search(enable_web_search) {
+        return Vec::new();
+    }
+
+    let _ = app.emit(
+        event_name,
+        KnowledgeChatEvent::Searching {
+            message: "正在联网检索...".to_string(),
+        },
+    );
+
+    match web_search::search_web(user_message, Some(abort_flag), true).await {
+        Ok(results) => {
+            let persisted = web_search::persist_web_sources(db, assistant_message_id, &results)
+                .unwrap_or_else(|error| {
+                    tracing::warn!("[knowledge_base] persist web sources failed: {}", error);
+                    results.clone()
+                });
+            let _ = app.emit(
+                event_name,
+                KnowledgeChatEvent::WebContextFound {
+                    sources: persisted.clone(),
+                },
+            );
+            persisted
+        }
+        Err(error) => {
+            tracing::warn!("[knowledge_base] web search failed: {}", error);
+            let _ = app.emit(
+                event_name,
+                KnowledgeChatEvent::Degraded {
+                    message: format!("联网检索失败：{}", error),
+                },
+            );
+            Vec::new()
+        }
     }
 }
 
@@ -1274,11 +1400,53 @@ mod tests {
         let base = "BASE_CONTEXT".to_string();
         let enabled = with_supplement_prompt(base.clone(), true);
         assert!(enabled.starts_with("BASE_CONTEXT"));
-        assert!(enabled.contains("如果证据不足，请补充通用知识"));
+        assert!(enabled.contains("如果笔记证据不足，请结合网页结果或补充通用知识"));
         assert!(enabled.contains("补充信息（非笔记原文）"));
         assert!(enabled.contains("笔记中未提及"));
         assert!(enabled.contains("[补充·模型]"));
         assert_eq!(with_supplement_prompt(base, false), "BASE_CONTEXT");
+    }
+
+    #[test]
+    fn disabled_web_search_keeps_plain_context() {
+        assert!(!super::web_search::should_use_web_search(false));
+        assert!(super::web_search::should_use_web_search(true));
+        let leftover = vec![KnowledgeWebSearchResult {
+            id: "1".to_string(),
+            rank: 1,
+            title: "OpenAI".to_string(),
+            url: "https://openai.com".to_string(),
+            snippet: "official-site".to_string(),
+            provider: "baidu_web".to_string(),
+            query_text: Some("openai".to_string()),
+            retrieved_at: "2026-09-19 00:00:00".to_string(),
+            verified: false,
+        }];
+        let disabled = with_web_and_supplement_prompt("BASE_CONTEXT".to_string(), &leftover, false);
+        assert_eq!(disabled, "BASE_CONTEXT");
+        assert!(!disabled.contains("[?? 1]"));
+        assert!(!disabled.contains("网页检索结果"));
+        assert!(!disabled.contains("[补充·模型]"));
+    }
+
+    #[test]
+    fn web_results_are_appended_as_numbered_sources() {
+        let web_results = vec![KnowledgeWebSearchResult {
+            id: "1".to_string(),
+            rank: 1,
+            title: "OpenAI".to_string(),
+            url: "https://openai.com".to_string(),
+            snippet: "官方网站".to_string(),
+            provider: "baidu".to_string(),
+            query_text: Some("openai".to_string()),
+            retrieved_at: "2026-09-19 00:00:00".to_string(),
+            verified: false,
+        }];
+        let output = with_web_and_supplement_prompt("BASE_CONTEXT".to_string(), &web_results, true);
+        assert!(output.contains("[网页 1] OpenAI"));
+        assert!(output.contains("https://openai.com"));
+        assert!(output.contains("优先引用 [网页N]"));
+        assert!(output.contains("不受「只能基于 visual_summary」限制"));
     }
 
     #[test]
@@ -1295,7 +1463,7 @@ mod tests {
             enable_supplement: None,
         };
         assert!(resolve_enable_supplement(&request, &KnowledgeChatMode::Agent));
-        assert!(!resolve_enable_supplement(&request, &KnowledgeChatMode::Standard));
+        assert!(resolve_enable_supplement(&request, &KnowledgeChatMode::Standard));
     }
 
     #[test]

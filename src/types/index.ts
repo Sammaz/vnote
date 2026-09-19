@@ -97,6 +97,18 @@ export interface RerankerConfig {
   is_default: boolean;
 }
 
+export type SearchProvider = "tavily" | "bocha" | "baidu" | "custom";
+
+export interface SearchConfig {
+  id: string;
+  title: string;
+  provider: SearchProvider;
+  base_url: string;
+  api_key: string;
+  sort_order: number;
+  is_default: boolean;
+}
+
 // 上传文件信息
 export interface UploadedFile {
   name: string;
